@@ -109,10 +109,16 @@ vec3 vanilla_lightmap0_15(float dayFrac) {
     return col * fac;
 }
 
-// Full lightmap texel for a Voxy lightId ((block<<4)|sky), lightmap.fsh math.
+// Full lightmap texel for a Voxy lightId (analysis/voxy-e2e.md §1.1:
+// bits 56-63 = (blockLight << 4) | skyLight — the BLOCK nibble is HIGH;
+// the scan writes 0x0F for sunlit surface cells). v4.3.1-rc swapped the
+// nibbles AND rounded them with floor(x+0.5), which decoded 0x0F as
+// block-15/sky-1 — a near-zero lightmap: the whole LOD rendered BLACK.
+// lightId is an exact integer float here, so plain floor division is
+// exact for both nibbles.
 vec3 voxy_lightmap(float lightId) {
-    float sky = floor(lightId / 16.0 + 0.5);
-    float block = floor(lightId - sky * 16.0 + 0.5);
+    float block = floor(lightId / 16.0);
+    float sky = lightId - block * 16.0;
     vec3 color = vanilla_lightmap0_15(GameTime) * lm_brightness(sky / 15.0);
     // BlockLightColor = mix(BlockLightTint, 1, 0.9 * (2b-1)^2), tint = white.
     float b = block / 15.0;
@@ -279,8 +285,13 @@ void main() {
     float cell = AtlasInfo.w;
     float sea = LodParams.z;
 
-    vec2 minW = origin - vec2(size * 0.5);
-    vec2 maxW = origin + vec2(size * 0.5);
+    vec2 minW = origin;
+    vec2 maxW = origin + vec2(size);
+    // origin is the atlas CORNER (packgen: center - half) — v4.3.1-rc built
+    // the window as origin ∓ size/2, i.e. the quadrant [origin-size, origin]
+    // — half the atlas. The edge fade then only released one screen half
+    // (a hard vertical boundary through the camera) and the dir.y>0 exit
+    // test culled the wrong rays on the other half.
 
     if (dir.y > 0.0) {
         float toCeil = (LodParams.y + 8.0 - cam.y) / dir.y;

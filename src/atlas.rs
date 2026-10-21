@@ -56,7 +56,8 @@ pub struct Cell {
     pub valid: bool,
     /// Blockstate id in the pack state table (voxy_core), 0 = unknown.
     pub state: u8,
-    /// Voxy lightId: (block << 4) | sky (surface cells default 0xF0).
+    /// Voxy lightId: (block << 4) | sky (Voxy voxel id bits 56-63; sunlit
+    /// surface = 0x0F, block-lit lava = 0xF0).
     pub light: u8,
     /// Biome tint for the shader (white = untinted block).
     pub rgb: [u8; 3],

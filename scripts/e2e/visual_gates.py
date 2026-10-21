@@ -42,6 +42,9 @@ WIN = (324, 184, 956, 536)  # x0, y0, x1, y1 (4px inset)
 
 # shots that must show the LOD world (everything except the two UI shots)
 UI_SHOTS = {"00_join_state", "00_pack_applied"}
+# shots taken OUTSIDE the atlas window: the LOD must NOT paint there (the
+# edge fade releases before the border) — V3's expectation is inverted
+OUT_SHOTS = {"07_veil_outside"}
 
 # horizon band (fraction of window height) scanned for dark LOD fragments
 HOR = (0.25, 0.60)
@@ -53,6 +56,7 @@ VEIL = (0.62, 0.95)
 MIN_STD_UI = 4.0        # V2: UI screens must not be flat
 MIN_STD_WORLD = 5.0     # V2: world frames must not be flat
 MIN_DARK = 0.05         # V3: dark LOD fragments; measured 11-24% on v4.1.0
+MAX_DARK_OUT = 0.50     # V3 inverted: an out-of-window frame must stay mostly clean
 MIN_SKY = 0.50          # V4: measured 89-100% on v4.1.0
 MIN_VEIL_LUMA = 80.0    # V5: measured 156-201 on v4.1.0
 
@@ -167,7 +171,12 @@ def analyze(name, path):
             if luma_at(px, row + x * ch, ch) < 140:
                 dark += 1
     darkf = dark / max(tot, 1)
-    if darkf < MIN_DARK:
+    if name in OUT_SHOTS:
+        if darkf > MAX_DARK_OUT:
+            problems.append(f"  FAIL V3 {name}: horizon band dark-LOD fraction {darkf:.1%} > {MAX_DARK_OUT:.0%} — LOD leaked outside the atlas window")
+        else:
+            lines.append(f"  OK   V3 {name}: horizon band dark-LOD {darkf:.1%} <= {MAX_DARK_OUT:.0%} (outside window stays clean)")
+    elif darkf < MIN_DARK:
         problems.append(f"  FAIL V3 {name}: horizon band dark-LOD fraction {darkf:.1%} < {MIN_DARK:.0%} — LODs not rendered?")
     else:
         lines.append(f"  OK   V3 {name}: horizon band dark-LOD {darkf:.1%} >= {MIN_DARK:.0%}")
@@ -209,37 +218,59 @@ def one(args):
 
 CLIENT_GATES = [
     ("C1 pack applied",
-     re.compile(r"applying server resource pack|loaded server resource pack|reload.*clod", re.I),
+     re.compile(r"applying server resource pack|loaded server resource pack|reload.*clod"
+                r"|Reloading ResourceManager:[^\n]*server/", re.I),
      "must match", "client never applied the server resource pack"),
-    ("C2 post effect exists",
-     re.compile(r"Requested post effect does not exist: clod", re.I),
-     "must NOT match", "clod:lod_terrain post effect missing — pack incomplete"),
-    ("C3 shaders compiled",
-     re.compile(r"couldn't compile|failed to compile|couldn't link|failed to link|"
-                r"shader.*error|error.*shader", re.I),
-     "must NOT match", "GLSL compile/link error in the client"),
-    ("C4 GLX visual ok",
-     re.compile(r"Couldn't find matching GLX visual", re.I),
-     "must NOT match", "sRGB shim failed — check libclodgl build"),
 ]
 
 
 def log_gates(paths):
-    text = ""
-    for p in paths:
-        try:
-            text += Path(p).read_text(encoding="utf-8", errors="replace") + "\n"
-        except FileNotFoundError:
-            return False, [f"  FAIL C* log missing: {p}"]
+    try:
+        text = "\n".join(Path(p).read_text(encoding="utf-8", errors="replace") for p in paths) + "\n"
+    except FileNotFoundError as e:
+        return False, [f"  FAIL C* log missing: {e}"]
+    lines_list = text.splitlines()
+
+    # The pack reload marker: the server pack joins the resource stack
+    # (26.3 logs the reload source list with server/<...>/<pack-uuid>).
+    c1_rx = CLIENT_GATES[0][1]
+    pack_idx = max((i for i, ln in enumerate(lines_list) if c1_rx.search(ln)), default=-1)
+
+    clod_rx = re.compile(r"Requested post effect does not exist: clod", re.I)
+    late_clod = [i for i, ln in enumerate(lines_list) if clod_rx.search(ln) and i > pack_idx]
+    any_clod = [i for i, ln in enumerate(lines_list) if clod_rx.search(ln)]
+
+    def hit(rx):
+        return rx.search(text) is not None
+
+    c3_rx = re.compile(r"couldn't compile|failed to compile|couldn't link|failed to link|"
+                       r"shader.*error|error.*shader", re.I)
+    c4_rx = re.compile(r"Couldn't find matching GLX visual", re.I)
+
     lines, ok = [], True
-    for name, rx, want, hint in CLIENT_GATES:
-        m = rx.search(text) is not None
-        good = (m and want == "must match") or (not m and want == "must NOT match")
+
+    def mark(name, good, hint):
+        nonlocal ok
         if good:
             lines.append(f"  OK   {name}")
         else:
             ok = False
             lines.append(f"  FAIL {name} — {hint}")
+
+    # C2: the boot race warns 'post effect does not exist' while the world
+    # renders before the pack's reload finishes — only warnings AFTER the
+    # pack reload marker mean the effect is really missing. (v4.3.1 CI:
+    # the race fired at 16:40:55, the pack reload landed at 16:41:05, the
+    # chain compiled and drew — the whole-run regex was a false FAIL.)
+    mark("C1 pack applied", pack_idx >= 0, "client never applied the server resource pack")
+    if pack_idx < 0:
+        mark("C2 post effect exists", not any_clod,
+             "clod:lod_terrain post effect missing — pack incomplete")
+    else:
+        mark("C2 post effect exists", not late_clod,
+             f"clod post effect missing after the pack reload (lines {late_clod[:3]})")
+    mark("C3 shaders compiled", not hit(c3_rx), "GLSL compile/link error in the client")
+    mark("C4 GLX visual ok", not hit(c4_rx), "sRGB shim failed — check libclodgl build")
     return ok, lines
 
 
