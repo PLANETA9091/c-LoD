@@ -1,4 +1,5 @@
 #version 330
+#extension GL_ARB_separate_shader_objects : require
 
 // c-LoD pass 2 (v4.2): decode both payload groups into the persistent
 // 2x2 rotation target (clod_rot_b, copied to clod_rot_a by clod:post/rot_copy):
@@ -19,8 +20,8 @@ uniform sampler2D ScanSampler; // clod:clod_scan (640x2 slice reports)
 uniform sampler2D InSampler;   // minecraft:main (payload rows)
 uniform sampler2D PrevSampler; // clod:clod_rot_a (persistent 2x2)
 
-in vec2 texCoord;
-out vec4 fragColor;
+layout(location = 0) in vec2 texCoord;
+layout(location = 0) out vec4 fragColor;
 
 const int SLICES = 640;
 const float PI = 3.14159265358979;

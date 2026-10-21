@@ -1,4 +1,5 @@
 #version 330
+#extension GL_ARB_separate_shader_objects : require
 #include <minecraft:globals.glsl>
 
 // c-LoD pass 4 (v4.3 "VOXY CORE"): the LOD renderer, now with the SUBSTANCE
@@ -70,8 +71,8 @@ layout(std140) uniform ClodColors {
     vec4 VeilColor; // fallback fog tint (rgb) + snow whiteness (a)
 };
 
-in vec2 texCoord;
-out vec4 fragColor;
+layout(location = 0) in vec2 texCoord;
+layout(location = 0) out vec4 fragColor;
 
 const float PI = 3.14159265358979;
 const int MAX_STEPS = 220;
