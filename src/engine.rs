@@ -42,6 +42,8 @@ pub const PHASE_FINALIZED: u8 = 3;
 pub struct State {
     pub cfg: Config,
     pub atlas: Arc<Atlas>,
+    /// Voxy state table: material -> state id (v4.3, built once).
+    pub states: crate::voxy_core::StateRegistry,
     pub server: Arc<PackServer>,
     pub pack: RwLock<Option<Arc<Pack>>>,
     /// Static-pack phase machine (see PHASE_*).
@@ -141,6 +143,7 @@ impl State {
         let server = PackServer::new();
         Arc::new(Self {
             atlas,
+            states: crate::voxy_core::StateRegistry::build(),
             server,
             pack: RwLock::new(None),
             phase: AtomicU8::new(PHASE_BOOT),
@@ -326,8 +329,38 @@ fn scan_batch(state: &Arc<State>, env: Env) {
     for (ix, iz) in tasks.iter().copied() {
         let x = state.atlas.cell_world_x(ix);
         let z = state.atlas.cell_world_z(iz);
-        if let Some((y, liquid)) = jni::sample_height(env, world, x, z) {
-            state.atlas.set(ix, iz, (y.clamp(-64, 1023)) as i16, liquid);
+        if let Some((y, liquid, material, biome)) = jni::sample_surface(env, world, x, z) {
+            // v4.3 VOXY CORE: the cell keeps the FULL voxel id — blockstate
+            // id (state table), Voxy lightId and the per-cell biome tint
+            // (white = untinted) — never a flattened albedo.
+            let sid = state.states.id_of(&material);
+            let def = state.states.def(sid);
+            // Emissive surfaces carry block light 15 (lava flows glow in the
+            // LOD band exactly like in Voxy); everything else is sky-lit.
+            let block_light: u8 = if material == "LAVA" || material == "lava" {
+                15
+            } else {
+                0
+            };
+            let light = (block_light << 4) | 0x0F;
+            let tint = if def.water {
+                crate::palette::water_tint(&biome)
+            } else {
+                match def.tint[1] {
+                    1 | 2 => crate::palette::grass_tint(&biome),
+                    3 => crate::palette::water_tint(&biome),
+                    _ => [255, 255, 255],
+                }
+            };
+            state.atlas.set(
+                ix,
+                iz,
+                (y.clamp(-64, 1023)) as i16,
+                liquid,
+                tint,
+                sid,
+                light,
+            );
         }
     }
     // Rate-limited scan diagnostics (one line per 25 ticks).
@@ -567,7 +600,7 @@ fn finalize(state: &Arc<State>) {
         }
     }
 
-    let new_pack = packgen::build(&state.cfg, &state.atlas);
+    let new_pack = packgen::build(&state.cfg, &state.atlas, &state.states);
     state.server.set_pack(new_pack.zip.clone());
     crate::log_info(&format!(
         "c-LoD pack finalized (ONE-TIME, static): {scanned}/{total} cells ({}%), {} bytes, sha1 {}",
@@ -640,7 +673,7 @@ mod tests {
         st.phase.store(PHASE_SCANNING, Ordering::SeqCst);
         *st.world_obj.lock().unwrap() = 1; // pretend the world resolved
         *st.world_seen_at.lock().unwrap() = Some(std::time::Instant::now());
-        st.atlas.set(0, 0, 70, false);
+        st.atlas.set(0, 0, 70, false, [0x91, 0xBD, 0x59], 1, 0xF0);
 
         // Deadline NOT reached yet, atlas incomplete -> no finalize.
         maybe_finalize(&st);

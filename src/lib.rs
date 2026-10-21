@@ -25,8 +25,11 @@ mod engine;
 mod http;
 mod jni;
 mod packgen;
+mod palette;
 mod png;
 mod sha1;
+mod states_data;
+mod voxy_core;
 mod zipw;
 
 use cplug_abi::{CPluginApi, JavaVmPtr};

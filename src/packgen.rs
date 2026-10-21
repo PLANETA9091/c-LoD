@@ -7,6 +7,7 @@ use crate::atlas::Atlas;
 use crate::config::Config;
 use crate::png;
 use crate::sha1::Sha1;
+use crate::voxy_core::StateRegistry;
 use crate::zipw::ZipWriter;
 
 pub struct Pack {
@@ -57,7 +58,7 @@ fn substitute(template: &str, map: &[(&str, String)]) -> String {
     out
 }
 
-pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
+pub fn build(cfg: &Config, atlas: &Atlas, states: &StateRegistry) -> Pack {
     let atlas_version = atlas.version();
 
     let lod_terrain_tpl = include_str!("../assets/post_effect/lod_terrain.json");
@@ -73,6 +74,17 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
     let fog_start = cfg.lod_near * 1.05;
     let fog_end = atlas.size as f32 * 0.72;
 
+    // v4.2: cull the march with the REAL scanned max height (+8 m margin),
+    // not the world cap — upward rays leave the heightfield an order of
+    // magnitude earlier, which removes the useless grazing marches that
+    // produced the dark center column on v4.1.
+    let scanned_max = atlas.max_height();
+    let max_h = if scanned_max > -32 {
+        (i32::from(scanned_max) + 8).clamp(cfg.sea_level + 16, cfg.max_height)
+    } else {
+        cfg.max_height
+    };
+
     let veil_rgba = [
         cfg.color_veil[0],
         cfg.color_veil[1],
@@ -80,15 +92,32 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
         cfg.snow_line,
     ];
 
+    // v4.3: encode all three pack textures BEFORE the template map (the
+    // states/PNG dimensions feed the JSON inputs).
+    let (aw, ah, atlas_rgba) = atlas.encode_pyramid_rgba();
+    let atlas_png = png::encode_png(aw, ah, &atlas_rgba);
+    // Per-cell biome TINT (white = untinted) + Voxy lightId in alpha.
+    let (cw, ch, col_rgba) = atlas.encode_color_rgba();
+    let col_png = png::encode_png(cw, ch, &col_rgba);
+    // The blockModelAtlas: per state 3x2 face tiles of the REAL vanilla 26.3
+    // block textures + the manual mip strip (the 26.3 post-chain loads
+    // location textures WITHOUT mip chains).
+    let (sw, sh, states_rgba) = crate::voxy_core::bake_states_atlas(states);
+    let states_png = png::encode_png(sw, sh, &states_rgba);
+
     let map: Vec<(&str, String)> = vec![
         ("__FOV__", fmt_f(cfg.fov)),
         ("__ORIGIN_X__", fmt_f(origin_x as f32)),
         ("__ORIGIN_Z__", fmt_f(origin_z as f32)),
         ("__ATLAS_SIZE__", fmt_f(atlas.size as f32)),
         ("__ATLAS_CELLS__", atlas.cells.to_string()),
+        ("__ATLAS_PNG_H__", ah.to_string()),
+        ("__STATES_W__", sw.to_string()),
+        ("__STATES_H__", sh.to_string()),
+        ("__STATES_COUNT__", states.count().to_string()),
         ("__CELL__", fmt_f(atlas.cell as f32)),
         ("__LOD_NEAR__", fmt_f(cfg.lod_near)),
-        ("__MAX_HEIGHT__", fmt_f(cfg.max_height as f32)),
+        ("__MAX_HEIGHT__", fmt_f(max_h as f32)),
         ("__SEA_LEVEL__", fmt_f(cfg.sea_level as f32)),
         ("__MIN_CONF__", fmt_f(0.25)),
         ("__FOG_START__", fmt_f(fog_start)),
@@ -131,9 +160,6 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
     // (client version.json: resource_major 97, resource_minor 1).
     let mcmeta = "{\"pack\":{\"description\":\"c-LoD v3 static LOD terrain (posteffect + heightfield raymarch)\",\"min_format\":97,\"max_format\":97}}".to_string();
 
-    let (aw, ah, atlas_rgba) = atlas.encode_rgba();
-    let atlas_png = png::encode_png(aw, ah, &atlas_rgba);
-
     let mut zip = ZipWriter::new();
     zip.add("pack.mcmeta", mcmeta.as_bytes());
     zip.add(
@@ -167,6 +193,8 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
     zip.add("assets/minecraft/shaders/core/sky.vsh", sky_vsh.as_bytes());
     zip.add("assets/minecraft/shaders/core/sky.fsh", sky_fsh.as_bytes());
     zip.add("assets/clod/textures/effect/atlas.png", &atlas_png);
+    zip.add("assets/clod/textures/effect/atlas_col.png", &col_png);
+    zip.add("assets/clod/textures/effect/atlas_states.png", &states_png);
     let zip_bytes = zip.finish();
 
     let mut h = Sha1::new();
@@ -185,6 +213,7 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::voxy_core::StateRegistry;
     use crate::zipw;
 
     #[test]
@@ -197,8 +226,9 @@ mod tests {
             cfg.cell_size,
             cfg.sea_level,
         );
-        atlas.set(0, 0, 70, false);
-        let pack = build(&cfg, &atlas);
+        atlas.set(0, 0, 70, false, [0x91, 0xBD, 0x59], 1, 0xF0);
+        let states = StateRegistry::build();
+        let pack = build(&cfg, &atlas, &states);
 
         assert!(!pack.zip.is_empty());
         assert_eq!(pack.sha1_hex.len(), 40);
@@ -211,8 +241,8 @@ mod tests {
         // Must contain the essential entries: scan by walking central dir.
         let count = u16::from_le_bytes([pack.zip[n - 12], pack.zip[n - 11]]) as usize;
         assert_eq!(
-            count, 12,
-            "pack.mcmeta + 2 json + 6 fsh + atlas.png + sky.vsh + sky.fsh"
+            count, 14,
+            "pack.mcmeta + 2 json + 6 fsh + atlas.png + atlas_col.png + atlas_states.png + sky.vsh + sky.fsh"
         );
 
         // JSON chains are valid JSON (parenthesis balance + token-free).
@@ -228,7 +258,8 @@ mod tests {
         // the vanilla-26.3 schema: min_format/max_format, no legacy key.
         let cfg = Config::parse("");
         let atlas = Atlas::new(0, 0, 256, 4, 63);
-        let pack = build(&cfg, &atlas);
+        let states = StateRegistry::build();
+        let pack = build(&cfg, &atlas, &states);
         let start = pack
             .zip
             .windows(4)
@@ -261,14 +292,15 @@ mod tests {
         // same pack bytes, regardless of internal version counters.
         let cfg = Config::parse("");
         let a = Atlas::new(0, 0, 256, 4, 63);
-        a.set(1, 1, 90, false);
-        a.set(2, 2, 40, true);
-        let pack_a = build(&cfg, &a);
+        a.set(1, 1, 90, false, [0x91, 0xBD, 0x59], 1, 0xF0);
+        a.set(2, 2, 40, true, [0x3F, 0x76, 0xE4], 2, 0xF0);
+        let states = StateRegistry::build();
+        let pack_a = build(&cfg, &a, &states);
 
         let b = Atlas::new(0, 0, 256, 4, 63);
-        b.set(1, 1, 90, false);
-        b.set(2, 2, 40, true);
-        let pack_b = build(&cfg, &b);
+        b.set(1, 1, 90, false, [0x91, 0xBD, 0x59], 1, 0xF0);
+        b.set(2, 2, 40, true, [0x3F, 0x76, 0xE4], 2, 0xF0);
+        let pack_b = build(&cfg, &b, &states);
 
         assert_eq!(pack_a.zip, pack_b.zip, "pack bytes must be deterministic");
         assert_eq!(pack_a.sha1_hex, pack_b.sha1_hex);
@@ -300,13 +332,48 @@ mod tests {
     }
 
     #[test]
+    fn texture_inputs_use_26_3_effect_path_schema() {
+        // 26.3 PostChain.createPass maps a texture-input location through
+        // lambda$createPass$0 = "textures/effect/<path>.png" (decompiled
+        // bootstrap #9). The location therefore carries NO textures/effect
+        // prefix: "clod:atlas" -> assets/clod/textures/effect/atlas.png.
+        // "clod:effect/atlas" would double to .../effect/effect/... and the
+        // client binds the missing texture (the v4.0-v4.1 invisible-atlas
+        // bug — the whole LOD rendered as the magenta checkerboard).
+        let cfg = Config::parse("");
+        let atlas = Atlas::new(0, 0, 256, 4, 63);
+        let states = StateRegistry::build();
+        let pack = build(&cfg, &atlas, &states);
+        let entries = zip_entries(&pack.zip);
+        let chain = &entries
+            .iter()
+            .find(|(n, _)| n == "assets/clod/post_effect/lod_terrain.json")
+            .unwrap()
+            .1;
+        let chain = String::from_utf8_lossy(chain);
+        assert!(
+            chain.contains("\"location\": \"clod:atlas\""),
+            "chain: {chain}"
+        );
+        assert!(
+            chain.contains("\"location\": \"clod:atlas_col\""),
+            "color atlas input missing: {chain}"
+        );
+        assert!(
+            !chain.contains("clod:effect/"),
+            "effect/ prefix must not appear inside locations: {chain}"
+        );
+    }
+
+    #[test]
     fn camera_channel_sky_override_is_shipped() {
         // v4.1: the pack must layer the payload-instrumented vanilla sky core
         // shader over the vanilla one (resolved through the resource system),
         // and the sun tracker shaders must be gone.
         let cfg = Config::parse("");
         let atlas = Atlas::new(0, 0, 256, 4, 63);
-        let pack = build(&cfg, &atlas);
+        let states = StateRegistry::build();
+        let pack = build(&cfg, &atlas, &states);
         let entries = zip_entries(&pack.zip);
         let names: Vec<&str> = entries.iter().map(|(n, _)| n.as_str()).collect();
 

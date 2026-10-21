@@ -2,23 +2,39 @@
 #extension GL_ARB_separate_shader_objects : require
 #include <minecraft:globals.glsl>
 
-// c-LoD pass 4: the actual level-of-distant-detail renderer.
+// c-LoD pass 4 (v4.3 "VOXY CORE"): the LOD renderer, now with the SUBSTANCE
+// of Voxy's LOD pipeline (analysis/voxy-e2e.md), not just its colors:
 //
-// For every pixel that shows sky (device depth ~ 1) we march a view ray
-// against the heightfield atlas shipped in the server resource pack and
-// shade the hit. The ray is built from the camera basis delivered by the
-// CAMERA CHANNEL (v4.1): the sky shader encodes yaw/pitch/fov into the
-// alpha of the leftmost columns, col_scan + rot_solve decode it into the
-// clod_rot target. Works at any time of day and any camera orientation —
-// no sun in view required. Camera position comes from the Globals UBO
-// (CameraBlockPos + CameraOffset), bound to every post pass.
+//   - The height PNG carries the real Voxy mip pyramid: level 0 cells plus
+//     levels 1..4 reduced by the ported Mipper (max-OPACITY corner voxel
+//     keeps its full blockstate id — distant LODs are real blocks, never
+//     averaged colors). The ray marches the level matching its distance,
+//     exactly like Voxy's screen-area detail selection.
+//   - Every hit is textured from the blockModelAtlas (baked server-side from
+//     the real vanilla 26.3 block textures): per state 3x2 face tiles +
+//     manual mip strip (16/8/4/2/1 px). uv = fract(worldXZ / cellL) gives
+//     the Voxy greedy-quad tiling — one texture tile per 2^L cell.
+//   - Fragment math = Voxy quads.frag: albedo x (lightmap x faceShade) x
+//     biomeTint, cutout discard at alpha <= 0.1, water translucent.
+//     faceShade = vanilla cardinal light: UP 1.0 / N,S 0.8 / E,W 0.6 /
+//     DOWN 0.5 (NormalRenderPipeline cardinalLighting).
+//   - lightmap(b, s) = Ambient + SkyLightColor*brightness(s)*SkyFactor +
+//     BlockLightColor*brightness(b)*BlockFactor — the exact 26.3
+//     lightmap.fsh formula; brightness(l) = l/(4-3l). The sky term is the
+//     v4.2-verified timeline reconstruction of lightmap(0,15); block light
+//     comes from the cell's Voxy lightId (lava glows).
+//   - fog/fade/composite stay the v4.2-verified Voxy recipe: linear fog over
+//     the vanilla environmental pair capped at max(vanRD,320)*sqrt(3), the
+//     10% xz fade, and real chunks always win (device depth gate).
 //
 // Non-sky pixels pass through untouched: real chunks always win.
 
 uniform sampler2D InSampler;      // minecraft:main color
 uniform sampler2D InDepthSampler; // minecraft:main depth
-uniform sampler2D AtlasSampler;   // clod:textures/effect/atlas.png (RG = height, B = water)
-uniform sampler2D RotSampler;     // clod:clod_rot_a (1x1 persistent, camera channel)
+uniform sampler2D AtlasSampler;   // clod:atlas — Voxy mip pyramid (RG=height, B=water, A=state)
+uniform sampler2D ColSampler;     // clod:atlas_col — RGB=biome tint, A=Voxy lightId
+uniform sampler2D StatesSampler;  // clod:atlas_states — the blockModelAtlas
+uniform sampler2D RotSampler;     // clod:clod_rot_a (2x2 persistent, camera + fog channel)
 
 layout(std140) uniform SamplerInfo {
     vec2 OutSize;
@@ -35,48 +51,162 @@ layout(std140) uniform ClodParams {
     vec4 LodParams;
 };
 
-// x = fog start (blocks), y = fog end (blocks), z = static fov fallback, w = unused
+// x = state count, y = states atlas width, z = states atlas height, w = 16
+layout(std140) uniform ClodStates {
+    vec4 StatesInfo;
+};
+
+// STATIC fallback fog (x = start, y = end) used only before the first valid
+// fog payload row arrives; live fog replaces it the moment the sky is seen.
 layout(std140) uniform ClodFog {
     vec4 FogParams;
 };
 
 layout(std140) uniform ClodColors {
-    vec4 ColLow;    // low terrain
-    vec4 ColHigh;   // high terrain
-    vec4 ColWater;  // water surface
-    vec4 VeilColor; // horizon veil (rgb) + snow whiteness (a)
+    vec4 ColLow;    // fallback low terrain (state 0 cells)
+    vec4 ColHigh;   // fallback high terrain
+    vec4 ColWater;  // fallback water surface
+    vec4 VeilColor; // fallback fog tint (rgb) + snow whiteness (a)
 };
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 
 const float PI = 3.14159265358979;
-const float SKY_DEPTH = 0.99995;
 const int MAX_STEPS = 220;
 const int BISECT = 7;
+const float VOID_Y = -63.5;   // cells below this are unscanned = no data
+const float FADE_START = 0.9; // Voxy: fade begins at 90% of the view radius
 
-// Height (block Y) stored in the atlas: (y + 64) << 6, big-endian RG.
-float atlas_height(vec2 uv) {
-    vec4 a = texture(AtlasSampler, uv);
-    float y16 = a.r * 65280.0 + a.g * 255.0; // r*255*256 + g*255
+// ---- vanilla 26.3 lightmap ------------------------------------------------
+// lightmap.fsh: brightness(l) = l / (4 - 3l); color = Ambient
+// + SkyLightColor * skyBr + BlockLightColor * blockBr (overworld Ambient 0).
+float lm_brightness(float level) {
+    return level / (4.0 - 3.0 * level);
+}
+
+// The (0, 15) texel: data/minecraft/timeline/day.json keyframes (v4.2-verified).
+vec3 vanilla_lightmap0_15(float dayFrac) {
+    const vec3 DAY = vec3(1.0);
+    const vec3 NIGHT = vec3(122.0, 122.0, 255.0) / 255.0; // #7a7aff
+    float t = dayFrac < 730.0 / 24000.0 ? dayFrac * 24000.0 + 24000.0 : dayFrac * 24000.0;
+    vec3 col;
+    float fac;
+    if (t < 11270.0) {
+        col = DAY; fac = 1.0;
+    } else if (t < 13140.0) {
+        float a = (t - 11270.0) / 1870.0;
+        col = mix(DAY, NIGHT, a); fac = mix(1.0, 0.24, a);
+    } else if (t < 22860.0) {
+        col = NIGHT; fac = 0.24;
+    } else {
+        float a = (t - 22860.0) / 1870.0;
+        col = mix(NIGHT, DAY, a); fac = mix(0.24, 1.0, a);
+    }
+    return col * fac;
+}
+
+// Full lightmap texel for a Voxy lightId ((block<<4)|sky), lightmap.fsh math.
+vec3 voxy_lightmap(float lightId) {
+    float sky = floor(lightId / 16.0 + 0.5);
+    float block = floor(lightId - sky * 16.0 + 0.5);
+    vec3 color = vanilla_lightmap0_15(GameTime) * lm_brightness(sky / 15.0);
+    // BlockLightColor = mix(BlockLightTint, 1, 0.9 * (2b-1)^2), tint = white.
+    float b = block / 15.0;
+    vec3 blockColor = mix(vec3(1.0), vec3(1.0), 0.9 * (2.0 * b - 1.0) * (2.0 * b - 1.0));
+    color += blockColor * lm_brightness(b);
+    return color;
+}
+
+// ---- atlas access -----------------------------------------------------------
+// The pyramid: level L occupies rows [topPx(L), topPx(L)+cellsL) of a PNG
+// that is `cells` wide. topPx(L) = cells * (2 - 2^(1-L)); the total PNG
+// height (levels 0..4) = cells * (2 - 2^-4) = cells * 31/16.
+float atlas_cells() { return AtlasInfo.z / AtlasInfo.w; }
+
+float level_cells(int L) { return atlas_cells() * exp2(float(L)); }
+
+float level_top(int L) {
+    return atlas_cells() * (2.0 - exp2(1.0 - float(L)));
+}
+
+float atlas_total_h() {
+    return atlas_cells() * (2.0 - exp2(-4.0));
+}
+
+// Height (block Y) from a level's data: (y + 64) << 6, big-endian RG.
+float atlas_height_at(vec4 a) {
+    float y16 = a.r * 65280.0 + a.g * 255.0;
     return y16 / 64.0 - 64.0;
 }
 
-bool atlas_water(vec2 uv) {
-    return texture(AtlasSampler, uv).b > 0.5;
+// Full data fetch for one level cell: height, water, state id.
+void atlas_cell(int L, vec2 local, out float height, out bool water, out float state) {
+    float cellsL = level_cells(L);
+    float topPx = level_top(L);
+    float totalH = atlas_total_h();
+    float cx = (floor(local.x * cellsL) + 0.5) / cellsL;
+    float cy = (topPx + floor(local.y * cellsL) + 0.5) / totalH;
+    vec4 a = texture(AtlasSampler, vec2(cx, cy));
+    height = atlas_height_at(a);
+    water = a.b > 0.5;
+    state = floor(a.a * 255.0 + 0.5);
 }
 
-// Heightfield lookup in world space; clamps to the atlas edge (plateau).
-float world_height(vec2 xz, vec2 origin, float size) {
-    vec2 uv = (xz - origin) / size;
-    uv = clamp(uv, vec2(0.0015), vec2(0.9985));
-    return atlas_height(uv);
+// Light + tint fetch (level 0 PNG only — light/tint are per L0 cell; the
+// pyramid keeps the winner's id, so coarse levels resample L0's winner by
+// taking the +x+z cell of each coarse cell, which IS the Mipper's pick).
+vec4 col_fetch(int L, vec2 local) {
+    float cellsL = level_cells(L);
+    float cx = (floor(local.x * cellsL) + 0.5) / cellsL;
+    float cy = (floor(local.y * cellsL) + 0.5) / cellsL;
+    return texture(ColSampler, vec2(cx, cy));
 }
 
-bool world_water(vec2 xz, vec2 origin, float size) {
-    vec2 uv = (xz - origin) / size;
-    uv = clamp(uv, vec2(0.0015), vec2(0.9985));
-    return atlas_water(uv);
+// Heightfield lookup helpers for the march (void = +inf: never hit).
+float ground_at(int L, vec2 local) {
+    float h; bool w; float s;
+    atlas_cell(L, local, h, w, s);
+    if (h < VOID_Y) {
+        return 1.0e8;
+    }
+    return w ? LodParams.z : h;
+}
+
+// ---- states atlas (the blockModelAtlas) ------------------------------------
+// Layout per state: 3 face-columns of 31 px (16/8/4/2/1 mip strip), 2 rows
+// of 16 px; 16 states per atlas row. Mip m tile width = 16 >> m.
+const float FACE_STRIDE = 31.0;
+const float STATES_PER_ROW = 16.0;
+
+vec4 state_tile(float sid, float face, int mip, vec2 uvf) {
+    float tw = exp2(float(4 - mip));          // 16 >> mip
+    // mip strip offsets within one 31px face column: 0,16,24,28,30 = 32-2^(5-m).
+    float off = 32.0 - exp2(5.0 - float(mip));
+    float sx = mod(sid, STATES_PER_ROW);
+    float sy = floor(sid / STATES_PER_ROW);
+    float ox = sx * 3.0 * FACE_STRIDE + floor(face / 2.0) * FACE_STRIDE + off;
+    float oy = sy * 32.0 + mod(face, 2.0) * 16.0;
+    vec2 texUV = vec2(ox, oy) + clamp(uvf, 0.5 / tw, 1.0 - 0.5 / tw) * tw;
+    return texture(StatesSampler, (texUV + 0.5) / StatesInfo.yz);
+}
+
+// ---- vanilla cardinal face shading (Voxy computeDirectionalFaceTint) -------
+float face_shade(float face) {
+    if (face < 0.5) return 0.5;        // DOWN
+    if (face < 1.5) return 1.0;        // UP
+    if (face < 3.5) return 0.8;        // NORTH/SOUTH (z axis)
+    return 0.6;                        // WEST/EAST (x axis)
+}
+
+// Horizontal distance from cam to the atlas boundary along dir.xz.
+float edge_distance_xz(vec3 cam, vec3 dir, vec2 minW, vec2 maxW) {
+    float e = 1.0e9;
+    if (dir.x > 0.0) e = min(e, (maxW.x - cam.x) / dir.x);
+    if (dir.x < 0.0) e = min(e, (minW.x - cam.x) / dir.x);
+    if (dir.z > 0.0) e = min(e, (maxW.y - cam.z) / dir.z);
+    if (dir.z < 0.0) e = min(e, (minW.y - cam.z) / dir.z);
+    return e * length(dir.xz);
 }
 
 void main() {
@@ -85,14 +215,13 @@ void main() {
 
     // 26.3 device depth (live-verified): d = near/eyeZ, infinite far plane —
     // the sky and the sun/moon quads sit at EXACTLY 0.0, real terrain reads
-    // positive values that grow with proximity (12 m ≈ 0.004 at near 0.05).
-    // Real chunks always win: non-sky pixels pass through untouched.
+    // positive values that grow with proximity. Real chunks always win.
     if (depth > 1.0e-6) {
         fragColor = scene;
         return;
     }
 
-    vec4 rot = texelFetch(RotSampler, ivec2(0), 0);
+    vec4 rot = texelFetch(RotSampler, ivec2(0, 0), 0);
     float conf = rot.b;
     float minConf = LodParams.w;
     if (conf < minConf) {
@@ -101,8 +230,7 @@ void main() {
     }
 
     // v4.0 encoding preserved: R = az/2pi, G = (el+pi/2)/pi, B = conf.
-    // A = fov byte (new in v4.1): the REAL vertical fov measured by the sky
-    // shader from ProjMat[1][1] — spyglass zoom and fov options just work.
+    // A = fov byte (v4.1): the REAL vertical fov measured by the sky shader.
     float az = rot.r * 6.28318530718;
     float el = rot.g * PI - PI * 0.5;
 
@@ -122,17 +250,13 @@ void main() {
     vec2 origin = AtlasInfo.xy;
     float size = AtlasInfo.z;
     float cell = AtlasInfo.w;
-    float near = LodParams.x;
-    float maxY = LodParams.y;
     float sea = LodParams.z;
 
-    // The atlas is a square around `origin`; stop the ray when it leaves.
     vec2 minW = origin - vec2(size * 0.5);
     vec2 maxW = origin + vec2(size * 0.5);
 
-    // Rays that leave the heightfield from above can never hit: early-out.
     if (dir.y > 0.0) {
-        float toCeil = (maxY + 64.0 - cam.y) / dir.y;
+        float toCeil = (LodParams.y + 8.0 - cam.y) / dir.y;
         float toEdge = 1.0e9;
         if (dir.x > 0.0) toEdge = min(toEdge, (maxW.x - cam.x) / dir.x);
         if (dir.x < 0.0) toEdge = min(toEdge, (minW.x - cam.x) / dir.x);
@@ -147,49 +271,51 @@ void main() {
         dir.y = 1.0e-6;
     }
 
-    // March: start at the LOD near edge (real chunks live inside it), step
-    // proportional to screen-space footprint of one atlas cell.
-    float t = near;
-    float dt = max(cell * 0.75, t * (2.0 * tanH / max(OutSize.y, 1.0)));
+    // March (Voxy level stepping): level L = floor(log2(t / cell)) clamped
+    // to the pyramid depth; each step samples that level's heightfield with
+    // a stride proportional to the level's cell size.
+    float horizon = size * 0.75;
+    float t = LodParams.x;
     float tHit = -1.0;
+    int hitL = 0;
     float prevT = t;
     float prevDiff = 1.0e9;
 
-    vec2 xz = cam.xz + dir.xz * t;
-    float above = (world_water(xz, origin, size) ? sea : world_height(xz, origin, size)) - (cam.y + dir.y * t);
-
     for (int i = 0; i < MAX_STEPS; ++i) {
+        int L = int(clamp(floor(log2(max(t, cell) / cell)), 0.0, 4.0));
+        float cellL = cell * exp2(float(L));
+        float dt = max(cellL * 0.35, t * (2.0 * tanH / max(OutSize.y, 1.0)));
         prevT = t;
-        prevDiff = above;
-        t = min(t + dt, size * 0.75);
-        dt = max(cell * 0.75, t * (2.0 * tanH / max(OutSize.y, 1.0)));
+        t = min(t + dt, horizon);
 
-        xz = cam.xz + dir.xz * t;
-        // Left the atlas? No LOD here.
-        if (any(lessThan(xz, minW)) || any(greaterThan(xz, maxW))) {
-            break;
+        vec3 p = cam + dir * t;
+        vec2 local = (p.xz - origin + vec2(size * 0.5)) / size;
+        if (any(lessThan(local, vec2(0.0))) || any(greaterThan(local, vec2(1.0)))) {
+            break; // left the atlas
         }
-        float ground = world_water(xz, origin, size) ? sea : world_height(xz, origin, size);
-        above = ground - (cam.y + dir.y * t);
+        float above = ground_at(L, local) - p.y;
 
         if (above <= 0.0 && prevDiff > 0.0) {
-            // Bisection between prevT and t.
             float lo = prevT;
             float hi = t;
             for (int b = 0; b < BISECT; ++b) {
                 float mid = (lo + hi) * 0.5;
-                vec2 mxz = cam.xz + dir.xz * mid;
-                float g = world_water(mxz, origin, size) ? sea : world_height(mxz, origin, size);
-                if (g - (cam.y + dir.y * mid) <= 0.0) {
+                vec3 mp = cam + dir * mid;
+                vec2 mlocal = (mp.xz - origin + vec2(size * 0.5)) / size;
+                int mL = int(clamp(floor(log2(max(mid, cell) / cell)), 0.0, 4.0));
+                float g = ground_at(mL, mlocal);
+                if (g - mp.y <= 0.0) {
                     hi = mid;
                 } else {
                     lo = mid;
                 }
             }
             tHit = (lo + hi) * 0.5;
+            hitL = int(clamp(floor(log2(max(tHit, cell) / cell)), 0.0, 4.0));
             break;
         }
-        if (t >= size * 0.75) {
+        prevDiff = above;
+        if (t >= horizon) {
             break;
         }
     }
@@ -201,46 +327,100 @@ void main() {
 
     float fade = smoothstep(minConf, minConf + 0.15, conf);
     vec3 hitPos = cam + dir * tHit;
+    vec2 local = (hitPos.xz - origin + vec2(size * 0.5)) / size;
+    local = clamp(local, vec2(0.0), vec2(0.999999));
 
-    // Shade: normal from the height gradient, palette by elevation.
-    vec2 e = vec2(cell, 0.0);
-    float hL = world_height(hitPos.xz - e.xy, origin, size);
-    float hR = world_height(hitPos.xz + e.xy, origin, size);
-    float hD = world_height(hitPos.xz - e.yx, origin, size);
-    float hU = world_height(hitPos.xz + e.yx, origin, size);
-    vec3 n = normalize(vec3(hL - hR, 2.0 * cell, hD - hU));
+    // ---- data at the hit cell (Voxy Mipper-picked level L) -----------------
+    int L = hitL;
+    float cellL = cell * exp2(float(L));
+    float h; bool isWater; float sid;
+    atlas_cell(L, local, h, isWater, sid);
 
-    float tt = fract(GameTime) * 6.28318530718;
-    vec3 sunDir = vec3(cos(tt), sin(tt), 0.0);
-    // RAW sun elevation drives the day cycle (shader-pack practice: distant
-    // detail must dissolve into a color that tracks the sky, not a constant).
-    // Post chains get no Fog UBO (verified in 26.3 sources: no vanilla post
-    // shader binds one), so GameTime is the only live sky data available.
-    float sunY = sin(tt);
-    float dayF = smoothstep(-0.14, 0.22, sunY);
-    vec3 veilCol = VeilColor.rgb * mix(0.42, 1.0, dayF);
-    veilCol = mix(veilCol * vec3(0.85, 0.9, 1.12), veilCol, dayF); // moonlit blue at night
-    if (sunDir.y < -0.12) {
-        sunDir = -sunDir;
+    // Height-gradient normal at the hit level (Voxy-flat quads).
+    vec2 e = vec2(1.0 / level_cells(L), 0.0);
+    float hL; bool wtmp; float stmp;
+    atlas_cell(L, clamp(local - e.xy, vec2(0.0), vec2(0.999999)), hL, wtmp, stmp);
+    float hR; atlas_cell(L, clamp(local + e.xy, vec2(0.0), vec2(0.999999)), hR, wtmp, stmp);
+    float hD; atlas_cell(L, clamp(local - e.yx, vec2(0.0), vec2(0.999999)), hD, wtmp, stmp);
+    float hU; atlas_cell(L, clamp(local + e.yx, vec2(0.0), vec2(0.999999)), hU, wtmp, stmp);
+    vec3 n = normalize(vec3(hL - hR, 2.0 * cellL, hD - hU));
+
+    // ---- FACE + TEXTURE (quads.frag math) ----------------------------------
+    float face = n.y > 0.577 ? 1.0 : (abs(n.x) > abs(n.z)
+        ? (n.x > 0.0 ? 5.0 : 4.0)
+        : (n.z > 0.0 ? 3.0 : 2.0));
+
+    vec4 colData = col_fetch(L, local);
+    float lightId = floor(colData.a * 255.0 + 0.5);
+
+    // Voxy greedy-quad tiling: one texture tile per 2^L cell.
+    vec2 uvf = fract(hitPos.xz / cellL);
+
+    vec3 albedo;
+    float texAlpha = 1.0;
+    bool hasState = sid > 0.5;
+    if (hasState) {
+        // Mip = the level (one mip step per detail level, Voxy-style).
+        vec4 tex = state_tile(sid, face, L, uvf);
+        // Cutout (Voxy: discard at mip-0 alpha <= 0.1 — leaves show sky).
+        float a0 = state_tile(sid, face, 0, uvf).a;
+        if (a0 <= 0.1) {
+            fragColor = scene;
+            return;
+        }
+        albedo = tex.rgb;
+        texAlpha = isWater ? 0.75 : tex.a;
+    } else {
+        // Unknown state: height gradient fallback (v4.1 look).
+        float hn = clamp((hitPos.y - sea) / max(LodParams.y - sea, 1.0), 0.0, 1.0);
+        albedo = isWater ? ColWater.rgb : mix(ColLow.rgb, ColHigh.rgb, smoothstep(0.15, 0.9, hn));
+        texAlpha = isWater ? 0.75 : 1.0;
     }
 
-    float hn = clamp((hitPos.y - sea) / max(maxY - sea, 1.0), 0.0, 1.0);
-    vec3 terrainCol = mix(ColLow.rgb, ColHigh.rgb, smoothstep(0.15, 0.9, hn));
-    float snow = smoothstep(VeilColor.a * 0.55 + 0.35, VeilColor.a * 0.55 + 0.55, hn);
-    terrainCol = mix(terrainCol, vec3(0.93, 0.95, 0.97), snow);
+    // Vanilla face shade (cardinal light), exact Voxy constants.
+    float shade = face_shade(face);
+    if (isWater) {
+        face = 1.0;
+        shade = 1.0;
+    }
 
-    float isWater = world_water(hitPos.xz, origin, size) ? 1.0 : 0.0;
-    vec3 albedo = mix(terrainCol, ColWater.rgb, isWater);
+    // Biome tint: multiply into UP faces when the cell carries one
+    // (white = untinted — matches Voxy's biome LUT behavior for the rest).
+    vec3 tint = colData.rgb;
+    bool tinted = any(greaterThan(abs(tint - vec3(1.0)), vec3(0.004)));
+    if (tinted && ((face > 0.5 && face < 1.5) || isWater)) {
+        albedo *= tint;
+    }
 
-    vec3 lightDir = normalize(vec3(sunDir.x, max(sunDir.y, 0.15), 0.0));
-    float diff = max(dot(n, lightDir), 0.0);
-    float ambient = mix(0.20, 0.55, dayF);
-    float sunGain = mix(0.30, 0.80, dayF);
-    vec3 lit = albedo * (ambient + diff * sunGain);
+    // Light = the exact lightmap texel for the cell's Voxy lightId.
+    vec3 lightRGB = voxy_lightmap(lightId);
+    vec3 lit = albedo * shade * lightRGB;
 
-    // Distance fog into the day-graded veil color: merges LOD into the sky.
-    float fog = smoothstep(FogParams.x, FogParams.y, tHit);
-    lit = mix(lit, veilCol, fog);
+    // ---- FOG: the Voxy recipe, verbatim (v4.2-verified) --------------------
+    vec4 fogCol = texelFetch(RotSampler, ivec2(1, 0), 0);
+    vec4 fogRng = texelFetch(RotSampler, ivec2(0, 1), 0);
+    bool fogLive = fogRng.a > 0.5 && fogCol.a > 0.004;
+    float fStart = fogLive ? fogRng.r * 255.0 * 8.0 : FogParams.x;
+    float fEnd = fogLive ? fogRng.g * 255.0 * 8.0 : FogParams.y;
+    float vanRD = fogRng.b * 255.0 * 16.0;
+    vec3 fogTint = fogLive ? fogCol.rgb : VeilColor.rgb;
+    float fogOpacity = fogLive ? fogCol.a : 1.0;
 
-    fragColor = vec4(mix(scene.rgb, lit, fade), scene.a);
+    float fog = 0.0;
+    if (abs(fEnd - fStart) > 1.0) {
+        float invEndFogDelta = 1.0 / (fEnd - fStart);
+        float startDelta = -fStart * invEndFogDelta;
+        float endDistance = max(vanRD, 320.0) * 1.7320508;
+        float maxFog = clamp(endDistance * invEndFogDelta + startDelta, 0.0, 1.0);
+        fog = clamp(tHit * invEndFogDelta + startDelta, 0.0, maxFog) * fogOpacity;
+    }
+    lit = mix(lit, fogTint, fog);
+
+    // ---- FADE: Voxy FogMode.FADE, MODE=1 (xz only), last 10% --------------
+    float lenXZ = tHit * length(dir.xz);
+    float rEdge = max(edge_distance_xz(cam, dir, minW, maxW), 1.0);
+    float edge = 1.0 - clamp((lenXZ - FADE_START * rEdge) / max((1.0 - FADE_START) * rEdge, 1.0), 0.0, 1.0);
+
+    vec3 outCol = mix(mix(scene.rgb, lit, fade), scene.rgb, edge);
+    fragColor = vec4(outCol, scene.a);
 }

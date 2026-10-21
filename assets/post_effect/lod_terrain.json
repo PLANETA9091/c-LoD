@@ -1,8 +1,8 @@
 {
     "targets": {
-        "clod_scan": { "width": 640, "height": 1 },
-        "clod_rot_a": { "width": 1, "height": 1, "persistent": true },
-        "clod_rot_b": { "width": 1, "height": 1, "persistent": true },
+        "clod_scan": { "width": 640, "height": 2 },
+        "clod_rot_a": { "width": 2, "height": 2, "persistent": true },
+        "clod_rot_b": { "width": 2, "height": 2, "persistent": true },
         "clod_swap": {}
     },
     "passes": [
@@ -38,7 +38,9 @@
             "inputs": [
                 { "sampler_name": "In", "target": "minecraft:main" },
                 { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
-                { "sampler_name": "Atlas", "location": "clod:effect/atlas", "width": __ATLAS_CELLS__, "height": __ATLAS_CELLS__, "bilinear": true },
+                { "sampler_name": "Atlas", "location": "clod:atlas", "width": __ATLAS_CELLS__, "height": __ATLAS_PNG_H__, "bilinear": false },
+                { "sampler_name": "Col", "location": "clod:atlas_col", "width": __ATLAS_CELLS__, "height": __ATLAS_CELLS__, "bilinear": false },
+                { "sampler_name": "States", "location": "clod:atlas_states", "width": __STATES_W__, "height": __STATES_H__, "bilinear": true },
                 { "sampler_name": "Rot", "target": "clod_rot_a" }
             ],
             "output": "clod_swap",
@@ -48,6 +50,9 @@
                 ],
                 "ClodParams": [
                     { "name": "LodParams", "type": "vec4", "value": [__LOD_NEAR__, __MAX_HEIGHT__, __SEA_LEVEL__, __MIN_CONF__] }
+                ],
+                "ClodStates": [
+                    { "name": "StatesInfo", "type": "vec4", "value": [__STATES_COUNT__, __STATES_W__, __STATES_H__, 16.0] }
                 ],
                 "ClodFog": [
                     { "name": "FogParams", "type": "vec4", "value": [__FOG_START__, __FOG_END__, __FOV__, 0.0] }

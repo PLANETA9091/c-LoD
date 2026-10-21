@@ -1,19 +1,23 @@
 #version 330
 #extension GL_ARB_separate_shader_objects : require
 
-// c-LoD pass 1 (v4.1): scan the camera-channel column.
+// c-LoD pass 1 (v4.2): scan the camera-channel columns.
 //
-// The sky program writes the view basis into the ALPHA of the leftmost 8
-// columns (see assets/glsl/sky.fsh). Everything else in the frame writes
-// different alpha: terrain is 1.0, translucent passes blend, the GUI comes
-// later. A row is "intact" when its 8 alpha bytes decode to valid magic,
-// a sane fov byte and a matching additive checksum.
+// The sky program writes TWO independent payload groups into the alpha of
+// the leftmost 16 columns (see assets/glsl/sky.fsh):
+//   group A (x0..x7)  — camera basis, magic 0xC7 0x63, checksum additive;
+//   group B (x8..x15) — vanilla fog state, checksum (bytes + 61) mod 256.
 //
-// This pass covers the screen column in slices: output pixel j scans rows
-// [j*4, j*4+4) and reports the TOPMOST intact row in its slice (GL y grows
-// upward, so topmost = largest y). The 1x1 solver (clod:post/rot_solve)
-// then picks the best slice. Cost: 640 pixels * 4 rows * 8 fetches — orders
-// of magnitude below the v4.0 256x256 sun scan, and no sun is required.
+// A row is "intact" for a group when its 8 alpha bytes decode to a sane
+// payload with a matching checksum. The two groups are validated INDEPENDENTLY:
+// clouds overwriting x8..x15 must not kill the camera, and terrain occluding
+// x0..x7 must not kill the fog readback.
+//
+// Output target is 640x2. Pixel (j, 0) scans rows [j*4, j*4+4) for group A
+// and reports the TOPMOST intact row (GL y grows upward: topmost = largest
+// y). Pixel (j, 1) does the same for group B. The 2x2 solver (clod:post/
+// rot_solve) picks the best slice per row. Cost: 2 * 640 pixels * 4 rows *
+// 8 fetches — trivial.
 
 uniform sampler2D InSampler; // minecraft:main
 
@@ -27,27 +31,41 @@ layout(location = 0) out vec4 fragColor;
 
 const int ROWS_PER_SLICE = 4;
 
-bool row_valid(int y) {
-    float a[8];
-    for (int i = 0; i < 8; ++i) {
-        a[i] = texelFetch(InSampler, ivec2(i, y), 0).a * 255.0;
-    }
-    if (abs(a[0] - 199.0) > 0.5) return false;  // 0xC7
-    if (abs(a[1] - 99.0) > 0.5) return false;   // 0x63
-    if (a[6] > 254.5) return false;             // 255 = opaque alpha (terrain)
-    float s = a[0] + a[1] + a[2] + a[3] + a[4] + a[5] + a[6];
-    float chk = mod(s, 256.0);
-    return abs(chk - a[7]) < 1.0;
+float alpha_at(int x, int y) {
+    return texelFetch(InSampler, ivec2(x, y), 0).a * 255.0;
+}
+
+// Group A: magic + sane fov + additive checksum (v4.1 semantics, stable).
+bool row_valid_camera(int y) {
+    float a0 = alpha_at(0, y);
+    float a1 = alpha_at(1, y);
+    if (abs(a0 - 199.0) > 0.5) return false;  // 0xC7
+    if (abs(a1 - 99.0) > 0.5) return false;   // 0x63
+    float a6 = alpha_at(6, y);
+    if (a6 > 254.5) return false;             // 255 = opaque alpha (terrain)
+    float s = a0 + a1 + alpha_at(2, y) + alpha_at(3, y)
+            + alpha_at(4, y) + alpha_at(5, y) + a6;
+    return abs(mod(s, 256.0) - alpha_at(7, y)) < 1.0;
+}
+
+// Group B: additive checksum with seed 61 over the 7 fog bytes.
+bool row_valid_fog(int y) {
+    float s = alpha_at(8, y) + alpha_at(9, y) + alpha_at(10, y)
+            + alpha_at(11, y) + alpha_at(12, y) + alpha_at(13, y)
+            + alpha_at(14, y) + 61.0;
+    return abs(mod(s, 256.0) - alpha_at(15, y)) < 1.0;
 }
 
 void main() {
     int slice = int(gl_FragCoord.x);
+    int group = int(gl_FragCoord.y); // 0 = camera, 1 = fog
     int rows = int(InSize.y);
     int best = -1;
     for (int r = 0; r < ROWS_PER_SLICE; ++r) {
         int y = slice * ROWS_PER_SLICE + r;
         if (y >= rows) break;
-        if (row_valid(y)) {
+        bool ok = group == 0 ? row_valid_camera(y) : row_valid_fog(y);
+        if (ok) {
             best = y; // ascending: last valid = topmost within the slice
         }
     }
