@@ -471,6 +471,28 @@ mod tests {
         }
     }
 
+    /// Offline-harness aid: dump the baked states atlas as a PNG so the
+    /// llvmpipe A/B can sample the REAL block textures (leaf cutout holes,
+    /// water tint) instead of a white dummy tile.
+    #[test]
+    fn dump_states_atlas_png() {
+        let path = match std::env::var("CLOD_DUMP_STATES") {
+            Ok(p) if !p.is_empty() => p,
+            _ => return,
+        };
+        let reg = StateRegistry::build();
+        let (w, h, px) = bake_states_atlas(&reg);
+        let png = crate::png::encode_png(w, h, &px);
+        std::fs::write(&path, &png).expect("write states png");
+        eprintln!(
+            "states atlas {}x{} ({} states) -> {}",
+            w,
+            h,
+            reg.count(),
+            path
+        );
+    }
+
     #[test]
     fn leaves_are_cutout_water_is_not() {
         let reg = StateRegistry::build();

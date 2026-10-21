@@ -353,17 +353,22 @@ void main() {
     // The START point is sampled for real (not a sentinel): a sentinel > 0
     // fakes a hit at the first step, a sentinel < 0 fakes an entry for rays
     // that are already inside the heightfield at lod_near (steep-down rays;
-    // those crossings sit inside the real-chunk band, where the depth gate
-    // wins anyway, so they must not paint anything).
+    // see the SKY-LEAK RESCUE below for how those are painted).
     float prevDiff;
+    // The llvmpipe JIT (CI client + local harness) segfaults on a bool flag
+    // kept alive across the march loop together with the rescue assignment
+    // below — an exact float 0/1 flag compiles and runs identically.
+    float startUnder; // 1.0 = the ray is already INSIDE the heightfield at lod_near
     {
         vec3 p0 = cam + dir * t;
         vec2 local0 = (p0.xz - origin) / size;
         if (any(lessThan(local0, vec2(0.0))) || any(greaterThan(local0, vec2(1.0)))) {
             prevDiff = -1.0; // start off-atlas: open sky, entries ahead are real
+            startUnder = 0.0;
         } else {
             int L0 = int(clamp(floor(log2(max(t, cell) / cell)), 0.0, 4.0));
             prevDiff = ground_at(L0, local0) - p0.y;
+            startUnder = prevDiff > 0.0 ? 1.0 : 0.0;
         }
     }
 
@@ -410,6 +415,17 @@ void main() {
         }
     }
 
+    // SKY-LEAK RESCUE: a ray that is under the heightfield at lod_near pierced
+    // the surface INSIDE the real-chunk band (t < lod_near). When the server's
+    // chunk view distance is SHORTER than lod_near (CI e2e: view-distance=4 =
+    // 64 blocks < lod_near 96) that piercing is NOT depth-covered, the march
+    // never re-enters on flat/downhill ground, and the pixel showed raw
+    // vanilla sky/fog — flat pale rectangles with ruler-straight edges
+    // (run-30 02_noon_high). Paint the START cell instead: the terrain that
+    // continues seamlessly from the real-chunk edge.
+    if (tHit < 0.0 && startUnder > 0.5) {
+        tHit = LodParams.x; // the march's own start distance (t was mutated)
+    }
     if (tHit < 0.0) {
         if (DEBUG > 1.5 && DEBUG < 2.5) {
             // debug 2: sky where the march found nothing (depth = miss)
@@ -464,15 +480,16 @@ void main() {
     //   mip m divides the texel rate by 2^m; the GPU (TRILINEAR) resolves
     //   m = round(log2(texels-per-pixel)).
     //
-    // The previous v4.3.1 formula picked the STRIP LEVEL from pxFoot alone
-    // (mip = ceil(log2(pxFoot)) with the tile period tied to the same Lt),
-    // which sampled a 16px tile across a whole cell at typical distances —
-    // 8..16 texels per pixel with NO mip reduction: full-surface aliasing
-    // speckle (the reported "block textures overlap" noise) plus mip-0
-    // alpha holes punched into mid-distance leaves. tpp < 1 (pixel smaller
-    // than a texel, near LOD0) clamps to mip 0 = vanilla-crisp magnification.
+    // pxFoot is the PERPENDICULAR footprint; the derivative textureGrad
+    // actually sees runs ALONG THE SURFACE: a ray grazing the heightfield
+    // sweeps pxFoot / |dot(dir,n)| surface blocks per pixel. Without the
+    // grazing factor mountainsides under-mip and alias (the run-30 slope
+    // chevrons) even with a correct mip chain. tpp < 1 (pixel smaller than
+    // a texel, near LOD0) clamps to mip 0 = vanilla-crisp magnification.
     float pxFoot = tHit * (2.0 * tanH / max(OutSize.y, 1.0));
-    float tpp = 16.0 * pxFoot / exp2(float(L)); // texels per pixel at mip 0
+    float grazing = max(abs(dot(dir, n)), 0.08);
+    float pxSurface = pxFoot / grazing;
+    float tpp = 16.0 * pxSurface / exp2(float(L)); // texels per pixel at mip 0
     int texMip = int(clamp(floor(log2(max(tpp, 0.03125)) + 0.5), 0.0, 4.0));
 
     // Greedy-quad uv, world-anchored, ONE TILE PER CELL (2^L blocks). UP
