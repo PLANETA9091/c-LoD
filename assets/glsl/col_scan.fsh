@@ -1,5 +1,4 @@
 #version 330
-#extension GL_ARB_separate_shader_objects : require
 
 // c-LoD pass 1 (v4.2): scan the camera-channel columns.
 //
@@ -26,8 +25,8 @@ layout(std140) uniform SamplerInfo {
     vec2 InSize;
 };
 
-layout(location = 0) in vec2 texCoord;
-layout(location = 0) out vec4 fragColor;
+in vec2 texCoord;
+out vec4 fragColor;
 
 const int ROWS_PER_SLICE = 4;
 

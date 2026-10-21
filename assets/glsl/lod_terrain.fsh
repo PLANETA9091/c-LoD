@@ -1,5 +1,4 @@
 #version 330
-#extension GL_ARB_separate_shader_objects : require
 #include <minecraft:globals.glsl>
 
 // c-LoD pass 4 (v4.3 "VOXY CORE"): the LOD renderer, now with the SUBSTANCE
@@ -71,8 +70,8 @@ layout(std140) uniform ClodColors {
     vec4 VeilColor; // fallback fog tint (rgb) + snow whiteness (a)
 };
 
-layout(location = 0) in vec2 texCoord;
-layout(location = 0) out vec4 fragColor;
+in vec2 texCoord;
+out vec4 fragColor;
 
 const float PI = 3.14159265358979;
 const int MAX_STEPS = 220;
@@ -163,7 +162,13 @@ void atlas_cell(int L, vec2 local, out float height, out bool water, out float s
     float totalH = atlas_total_h();
     float cx = (floor(local.x * cellsL) + 0.5) / atlas_cells();
     float cy = (topPx + floor(local.y * cellsL) + 0.5) / totalH;
-    vec4 a = texture(AtlasSampler, vec2(cx, cy));
+    // textureLod, not texture: these fetches run inside the march loop whose
+    // break paths diverge across the quad — implicit derivatives are
+    // UNDEFINED there. On strict drivers (llvmpipe in CI) the helper-invocation
+    // garbage produced wrong fetches and the whole LOD silently vanished
+    // (V3 dark-LOD fraction 0.0%). The data PNGs carry a single mip, so lod 0
+    // is byte-identical to the intent and derivative-free.
+    vec4 a = textureLod(AtlasSampler, vec2(cx, cy), 0.0);
     height = atlas_height_at(a);
     water = a.b > 0.5;
     state = floor(a.a * 255.0 + 0.5);
@@ -180,15 +185,20 @@ vec4 col_fetch(int L, vec2 local) {
     float iz0 = (floor(local.y * cellsL) + 1.0) * stepL - 1.0;
     float cx = (min(ix0, n - 1.0) + 0.5) / n;
     float cy = (min(iz0, n - 1.0) + 0.5) / n;
-    return texture(ColSampler, vec2(cx, cy));
+    // textureLod: same divergence argument as atlas_cell (this runs after
+    // early returns, so quad derivatives are already undefined).
+    return textureLod(ColSampler, vec2(cx, cy), 0.0);
 }
 
-// Heightfield lookup helpers for the march (void = +inf: never hit).
+// Heightfield lookup helpers for the march.
+// Unscanned (void) cells return -inf: the ray is always ABOVE them, so an
+// entry test can never fire inside unknown territory (v4.3.0 used +inf,
+// which under entry semantics made void cells an infinite wall to enter).
 float ground_at(int L, vec2 local) {
     float h; bool w; float s;
     atlas_cell(L, local, h, w, s);
     if (h < VOID_Y) {
-        return 1.0e8;
+        return -1.0e8;
     }
     return w ? LodParams.z : h;
 }
@@ -213,7 +223,10 @@ vec4 state_tile(float sid, float face, int mip, vec2 uvf) {
     // bilinear-blended with the NEIGHBOURING tile (another face or another
     // block state) — the reported "block textures overlap" artifact.
     vec2 texUV = vec2(ox, oy) + clamp(uvf, 0.5 / tw, 1.0 - 0.5 / tw) * tw;
-    return texture(StatesSampler, texUV / StatesInfo.yz);
+    // textureLod: the mip strip is selected MANUALLY via `off`; implicit
+    // derivatives would let the driver pick mips of the whole states atlas
+    // (and are undefined under divergent control flow anyway).
+    return textureLod(StatesSampler, texUV / StatesInfo.yz, 0.0);
 }
 
 // ---- vanilla cardinal face shading (Voxy computeDirectionalFaceTint) -------
@@ -312,12 +325,34 @@ void main() {
     // March (Voxy level stepping): level L = floor(log2(t / cell)) clamped
     // to the pyramid depth; each step samples that level's heightfield with
     // a stride proportional to the level's cell size.
+    //
+    // HIT = ENTRY into the heightfield: above = ground - p.y crosses from
+    // <= 0 (ray point above the surface) to > 0 (ray point under it). The
+    // v4.3-and-earlier test had the signs swapped — it caught the EXIT from
+    // terrain, i.e. the far side of ridges. Consequences: on flat ground the
+    // ray dives below the surface and never exits, so flat/low-relief worlds
+    // rendered NO LOD at all (CI V3 dark-LOD fraction 0.0% on every v4.3
+    // run), and relief worlds rendered back-slopes with inverted lighting.
     float horizon = size * 0.75;
     float t = LodParams.x;
     float tHit = -1.0;
     int hitL = 0;
+
+    // Sample the START point before stepping: the entry test needs a real
+    // "above surface" reference. A sentinel would fake a hit at the first
+    // step (> 0) or suppress the first legit entry (< 0).
     float prevT = t;
-    float prevDiff = 1.0e9;
+    float prevDiff;
+    {
+        vec3 p0 = cam + dir * t;
+        vec2 local0 = (p0.xz - origin) / size;
+        if (any(lessThan(local0, vec2(0.0))) || any(greaterThan(local0, vec2(1.0)))) {
+            prevDiff = -1.0; // start off-atlas: open sky, entries ahead are real
+        } else {
+            int L0 = int(clamp(floor(log2(max(t, cell) / cell)), 0.0, 4.0));
+            prevDiff = ground_at(L0, local0) - p0.y;
+        }
+    }
 
     for (int i = 0; i < MAX_STEPS; ++i) {
         int L = int(clamp(floor(log2(max(t, cell) / cell)), 0.0, 4.0));
@@ -334,7 +369,9 @@ void main() {
         }
         float above = ground_at(L, local) - p.y;
 
-        if (above <= 0.0 && prevDiff > 0.0) {
+        if (above > 0.0 && prevDiff <= 0.0) {
+            // Entry: lo tracks the OUTSIDE side (g - y <= 0), hi the INSIDE
+            // side (g - y > 0); converge on the surface crossing.
             float lo = prevT;
             float hi = t;
             for (int b = 0; b < BISECT; ++b) {
@@ -344,9 +381,9 @@ void main() {
                 int mL = int(clamp(floor(log2(max(mid, cell) / cell)), 0.0, 4.0));
                 float g = ground_at(mL, mlocal);
                 if (g - mp.y <= 0.0) {
-                    hi = mid;
-                } else {
                     lo = mid;
+                } else {
+                    hi = mid;
                 }
             }
             tHit = (lo + hi) * 0.5;
@@ -486,6 +523,13 @@ void main() {
     float rEdge = max(edge_distance_xz(cam, dir, minW, maxW), 1.0);
     float edge = 1.0 - clamp((lenXZ - FADE_START * rEdge) / max((1.0 - FADE_START) * rEdge, 1.0), 0.0, 1.0);
 
-    vec3 outCol = mix(mix(scene.rgb, lit, fade), scene.rgb, edge);
+    // v4.3.0 REGRESSION FIX: the factor below was passed INVERTED — `edge` is
+    // 1.0 in the atlas interior and 0.0 at the rim, so mix(..., scene, edge)
+    // drew VANILLA SKY everywhere except the outer 10% ring of the atlas.
+    // The LOD was invisible across ~90% of the window on every GPU (CI V3
+    // dark fraction 0.0%; live testing only ever saw the far rim).
+    // 1.0 - edge is the rim factor: 0 interior (draw the LOD), 1 at the rim
+    // (hand back to vanilla sky) — the actual Voxy FogMode.FADE behaviour.
+    vec3 outCol = mix(mix(scene.rgb, lit, fade), scene.rgb, 1.0 - edge);
     fragColor = vec4(outCol, scene.a);
 }

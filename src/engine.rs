@@ -58,6 +58,14 @@ pub struct State {
     pub scan_seq: AtomicU64,
     /// Chunk-major streaming cursor (index into the atlas chunk grid).
     pub scan_cursor: AtomicU64,
+    /// Set once a scan sweep has VISITED the whole atlas (streaming: the
+    /// chunk-grid cursor reached the end; classic: the radial order was
+    /// fully consumed). Cells can stay unfillable forever (void rows,
+    /// chunks that fail to generate), so `scanned_cells >= total_cells` is
+    /// NOT a reachable condition on real worlds — without this flag the
+    /// finalize always waited out the full scan deadline (the "6 minutes"
+    /// dead wait on the local test server).
+    pub sweep_done: AtomicU8,
     pub world_obj: Mutex<usize>, // jobject handle as usize; main-thread only
     pub world_name: Mutex<String>,
     pub keys: Mutex<Option<Keys>>,
@@ -160,6 +168,7 @@ impl State {
             world_seen_at: Mutex::new(None),
             scan_seq: AtomicU64::new(0),
             scan_cursor: AtomicU64::new(0),
+            sweep_done: AtomicU8::new(0),
             world_obj: Mutex::new(0),
             world_name: Mutex::new(String::new()),
             keys: Mutex::new(None),
@@ -346,6 +355,14 @@ fn scan_batch(state: &Arc<State>, env: Env) {
             let z = state.atlas.cell_world_z(iz);
             sample_cell(state, env, world, x, z, ix, iz);
         }
+        // Classic sweep completion: the radial order has been fully visited
+        // at least once (scan_task wraps the start index; scan_seq was
+        // already bumped for this tick).
+        if state.scan_seq.load(Ordering::Relaxed) * u64::from(budget)
+            >= u64::from(state.atlas.cells) * u64::from(state.atlas.cells)
+        {
+            state.sweep_done.store(1, Ordering::Relaxed);
+        }
     }
     // Rate-limited scan diagnostics (one line per 25 ticks).
     if seq.is_multiple_of(25) {
@@ -470,6 +487,13 @@ fn scan_stream(state: &Arc<State>, env: Env, world: jvmti_bindings::jni::jobject
             }
         }
         let _ = jni::warm_chunk(env, world, cx, cz, false);
+    }
+    // Streaming sweep completion: the cursor walked past the last chunk of
+    // the atlas grid. Chunks whose warm/generate failed are SKIPPED (their
+    // cells stay unscanned) — the sweep still counts as complete, otherwise
+    // every finalization would wait out the whole scan deadline.
+    if state.scan_cursor.load(Ordering::Relaxed) >= total {
+        state.sweep_done.store(1, Ordering::Relaxed);
     }
 }
 
@@ -670,7 +694,8 @@ pub fn maybe_finalize(state: &Arc<State>) {
     if *state.world_obj.lock().unwrap() == 0 {
         return;
     }
-    let complete = state.atlas.scanned_cells() >= state.atlas.total_cells();
+    let complete = state.atlas.scanned_cells() >= state.atlas.total_cells()
+        || state.sweep_done.load(Ordering::SeqCst) == 1;
     let deadline_hit = match *state.world_seen_at.lock().unwrap() {
         Some(t) => t.elapsed().as_secs() >= state.cfg.scan_deadline_secs || state.restored,
         None => state.restored,
