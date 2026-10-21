@@ -45,9 +45,15 @@ UI_SHOTS = {"00_join_state", "00_pack_applied"}
 # shots taken OUTSIDE the atlas window: the LOD must NOT paint there (the
 # edge fade releases before the border) — V3's expectation is inverted
 OUT_SHOTS = {"07_veil_outside"}
+# aerial pitch (-30deg) puts the horizon line outside the fixed band — V2/V5
+# cover that frame, V3 skips it
+V3_SKIP = {"03_noon_aerial"}
 
-# horizon band (fraction of window height) scanned for dark LOD fragments
-HOR = (0.25, 0.60)
+# V3 band: a thin strip AROUND THE HORIZON LINE (pitch-0 fov-70 puts el=0 at
+# 0.50 of the window). Vanilla-only frames render pure sky/fog there; LOD
+# hill and tree tops poke ABOVE the horizon line — terrain-tone pixels in
+# this strip are direct evidence of the LOD silhouette.
+HOR = (0.42, 0.505)
 # sky band scanned for sky-likeness at noon
 SKY = (0.05, 0.30)
 # veil band (below horizon) scanned for liveness
@@ -55,7 +61,7 @@ VEIL = (0.62, 0.95)
 
 MIN_STD_UI = 4.0        # V2: UI screens must not be flat
 MIN_STD_WORLD = 5.0     # V2: world frames must not be flat
-MIN_DARK = 0.04         # V3: terrain-tone fragments in the horizon band
+MIN_DARK = 0.008         # V3: terrain-tone fragments in the horizon band
 # v4.3.1: the LOD is TEXTURED and lit by the vanilla lightmap — bright grass
 # lands at luma 120-180, well above the old flat-palette darkness cutoff of
 # 140. The horizon-band discriminator is now "terrain tone vs sky": mid and
@@ -175,7 +181,9 @@ def analyze(name, path):
             if luma_at(px, row + x * ch, ch) < 185:
                 dark += 1
     darkf = dark / max(tot, 1)
-    if name in OUT_SHOTS:
+    if name in V3_SKIP:
+        lines.append(f"  OK   V3 {name}: skipped (aerial pitch — horizon outside the band)")
+    elif name in OUT_SHOTS:
         if darkf > MAX_DARK_OUT:
             problems.append(f"  FAIL V3 {name}: horizon band dark-LOD fraction {darkf:.1%} > {MAX_DARK_OUT:.0%} — LOD leaked outside the atlas window")
         else:

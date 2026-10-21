@@ -317,7 +317,14 @@ void main() {
     float tHit = -1.0;
     int hitL = 0;
     float prevT = t;
-    float prevDiff = 1.0e9;
+    // The camera stands in AIR above the heightfield: the first sample is
+    // 'above' (ground below the ray point). The surface hit is the
+    // air -> underground transition of 'above' (negative -> positive).
+    // v4.3.1-rc tested the OPPOSITE transition with prevDiff initialised
+    // to +1e9, so the very first in-air sample fired the branch and the
+    // bisect collapsed to ~lod_near — every downward ray got a ghost hit
+    // at a fixed distance instead of a real raycast.
+    float prevDiff = -1.0;
 
     for (int i = 0; i < MAX_STEPS; ++i) {
         int L = int(clamp(floor(log2(max(t, cell) / cell)), 0.0, 4.0));
@@ -334,19 +341,19 @@ void main() {
         }
         float above = ground_at(L, local) - p.y;
 
-        if (above <= 0.0 && prevDiff > 0.0) {
-            float lo = prevT;
-            float hi = t;
+        if (above > 0.0 && prevDiff <= 0.0) {
+            float lo = prevT;   // air side (ground below the ray)
+            float hi = t;       // underground side (ground above the ray)
             for (int b = 0; b < BISECT; ++b) {
                 float mid = (lo + hi) * 0.5;
                 vec3 mp = cam + dir * mid;
                 vec2 mlocal = (mp.xz - origin) / size;
                 int mL = int(clamp(floor(log2(max(mid, cell) / cell)), 0.0, 4.0));
                 float g = ground_at(mL, mlocal);
-                if (g - mp.y <= 0.0) {
-                    hi = mid;
+                if (g - mp.y > 0.0) {
+                    hi = mid;   // underground: the hit is closer
                 } else {
-                    lo = mid;
+                    lo = mid;   // still air: the hit is farther
                 }
             }
             tHit = (lo + hi) * 0.5;

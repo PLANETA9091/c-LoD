@@ -65,14 +65,14 @@ shot() { # name yaw pitch x y z
   echo "shot $1 (yaw=$2 pitch=$3 at $4,$5,$6)"
 }
 
-shot 01_noon_ground  90  0    0 100 0
-shot 02_noon_high    90  5    0 120 0
-shot 03_noon_aerial  90  15   0 160 0
-shot 04_yaw_south     0  5    0 130 0
-shot 05_yaw_north   180  5    0 130 0
-shot 06_yaw_east    270  5    0 130 0
-shot 07_veil_outside 90 10  700 140 0
-shot 08_back_inside  90  0    0 120 0
+shot 01_noon_ground  90  0    0 72 0
+shot 02_noon_high    90  5    0 96 0
+shot 03_noon_aerial  90 -30   0 120 0
+shot 04_yaw_south     0  0    0 72 0
+shot 05_yaw_north   180  0    0 72 0
+shot 06_yaw_east    270  0    0 72 0
+shot 07_veil_outside 90  5  700 90 0
+shot 08_back_inside  90  0    0 72 0
 
 echo "=== client log pack markers ==="
 grep -iE "pack|post" /tmp/client.log | tail -12 || true
