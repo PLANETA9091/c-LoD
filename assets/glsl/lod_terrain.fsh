@@ -491,6 +491,13 @@ void main() {
     float pxSurface = pxFoot / grazing;
     float tpp = 16.0 * pxSurface / exp2(float(L)); // texels per pixel at mip 0
     int texMip = int(clamp(floor(log2(max(tpp, 0.03125)) + 0.5), 0.0, 4.0));
+    // Continuous LOD for the manual strip: a real GPU trilinearly BLENDS the
+    // two mips around the continuous LOD log2(tpp); rounding alone hard-
+    // switches strips per pixel, and the round() contour lines across a
+    // terraced surface painted visible ring/dither zones (harness zoom on
+    // the sand terraces). Mix floor/ceil strips by the fractional part -
+    // the exact behaviour quads.frag gets from the sampler for free.
+    float mipF = clamp(log2(max(tpp, 0.03125)), 0.0, 4.0);
 
     // Greedy-quad uv, world-anchored, ONE TILE PER CELL (2^L blocks). UP
     // faces tile in xz; side faces tile along the horizontal axis AND
@@ -506,9 +513,21 @@ void main() {
 
     vec3 albedo;
     float texAlpha = 1.0;
-    bool hasState = sid > 0.5;
+    // StatesInfo.x = the pack's state count. A client can hold a STALE pack
+    // (join-time pack swap races: "post effect does not exist" window) while
+    // the server atlas already uses a newer registry — out-of-range sids then
+    // clamp into a random neighbouring tile. The count guard falls back to
+    // the height-gradient colours instead of garbage block textures.
+    bool hasState = sid > 0.5 && sid < StatesInfo.x;
     if (hasState) {
-        vec4 tex = state_tile(sid, face, texMip, uvf);
+        // Manual trilinear across the mip strip (see mipF above): m0/m1 and
+        // the blend factor reproduce the sampler's behaviour between two
+        // adjacent strip tiles.
+        int m0 = int(floor(mipF));
+        int m1 = min(m0 + 1, 4);
+        float mf = mipF - float(m0);
+        vec4 tex = mix(state_tile(sid, face, m0, uvf),
+                       state_tile(sid, face, m1, uvf), mf);
         // Cutout — Voxy makeQuadFlags/ModelFactory semantics, exactly:
         //   * merged quads (quadSize > 1) disable discard via the alpha
         //     cutout override — the heightfield's every L >= 1 cell IS a
