@@ -159,22 +159,27 @@ pub fn build(cfg: &Config, atlas: &Atlas, states: &StateRegistry) -> Pack {
     let lod_terrain_json = substitute(lod_terrain_tpl, &map);
     let atmosphere_json = substitute(atmosphere_tpl, &map);
 
-    let col_scan = include_str!("../assets/glsl/col_scan.fsh");
-    let rot_solve = include_str!("../assets/glsl/rot_solve.fsh");
-    let rot_copy = include_str!("../assets/glsl/rot_copy.fsh");
-    let lod_terrain = include_str!("../assets/glsl/lod_terrain.fsh");
-    let clod_blit = include_str!("../assets/glsl/clod_blit.fsh");
-    let atmosphere = include_str!("../assets/glsl/atmosphere.fsh");
+    let col_scan = substitute(include_str!("../assets/glsl/col_scan.fsh"), &map);
+    let rot_solve = substitute(include_str!("../assets/glsl/rot_solve.fsh"), &map);
+    let rot_copy = substitute(include_str!("../assets/glsl/rot_copy.fsh"), &map);
+    // v4.3.1: the GLSL files are TEMPLATES too (lod_terrain.fsh carries
+    // __DEBUG__) — v4.3.1-rc shipped them raw and the 26.3 shaderc rejected
+    // the literal '__DEBUG__' (undeclared identifier), killing the whole
+    // post chain on the client. Every text asset goes through the map;
+    // absent tokens are no-ops.
+    let lod_terrain = substitute(include_str!("../assets/glsl/lod_terrain.fsh"), &map);
+    let clod_blit = substitute(include_str!("../assets/glsl/clod_blit.fsh"), &map);
+    let atmosphere = substitute(include_str!("../assets/glsl/atmosphere.fsh"), &map);
     // v4.1 camera channel: the vanilla sky core-shader override. The client
     // resolves core shader sources through the resource system (verified:
     // RenderPipelines binds pipeline/sky to shader ids "core/sky"), so the
     // server pack layers the payload-instrumented sky on top of vanilla.
-    let sky_vsh = include_str!("../assets/glsl/sky.vsh");
-    let sky_fsh = include_str!("../assets/glsl/sky.fsh");
+    let sky_vsh = substitute(include_str!("../assets/glsl/sky.vsh"), &map);
+    let sky_fsh = substitute(include_str!("../assets/glsl/sky.fsh"), &map);
     // Vanilla terrain fog is disabled through a core-shader override: vanilla
     // fades the real chunks to the fog colour at the server view distance,
     // which drew a bright ring exactly where the LOD band starts.
-    let terrain_vsh = include_str!("../assets/mc/terrain.vsh");
+    let terrain_vsh = substitute(include_str!("../assets/mc/terrain.vsh"), &map);
 
     // 26.3 moved resource packs to the major.minor scheme (26.3 = 97.1) and
     // REJECTS a bare `pack_format` when it is newer than 64:
@@ -285,6 +290,69 @@ mod tests {
         let s = String::from_utf8_lossy(pack.zip.as_slice());
         assert!(!s.contains("__FOV__"), "tokens must be substituted");
         let _ = zipw::crc32(pack.zip.as_slice());
+    }
+
+    /// True when the bytes contain a `__NAME__`-style template placeholder
+    /// (uppercase/digits/underscores between two double underscores).
+    fn contains_template_token(bytes: &[u8]) -> bool {
+        let n = bytes.len();
+        for i in 0..n.saturating_sub(4) {
+            if &bytes[i..i + 2] != b"__" {
+                continue;
+            }
+            let mut j = i + 2;
+            while j < n
+                && (bytes[j].is_ascii_uppercase() || bytes[j].is_ascii_digit() || bytes[j] == b'_')
+            {
+                j += 1;
+            }
+            // backtrack trailing underscores so the closing "__" can match
+            let mut end = j;
+            while end > i + 2 && bytes[end - 1] == b'_' {
+                end -= 1;
+            }
+            if end > i + 2 && end + 2 <= n && &bytes[end..end + 2] == b"__" {
+                return true;
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn no_template_tokens_reach_the_pack() {
+        // The 26.3 shaderc rejects literal placeholders ('__DEBUG__' :
+        // undeclared identifier) and the whole post chain dies on the
+        // client. v4.3.1 regression: the .fsh files were zipped WITHOUT
+        // substitution (only the JSON chains went through the map). Every
+        // TEXT entry — mcmeta, post-effect JSON, GLSL — must be token-free;
+        // binary PNG entries are skipped (byte pairs may collide there).
+        let cfg = Config::parse("");
+        let atlas = Atlas::new(0, 0, 256, 4, 63);
+        let states = StateRegistry::build();
+        let pack = build(&cfg, &atlas, &states);
+        for (name, data) in zip_entries(&pack.zip) {
+            let text = name.ends_with(".mcmeta")
+                || name.ends_with(".json")
+                || name.ends_with(".fsh")
+                || name.ends_with(".vsh");
+            if text {
+                assert!(
+                    !contains_template_token(&data),
+                    "{name} still carries a template token"
+                );
+            }
+        }
+        // The lod_terrain.fsh entry must carry the substituted debug const.
+        let fsh = &zip_entries(&pack.zip)
+            .into_iter()
+            .find(|(n, _)| n == "assets/clod/shaders/post/lod_terrain.fsh")
+            .unwrap()
+            .1;
+        let src = String::from_utf8_lossy(fsh);
+        assert!(
+            src.contains("const float DEBUG = 0.0;"),
+            "debug token must be substituted to 0.0"
+        );
     }
 
     #[test]

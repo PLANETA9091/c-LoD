@@ -104,8 +104,7 @@ pub fn runnable_defined() -> bool {
 static IS_READY: OnceLock<Option<usize>> = OnceLock::new();
 
 fn is_ready(env: &JniEnv, mc: &ClassRef, server: jni::jobject) -> bool {
-    let id = *IS_READY
-        .get_or_init(|| method(env, mc.as_jclass(), "isReady", "()Z"));
+    let id = *IS_READY.get_or_init(|| method(env, mc.as_jclass(), "isReady", "()Z"));
     let Some(m) = id else {
         // Exotic kernel without the vanilla surface: keep the old behavior.
         return true;
