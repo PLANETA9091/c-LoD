@@ -207,10 +207,7 @@ pub fn build(cfg: &Config, atlas: &Atlas, states: &StateRegistry) -> Pack {
         "assets/clod/shaders/post/rot_solve.fsh",
         rot_solve.as_bytes(),
     );
-    zip.add(
-        "assets/clod/shaders/post/rot_copy.fsh",
-        rot_copy.as_bytes(),
-    );
+    zip.add("assets/clod/shaders/post/rot_copy.fsh", rot_copy.as_bytes());
     zip.add(
         "assets/clod/shaders/post/lod_terrain.fsh",
         lod_terrain.as_bytes(),
@@ -464,4 +461,3 @@ mod tests {
         );
     }
 }
-
