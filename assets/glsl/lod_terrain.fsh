@@ -342,6 +342,16 @@ void main() {
     // "above surface" reference. A sentinel would fake a hit at the first
     // step (> 0) or suppress the first legit entry (< 0).
     float prevT = t;
+    // The camera stands in AIR above the heightfield: the surface hit is the
+    // air -> underground transition of 'above' (<= 0 -> > 0). v4.3.1-rc
+    // tested the OPPOSITE transition with prevDiff = +1e9, so the very first
+    // sample fired the branch and the bisect collapsed to ~lod_near — every
+    // downward ray got a ghost hit at a fixed distance (the "ghost wall").
+    // The START point is sampled for real (not a sentinel): a sentinel > 0
+    // fakes a hit at the first step, a sentinel < 0 fakes an entry for rays
+    // that are already inside the heightfield at lod_near (steep-down rays;
+    // those crossings sit inside the real-chunk band, where the depth gate
+    // wins anyway, so they must not paint anything).
     float prevDiff;
     {
         vec3 p0 = cam + dir * t;
@@ -370,8 +380,9 @@ void main() {
         float above = ground_at(L, local) - p.y;
 
         if (above > 0.0 && prevDiff <= 0.0) {
-            // Entry: lo tracks the OUTSIDE side (g - y <= 0), hi the INSIDE
-            // side (g - y > 0); converge on the surface crossing.
+            // lo tracks the air side (ground below the ray), hi the
+            // underground side (ground above the ray); converge on the
+            // surface crossing.
             float lo = prevT;
             float hi = t;
             for (int b = 0; b < BISECT; ++b) {
@@ -381,9 +392,9 @@ void main() {
                 int mL = int(clamp(floor(log2(max(mid, cell) / cell)), 0.0, 4.0));
                 float g = ground_at(mL, mlocal);
                 if (g - mp.y <= 0.0) {
-                    lo = mid;
+                    lo = mid;   // still air: the hit is farther
                 } else {
-                    hi = mid;
+                    hi = mid;   // underground: the hit is closer
                 }
             }
             tHit = (lo + hi) * 0.5;
