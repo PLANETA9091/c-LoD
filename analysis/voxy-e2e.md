@@ -150,3 +150,50 @@ fade: MODE=1 (xz): start = max(vanRD, rd*0.9); end = max(vanRD, rd)
 - `lightmap.fsh` (26.3): формула выше дословно; UBO объявлен только в
   lightmap.fsh — привязка в post-проходе требует проверки на живом клиенте.
 - Колормапы: `assets/minecraft/textures/colormap/{grass,foliage,dry_foliage}.png`.
+
+## 6. Скан №2 (v4.3.2): текстурная модель quads.frag — построчно (файлы 26.3-ветки)
+
+### 6.1. quads.frag — mip через textureGrad от ПОЛНОГО uv
+- `vec2 uv2 = modf(uv, tile)*(1/(768,512))` — uv приходит из вершинки в
+  ЯЧЕЙКАХ (getCornerUV = uvCorner + quadSizeAddin*corner), `modf` делит на
+  целую часть (индекс ячейки в кваде) и дробную (позиция в тайле).
+  => **один тайл текстуры на ОДНУ ЯЧЕЙКУ уровня L (2^L блоков)**, не на блок.
+- `uvSmol = uv*(1/(768,512)); dx=dFdx(uvSmol); dy=dFdy(uvSmol);
+  colour = textureGrad(blockModelAtlas, texPos, dx, dy)` — производные берутся
+  от ПОЛНОГО uv (до fract-эквивалента), поэтому GPU-мип = `log2(16*pxFoot/2^L)`
+  (16 px тайл на 2^L-ячейке): дальние квад-ы блюрятся к среднему цвету тайла.
+  v4.3.1 выбирал стрип-уровень `ceil(log2(pxFoot))` с тем же периодом — давал
+  8..16 текселей/пиксель без редукции = шум «наложения текстур».
+- Дискард: `if (useDiscard() && textureLod(blockModelAtlas, texPos, 0).a <= 0.1)`
+  — тест по **mip-0** альфе в точной позиции тайла (комментарий в коде: «stops
+  mipmapping fucking it over»), цвет при этом с дистанционного мипа.
+
+### 6.2. makeQuadFlags (quad_util.glsl) + ModelFactory — семантика cutout
+- `flags |= faceHasAlphaCuttout(faceData);
+   flags |= any(quadSize > 1) & faceHasAlphaCuttoutOverride(faceData);`
+  => **у merged-квадов (quadSize>1) дискад отключён override-флагом** — дальние
+  леса рендерятся СПЛОШНЫМ усреднённым цветом.
+- ModelFactory: `needsAlphaDiscard = coverage<0.9 | layer!=SOLID;
+  &= layer!=TRANSLUCENT`; override (bit23) — когда грань не покрывает блок.
+  `LEAVES => layer=SOLID` (листва — SOLID, но coverage<0.9 => cutout на
+  одиночных ячейках).
+- Порт в c-LoD: каждая ячейка heightfield уровня L>=1 — это и есть
+  Mipper-merged квад => дискад только при L==0 (одиночная ячейка).
+
+### 6.3. MipGen.java + TextureUtils.mipColours — рецепт мип-цепочки
+- `solidify`: BFS от каждого непрозрачного текселя — прозрачные получают RGB
+  ближайшего непрозрачного (альфа не трогается). Без этого мипы тянут чёрный
+  (0,0,0) прозрачных текселей — тёмная сетка вдали.
+- `mipColours(darkened=false)`: RGB — среднее 2x2 в ЛИНЕЙНОМ пространстве
+  (srgbToLinear -> avg/4 -> linearToSrgb), альфа — простое байтовое среднее.
+- Ванильные мип-ы клиента (generateMipmap) так НЕ делают — это кастом Voxy;
+  наш ручной стрип обязан повторять именно его (v4.3.2: solidify_tile +
+  линейный mip_tile в voxy_core.rs — байт-в-байт семантика).
+
+### 6.4. Верификация на реальном клиенте (CI, vanilla 26.3 + Xvfb)
+- До (ca97bfb): пёстрый шум по всей LOD-поверхности (небо-точки листвы на
+  mip0-альфе всех уровней + алиасинг 16 т/п + тёмная сетка straight-мипов).
+- После (6067b63, три прогона CI): вдали сплошные усреднённые тайлы (леса
+  цельные, вода гладкая), вблизи — пер-блочная деталь и дырки листвы,
+  пер-ячеечный тайлинг «один тайл на ячейку» = Voxy-look. Зум-кропы в
+  docs/e2e-ci/ (коммитятся CI сpermissions: contents:write).
