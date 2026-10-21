@@ -86,7 +86,12 @@ pub fn on_kernel_ready(class_name: &str, cb: impl FnOnce() + Send + 'static) {
     std::thread::spawn(move || {
         // Give the VM time to finish initializing before the first JNI attach;
         // AttachCurrentThread from a fresh thread during VM init can SIGSEGV.
-        std::thread::sleep(std::time::Duration::from_millis(3000));
+        // Tunable for boot-race bisection: CLOD_KERNEL_READY_DELAY_MS.
+        let delay_ms: u64 = std::env::var("CLOD_KERNEL_READY_DELAY_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(3000);
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
         const POLL_MS: u64 = 200;
         const MAX_MS: u64 = 120_000;
         let mut waited = 0u64;

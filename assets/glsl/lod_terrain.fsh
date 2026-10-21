@@ -12,8 +12,10 @@
 //     exactly like Voxy's screen-area detail selection.
 //   - Every hit is textured from the blockModelAtlas (baked server-side from
 //     the real vanilla 26.3 block textures): per state 3x2 face tiles +
-//     manual mip strip (16/8/4/2/1 px). uv = fract(worldXZ / cellL) gives
-//     the Voxy greedy-quad tiling — one texture tile per 2^L cell.
+//     manual mip strip (16/8/4/2/1 px). uv = fract(worldXZ / 2^Lt) gives
+//     the Voxy greedy-quad tiling — one texture tile per 2^Lt BLOCKS (the
+//     tile level Lt follows the screen pixel footprint, quads.frag's
+//     textureGrad behaviour), side faces tile vertically along world Y.
 //   - Fragment math = Voxy quads.frag: albedo x (lightmap x faceShade) x
 //     biomeTint, cutout discard at alpha <= 0.1, water translucent.
 //     faceShade = vanilla cardinal light: UP 1.0 / N,S 0.8 / E,W 0.6 /
@@ -77,6 +79,7 @@ const int MAX_STEPS = 220;
 const int BISECT = 7;
 const float VOID_Y = -63.5;   // cells below this are unscanned = no data
 const float FADE_START = 0.9; // Voxy: fade begins at 90% of the view radius
+const float DEBUG = __DEBUG__; // 0 off; 1 = sky->vec3(conf,0,0); 2 = hit distance
 
 // ---- vanilla 26.3 lightmap ------------------------------------------------
 // lightmap.fsh: brightness(l) = l / (4 - 3l); color = Ambient
@@ -119,12 +122,16 @@ vec3 voxy_lightmap(float lightId) {
 }
 
 // ---- atlas access -----------------------------------------------------------
-// The pyramid: level L occupies rows [topPx(L), topPx(L)+cellsL) of a PNG
-// that is `cells` wide. topPx(L) = cells * (2 - 2^(1-L)); the total PNG
+// The pyramid: level L is a (cells / 2^L)-pixel square sitting at row
+// topPx(L) = cells * (2 - 2^(1-L)) of a PNG that is `cells` texels wide
+// (levels stack below each other, each left-aligned). The total PNG
 // height (levels 0..4) = cells * (2 - 2^-4) = cells * 31/16.
 float atlas_cells() { return AtlasInfo.z / AtlasInfo.w; }
 
-float level_cells(int L) { return atlas_cells() * exp2(float(L)); }
+// Cells across the atlas at level L (each cell covers cell * 2^L blocks).
+// MUST divide by 2^L — the strip SHRINKS with coarser levels (v4.3.0
+// multiplied here, which read neighbouring strips as garbage heights).
+float level_cells(int L) { return atlas_cells() / exp2(float(L)); }
 
 float level_top(int L) {
     return atlas_cells() * (2.0 - exp2(1.0 - float(L)));
@@ -141,11 +148,14 @@ float atlas_height_at(vec4 a) {
 }
 
 // Full data fetch for one level cell: height, water, state id.
+// u is normalized by the FULL PNG width (atlas_cells texels) — the level
+// strip is left-aligned, so u must NOT be normalized by the level's cell
+// count (that stretched L>=1 over the whole width and into the padding).
 void atlas_cell(int L, vec2 local, out float height, out bool water, out float state) {
     float cellsL = level_cells(L);
     float topPx = level_top(L);
     float totalH = atlas_total_h();
-    float cx = (floor(local.x * cellsL) + 0.5) / cellsL;
+    float cx = (floor(local.x * cellsL) + 0.5) / atlas_cells();
     float cy = (topPx + floor(local.y * cellsL) + 0.5) / totalH;
     vec4 a = texture(AtlasSampler, vec2(cx, cy));
     height = atlas_height_at(a);
@@ -153,13 +163,17 @@ void atlas_cell(int L, vec2 local, out float height, out bool water, out float s
     state = floor(a.a * 255.0 + 0.5);
 }
 
-// Light + tint fetch (level 0 PNG only — light/tint are per L0 cell; the
-// pyramid keeps the winner's id, so coarse levels resample L0's winner by
-// taking the +x+z cell of each coarse cell, which IS the Mipper's pick).
+// Light + tint fetch. The colour PNG is LEVEL-0 resolution (cells x cells);
+// coarse cells resample the L0 winner, which is the group's +x+z corner
+// cell (exactly the Mipper's pick: highest corner rank wins ties).
 vec4 col_fetch(int L, vec2 local) {
-    float cellsL = level_cells(L);
-    float cx = (floor(local.x * cellsL) + 0.5) / cellsL;
-    float cy = (floor(local.y * cellsL) + 0.5) / cellsL;
+    float stepL = exp2(float(L));          // group size in L0 cells
+    float cellsL = atlas_cells() / stepL;
+    float n = atlas_cells();
+    float ix0 = (floor(local.x * cellsL) + 1.0) * stepL - 1.0;
+    float iz0 = (floor(local.y * cellsL) + 1.0) * stepL - 1.0;
+    float cx = (min(ix0, n - 1.0) + 0.5) / n;
+    float cy = (min(iz0, n - 1.0) + 0.5) / n;
     return texture(ColSampler, vec2(cx, cy));
 }
 
@@ -187,8 +201,13 @@ vec4 state_tile(float sid, float face, int mip, vec2 uvf) {
     float sy = floor(sid / STATES_PER_ROW);
     float ox = sx * 3.0 * FACE_STRIDE + floor(face / 2.0) * FACE_STRIDE + off;
     float oy = sy * 32.0 + mod(face, 2.0) * 16.0;
+    // The clamp already insets half a texel: texUV spans EXACT texel
+    // centers [ox+0.5, ox+tw-0.5]. The extra +0.5 the v4.3.0 pass added
+    // shifted every tile one texel over — its right/bottom edge then
+    // bilinear-blended with the NEIGHBOURING tile (another face or another
+    // block state) — the reported "block textures overlap" artifact.
     vec2 texUV = vec2(ox, oy) + clamp(uvf, 0.5 / tw, 1.0 - 0.5 / tw) * tw;
-    return texture(StatesSampler, (texUV + 0.5) / StatesInfo.yz);
+    return texture(StatesSampler, texUV / StatesInfo.yz);
 }
 
 // ---- vanilla cardinal face shading (Voxy computeDirectionalFaceTint) -------
@@ -225,7 +244,15 @@ void main() {
     float conf = rot.b;
     float minConf = LodParams.w;
     if (conf < minConf) {
+        if (DEBUG > 0.5 && DEBUG < 1.5) {
+            fragColor = vec4(conf, 0.0, 0.0, 1.0); // black = never locked
+            return;
+        }
         fragColor = scene;
+        return;
+    }
+    if (DEBUG > 0.5 && DEBUG < 1.5) {
+        fragColor = vec4(conf, 0.0, 0.0, 1.0); // red = camera locked
         return;
     }
 
@@ -322,7 +349,17 @@ void main() {
     }
 
     if (tHit < 0.0) {
+        if (DEBUG > 1.5 && DEBUG < 2.5) {
+            // debug 2: sky where the march found nothing (depth = miss)
+            fragColor = vec4(0.0, 0.0, 1.0, 1.0);
+            return;
+        }
         fragColor = scene; // open sky (or out of atlas): vanilla wins
+        return;
+    }
+    if (DEBUG > 1.5 && DEBUG < 2.5) {
+        // debug 2: green = LOD hit, brightness = tHit / 512 blocks
+        fragColor = vec4(0.0, clamp(tHit / 512.0, 0.0, 1.0), 0.0, 1.0);
         return;
     }
 
@@ -353,18 +390,35 @@ void main() {
     vec4 colData = col_fetch(L, local);
     float lightId = floor(colData.a * 255.0 + 0.5);
 
-    // Voxy greedy-quad tiling: one texture tile per 2^L cell.
-    vec2 uvf = fract(hitPos.xz / cellL);
+    // ---- Voxy texture detail level (quads.frag textureGrad) ----------------
+    // The TILE level follows the screen pixel footprint (one texture tile
+    // per 2^Lt blocks, one mip step per level: the mip-m strip tile is
+    // (16>>m) px over 2^m blocks = 1 texel per block at EVERY distance),
+    // NOT the march's data level — a 64-block cell of one state still
+    // repeats its texture per block, exactly like a Voxy greedy quad.
+    float pxFoot = tHit * (2.0 * tanH / max(OutSize.y, 1.0));
+    float Lt = clamp(ceil(log2(max(pxFoot, 0.5))), 0.0, 4.0);
+
+    // Greedy-quad uv, world-anchored. UP faces tile in xz; side faces tile
+    // along the horizontal axis AND vertically along world Y (Voxy quad uv
+    // is 2D in cells) — without the Y term every cliff showed one smeared
+    // texel row instead of stacked texture tiles.
+    vec2 uvWorld = (abs(n.x) > abs(n.z)) ? vec2(hitPos.z, hitPos.y)
+                                         : vec2(hitPos.x, hitPos.y);
+    if (face < 1.5) {
+        uvWorld = hitPos.xz; // UP (the heightfield never yields DOWN)
+    }
+    vec2 uvf = fract(uvWorld / exp2(Lt));
 
     vec3 albedo;
     float texAlpha = 1.0;
     bool hasState = sid > 0.5;
     if (hasState) {
-        // Mip = the level (one mip step per detail level, Voxy-style).
-        vec4 tex = state_tile(sid, face, L, uvf);
-        // Cutout (Voxy: discard at mip-0 alpha <= 0.1 — leaves show sky).
-        float a0 = state_tile(sid, face, 0, uvf).a;
-        if (a0 <= 0.1) {
+        vec4 tex = state_tile(sid, face, int(Lt), uvf);
+        // Cutout (Voxy: alpha <= 0.1 shows sky). The sample IS the mip-Lt
+        // texel: L0 = per-block holes (leaves), coarse = the tile's averaged
+        // alpha (distant leaves render solid — no random hole-punching).
+        if (tex.a <= 0.1) {
             fragColor = scene;
             return;
         }

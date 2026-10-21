@@ -388,4 +388,81 @@ mod tests {
         let water = reg.id_of("water");
         assert!(!reg.def(water).cutout);
     }
+
+    // ---- shader-contract mirrors (assets/glsl/lod_terrain.fsh state_tile) --
+
+    /// Mirror of the shader's `state_tile` texel mapping (v4.3.1): the uv
+    /// clamp already insets half a texel, so the sample spans EXACT texel
+    /// centers. v4.3.0 added another +0.5 on top, shifting every tile one
+    /// texel over — its right/bottom edge then bilinear-blended with the
+    /// NEIGHBOURING tile (another face or another block state): the
+    /// "block textures overlap" artifact the shader-contract tests pin out.
+    #[test]
+    fn state_tile_uv_stays_inside_the_requested_tile() {
+        for sid in 1..48usize {
+            for face in 0..6usize {
+                for mip in 0..5usize {
+                    let tw = 16usize >> mip;
+                    let off = 32 - (1usize << (5 - mip));
+                    assert_eq!(off, MIP_X[mip], "shader offset must match storage");
+                    assert_eq!(tw, MIP_W[mip]);
+                    let ox =
+                        (sid % STATES_PER_ROW) * 3 * FACE_STRIDE + (face / 2) * FACE_STRIDE + off;
+                    let oy = (sid / STATES_PER_ROW) * ATLAS_STATE_H + (face % 2) * TILE;
+                    for &uv in &[0.0f64, 0.31, 0.5, 0.77, 0.999_999] {
+                        let ftw = tw as f64;
+                        let cl = uv.clamp(0.5 / ftw, 1.0 - 0.5 / ftw) * ftw;
+                        let sx = ox as f64 + cl;
+                        let sy = oy as f64 + cl;
+                        assert!(
+                            sx >= ox as f64 && sx < (ox + tw) as f64,
+                            "sid {sid} face {face} mip {mip} uv {uv}: x sample {sx} leaves the tile"
+                        );
+                        assert!(
+                            sy >= oy as f64 && sy < (oy + TILE) as f64,
+                            "sid {sid} face {face} mip {mip} uv {uv}: y sample {sy} leaves the tile"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Texel-center uv points must read back exactly the source vanilla
+    /// texel that `bake_states_atlas` stored there (bilinear at a texel
+    /// center returns the pure texel — no bleed from neighbours).
+    #[test]
+    fn state_tile_addressing_reads_the_right_texels() {
+        let reg = StateRegistry::build();
+        let (w, h, px) = bake_states_atlas(&reg);
+        for &mat in &["stone", "grass_block", "oak_leaves"] {
+            let sid = reg.id_of(mat) as usize;
+            assert_ne!(sid, 0, "{mat} must be a known state");
+            for face in 0..6usize {
+                let def = reg.def(sid as u8);
+                let base = def.faces[face] as usize * TILE * TILE * 4;
+                let off = MIP_X[0];
+                let ox = (sid % STATES_PER_ROW) * 3 * FACE_STRIDE + (face / 2) * FACE_STRIDE + off;
+                let oy = (sid / STATES_PER_ROW) * ATLAS_STATE_H + (face % 2) * TILE;
+                // (u, v, texel x, texel y): uv = (texel + 0.5) / 16 centers.
+                for &(u, v, tx, ty) in &[
+                    (1.0 / 32.0, 1.0 / 32.0, 0usize, 0usize),
+                    (17.0 / 32.0, 9.0 / 32.0, 8, 4),
+                    (31.0 / 32.0, 23.0 / 32.0, 15, 11),
+                ] {
+                    let sx = ox as f64 + u * 16.0;
+                    let sy = oy as f64 + v * 16.0;
+                    let ax = (sx.floor() as usize).min(w as usize - 1);
+                    let ay = (sy.floor() as usize).min(h as usize - 1);
+                    let d = ((ay * w as usize) + ax) * 4;
+                    let s = base + (ty * TILE + tx) * 4;
+                    assert_eq!(
+                        &px[d..d + 4],
+                        &TEX_RGBA[s..s + 4],
+                        "{mat} face {face} texel ({tx},{ty})"
+                    );
+                }
+            }
+        }
+    }
 }

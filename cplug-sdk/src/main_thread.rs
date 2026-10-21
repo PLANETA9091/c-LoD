@@ -93,9 +93,33 @@ pub fn runnable_defined() -> bool {
     RUNNABLE_CLS.get().is_some()
 }
 
+/// Cached `MinecraftServer.isReady()` id. The flag flips at the end of
+/// `runServer()` — i.e. once world loading has fully completed. Before that
+/// the main thread is inside the WorldLoader / initServer pipeline, and
+/// tasks executed there (BlockableEventLoop.managedBlock drains the queue
+/// during world gen) can break Paper's world-gen settings pipeline — CI
+/// reproduced `Unable to read or access world_gen_settings.dat` and
+/// `Overworld settings missing` exactly that way. So: no module work on the
+/// main thread until the server is actually up.
+static IS_READY: OnceLock<Option<usize>> = OnceLock::new();
+
+fn is_ready(env: &JniEnv, mc: &ClassRef, server: jni::jobject) -> bool {
+    let id = *IS_READY
+        .get_or_init(|| method(env, mc.as_jclass(), "isReady", "()Z"));
+    let Some(m) = id else {
+        // Exotic kernel without the vanilla surface: keep the old behavior.
+        return true;
+    };
+    let v = env.call_boolean_method(server, m as jni::jmethodID, &[]);
+    if !v {
+        let _ = crate::jni_util::clear_exception(env);
+    }
+    v
+}
+
 /// Hand one queued job to the main thread via MinecraftServer.execute.
 /// Returns false while the kernel is unreachable (class not loaded / server
-/// object not created yet).
+/// object not created yet) or still booting (isReady == false).
 fn deliver() -> bool {
     with_attached(|env| {
         // Never enter JNI with a stale pending exception from a previous
@@ -124,6 +148,11 @@ fn deliver() -> bool {
             env.call_static_object_method(mc.as_jclass(), get_server as jni::jmethodID, &[]);
         if server.is_null() {
             let _ = crate::jni_util::clear_exception(env);
+            return Some(false);
+        }
+        if !is_ready(env, &mc, server) {
+            let _ = crate::jni_util::clear_exception(env);
+            env.delete_local_ref(server);
             return Some(false);
         }
         let Some(init) = method(env, runnable_cls.0, "<init>", "()V") else {

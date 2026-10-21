@@ -649,4 +649,123 @@ mod tests {
         truncated.truncate(bytes.len() - 7);
         assert!(Atlas::from_bytes(&truncated, 0, 0, 64, 4, 63).is_none());
     }
+
+    // ---- shader-contract mirrors (assets/glsl/lod_terrain.fsh) -------------
+
+    /// Mirror of the shader's `atlas_cell` addressing (v4.3.1): level L is a
+    /// (cells/2^L)-pixel square at row topPx(L) of a cells-wide PNG, u
+    /// normalized by the FULL width. v4.3.0 multiplied by 2^L instead of
+    /// dividing and normalized u by the level's cell count, so every L>=1
+    /// fetch read the wrong rows (padding / the next strip) — garbage
+    /// heights and states across the whole far LOD band.
+    fn shader_atlas_fetch(
+        px: &[u8],
+        w: u32,
+        h: u32,
+        cells: f64,
+        level: u32,
+        local: (f64, f64),
+    ) -> (i16, bool, u8) {
+        let cells_l = cells / 2f64.powi(level as i32);
+        let top_px = cells * (2.0 - 2f64.powi(1 - level as i32));
+        let total_h = cells * (2.0 - 2f64.powi(-4));
+        let cx = ((local.0 * cells_l).floor() + 0.5) / cells;
+        let cy = (top_px + (local.1 * cells_l).floor() + 0.5) / total_h;
+        let tx = ((cx * f64::from(w)).floor() as u32).min(w - 1);
+        let ty = ((cy * f64::from(h)).floor() as u32).min(h - 1);
+        let o = ((ty * w + tx) * 4) as usize;
+        let y16 = (u16::from(px[o]) << 8) | u16::from(px[o + 1]);
+        ((y16 as i16) / 64 - 64, px[o + 2] > 0, px[o + 3])
+    }
+
+    #[test]
+    fn pyramid_addressing_matches_the_shader_contract() {
+        let a = Atlas::new(0, 0, 256, 4, 63);
+        assert_eq!(a.cells, 64);
+        let height = |ix: u32, iz: u32| 50 + ((ix * 7 + iz * 13) % 45) as i16;
+        let state = |ix: u32, iz: u32| ((ix * 3 + iz * 5) % 254 + 1) as u8;
+        let rgb = |ix: u32, iz: u32| [ix as u8, iz as u8, (ix + iz) as u8];
+        for iz in 0..64u32 {
+            for ix in 0..64u32 {
+                a.set(
+                    ix,
+                    iz,
+                    height(ix, iz),
+                    (ix + iz) % 11 == 0,
+                    rgb(ix, iz),
+                    state(ix, iz),
+                    0xF0,
+                );
+            }
+        }
+        let (w, h, px) = a.encode_pyramid_rgba();
+        assert_eq!((w, h), (64, 124), "cells-wide PNG, levels 64+32+16+8+4");
+
+        // Contract: the shader's mapping must read back EXACTLY the cell the
+        // Mipper stored on each level (water mixes in: land (op 15) beats
+        // water (op 1), ties resolve to the +x+z corner — recursively).
+        let snap = a.snapshot();
+        let v0: Vec<crate::voxy_core::VCell> = snap
+            .iter()
+            .map(|c| crate::voxy_core::VCell {
+                height: c.height,
+                water: c.water,
+                valid: c.valid,
+                state: c.state,
+                light: c.light,
+            })
+            .collect();
+        let pyramid = crate::voxy_core::build_pyramid(&v0, 64);
+        for level in 0..=4u32 {
+            let groups = 64u32 >> level;
+            for gz in 0..groups {
+                for gx in 0..groups {
+                    let local = (
+                        (f64::from(gx) + 0.5) * f64::from(1 << level) / 64.0,
+                        (f64::from(gz) + 0.5) * f64::from(1 << level) / 64.0,
+                    );
+                    let want = pyramid[level as usize][(gz * groups + gx) as usize];
+                    let (fh, fw, fs) = shader_atlas_fetch(&px, w, h, 64.0, level, local);
+                    assert_eq!(fh, want.height, "L{level} ({gx},{gz}) height");
+                    assert_eq!(fs, want.state, "L{level} ({gx},{gz}) state");
+                    assert_eq!(fw, want.water, "L{level} ({gx},{gz}) water");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn color_fetch_targets_the_mipper_winner_cell() {
+        // The colour PNG is L0-resolution; the shader's col_fetch maps a
+        // level-L cell to the group's +x+z L0 cell. Mirror the mapping and
+        // assert the tint/light read back is the winner's.
+        let a = Atlas::new(0, 0, 256, 4, 63);
+        let rgb = |ix: u32, iz: u32| [ix as u8, iz as u8, (ix + iz) as u8];
+        for iz in 0..64u32 {
+            for ix in 0..64u32 {
+                a.set(ix, iz, 70, false, rgb(ix, iz), 1, 0xF0);
+            }
+        }
+        let (w, h, px) = a.encode_color_rgba();
+        assert_eq!((w, h), (64, 64));
+        for level in 1..=4u32 {
+            let groups = 64u32 >> level;
+            let gz = groups / 2;
+            let gx = groups / 2;
+            let cells_l = f64::from(groups);
+            let local = (
+                (f64::from(gx) + 0.5) / cells_l,
+                (f64::from(gz) + 0.5) / cells_l,
+            );
+            let step = f64::from(1 << level);
+            let ix0 = (((local.0 * cells_l).floor() + 1.0) * step - 1.0).min(63.0) as u32;
+            let iz0 = (((local.1 * cells_l).floor() + 1.0) * step - 1.0).min(63.0) as u32;
+            let corner = ((gx + 1) * (1 << level)) - 1;
+            let corner_z = ((gz + 1) * (1 << level)) - 1;
+            assert_eq!((ix0, iz0), (corner, corner_z), "winner cell L{level}");
+            let o = ((iz0 * 64 + ix0) * 4) as usize;
+            assert_eq!(&px[o..o + 3], &rgb(ix0, iz0), "tint at L{level}");
+            assert_eq!(px[o + 3], 0xF0, "light at L{level}");
+        }
+    }
 }

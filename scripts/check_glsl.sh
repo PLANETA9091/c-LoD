@@ -102,6 +102,9 @@ for fsh in sorted(list(Path("assets/glsl").glob("*.fsh")) + list(Path("assets/gl
     src = fsh.read_text()
     for inc, stub in INCLUDES.items():
         src = src.replace(inc, stub)
+    # Shader templates carry __TOKEN__ placeholders too (e.g. __DEBUG__);
+    # substitute 0 exactly like packgen does for validation.
+    src = re.sub(r"__[A-Z0-9_]+__", "0", src)
     # Legacy directive (pre-26.3): reject loudly if it sneaks back in.
     if "#moj_import" in src:
         print(f"FAIL {fsh.name}: #moj_import is not supported by the 26.3 shaderc pipeline")
