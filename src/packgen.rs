@@ -66,13 +66,27 @@ pub fn build(cfg: &Config, atlas: &Atlas, states: &StateRegistry) -> Pack {
 
     let origin_x = atlas.center_x - atlas.half();
     let origin_z = atlas.center_z - atlas.half();
-    // 26.3 veil window in EYE-SPACE BLOCKS (the shader converts device depth
-    // via eyeZ = depth_near / d): the veil starts taking over just before the
-    // LOD band begins and reaches full strength at `veil_far`.
+    // Upstream v4.0.0: the veil window is expressed in EYE-SPACE BLOCKS (the
+    // shader converts device depth via eyeZ = depth_near / d), so it starts
+    // just before the LOD band and reaches full strength at `veil_far`.
     let atmo_start = fmt_f(cfg.lod_near * 0.85);
     let atmo_end = fmt_f(cfg.veil_far);
     let fog_start = cfg.lod_near * 1.05;
-    let fog_end = atlas.size as f32 * 0.72;
+    // Local tweak: the default (size * 0.72) sat past the atlas border for
+    // half-extent <= 0.72*size, so the scanned window's square edge was
+    // only ~65% veiled and showed up as a hard wall on the horizon.
+    // Fade fully before the border instead.
+    let fog_end = (atlas.size as f32 * 0.72).min(atlas.half() as f32 * 0.92);
+
+    // Highest scanned height in the atlas: anything above it in the scene can
+    // only be the cloud layer (or weather), never LOD terrain.
+    let atlas_max_h = atlas
+        .snapshot()
+        .iter()
+        .filter(|c| c.valid)
+        .map(|c| c.height)
+        .max()
+        .unwrap_or(0) as f32;
 
     // v4.2: cull the march with the REAL scanned max height (+8 m margin),
     // not the world cap — upward rays leave the heightfield an order of
@@ -129,9 +143,15 @@ pub fn build(cfg: &Config, atlas: &Atlas, states: &StateRegistry) -> Pack {
         ("__COL_HIGH__", rgba(cfg.color_high)),
         ("__COL_WATER__", rgba(cfg.color_water)),
         ("__VEIL_RGBA__", vec4(veil_rgba)),
+        ("__DEBUG__", format!("{}.0", cfg.debug_lod)),
+        ("__ATLAS_MAX_H__", fmt_f(atlas_max_h + 3.0)),
         ("__ATMO_START__", atmo_start),
         ("__ATMO_END__", atmo_end),
-        ("__ATMO_STRENGTH__", fmt_f(0.92)),
+        // The distance veil is disabled (strength 0): it sits on real geometry
+        // only, but a strength > 0 also tints distant clouds and the chunk
+        // wall; LOD fog already handles the horizon, and the veil must never
+        // starve the sun tracker.
+        ("__ATMO_STRENGTH__", fmt_f(0.0)),
         // 26.3 device depth: d = depth_near / eyeZ (infinite far, sky == 0.0).
         ("__DEPTH_NEAR__", fmt_f(cfg.depth_near)),
     ];
@@ -151,14 +171,26 @@ pub fn build(cfg: &Config, atlas: &Atlas, states: &StateRegistry) -> Pack {
     // server pack layers the payload-instrumented sky on top of vanilla.
     let sky_vsh = include_str!("../assets/glsl/sky.vsh");
     let sky_fsh = include_str!("../assets/glsl/sky.fsh");
+    // Vanilla terrain fog is disabled through a core-shader override: vanilla
+    // fades the real chunks to the fog colour at the server view distance,
+    // which drew a bright ring exactly where the LOD band starts.
+    let terrain_vsh = include_str!("../assets/mc/terrain.vsh");
 
-    // 26.3 pack.mcmeta schema (verified against vanilla embedded packs and
-    // PackFormat$IntermediaryFormat): packs declaring a format newer than 64
-    // MUST carry min_format/max_format; the legacy pack_format key is what
-    // triggered the client warning "missing mandatory fields min_format and
-    // max_format" (ResourceMetadata fallback). 97 = resource_major of 26.3
-    // (client version.json: resource_major 97, resource_minor 1).
-    let mcmeta = "{\"pack\":{\"description\":\"c-LoD v3 static LOD terrain (posteffect + heightfield raymarch)\",\"min_format\":97,\"max_format\":97}}".to_string();
+    // 26.3 moved resource packs to the major.minor scheme (26.3 = 97.1) and
+    // REJECTS a bare `pack_format` when it is newer than 64:
+    //   "Pack declares support for version newer than 64, but is missing
+    //    mandatory fields min_format and max_format"
+    // `PackFormat` is decoded with `compactListCodec(INT, INT.listOf())`, so
+    // `[major, minor]` is the canonical form. Without this the client refuses
+    // the pack and every `clod:*` post effect stays "does not exist".
+    let mcmeta = concat!(
+        "{\"pack\":{",
+        "\"description\":\"c-LoD v3 static LOD terrain (posteffect + heightfield raymarch)\",",
+        "\"min_format\":[97,0],",
+        "\"max_format\":[97,1]",
+        "}}"
+    )
+    .to_string();
 
     let mut zip = ZipWriter::new();
     zip.add("pack.mcmeta", mcmeta.as_bytes());
@@ -175,7 +207,10 @@ pub fn build(cfg: &Config, atlas: &Atlas, states: &StateRegistry) -> Pack {
         "assets/clod/shaders/post/rot_solve.fsh",
         rot_solve.as_bytes(),
     );
-    zip.add("assets/clod/shaders/post/rot_copy.fsh", rot_copy.as_bytes());
+    zip.add(
+        "assets/clod/shaders/post/rot_copy.fsh",
+        rot_copy.as_bytes(),
+    );
     zip.add(
         "assets/clod/shaders/post/lod_terrain.fsh",
         lod_terrain.as_bytes(),
@@ -192,6 +227,10 @@ pub fn build(cfg: &Config, atlas: &Atlas, states: &StateRegistry) -> Pack {
     // payload fsh). Resolves through the resource stack above vanilla.
     zip.add("assets/minecraft/shaders/core/sky.vsh", sky_vsh.as_bytes());
     zip.add("assets/minecraft/shaders/core/sky.fsh", sky_fsh.as_bytes());
+    zip.add(
+        "assets/minecraft/shaders/core/terrain.vsh",
+        terrain_vsh.as_bytes(),
+    );
     zip.add("assets/clod/textures/effect/atlas.png", &atlas_png);
     zip.add("assets/clod/textures/effect/atlas_col.png", &col_png);
     zip.add("assets/clod/textures/effect/atlas_states.png", &states_png);
@@ -241,8 +280,8 @@ mod tests {
         // Must contain the essential entries: scan by walking central dir.
         let count = u16::from_le_bytes([pack.zip[n - 12], pack.zip[n - 11]]) as usize;
         assert_eq!(
-            count, 14,
-            "pack.mcmeta + 2 json + 6 fsh + atlas.png + atlas_col.png + atlas_states.png + sky.vsh + sky.fsh"
+            count, 15,
+            "pack.mcmeta + 2 json + 6 fsh + atlas/atlas_col/atlas_states.png + sky.vsh/fsh + terrain.vsh"
         );
 
         // JSON chains are valid JSON (parenthesis balance + token-free).
@@ -252,10 +291,10 @@ mod tests {
     }
 
     #[test]
-    fn mcmeta_uses_26_3_new_format_schema() {
-        // Client 26.3 refuses legacy-only mcmeta for formats > 64 ("missing
-        // mandatory fields min_format and max_format"). The pack must follow
-        // the vanilla-26.3 schema: min_format/max_format, no legacy key.
+    fn mcmeta_declares_the_26_3_minor_range() {
+        // 26.3 rejects a bare `pack_format` > 64 ("missing mandatory fields
+        // min_format and max_format"): the whole pack — post-effect chains
+        // included — is then never registered by the client.
         let cfg = Config::parse("");
         let atlas = Atlas::new(0, 0, 256, 4, 63);
         let states = StateRegistry::build();
@@ -277,8 +316,10 @@ mod tests {
         let mcmeta = String::from_utf8_lossy(
             &pack.zip[start + 30 + name_len + extra_len..start + 30 + name_len + extra_len + size],
         );
-        assert!(mcmeta.contains("\"min_format\":97"), "mcmeta: {mcmeta}");
-        assert!(mcmeta.contains("\"max_format\":97"), "mcmeta: {mcmeta}");
+        // 26.3 decodes PackFormat with compactListCodec(INT, INT.listOf()) —
+        // the canonical form is the [major, minor] pair, not the bare int.
+        assert!(mcmeta.contains("\"min_format\":[97,0]"), "mcmeta: {mcmeta}");
+        assert!(mcmeta.contains("\"max_format\":[97,1]"), "mcmeta: {mcmeta}");
         assert!(
             !mcmeta.contains("pack_format"),
             "legacy key must go: {mcmeta}"
@@ -423,3 +464,4 @@ mod tests {
         );
     }
 }
+
