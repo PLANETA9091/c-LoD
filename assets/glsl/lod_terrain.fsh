@@ -12,10 +12,12 @@
 //     exactly like Voxy's screen-area detail selection.
 //   - Every hit is textured from the blockModelAtlas (baked server-side from
 //     the real vanilla 26.3 block textures): per state 3x2 face tiles +
-//     manual mip strip (16/8/4/2/1 px). uv = fract(worldXZ / 2^Lt) gives
-//     the Voxy greedy-quad tiling — one texture tile per 2^Lt BLOCKS (the
-//     tile level Lt follows the screen pixel footprint, quads.frag's
-//     textureGrad behaviour), side faces tile vertically along world Y.
+//     manual mip strip (16/8/4/2/1 px). uv = fract(worldXZ / 2^L) gives the
+//     Voxy greedy-quad tiling — ONE texture tile per 2^L-block CELL (the
+//     march level), and the mip follows the screen footprint exactly like
+//     quads.frag's textureGrad (mip = round(log2(16*pxFoot/2^L))): distant
+//     quads auto-blur to the tile's average colour, side faces tile
+//     vertically along world Y.
 //   - Fragment math = Voxy quads.frag: albedo x (lightmap x faceShade) x
 //     biomeTint, cutout discard at alpha <= 0.1, water translucent.
 //     faceShade = vanilla cardinal light: UP 1.0 / N,S 0.8 / E,W 0.6 /
@@ -451,34 +453,56 @@ void main() {
     float lightId = floor(colData.a * 255.0 + 0.5);
 
     // ---- Voxy texture detail level (quads.frag textureGrad) ----------------
-    // The TILE level follows the screen pixel footprint (one texture tile
-    // per 2^Lt blocks, one mip step per level: the mip-m strip tile is
-    // (16>>m) px over 2^m blocks = 1 texel per block at EVERY distance),
-    // NOT the march's data level — a 64-block cell of one state still
-    // repeats its texture per block, exactly like a Voxy greedy quad.
+    // Voxy quads carry uv in CELL units: frac(uv) repeats ONE texture tile
+    // per 2^L-block cell (analysis §2.1: "одна ячейка = один тайл"), and the
+    // GPU picks the atlas mip from the screen-space derivative — distant
+    // quads auto-blur to the tile's AVERAGE colour (solid distant leaves,
+    // smooth water). textureGrad equivalent, derived here:
+    //
+    //   texels-per-pixel at mip 0 = 16 * pxFoot / 2^L
+    //     (16px tile spanning one 2^L-block cell; pxFoot = blocks/pixel)
+    //   mip m divides the texel rate by 2^m; the GPU (TRILINEAR) resolves
+    //   m = round(log2(texels-per-pixel)).
+    //
+    // The previous v4.3.1 formula picked the STRIP LEVEL from pxFoot alone
+    // (mip = ceil(log2(pxFoot)) with the tile period tied to the same Lt),
+    // which sampled a 16px tile across a whole cell at typical distances —
+    // 8..16 texels per pixel with NO mip reduction: full-surface aliasing
+    // speckle (the reported "block textures overlap" noise) plus mip-0
+    // alpha holes punched into mid-distance leaves. tpp < 1 (pixel smaller
+    // than a texel, near LOD0) clamps to mip 0 = vanilla-crisp magnification.
     float pxFoot = tHit * (2.0 * tanH / max(OutSize.y, 1.0));
-    float Lt = clamp(ceil(log2(max(pxFoot, 0.5))), 0.0, 4.0);
+    float tpp = 16.0 * pxFoot / exp2(float(L)); // texels per pixel at mip 0
+    int texMip = int(clamp(floor(log2(max(tpp, 0.03125)) + 0.5), 0.0, 4.0));
 
-    // Greedy-quad uv, world-anchored. UP faces tile in xz; side faces tile
-    // along the horizontal axis AND vertically along world Y (Voxy quad uv
-    // is 2D in cells) — without the Y term every cliff showed one smeared
-    // texel row instead of stacked texture tiles.
+    // Greedy-quad uv, world-anchored, ONE TILE PER CELL (2^L blocks). UP
+    // faces tile in xz; side faces tile along the horizontal axis AND
+    // vertically along world Y (Voxy quad uv is 2D in cells) — without the
+    // Y term every cliff showed one smeared texel row instead of stacked
+    // texture tiles.
     vec2 uvWorld = (abs(n.x) > abs(n.z)) ? vec2(hitPos.z, hitPos.y)
                                          : vec2(hitPos.x, hitPos.y);
     if (face < 1.5) {
         uvWorld = hitPos.xz; // UP (the heightfield never yields DOWN)
     }
-    vec2 uvf = fract(uvWorld / exp2(Lt));
+    vec2 uvf = fract(uvWorld / exp2(float(L)));
 
     vec3 albedo;
     float texAlpha = 1.0;
     bool hasState = sid > 0.5;
     if (hasState) {
-        vec4 tex = state_tile(sid, face, int(Lt), uvf);
-        // Cutout (Voxy: alpha <= 0.1 shows sky). The sample IS the mip-Lt
-        // texel: L0 = per-block holes (leaves), coarse = the tile's averaged
-        // alpha (distant leaves render solid — no random hole-punching).
-        if (tex.a <= 0.1) {
+        vec4 tex = state_tile(sid, face, texMip, uvf);
+        // Cutout — Voxy makeQuadFlags/ModelFactory semantics, exactly:
+        //   * merged quads (quadSize > 1) disable discard via the alpha
+        //     cutout override — the heightfield's every L >= 1 cell IS a
+        //     Mipper-merged quad, so coarse cells render SOLID (distant
+        //     forests have no sky holes);
+        //   * unmerged single-cell quads (L == 0) discard on the MIP-0
+        //     alpha at the exact tile position — quads.frag samples
+        //     textureLod(blockModelAtlas, texPos, 0).a <= 0.1 for the test
+        //     while the colour stays at the distance mip (per-block holes
+        //     punched into slightly blurred foliage, never random specks).
+        if (L == 0 && !isWater && state_tile(sid, face, 0, uvf).a <= 0.1) {
             fragColor = scene;
             return;
         }

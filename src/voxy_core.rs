@@ -207,19 +207,105 @@ pub fn build_pyramid(level0: &[VCell], n: usize) -> Vec<Vec<VCell>> {
     levels
 }
 
-/// Alpha-aware 2x2 box-filter mip of a 16px RGBA tile.
+/// sRGB <-> linear (per 8-bit channel), the Voxy ColorSRGB LUT formula
+/// (standard 2.4-gamma sRGB decode/encode, exact for every u8 value).
+fn srgb_to_linear(c: u8) -> f32 {
+    let x = c as f32 / 255.0;
+    if x <= 0.04045 {
+        x / 12.92
+    } else {
+        ((x + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn linear_to_srgb(x: f32) -> u8 {
+    let v = if x <= 0.003_130_8 {
+        x * 12.92
+    } else {
+        1.055 * x.powf(1.0 / 2.4) - 0.055
+    };
+    (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
+}
+
+/// Solidify (Voxy MipGen.solidify): every transparent texel takes the RGB
+/// of the NEAREST opaque texel (BFS, 4-neighbourhood) while keeping its
+/// alpha at 0. Without this the mip averages blend the transparent texels'
+/// black RGB into the chain and distant foliage/water turn muddy dark —
+/// the visible dark grid on the v4.3.1 zoomed screenshots.
+fn solidify_tile(rgba: &mut [u8], w: usize) {
+    let n = rgba.len() / 4;
+    let h = n / w;
+    let mut src: Vec<usize> = vec![usize::MAX; n]; // nearest opaque texel
+    let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
+    for i in 0..n {
+        if rgba[i * 4 + 3] != 0 {
+            src[i] = i;
+            queue.push_back(i);
+        }
+    }
+    while let Some(i) = queue.pop_front() {
+        let x = i % w;
+        let y = i / w;
+        let mut push = |x2: usize, y2: usize| {
+            let j = y2 * w + x2;
+            if src[j] == usize::MAX {
+                src[j] = src[i];
+                queue.push_back(j);
+            }
+        };
+        if x > 0 {
+            push(x - 1, y);
+        }
+        if x + 1 < w {
+            push(x + 1, y);
+        }
+        if y > 0 {
+            push(x, y - 1);
+        }
+        if y + 1 < h {
+            push(x, y + 1);
+        }
+    }
+    for i in 0..n {
+        if src[i] != i {
+            // Copy RGB from the nearest opaque texel; alpha stays 0.
+            let s = src[i];
+            let rgb = [rgba[s * 4], rgba[s * 4 + 1], rgba[s * 4 + 2]];
+            rgba[i * 4..i * 4 + 3].copy_from_slice(&rgb);
+        }
+    }
+}
+
+/// Alpha-aware 2x2 box-filter mip of a 16px RGBA tile — the Voxy
+/// TextureUtils.mipColours recipe (darkened=false): RGB averages in LINEAR
+/// space over ALL four texels (the solidify pass has already replaced the
+/// transparent texels' RGB with their nearest-opaque colour), alpha
+/// averages as plain bytes. Straight sRGB averaging (the v4.3.1
+/// mip_tile) darkened every distant surface — the reported dark grid.
 fn mip_tile(src: &[u8], w: usize) -> Vec<u8> {
     let hw = w / 2;
     let mut out = vec![0u8; hw * hw * 4];
     for y in 0..hw {
         for x in 0..hw {
-            for c in 0..4 {
-                let s00 = src[((y * 2) * w + x * 2) * 4 + c] as u32;
-                let s10 = src[((y * 2) * w + x * 2 + 1) * 4 + c] as u32;
-                let s01 = src[((y * 2 + 1) * w + x * 2) * 4 + c] as u32;
-                let s11 = src[((y * 2 + 1) * w + x * 2 + 1) * 4 + c] as u32;
-                out[(y * hw + x) * 4 + c] = ((s00 + s10 + s01 + s11) / 4) as u8;
+            let mut rgb = [0.0f32; 3];
+            let mut a = 0u32;
+            for (yy, xx) in [
+                (y * 2, x * 2),
+                (y * 2, x * 2 + 1),
+                (y * 2 + 1, x * 2),
+                (y * 2 + 1, x * 2 + 1),
+            ] {
+                let s = (yy * w + xx) * 4;
+                rgb[0] += srgb_to_linear(src[s]);
+                rgb[1] += srgb_to_linear(src[s + 1]);
+                rgb[2] += srgb_to_linear(src[s + 2]);
+                a += src[s + 3] as u32;
             }
+            let d = (y * hw + x) * 4;
+            out[d] = linear_to_srgb(rgb[0] / 4.0);
+            out[d + 1] = linear_to_srgb(rgb[1] / 4.0);
+            out[d + 2] = linear_to_srgb(rgb[2] / 4.0);
+            out[d + 3] = (a / 4) as u8;
         }
     }
     out
@@ -243,10 +329,15 @@ pub fn bake_states_atlas(registry: &StateRegistry) -> (u32, u32, Vec<u8>) {
         for f in 0..6 {
             let face_col = f / 2;
             let face_row = f % 2;
-            // Build the mip chain for this face's tile.
+            // Build the mip chain for this face's tile. The L0 tile is
+            // SOLIDIFIED first (Voxy MipGen.putTextures: transparent texels
+            // get the nearest opaque RGB, alpha untouched) so the whole
+            // chain averages colour without the transparent-black bias.
             let mut chain = Vec::with_capacity(5);
             let base = def.faces[f] as usize * TILE * TILE * 4;
-            chain.push(TEX_RGBA[base..base + TILE * TILE * 4].to_vec());
+            let mut l0 = TEX_RGBA[base..base + TILE * TILE * 4].to_vec();
+            solidify_tile(&mut l0, TILE);
+            chain.push(l0);
             for m in 1..5 {
                 let prev = &chain[m - 1];
                 chain.push(mip_tile(prev, MIP_W[m - 1]));
@@ -456,11 +547,23 @@ mod tests {
                     let ay = (sy.floor() as usize).min(h as usize - 1);
                     let d = ((ay * w as usize) + ax) * 4;
                     let s = base + (ty * TILE + tx) * 4;
-                    assert_eq!(
-                        &px[d..d + 4],
-                        &TEX_RGBA[s..s + 4],
-                        "{mat} face {face} texel ({tx},{ty})"
-                    );
+                    // The stored L0 tile is the SOLIDIFIED source (transparent
+                    // texels carry the nearest opaque RGB, alpha untouched) —
+                    // compare RGB only where the source texel is opaque, and
+                    // always compare alpha (solidify never touches it).
+                    if TEX_RGBA[s + 3] != 0 {
+                        assert_eq!(
+                            &px[d..d + 4],
+                            &TEX_RGBA[s..s + 4],
+                            "{mat} face {face} texel ({tx},{ty})"
+                        );
+                    } else {
+                        assert_eq!(
+                            px[d + 3],
+                            TEX_RGBA[s + 3],
+                            "{mat} face {face} texel ({tx},{ty}) alpha"
+                        );
+                    }
                 }
             }
         }
