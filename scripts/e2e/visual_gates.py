@@ -55,7 +55,11 @@ VEIL = (0.62, 0.95)
 
 MIN_STD_UI = 4.0        # V2: UI screens must not be flat
 MIN_STD_WORLD = 5.0     # V2: world frames must not be flat
-MIN_DARK = 0.05         # V3: dark LOD fragments; measured 11-24% on v4.1.0
+MIN_DARK = 0.04         # V3: terrain-tone fragments in the horizon band
+# v4.3.1: the LOD is TEXTURED and lit by the vanilla lightmap — bright grass
+# lands at luma 120-180, well above the old flat-palette darkness cutoff of
+# 140. The horizon-band discriminator is now "terrain tone vs sky": mid and
+# dark tones (luma < 185) count, sky/fog-blue (~200+) does not.
 MAX_DARK_OUT = 0.50     # V3 inverted: an out-of-window frame must stay mostly clean
 MIN_SKY = 0.50          # V4: measured 89-100% on v4.1.0
 MIN_VEIL_LUMA = 80.0    # V5: measured 156-201 on v4.1.0
@@ -168,7 +172,7 @@ def analyze(name, path):
         row = y * W * ch
         for x in range(wx0, wx1, step):
             tot += 1
-            if luma_at(px, row + x * ch, ch) < 140:
+            if luma_at(px, row + x * ch, ch) < 185:
                 dark += 1
     darkf = dark / max(tot, 1)
     if name in OUT_SHOTS:
