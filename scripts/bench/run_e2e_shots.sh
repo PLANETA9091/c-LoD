@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Client e2e phase: launch vanilla client, auto-join, screenshot matrix.
 # Requires: server already booted and pack finalized (boot_server.sh).
+# Env overrides: CLOD_SHOTS (default ~/mc-test/shots)
 set -uo pipefail
-SHOTS="$HOME/mc-test/shots"
+BENCH="$(cd "$(dirname "$0")" && pwd)"
+SHOTS="${CLOD_SHOTS:-$HOME/mc-test/shots}"
 mkdir -p "$SHOTS"
 
 srv() { echo "$1" > /tmp/server.in; }
@@ -21,7 +23,7 @@ ps aux | grep "[p]aper-26.3" > /dev/null || { echo "server process dead"; exit 2
 curl -s -o /tmp/pack_check.zip -w "pack HTTP %{http_code} %{size_download}B\n" http://127.0.0.1:8199/clod-pack.zip
 
 # 2. client
-bash /home/z/my-project/scripts/bench/run_client.sh
+bash "$BENCH/run_client.sh"
 wait_for "Stepan joined the game" /tmp/server.log 420 || { echo "client never joined"; tail -20 /tmp/client.log; exit 3; }
 echo "client joined"
 sleep 5
@@ -36,12 +38,12 @@ echo "join-state shot taken (pack prompt expected)"
 PACK_APPLIED=0
 for i in $(seq 1 14); do
   sleep 3
-  python3 /home/z/my-project/scripts/bench/click.py 562 385 || true
-  if rg -q -i "applying server resource pack|loaded server resource pack|reload.*clod" /tmp/client.log 2>/dev/null; then
+  python3 "$BENCH/click.py" 562 385 || true
+  if grep -qiE "applying server resource pack|loaded server resource pack|reload.*clod" /tmp/client.log 2>/dev/null; then
     PACK_APPLIED=1
     break
   fi
-  if rg -q "Requested post effect does not exist: clod" /tmp/client.log 2>/dev/null; then
+  if grep -q "Requested post effect does not exist: clod" /tmp/client.log 2>/dev/null; then
     break # post effects attempted: the pack answer resolved either way
   fi
 done
@@ -73,6 +75,6 @@ shot 07_veil_outside 90 10  700 140 0
 shot 08_back_inside  90  0    0 120 0
 
 echo "=== client log pack markers ==="
-rg -N -i "pack|post" /tmp/client.log | tail -12 || true
+grep -iE "pack|post" /tmp/client.log | tail -12 || true
 pkill -f "net.minecraft.client.main.Main" 2>/dev/null || true
 echo "E2E CLIENT PHASE DONE"

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Launch the real vanilla 26.3 client under Xvfb and auto-join the bench server.
 # Usage: run_client.sh   — logs to /tmp/client.log, DISPLAY :99 (1280x720)
+# Env overrides: CLOD_CLIENT_ROOT, CLOD_JAVA, CLOD_SHIM_DIR
 set -euo pipefail
-C="$HOME/mc-test/client"
-JAVA="$HOME/mc-test/jdk25/bin/java"
+C="${CLOD_CLIENT_ROOT:-$HOME/mc-test/client}"
+JAVA="${CLOD_JAVA:-$HOME/mc-test/jdk25/bin/java}"
+SHIM="${CLOD_SHIM_DIR:-$HOME/mc-test/shim}"
 
 pkill -f "net.minecraft.client.main.Main" 2>/dev/null || true
 pkill Xvfb 2>/dev/null || true
@@ -21,7 +23,7 @@ export __GLX_VENDOR_LIBRARY_NAME=mesa
 export GLX_VENDOR_LIBRARY_NAME=mesa
 # sRGB-less GLX shim: renderpearl asks for SDL_GL_FRAMEBUFFER_SRGB_CAPABLE=1,
 # which dril's GLX cannot satisfy - the shim strips that attrib (see scripts/bench/libclodgl.c)
-export LD_LIBRARY_PATH="$HOME/mc-test/shim${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="$SHIM${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 cd "$C"
 mkdir -p screenshots

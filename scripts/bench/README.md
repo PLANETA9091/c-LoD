@@ -1,11 +1,12 @@
-# Real-client E2E bench (local harness)
+# Real-client E2E bench (local harness) — now runs in CI
 
-The CI `e2e-live` job boots the server stack and asserts gates G1–G7, but only
-a real vanilla 26.3 client can prove the *visual* half: pack acceptance, the
-post-chain compiling, and the camera channel holding at noon (the exact v4.0
-killer scenario). This directory contains the full local harness that does
-exactly that. It was used to verify v4.1.0 on a genuine vanilla 26.3 client —
-see `docs/e2e-2026-10-20-noon/` for the screenshot matrix.
+**Everything here runs on GitHub Actions** — the CI `e2e-visual` job boots the
+server stack AND a real vanilla 26.3 client under Xvfb on the runner, accepts
+the pack headlessly, locks noon, takes the 8-position screenshot matrix and
+asserts the visual gates (`scripts/e2e/visual_gates.py`: PNG V1–V5 + client-log
+C1–C4). Artifacts (shots + logs) are uploaded on every run — green or red.
+The `e2e-live` job covers the server-side gates G1–G7 on all branches too.
+This directory remains the local debugging twin of the CI job.
 
 ## What's here
 
@@ -52,4 +53,21 @@ bash   scripts/bench/setup_server.sh           # once, needs liblod.so + CRUSSTY
 bash   scripts/bench/run_full_e2e.sh           # boot + client + shots
 ```
 
-Screenshots land in `~/mc-test/shots/`.
+Screenshots land in `~/mc-test/shots/`; gates:
+`python3 scripts/e2e/visual_gates.py ~/mc-test/shots /tmp/client.log /tmp/server.log`.
+
+## Env overrides (what the CI job sets)
+
+| var | default | meaning |
+|-----|---------|---------|
+| `CLOD_CLIENT_ROOT` | `~/mc-test/client` | vanilla client runtime root |
+| `CLOD_MANIFEST` / `CLOD_CLIENT_JAR` | repo `analysis/mc263/` | version manifest / client jar |
+| `CLOD_JAVA` | `~/mc-test/jdk25/bin/java` | JDK 25+ `java` binary (CI: `$JAVA_HOME/bin/java`) |
+| `CLOD_DIST` | `~/mc-test/dist` | CRUSSTY dist root |
+| `CLOD_CRUSSTY` | sibling `analysis/crussty` | CRUSSTY checkout |
+| `CLOD_PAPER_JAR` | `~/mc-test/dl/paper-26.3.jar` | Paper jar |
+| `CLOD_SHOTS` | `~/mc-test/shots` | screenshot output dir |
+| `CLOD_SHIM_DIR` | `~/mc-test/shim` | sRGB shim dir (`libGL.so.1`) |
+| `CLOD_OPTS` | `scan_deadline_secs=45;…;atlas_size=512` | module options |
+| `CLOD_DIST_JAVA_OPTS` | `-Xms256M -Xmx700M …` | Paper JVM heap |
+| `CLOD_REPO` / `CLOD_DIST` in `setup_server.sh` | derived | repo / dist roots |
