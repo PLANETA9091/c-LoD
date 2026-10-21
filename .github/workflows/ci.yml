@@ -237,6 +237,10 @@ jobs:
     name: e2e visual client (vanilla 26.3 client on Xvfb + screenshot gates)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # contents:write — the evidence step commits screenshots + zoom crops
+    # into docs/e2e-ci/ on master (browsable history of every run's look).
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -334,6 +338,7 @@ jobs:
           name: e2e-visual
           path: |
             shots/
+            zoom/
             /tmp/client.log
             /tmp/server.log
           if-no-files-found: warn
