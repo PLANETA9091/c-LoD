@@ -28,12 +28,26 @@ sleep 5
 ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -frames:v 1 "$SHOTS/00_join_state.png"
 echo "join-state shot taken (pack prompt expected)"
 
-# the server pack prompt is on screen — click Yes (window 640x360 centered on
-# 1280x720 Xvfb: Yes button spans x 489..635, y 376..394 -> center ~562,385)
-python3 /home/z/my-project/scripts/bench/click.py 562 385
+# the server pack prompt appears AFTER the world finishes loading — click
+# Yes (window 640x360 centered on 1280x720 Xvfb: Yes button spans
+# x 489..635, y 376..394 -> center ~562,385) in a retry loop until the
+# client log shows the pack being applied (extra clicks are harmless: the
+# prompt disappears once accepted and clicks land in the game world).
+PACK_APPLIED=0
+for i in $(seq 1 14); do
+  sleep 3
+  python3 /home/z/my-project/scripts/bench/click.py 562 385 || true
+  if rg -q -i "applying server resource pack|loaded server resource pack|reload.*clod" /tmp/client.log 2>/dev/null; then
+    PACK_APPLIED=1
+    break
+  fi
+  if rg -q "Requested post effect does not exist: clod" /tmp/client.log 2>/dev/null; then
+    break # post effects attempted: the pack answer resolved either way
+  fi
+done
 sleep 12
 ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -frames:v 1 "$SHOTS/00_pack_applied.png"
-echo "pack-accept clicked"
+echo "pack-accept clicked (applied marker: $PACK_APPLIED)"
 
 # 3. world state: lock NOON (the v4.0-killer scenario) + clear weather
 srv "gamerule doDaylightCycle false"

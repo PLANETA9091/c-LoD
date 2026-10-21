@@ -289,7 +289,8 @@ void main() {
         t = min(t + dt, horizon);
 
         vec3 p = cam + dir * t;
-        vec2 local = (p.xz - origin + vec2(size * 0.5)) / size;
+        // origin is the atlas CORNER (packgen: center - half) — no +size/2.
+        vec2 local = (p.xz - origin) / size;
         if (any(lessThan(local, vec2(0.0))) || any(greaterThan(local, vec2(1.0)))) {
             break; // left the atlas
         }
@@ -301,7 +302,7 @@ void main() {
             for (int b = 0; b < BISECT; ++b) {
                 float mid = (lo + hi) * 0.5;
                 vec3 mp = cam + dir * mid;
-                vec2 mlocal = (mp.xz - origin + vec2(size * 0.5)) / size;
+                vec2 mlocal = (mp.xz - origin) / size;
                 int mL = int(clamp(floor(log2(max(mid, cell) / cell)), 0.0, 4.0));
                 float g = ground_at(mL, mlocal);
                 if (g - mp.y <= 0.0) {
@@ -327,8 +328,7 @@ void main() {
 
     float fade = smoothstep(minConf, minConf + 0.15, conf);
     vec3 hitPos = cam + dir * tHit;
-    vec2 local = (hitPos.xz - origin + vec2(size * 0.5)) / size;
-    local = clamp(local, vec2(0.0), vec2(0.999999));
+    vec2 local = clamp((hitPos.xz - origin) / size, vec2(0.0), vec2(0.999999));
 
     // ---- data at the hit cell (Voxy Mipper-picked level L) -----------------
     int L = hitL;
