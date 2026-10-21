@@ -165,6 +165,19 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
 
     let (aw, ah, atlas_rgba) = atlas.encode_rgba();
     let atlas_png = png::encode_png(aw, ah, &atlas_rgba);
+    // Top-face colours (bilinear, this is what the eye reads as "block colour").
+    let (cw, ch, color_rgba) = atlas.encode_colors();
+    let color_png = png::encode_png(cw, ch, &color_rgba);
+    // Side/cliff colours: one 256x1 strip, indexed by the atlas alpha channel.
+    let side_lut = atlas.side_lut();
+    let mut side_rgba = vec![0u8; 256 * 4];
+    for (i, c) in side_lut.iter().enumerate() {
+        side_rgba[i * 4] = ((c >> 16) & 0xFF) as u8;
+        side_rgba[i * 4 + 1] = ((c >> 8) & 0xFF) as u8;
+        side_rgba[i * 4 + 2] = (c & 0xFF) as u8;
+        side_rgba[i * 4 + 3] = 255;
+    }
+    let side_png = png::encode_png(256, 1, &side_rgba);
 
     let mut zip = ZipWriter::new();
     zip.add("pack.mcmeta", mcmeta.as_bytes());
@@ -206,6 +219,8 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
         terrain_vsh.as_bytes(),
     );
     zip.add("assets/clod/textures/effect/atlas.png", &atlas_png);
+    zip.add("assets/clod/textures/effect/color.png", &color_png);
+    zip.add("assets/clod/textures/effect/side.png", &side_png);
     let zip_bytes = zip.finish();
 
     let mut h = Sha1::new();
@@ -236,7 +251,7 @@ mod tests {
             cfg.cell_size,
             cfg.sea_level,
         );
-        atlas.set(0, 0, 70, false);
+        atlas.set(0, 0, 70, false, 0x808080, 0x707070);
         let pack = build(&cfg, &atlas);
 
         assert!(!pack.zip.is_empty());
@@ -250,8 +265,8 @@ mod tests {
         // Must contain the essential entries: scan by walking central dir.
         let count = u16::from_le_bytes([pack.zip[n - 12], pack.zip[n - 11]]) as usize;
         assert_eq!(
-            count, 13,
-            "pack.mcmeta + 2 json + 6 fsh + atlas.png + sky.vsh/fsh + terrain.vsh"
+            count, 15,
+            "pack.mcmeta + 2 json + 6 fsh + 3 textures + sky.vsh/fsh + terrain.vsh"
         );
 
         // JSON chains are valid JSON (parenthesis balance + token-free).
@@ -287,13 +302,13 @@ mod tests {
         // same pack bytes, regardless of internal version counters.
         let cfg = Config::parse("");
         let a = Atlas::new(0, 0, 256, 4, 63);
-        a.set(1, 1, 90, false);
-        a.set(2, 2, 40, true);
+        a.set(1, 1, 90, false, 0x808080, 0x707070);
+        a.set(2, 2, 40, true, 0x808080, 0x707070);
         let pack_a = build(&cfg, &a);
 
         let b = Atlas::new(0, 0, 256, 4, 63);
-        b.set(1, 1, 90, false);
-        b.set(2, 2, 40, true);
+        b.set(1, 1, 90, false, 0x808080, 0x707070);
+        b.set(2, 2, 40, true, 0x808080, 0x707070);
         let pack_b = build(&cfg, &b);
 
         assert_eq!(pack_a.zip, pack_b.zip, "pack bytes must be deterministic");

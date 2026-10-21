@@ -120,6 +120,7 @@ struct WorldIds {
     m_get_block_at: jmethodID,
     m_chunk_loaded: jmethodID,
     m_set_force_loaded: jmethodID,
+    m_get_biome: jmethodID,
 }
 // Raw method-ID pointers cached process-lifetime; consumed main-thread-only.
 unsafe impl Send for WorldIds {}
@@ -150,10 +151,260 @@ static LOCATION_IDS: Mutex<Option<LocationIds>> = Mutex::new(None);
 #[derive(Clone, Copy)]
 struct BlockIds {
     m_is_liquid: jmethodID,
+    m_get_type: jmethodID,
 }
 // Raw method-ID pointers cached process-lifetime; consumed main-thread-only.
 unsafe impl Send for BlockIds {}
 static BLOCK_IDS: Mutex<Option<BlockIds>> = Mutex::new(None);
+
+/// `org.bukkit.Material` (an enum) + `NamespacedKey`.
+#[derive(Clone, Copy)]
+struct MaterialIds {
+    m_ordinal: jmethodID,
+    m_get_key: jmethodID,
+}
+unsafe impl Send for MaterialIds {}
+static MATERIAL_IDS: Mutex<Option<MaterialIds>> = Mutex::new(None);
+
+#[derive(Clone, Copy)]
+struct KeyIds {
+    m_get_key: jmethodID,
+}
+unsafe impl Send for KeyIds {}
+static KEY_IDS: Mutex<Option<KeyIds>> = Mutex::new(None);
+
+#[derive(Clone, Copy)]
+struct BiomeIds {
+    m_get_key: jmethodID,
+}
+unsafe impl Send for BiomeIds {}
+static BIOME_IDS: Mutex<Option<BiomeIds>> = Mutex::new(None);
+
+/// Baked average top/side colours + per-face tint kind for one Material.
+#[derive(Clone, Copy)]
+struct MatInfo {
+    top: u32,
+    side: u32,
+    tint_top: u8,
+    tint_side: u8,
+}
+static MAT_CACHE: Mutex<Vec<Option<MatInfo>>> = Mutex::new(Vec::new());
+/// One-entry biome tint cache: the scan walks chunk-major, so consecutive
+/// columns almost always share a biome.
+static BIOME_CACHE: Mutex<Option<((i32, i32), (u32, u32, u32))>> = Mutex::new(None);
+
+fn key_ids(env: Env, key: jobject) -> Option<KeyIds> {
+    if let Some(k) = KEY_IDS.lock().unwrap().as_ref() {
+        return Some(*k);
+    }
+    let cls_local = env.get_object_class(key);
+    let cls = {
+        let g = env.new_global_ref(cls_local);
+        g as jobject
+    };
+    let ids = KeyIds {
+        m_get_key: bind_method(env, cls_local, cls, "getKey", "()Ljava/lang/String;")?,
+    };
+    *KEY_IDS.lock().unwrap() = Some(ids);
+    Some(ids)
+}
+
+fn material_ids(env: Env, mat: jobject) -> Option<MaterialIds> {
+    if let Some(m) = MATERIAL_IDS.lock().unwrap().as_ref() {
+        return Some(*m);
+    }
+    let cls_local = env.get_object_class(mat);
+    let cls = {
+        let g = env.new_global_ref(cls_local);
+        g as jobject
+    };
+    let ids = MaterialIds {
+        m_ordinal: bind_method(env, cls_local, cls, "ordinal", "()I")?,
+        m_get_key: bind_method(
+            env,
+            cls_local,
+            cls,
+            "getKey",
+            "()Lorg/bukkit/NamespacedKey;",
+        )?,
+    };
+    *MATERIAL_IDS.lock().unwrap() = Some(ids);
+    Some(ids)
+}
+
+fn biome_ids(env: Env, biome: jobject) -> Option<BiomeIds> {
+    if let Some(b) = BIOME_IDS.lock().unwrap().as_ref() {
+        return Some(*b);
+    }
+    let cls_local = env.get_object_class(biome);
+    let cls = {
+        let g = env.new_global_ref(cls_local);
+        g as jobject
+    };
+    let ids = BiomeIds {
+        m_get_key: bind_method(
+            env,
+            cls_local,
+            cls,
+            "getKey",
+            "()Lorg/bukkit/NamespacedKey;",
+        )?,
+    };
+    *BIOME_IDS.lock().unwrap() = Some(ids);
+    Some(ids)
+}
+
+fn namespaced_key_path(env: Env, key: jobject, ids: KeyIds) -> Option<String> {
+    let s = jobj(env.call_object_method(key, ids.m_get_key, &[]))?;
+    let out = jstr(env, s);
+    clear_if_pending(env);
+    out
+}
+
+fn mul_rgb(c: u32, t: u32) -> u32 {
+    let r = ((c >> 16) & 0xFF) * ((t >> 16) & 0xFF) / 255;
+    let g = ((c >> 8) & 0xFF) * ((t >> 8) & 0xFF) / 255;
+    let b = (c & 0xFF) * (t & 0xFF) / 255;
+    (r << 16) | (g << 8) | b
+}
+
+/// Resolve (and memoise by enum ordinal) the baked colours of one Material.
+fn mat_info(env: Env, mat: jobject, ids: &MaterialIds, ordinal: i32) -> Option<MatInfo> {
+    if ordinal < 0 {
+        return None;
+    }
+    let idx = ordinal as usize;
+    {
+        let cache = MAT_CACHE.lock().unwrap();
+        if let Some(Some(info)) = cache.get(idx) {
+            return Some(*info);
+        }
+    }
+    let key = jobj(env.call_object_method(mat, ids.m_get_key, &[]))?;
+    let kid = key_ids(env, key)?;
+    let name = namespaced_key_path(env, key, kid)?;
+    let info = match crate::blockcolors::lookup(&name) {
+        Some((top, side, tint_top, tint_side)) => MatInfo {
+            top,
+            side,
+            tint_top,
+            tint_side,
+        },
+        None => MatInfo {
+            top: 0x7F7F7F,
+            side: 0x7A746C,
+            tint_top: 0,
+            tint_side: 0,
+        },
+    };
+    let mut cache = MAT_CACHE.lock().unwrap();
+    if cache.len() <= idx {
+        cache.resize(idx + 1, None);
+    }
+    cache[idx] = Some(info);
+    Some(info)
+}
+
+/// Biome grass/foliage/water tint for a column (cached per chunk).
+fn biome_tint(env: Env, world: jobject, wid: &WorldIds, x: i32, y: i32, z: i32) -> (u32, u32, u32) {
+    let key = (x >> 4, z >> 4);
+    if let Some((k, v)) = *BIOME_CACHE.lock().unwrap() {
+        if k == key {
+            return v;
+        }
+    }
+    let resolved = (|| {
+        let biome = jobj(env.call_object_method(
+            world,
+            wid.m_get_biome,
+            &[ji(x), ji(y), ji(z)],
+        ))?;
+        let bid = biome_ids(env, biome)?;
+        let kobj = jobj(env.call_object_method(biome, bid.m_get_key, &[]))?;
+        let kid = key_ids(env, kobj)?;
+        let name = namespaced_key_path(env, kobj, kid)?;
+        Some(crate::blockcolors::biome(&name))
+    })()
+    .unwrap_or((0x91BD59, 0x48B518, 0x3F76E4));
+    *BIOME_CACHE.lock().unwrap() = Some((key, resolved));
+    resolved
+}
+
+/// Sample one column: (blockY, isLiquid, top rgb, side rgb).
+///
+/// The colours come from the baked block table (average texture colour) times
+/// the biome tint, i.e. exactly the value Voxy's block-model atlas collapses to
+/// at the LOD levels where individual texels stop being visible.
+pub fn sample_column(env: Env, world: jobject, x: i32, z: i32) -> Option<(i32, bool, u32, u32)> {
+    use std::sync::atomic::Ordering;
+    let wid = world_ids(env, world)?;
+    if env.exception_check() {
+        env.exception_clear();
+        SCAN_ERR.fetch_add(1, Ordering::Relaxed);
+        return None;
+    }
+    let loaded = env.call_boolean_method(world, wid.m_chunk_loaded, &[ji(x >> 4), ji(z >> 4)]);
+    if env.exception_check() {
+        env.exception_clear();
+        return None;
+    }
+    if !loaded {
+        SCAN_UNLOADED.fetch_add(1, Ordering::Relaxed);
+        return None;
+    }
+    let y = env.call_int_method(world, wid.m_highest_block, &[ji(x), ji(z)]);
+    if env.exception_check() {
+        env.exception_clear();
+        SCAN_ERR.fetch_add(1, Ordering::Relaxed);
+        return None;
+    }
+    if y < -64 {
+        return Some((y, false, 0x808080, 0x808080));
+    }
+    let gray = 0x808080u32;
+    let Some(block) = jobj(env.call_object_method(world, wid.m_get_block_at, &[ji(x), ji(y), ji(z)]))
+    else {
+        clear_if_pending(env);
+        return Some((y, false, gray, gray));
+    };
+    let Some(bid) = block_ids(env, block) else {
+        clear_if_pending(env);
+        return Some((y, false, gray, gray));
+    };
+    let liquid = env.call_boolean_method(block, bid.m_is_liquid, &[]);
+    let mat = jobj(env.call_object_method(block, bid.m_get_type, &[]));
+    clear_if_pending(env);
+    let Some(mat) = mat else {
+        SCAN_OK.fetch_add(1, Ordering::Relaxed);
+        return Some((y, liquid, gray, gray));
+    };
+    let Some(mid) = material_ids(env, mat) else {
+        return Some((y, liquid, gray, gray));
+    };
+    let ordinal = env.call_int_method(mat, mid.m_ordinal, &[]);
+    clear_if_pending(env);
+    let info = mat_info(env, mat, &mid, ordinal).unwrap_or(MatInfo {
+        top: gray,
+        side: gray,
+        tint_top: 0,
+        tint_side: 0,
+    });
+    let (grass, foliage, water) = biome_tint(env, world, &wid, x, y, z);
+    let t_top = match info.tint_top {
+        1 => grass,
+        2 => foliage,
+        3 => water,
+        _ => 0xFFFFFF,
+    };
+    let t_side = match info.tint_side {
+        1 => grass,
+        2 => foliage,
+        3 => water,
+        _ => 0xFFFFFF,
+    };
+    SCAN_OK.fetch_add(1, Ordering::Relaxed);
+    Some((y, liquid, mul_rgb(info.top, t_top), mul_rgb(info.side, t_side)))
+}
 
 fn method_or_log(env: Env, cls: jobject, name: &str, sig: &str) -> Option<jmethodID> {
     // The FIRST GetMethodID on a freshly-seen class can fail spuriously
@@ -201,6 +452,13 @@ fn world_ids(env: Env, world: jobject) -> Option<WorldIds> {
             cls,
             "getBlockAt",
             "(III)Lorg/bukkit/block/Block;",
+        )?,
+        m_get_biome: bind_method(
+            env,
+            cls_local,
+            cls,
+            "getBiome",
+            "(III)Lorg/bukkit/block/Biome;",
         )?,
     };
     *WORLD_IDS.lock().unwrap() = Some(ids);
@@ -274,6 +532,7 @@ fn block_ids(env: Env, block: jobject) -> Option<BlockIds> {
     };
     let ids = BlockIds {
         m_is_liquid: bind_method(env, cls_local, cls, "isLiquid", "()Z")?,
+        m_get_type: bind_method(env, cls_local, cls, "getType", "()Lorg/bukkit/Material;")?,
     };
     *BLOCK_IDS.lock().unwrap() = Some(ids);
     Some(ids)

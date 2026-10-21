@@ -52,17 +52,68 @@ fn crc32_bytes(data: &[u8]) -> [u8; 4] {
     c.to_be_bytes()
 }
 
+/// One PNG scanline filter. `prev` is the already-unfiltered previous row.
+fn filter_row(kind: u8, row: &[u8], prev: &[u8], out: &mut [u8]) {
+    let bpp = 4;
+    for i in 0..row.len() {
+        let a = if i >= bpp { row[i - bpp] } else { 0 }; // left
+        let b = prev[i]; // up
+        let c = if i >= bpp { prev[i - bpp] } else { 0 }; // up-left
+        let x = row[i];
+        out[i] = match kind {
+            0 => x,
+            1 => x.wrapping_sub(a),
+            2 => x.wrapping_sub(b),
+            3 => x.wrapping_sub((((a as u16) + (b as u16)) / 2) as u8),
+            _ => {
+                let p = a as i16 + b as i16 - c as i16;
+                let pa = (p - a as i16).abs();
+                let pb = (p - b as i16).abs();
+                let pc = (p - c as i16).abs();
+                let pred = if pa <= pb && pa <= pc {
+                    a
+                } else if pb <= pc {
+                    b
+                } else {
+                    c
+                };
+                x.wrapping_sub(pred)
+            }
+        };
+    }
+}
+
 /// Encode an RGBA8 image as PNG. `rgba.len()` must be `width * height * 4`.
+///
+/// Uses adaptive per-scanline filtering + real DEFLATE (miniz_oxide). The old
+/// stored-only stream made a 2048² atlas 16 MiB, which is unusable as a
+/// server resource pack.
 pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
     assert_eq!(rgba.len(), (width as usize) * (height as usize) * 4);
-    // Build filtered scanlines: filter type 0 (None) per row.
     let stride = width as usize * 4;
     let mut raw = Vec::with_capacity(height as usize * (stride + 1));
+    let mut prev = vec![0u8; stride];
+    let mut best = vec![0u8; stride];
+    let mut trial = vec![0u8; stride];
     for y in 0..height as usize {
-        raw.push(0u8);
-        raw.extend_from_slice(&rgba[y * stride..(y + 1) * stride]);
+        let row = &rgba[y * stride..(y + 1) * stride];
+        let mut best_kind = 0u8;
+        let mut best_score = u64::MAX;
+        for kind in 0..5u8 {
+            filter_row(kind, row, &prev, &mut trial);
+            // Classic heuristic: smallest sum of absolute signed residuals.
+            let score: u64 = trial.iter().map(|&b| (b as i8).unsigned_abs() as u64).sum();
+            if score < best_score {
+                best_score = score;
+                best_kind = kind;
+                best.copy_from_slice(&trial);
+            }
+        }
+        raw.push(best_kind);
+        raw.extend_from_slice(&best);
+        prev.copy_from_slice(row);
     }
-    let idat = zlib_store(&raw);
+    let idat = miniz_oxide::deflate::compress_to_vec_zlib(&raw, 8);
 
     let mut out = Vec::with_capacity(idat.len() + 128);
     out.extend_from_slice(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
@@ -110,22 +161,86 @@ mod tests {
         assert_eq!(&png[n - 8..n - 4], b"IEND");
     }
 
+    /// Minimal PNG reader for tests: inflate IDAT and undo the scanline filters.
+    fn decode(png: &[u8]) -> (u32, u32, Vec<u8>) {
+        let mut p = 8usize;
+        let mut w = 0u32;
+        let mut h = 0u32;
+        let mut idat = Vec::new();
+        while p + 8 <= png.len() {
+            let len = u32::from_be_bytes([png[p], png[p + 1], png[p + 2], png[p + 3]]) as usize;
+            let kind = &png[p + 4..p + 8];
+            let data = &png[p + 8..p + 8 + len];
+            match kind {
+                b"IHDR" => {
+                    w = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+                    h = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
+                }
+                b"IDAT" => idat.extend_from_slice(data),
+                _ => {}
+            }
+            p += 12 + len;
+        }
+        let raw = miniz_oxide::inflate::decompress_to_vec_zlib(&idat).expect("deflate");
+        let stride = w as usize * 4;
+        assert_eq!(raw.len(), h as usize * (stride + 1));
+        let mut out = vec![0u8; stride * h as usize];
+        for y in 0..h as usize {
+            let kind = raw[y * (stride + 1)];
+            let row = &raw[y * (stride + 1) + 1..(y + 1) * (stride + 1)];
+            for i in 0..stride {
+                let a = if i >= 4 { out[y * stride + i - 4] } else { 0 };
+                let b = if y > 0 { out[(y - 1) * stride + i] } else { 0 };
+                let c = if y > 0 && i >= 4 { out[(y - 1) * stride + i - 4] } else { 0 };
+                let pred = match kind {
+                    0 => 0,
+                    1 => a,
+                    2 => b,
+                    3 => (((a as u16) + (b as u16)) / 2) as u8,
+                    4 => {
+                        let p = a as i16 + b as i16 - c as i16;
+                        let pa = (p - a as i16).abs();
+                        let pb = (p - b as i16).abs();
+                        let pc = (p - c as i16).abs();
+                        if pa <= pb && pa <= pc {
+                            a
+                        } else if pb <= pc {
+                            b
+                        } else {
+                            c
+                        }
+                    }
+                    other => panic!("bad filter {other}"),
+                };
+                out[y * stride + i] = row[i].wrapping_add(pred);
+            }
+        }
+        (w, h, out)
+    }
+
     #[test]
-    fn png_decodable_by_width_height() {
+    fn png_roundtrips_pixels() {
         let (w, h) = (64u32, 32u32);
-        let px = vec![7u8; (w * h * 4) as usize];
+        let px: Vec<u8> = (0..(w * h * 4)).map(|i| ((i * 7 + i / 13) % 256) as u8).collect();
         let png = encode_png(w, h, &px);
-        // Find IDAT and verify raw length == h * (1 + w*4)
-        let pos = png
-            .windows(4)
-            .position(|w2| w2 == b"IDAT")
-            .expect("IDAT present");
-        let len =
-            u32::from_be_bytes([png[pos - 4], png[pos - 3], png[pos - 2], png[pos - 1]]) as usize;
-        let expected_raw = h as usize * (1 + w as usize * 4);
-        // zlib wrapper: 2 bytes head + stored blocks overhead + 4 bytes adler
-        let overhead = 2 + 4 + (expected_raw / 65535 + 1) * 5;
-        assert_eq!(len, expected_raw + overhead);
+        let (dw, dh, out) = decode(&png);
+        assert_eq!((dw, dh), (w, h));
+        assert_eq!(out, px);
+    }
+
+    #[test]
+    fn png_idat_is_compressed() {
+        // Regression: stored-deflate made the 2048² atlas a 16 MiB pack.
+        let (w, h) = (256u32, 256u32);
+        let px = vec![42u8; (w * h * 4) as usize];
+        let png = encode_png(w, h, &px);
+        assert!(
+            png.len() < (w * h * 4) as usize / 8,
+            "flat image must compress, got {} bytes",
+            png.len()
+        );
+        let (_, _, out) = decode(&png);
+        assert_eq!(out, px);
     }
 
     #[test]
@@ -160,10 +275,9 @@ mod tests {
         assert_eq!(seen[0].0, "IHDR");
         assert_eq!(seen.last().unwrap().0, "IEND");
         let idat = seen.iter().find(|(k, _)| k == "IDAT").expect("IDAT");
-        assert!(
-            idat.1 > (w * h * 4) as usize,
-            "IDAT payload must carry the raw scanlines, got {} bytes",
-            idat.1
-        );
+        assert!(idat.1 > 0, "IDAT payload must not be empty");
+        let (dw, dh, out) = decode(&png);
+        assert_eq!((dw, dh), (w, h));
+        assert_eq!(out, px);
     }
 }

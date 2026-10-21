@@ -17,7 +17,9 @@
 
 uniform sampler2D InSampler;      // minecraft:main color
 uniform sampler2D InDepthSampler; // minecraft:main depth
-uniform sampler2D AtlasSampler;   // clod:textures/effect/atlas.png (RG = height, B = water)
+uniform sampler2D AtlasSampler;   // RG = height, B = water, A = side colour index
+uniform sampler2D ColorSampler;   // top-face block colour (baked texture average)
+uniform sampler2D SideSampler;    // 256x1 side/cliff colour LUT
 uniform sampler2D RotSampler;     // clod:clod_rot_a (1x1 persistent, camera channel)
 
 layout(std140) uniform SamplerInfo {
@@ -65,7 +67,7 @@ const float PI = 3.14159265358979;
 // 26.3 device depth: d = near/eyeZ (infinite far) — sky == 0.0, any real
 // geometry reads positive, so 1e-6 keeps terrain out to ~50 km classified.
 const float SKY_DEPTH = 1.0e-6;
-const int MAX_STEPS = 420;
+const int MAX_STEPS = 460;
 const int BISECT = 7;
 
 // Height (block Y) stored in the atlas: (y + 64) << 6, big-endian RG.
@@ -90,6 +92,15 @@ bool world_water(vec2 xz, vec2 origin, float size) {
     vec2 uv = (xz - origin) / size;
     uv = clamp(uv, vec2(0.0015), vec2(0.9985));
     return atlas_water(uv);
+}
+
+vec2 atlas_uv(vec2 xz, vec2 origin, float size) {
+    return clamp((xz - origin) / size, vec2(0.0015), vec2(0.9985));
+}
+
+/// Index of the side/cliff colour stored in the atlas alpha channel.
+float atlas_side(vec2 uv) {
+    return texture(AtlasSampler, uv).a;
 }
 
 void main() {
@@ -236,21 +247,29 @@ void main() {
     // field is free; starting at 0 also guarantees the first sample is above
     // the heightfield (the camera always is), which the crossing test needs.
     float t = 0.0;
-    float dt = max(cell * 0.75, t * 0.004);
+    float dt = max(cell * 0.75, t * 0.008);
     float tHit = -1.0;
     float prevT = t;
     float prevDiff = 1.0e9;
+    // Voxy draws real quads, so the visible face decides both the texture and
+    // the vanilla face shade. We reconstruct the face from the march: entering a
+    // column whose top is above the ray means we are looking at its SIDE (cliff)
+    // face, otherwise the ray crossed the surface downwards -> TOP face.
+    bool sideHit = false;
+    float faceShade = 1.0;
 
     vec2 xz = cam.xz + dir.xz * t;
-    float above = (world_water(xz, origin, size) ? sea : world_height(xz, origin, size)) - (cam.y + dir.y * t);
+    vec2 cellPrev = floor((xz - origin) / cell);
+    float hPrev = world_water(xz, origin, size) ? sea : world_height(xz, origin, size);
+    float above = hPrev - (cam.y + dir.y * t);
 
     for (int i = 0; i < MAX_STEPS; ++i) {
         prevT = t;
         prevDiff = above;
         t = min(t + dt, size);
-        // Grow the step so ~420 iterations cover the full atlas (was: constant
-        // 2 blocks, which capped the march at ~720 of 2048 blocks).
-        dt = max(cell * 0.75, t * 0.004);
+        // Cell-sized steps near the camera, growing with distance so the whole
+        // atlas stays reachable at 1 block per cell.
+        dt = max(cell * 0.75, t * 0.008);
 
         xz = cam.xz + dir.xz * t;
         // Left the atlas? No LOD here.
@@ -258,14 +277,17 @@ void main() {
             break;
         }
         float ground = world_water(xz, origin, size) ? sea : world_height(xz, origin, size);
+        vec2 cellNow = floor((xz - origin) / cell);
         above = ground - (cam.y + dir.y * t);
 
         // `above` = ground - rayY: POSITIVE means the ray is below the
         // heightfield. A hit is the crossing from outside (-) to inside (+).
-        // The old test used (+ -> -), i.e. it only matched rays EXITING the
-        // terrain, which is why only thin far-side "curtains" of hills were
-        // drawn and everything facing the player went missing.
         if (above >= 0.0 && prevDiff < 0.0) {
+            sideHit = any(notEqual(cellNow, cellPrev)) && (ground > hPrev + 0.5);
+            if (sideHit) {
+                // Vanilla directional face shade: N/S = 0.8, E/W = 0.6.
+                faceShade = abs(cellNow.x - cellPrev.x) > 0.5 ? 0.6 : 0.8;
+            }
             // Bisection between prevT and t.
             float lo = prevT;
             float hi = t;
@@ -282,6 +304,8 @@ void main() {
             tHit = (lo + hi) * 0.5;
             break;
         }
+        cellPrev = cellNow;
+        hPrev = ground;
         if (t >= size) {
             break;
         }
@@ -306,46 +330,43 @@ void main() {
     float fade = forceLod > 0.5 ? 1.0 : smoothstep(minConf, minConf + 0.15, conf);
     vec3 hitPos = cam + dir * tHit;
 
-    // Shade: normal from the height gradient, palette by elevation.
-    vec2 e = vec2(cell, 0.0);
-    float hL = world_height(hitPos.xz - e.xy, origin, size);
-    float hR = world_height(hitPos.xz + e.xy, origin, size);
-    float hD = world_height(hitPos.xz - e.yx, origin, size);
-    float hU = world_height(hitPos.xz + e.yx, origin, size);
-    vec3 n = normalize(vec3(hL - hR, 2.0 * cell, hD - hU));
+    // ---------------------------------------------------------------
+    // Surface colour, Voxy model: the block's real average texture colour
+    // (baked from the client jar's blockstate -> model -> texture graph, biome
+    // tinted at scan time) picked per face, times vanilla's directional face
+    // shade, times the daylight light-map factor. Voxy samples the block model
+    // atlas with textureGrad, which at any real distance is exactly this
+    // average -- so the colours match instead of being a hand-picked palette.
+    // ---------------------------------------------------------------
+    vec2 auv = atlas_uv(hitPos.xz, origin, size);
+    vec3 topCol = texture(ColorSampler, auv).rgb;
+    vec3 sideCol = texture(
+        SideSampler,
+        vec2((atlas_side(auv) * 255.0 + 0.5) / 256.0, 0.5)
+    ).rgb;
+    vec3 albedo = sideHit ? sideCol * faceShade : topCol;
 
-    float tt = fract(GameTime) * 6.28318530718;
-    vec3 sunDir = vec3(cos(tt), sin(tt), 0.0);
-    // Lighting reference comes from the SKY IN THIS FRAME, not from GameTime:
-    // the world clock and the rendered sky can disagree (sunset/daylight
-    // transitions, doDaylightCycle, dimension quirks) and a wrong day factor
-    // made the LOD look lit by moonlight next to sunlit chunks.
+    // Light reference from the SKY IN THIS FRAME (see v4.1 notes above): the
+    // world clock and the rendered sky can disagree, and a wrong day factor made
+    // the LOD look lit by moonlight next to sunlit chunks.
     float skyLum = dot(scene.rgb, vec3(0.299, 0.587, 0.114));
     float dayF = smoothstep(0.08, 0.45, skyLum);
     // The fog target is the actual sky behind the pixel, so the far edge of the
     // LOD band dissolves into the horizon instead of a config colour that can
     // only ever approximate it. VeilColor only tints it.
     vec3 veilCol = mix(VeilColor.rgb * mix(0.35, 1.0, dayF), scene.rgb, 0.82);
-    if (sunDir.y < -0.12) {
-        sunDir = -sunDir;
-    }
 
+    // Vanilla lightmap substitute: full daylight is 1.0 (the baked colours are
+    // already the texture colours, which is what a sunlit block shows), night
+    // keeps a small ambient so the silhouette does not vanish.
+    float lightMul = mix(0.14, 1.0, dayF);
+    vec3 lit = albedo * lightMul;
+
+    // Snow: per-block colours cannot see state variants (snowy=true shares the
+    // material id with the plain block), so high terrain is whitened by height.
     float hn = clamp((hitPos.y - sea) / max(maxY - sea, 1.0), 0.0, 1.0);
-    vec3 terrainCol = mix(ColLow.rgb, ColHigh.rgb, smoothstep(0.15, 0.9, hn));
     float snow = smoothstep(VeilColor.a * 0.55 + 0.35, VeilColor.a * 0.55 + 0.55, hn);
-    terrainCol = mix(terrainCol, vec3(0.93, 0.95, 0.97), snow);
-
-    float isWater = world_water(hitPos.xz, origin, size) ? 1.0 : 0.0;
-    vec3 albedo = mix(terrainCol, ColWater.rgb, isWater);
-
-    vec3 lightDir = normalize(vec3(sunDir.x, max(sunDir.y, 0.15), 0.0));
-    // Normalise by the flat-ground response so that sunlit flat terrain lands
-    // exactly on the palette colour -- that is what the real chunks show, and
-    // any mismatch turns the LOD/chunk seam into a visible dark band.
-    float diff = max(dot(n, lightDir), 0.0) / max(lightDir.y, 0.25);
-    float ambient = mix(0.10, 0.62, dayF);
-    float sunGain = mix(0.06, 0.38, dayF);
-    vec3 lit = albedo * (ambient + diff * sunGain);
+    lit = mix(lit, vec3(0.93, 0.95, 0.97) * lightMul, snow * 0.9);
 
     // Distance fog into the day-graded veil color: merges LOD into the sky.
     float fog = smoothstep(FogParams.x, FogParams.y, tHit);

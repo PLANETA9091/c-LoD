@@ -16,6 +16,7 @@ crate-type = ["cdylib", "rlib"]
 cplug-abi = { path = "cplug-abi" }
 cplug-sdk = { path = "cplug-sdk" }
 jvmti-bindings = "2"
+miniz_oxide = "0.9.1"
 
 [profile.release]
 lto = "fat"

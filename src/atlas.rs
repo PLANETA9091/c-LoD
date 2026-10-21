@@ -1,7 +1,10 @@
 //! The LOD heightmap atlas: a `cells x cells` grid covering a square world
 //! region. Cell data:
 //!   - height: i16 block Y (decoded from the atlas PNG's R/G channels),
-//!   - water:  bool (sea surface instead of terrain).
+//!   - water:  bool (sea surface instead of terrain),
+//!   - top:    0xRRGGBB average colour of the block's top face (mip average,
+//!             biome tint applied) — what Voxy's model atlas collapses to,
+//!   - side:   0xRRGGBB same for the side face, used on cliff/step faces.
 //!
 //! Static-pack lifecycle (v3): the atlas is filled ONCE (JNI budget per tick
 //! until completion or the scan deadline), optionally persisted to
@@ -15,7 +18,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 
 /// On-disk snapshot magic + format version.
-const MAGIC: &[u8; 8] = b"CLODAT01";
+const MAGIC: &[u8; 8] = b"CLODAT02";
+/// Bytes per cell in the on-disk snapshot: i16 height, u32 top, u32 side,
+/// u8 flags.
+const CELL_BYTES: usize = 11;
 
 pub struct Atlas {
     pub center_x: i32,
@@ -38,6 +44,10 @@ pub struct Cell {
     pub height: i16,
     pub water: bool,
     pub valid: bool,
+    /// Average top-face colour (0xRRGGBB), already biome tinted.
+    pub top: u32,
+    /// Average side-face colour (0xRRGGBB), already biome tinted.
+    pub side: u32,
 }
 
 impl Atlas {
@@ -70,11 +80,16 @@ impl Atlas {
         Some(((dx / self.cell) as u32, (dz / self.cell) as u32))
     }
 
-    pub fn set(&self, ix: u32, iz: u32, height: i16, water: bool) {
+    pub fn set(&self, ix: u32, iz: u32, height: i16, water: bool, top: u32, side: u32) {
         let idx = (iz * self.cells + ix) as usize;
         if let Ok(mut data) = self.data.write() {
             if let Some(cell) = data.get_mut(idx) {
-                if !cell.valid || cell.height != height || cell.water != water {
+                if !cell.valid
+                    || cell.height != height
+                    || cell.water != water
+                    || cell.top != top
+                    || cell.side != side
+                {
                     if !cell.valid {
                         self.scanned.fetch_add(1, Ordering::Relaxed);
                     }
@@ -82,6 +97,8 @@ impl Atlas {
                         height,
                         water,
                         valid: true,
+                        top,
+                        side,
                     };
                     self.version.fetch_add(1, Ordering::Relaxed);
                 }
@@ -144,28 +161,71 @@ impl Atlas {
         self.center_z - self.half() + (iz * self.cell as u32) as i32 + self.cell / 2
     }
 
-    /// Encode the atlas as RGBA8 pixels for the PNG texture:
+    /// Distinct side colours, sorted: the atlas stores a 1-byte index into this
+    /// table (a u8 alpha channel) instead of a full colour, which keeps both
+    /// per-cell colours in two RGBA textures.
+    pub fn side_lut(&self) -> Vec<u32> {
+        let mut v: Vec<u32> = self
+            .snapshot()
+            .iter()
+            .filter(|c| c.valid)
+            .map(|c| c.side & 0xFFFFFF)
+            .collect();
+        v.sort_unstable();
+        v.dedup();
+        v.truncate(255);
+        v
+    }
+
+    fn side_index(lut: &[u32], side: u32) -> u8 {
+        match lut.binary_search(&(side & 0xFFFFFF)) {
+            Ok(i) => i as u8,
+            Err(_) => 0,
+        }
+    }
+
+    /// Height/flags image:
     ///   R = high byte, G = low byte of `(height + 64) << 6`,
-    ///   B = 255 when water, A = 255 (opaque).
-    /// Unscanned cells encode height 0 / water so the shader treats them as
-    /// void (below the culled minimum).
+    ///   B = 255 when water, A = index into [`Self::side_lut`].
+    /// Unscanned cells encode height 0 so the shader treats them as void.
     pub fn encode_rgba(&self) -> (u32, u32, Vec<u8>) {
+        let snap = self.snapshot();
+        let lut = self.side_lut();
+        let n = self.cells as usize;
+        let mut px = vec![0u8; n * n * 4];
+        for z in 0..n {
+            for x in 0..n {
+                let cell = snap[z * n + x];
+                let (y16, water, side) = if cell.valid {
+                    let h = (i32::from(cell.height) + 64).max(0) << 6;
+                    (h.min(0xFFFF) as u16, cell.water, Self::side_index(&lut, cell.side))
+                } else {
+                    (0, false, 0)
+                };
+                let o = (z * n + x) * 4;
+                px[o] = (y16 >> 8) as u8;
+                px[o + 1] = (y16 & 0xFF) as u8;
+                px[o + 2] = if water { 255 } else { 0 };
+                px[o + 3] = side;
+            }
+        }
+        (self.cells, self.cells, px)
+    }
+
+    /// Top-face colour image (RGB, alpha 255), bilinearly filtered on the GPU.
+    pub fn encode_colors(&self) -> (u32, u32, Vec<u8>) {
         let snap = self.snapshot();
         let n = self.cells as usize;
         let mut px = vec![0u8; n * n * 4];
         for z in 0..n {
             for x in 0..n {
                 let cell = snap[z * n + x];
-                let (y16, water) = if cell.valid {
-                    let h = (i32::from(cell.height) + 64).max(0) << 6;
-                    (h.min(0xFFFF) as u16, cell.water)
-                } else {
-                    (0, false)
-                };
                 let o = (z * n + x) * 4;
-                px[o] = (y16 >> 8) as u8;
-                px[o + 1] = (y16 & 0xFF) as u8;
-                px[o + 2] = if water { 255 } else { 0 };
+                if cell.valid {
+                    px[o] = ((cell.top >> 16) & 0xFF) as u8;
+                    px[o + 1] = ((cell.top >> 8) & 0xFF) as u8;
+                    px[o + 2] = (cell.top & 0xFF) as u8;
+                }
                 px[o + 3] = 255;
             }
         }
@@ -176,12 +236,12 @@ impl Atlas {
     // Disk persistence (static-pack determinism across restarts).
     // -----------------------------------------------------------------------
 
-    /// Serialize the atlas snapshot: MAGIC + header + 3 bytes per cell
-    /// (height i16 LE, flags: bit0 water, bit1 valid).
+    /// Serialize the atlas snapshot: MAGIC + header + 11 bytes per cell
+    /// (height i16 LE, top u32, side u32, flags: bit0 water, bit1 valid).
     pub fn to_bytes(&self) -> Vec<u8> {
         let snap = self.snapshot();
         let n = snap.len();
-        let mut out = Vec::with_capacity(MAGIC.len() + 20 + n * 3);
+        let mut out = Vec::with_capacity(MAGIC.len() + 20 + n * CELL_BYTES);
         out.extend_from_slice(MAGIC);
         out.extend_from_slice(&self.center_x.to_le_bytes());
         out.extend_from_slice(&self.center_z.to_le_bytes());
@@ -190,6 +250,8 @@ impl Atlas {
         out.extend_from_slice(&self.sea_level.to_le_bytes());
         for c in &snap {
             out.extend_from_slice(&c.height.to_le_bytes());
+            out.extend_from_slice(&(c.top & 0xFFFFFF).to_le_bytes());
+            out.extend_from_slice(&(c.side & 0xFFFFFF).to_le_bytes());
             out.push((u8::from(c.water)) | (u8::from(c.valid) << 1));
         }
         out
@@ -226,21 +288,25 @@ impl Atlas {
         }
         let atlas = Atlas::new(cx, cz, size, cell, sea);
         let n = (atlas.cells as usize) * (atlas.cells as usize);
-        if buf.len() < MAGIC.len() + 20 + n * 3 {
+        if buf.len() < MAGIC.len() + 20 + n * CELL_BYTES {
             return None;
         }
         let mut data = atlas.data.write().ok()?;
         let base = MAGIC.len() + 20;
         let mut scanned = 0u64;
         for (i, cell_out) in data.iter_mut().enumerate() {
-            let o = base + i * 3;
+            let o = base + i * CELL_BYTES;
             let height = i16::from_le_bytes([buf[o], buf[o + 1]]);
-            let flags = buf[o + 2];
+            let top = u32::from_le_bytes([buf[o + 2], buf[o + 3], buf[o + 4], 0]) & 0xFFFFFF;
+            let side = u32::from_le_bytes([buf[o + 6], buf[o + 7], buf[o + 8], 0]) & 0xFFFFFF;
+            let flags = buf[o + 10];
             if flags & 0b10 != 0 {
                 *cell_out = Cell {
                     height,
                     water: flags & 0b01 != 0,
                     valid: true,
+                    top,
+                    side,
                 };
                 scanned += 1;
             }
@@ -301,8 +367,8 @@ mod tests {
     fn set_get_encode() {
         let a = Atlas::new(0, 0, 64, 4, 63);
         assert_eq!(a.cells, 16);
-        a.set(3, 5, 100, false);
-        a.set(0, 0, 62, true);
+        a.set(3, 5, 100, false, 0x808080, 0x707070);
+        a.set(0, 0, 62, true, 0x808080, 0x707070);
         assert_eq!(a.get(3, 5).unwrap().height, 100);
         assert!(a.get(0, 0).unwrap().water);
         assert!(a.get(1, 1).is_none());
@@ -327,9 +393,9 @@ mod tests {
     fn version_bumps_on_change() {
         let a = Atlas::new(0, 0, 64, 4, 63);
         let v0 = a.version();
-        a.set(1, 1, 10, false);
+        a.set(1, 1, 10, false, 0x808080, 0x707070);
         let v1 = a.version();
-        a.set(1, 1, 10, false); // same value — no bump
+        a.set(1, 1, 10, false, 0x808080, 0x707070); // same value — no bump
         assert_eq!(v0 + 1, v1);
         assert_eq!(a.version(), v1);
         assert_eq!(a.scanned_cells(), 1);
@@ -356,9 +422,9 @@ mod tests {
         let path = dir.join("atlas.bin");
 
         let a = Atlas::new(123, -456, 64, 4, 62);
-        a.set(3, 5, 100, false);
-        a.set(0, 0, 62, true);
-        a.set(15, 15, 200, false);
+        a.set(3, 5, 100, false, 0x808080, 0x707070);
+        a.set(0, 0, 62, true, 0x808080, 0x707070);
+        a.set(15, 15, 200, false, 0x808080, 0x707070);
         a.save(&path).unwrap();
         // tmp file must be gone after atomic rename
         assert!(!path.with_extension("tmp").exists());
