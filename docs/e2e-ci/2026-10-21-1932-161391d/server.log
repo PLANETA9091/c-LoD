@@ -1,0 +1,328 @@
+[launcher] kernel:  /home/runner/mc-test/dist/versions/paper-26.3.jar
+[launcher] agent:   /home/runner/mc-test/dist/libcrussty_runtime.so
+[launcher] modules: /home/runner/mc-test/dist/modules (recursive)
+[launcher] exec: /usr/lib/jvm/temurin-25-jdk-amd64/bin/java -agentpath:/home/runner/mc-test/dist/libcrussty_runtime.so=modules=/home/runner/mc-test/dist/modules;versions=/home/runner/mc-test/dist/versions;kernel=paper-26.3.jar -Xms512M -Xmx1536M -XX:MaxMetaspaceSize=256M -XX:MaxDirectMemorySize=128M -XX:+UseG1GC -Ddist.root=/home/runner/mc-test/dist -jar /home/runner/mc-test/dist/versions/paper-26.3.jar --nogui
+[crussty-runtime] v2.0.0 loaded (options: modules=/home/runner/mc-test/dist/modules;versions=/home/runner/mc-test/dist/versions;kernel=paper-26.3.jar)
+[c-LoD] booting: atlas 512x512 blocks (cell 4), http :8199, fov 70, static pack (scan deadline 90s, cache on)
+[cplug-sdk] log dropped (kernel not ready): [c-LoD] booting: atlas 512x512 blocks (cell 4), http :8199, fov 70, static pack (scan deadline 90s, cache on)
+[c-LoD] c-LoD v3.0: static pack mode — one finalize per session, zero rebuilds, zero re-pushes
+[cplug-sdk] log dropped (kernel not ready): [c-LoD] c-LoD v3.0: static pack mode — one finalize per session, zero rebuilds, zero re-pushes
+[crussty-runtime] module lod -> init rc=0
+[crussty-runtime] pipeline ready: 1 module hook(s)
+[c-LoD] c-LoD pack server listening on 0.0.0.0:8199 (GET /clod-pack.zip)
+[crussty-rcon] RCON-WATCH installed (2s cadence)
+[crussty-runtime] transform engine: 23 rule(s) registered
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/SchedulerHooks" }
+[cplug-sdk] log dropped (kernel not ready): [c-LoD] c-LoD pack server listening on 0.0.0.0:8199 (GET /clod-pack.zip)
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/StorageHooks" }
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/NetHooks" }
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/TickHook" }
+[crussty-runtime] transform hook classes installed (4); transform engine armed
+[crussty:hot-reload] SIGUSR1 reload trigger armed (1 module(s) reloadable)
+Downloading mojang_26.3.jar
+Applying patches
+Starting org.bukkit.craftbukkit.Main
+2026-10-21T19:30:40.713635705Z ServerMain WARN Advanced terminal features are not available in this environment
+[19:30:41 INFO]: [bootstrap] Running Java 25 (OpenJDK 64-Bit Server VM 25.0.4.1+1-LTS; Eclipse Adoptium Temurin-25.0.4.1+1) on Linux 7.0.0-1017-azure (amd64)
+[19:30:41 INFO]: [bootstrap] Loading Paper 26.3-211-main@2d602d6 (2026-10-21T13:13:03Z) for Minecraft 26.3
+[19:30:41 INFO]: [PluginInitializerManager] Initializing plugins...
+[19:30:41 INFO]: [PluginInitializerManager] Initialized 0 plugins
+[c-LoD] kernel ready — starting engine loop
+[cplug-sdk] log emit failed: [c-LoD] kernel ready — starting engine loop
+[19:30:45 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Initialising converters for DataConverter...
+[19:30:46 INFO]: [com.destroystokyo.paper.profile.PaperServicesDiscoveryService] Environment: Environment[discoveryUrl=https://discovery.minecraftservices.com/minecraft/client, name=PROD]
+[19:30:46 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Finished initialising converters for DataConverter in 724.9ms
+[19:30:46 INFO]: Found new data pack paper, loading it automatically
+[19:30:47 INFO]: No existing world data, creating new world
+[19:30:49 INFO]: Loaded 1866 advancements
+[19:30:49 INFO]: Starting minecraft server version 26.3
+[19:30:49 INFO]: Loading properties
+[19:30:49 INFO]: This server is running Paper version 26.3-211-main@2d602d6 (2026-10-21T13:13:03Z) (Implementing API version 26.3.build.211-stable)
+[19:30:49 INFO]: [spark] This server bundles the spark profiler. For more information please visit https://docs.papermc.io/paper/profiling
+[19:30:49 INFO]: Server Ping Player Sample Count: 12
+[19:30:49 INFO]: Using 4 threads for Netty based IO
+[19:30:49 INFO]: [MoonriseCommon] Paper is using 1 worker threads, 1 I/O threads
+[19:30:50 INFO]: Default game type: SURVIVAL
+[19:30:50 INFO]: Generating keypair
+[19:30:50 INFO]: Starting Minecraft server on *:25565
+[19:30:50 INFO]: Paper: Using libdeflate (Linux x86_64) compression from Velocity.
+[19:30:50 INFO]: Paper: Using OpenSSL 3.x.x (Linux x86_64) cipher from Velocity.
+[19:30:50 WARN]: **** SERVER IS RUNNING IN OFFLINE/INSECURE MODE!
+[19:30:50 WARN]: The server will make no attempt to authenticate usernames. Beware.
+[19:30:50 WARN]: While this makes the game possible to play without internet access, it also opens up the ability for hackers to connect with any username they choose.
+[19:30:50 WARN]: To change this, set "online-mode" to "true" in the server.properties file.
+[19:30:50 INFO]: Preparing level "world"
+[19:30:50 INFO]: Selecting spawn point for level 'minecraft:overworld'...
+[19:30:54 INFO]: Selecting spawn point for level 'minecraft:the_nether'...
+[19:30:55 INFO]: Selecting spawn point for level 'minecraft:the_end'...
+[19:30:56 INFO]: Loading 0 persistent chunks for level 'minecraft:overworld'...
+[19:30:56 INFO]: Preparing spawn area: 100%
+[19:30:56 INFO]: Prepared spawn area in 5356 ms
+[19:30:56 INFO]: Loading 0 persistent chunks for level 'minecraft:the_nether'...
+[19:30:56 INFO]: Preparing spawn area: 100%
+[19:30:56 INFO]: Prepared spawn area in 1155 ms
+[19:30:56 INFO]: Loading 0 persistent chunks for level 'minecraft:the_end'...
+[19:30:56 INFO]: Preparing spawn area: 100%
+[19:30:56 INFO]: Prepared spawn area in 222 ms
+[19:30:56 INFO]: Done preparing level "world" (5.675s)
+[19:30:56 INFO]: [spark] Starting background profiler...
+[19:30:57 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:overworld
+[19:30:57 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_nether
+[19:30:57 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_end
+[19:30:57 INFO]: Running delayed init tasks
+[19:30:57 INFO]: Done (17.994s)! For help, type "help"
+[19:30:57 INFO]: *************************************************************************************
+[19:30:57 INFO]: This is the first time you're starting this server.
+[19:30:57 INFO]: It's recommended you read our 'Getting Started' documentation for guidance.
+[19:30:57 INFO]: View this and more helpful information here: https://docs.papermc.io/paper/next-steps
+[19:30:57 INFO]: *************************************************************************************
+[c-LoD] c-LoD JNI bridge resolved: true
+[c-LoD] c-LoD atlas world: world
+[19:30:57 INFO]: [c-LoD] c-LoD JNI bridge resolved: true
+[19:30:57 INFO]: [c-LoD] c-LoD atlas world: world
+[19:31:07 ERROR]: --- DO NOT REPORT THIS TO PAPER - THIS IS NOT A BUG OR A CRASH  - 26.3-211-2d602d6 (MC: 26.3) ---
+[19:31:07 ERROR]: The server has not responded for 10 seconds! Creating thread dump
+[19:31:07 ERROR]: ------------------------------
+[19:31:07 ERROR]: Server thread dump (Look for plugins here before reporting to Paper!):
+[19:31:07 ERROR]: [ChunkTaskScheduler] Chunk wait task info below: 
+[19:31:07 ERROR]: [ChunkTaskScheduler] Chunk wait: [( -1,2) in 'minecraft:overworld']
+[19:31:07 ERROR]: [ChunkTaskScheduler] Chunk holder: NewChunkHolder{world=minecraft:overworld, chunkX=-1, chunkZ=2, entityChunkFromDisk=false, lastChunkCompletion={chunk_class=net.minecraft.world.level.chunk.ProtoChunk,status=minecraft:spawn}, currentGenStatus=minecraft:spawn, requestedGenStatus=minecraft:full, generationTask=ChunkProgressionTask{class: ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkFullTask, for world: minecraft:overworld, chunk: (-1,2), hashcode: 1161387872, priority: BLOCKING, status: minecraft:full, scheduled: true}, generationTaskStatus=minecraft:full, priority=BLOCKING, priorityLocked=false, neighbourRequestedPriority=null, effective_priority=BLOCKING, oldTicketLevel=31, currentTicketLevel=31, totalNeighboursUsingThisChunk=21, fullNeighbourChunksLoadedBitset=3247343, currentChunkStatus=INACCESSIBLE, pendingChunkStatus=INACCESSIBLE, is_unload_safe=ticket_level, killed=false}
+[19:31:07 ERROR]: ------------------------------
+[19:31:07 ERROR]: Current Thread: Server thread
+[19:31:07 ERROR]: 	PID: 182 | Suspended: false | Native: false | State: TIMED_WAITING
+[19:31:07 ERROR]: 	Stack:
+[19:31:07 ERROR]: 		java.base@25.0.4.1/jdk.internal.misc.Unsafe.park(Native Method)
+[19:31:07 ERROR]: 		java.base@25.0.4.1/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:271)
+[19:31:07 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.waitForTasks(BlockableEventLoop.java:202)
+[19:31:07 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.managedBlock(BlockableEventLoop.java:192)
+[19:31:07 ERROR]: 		net.minecraft.server.level.ServerChunkCache.syncLoad(ServerChunkCache.java:123)
+[19:31:07 ERROR]: 		net.minecraft.server.level.ServerChunkCache.getChunkFallback(ServerChunkCache.java:157)
+[19:31:07 ERROR]: 		net.minecraft.server.level.ServerChunkCache.getChunk(ServerChunkCache.java:318)
+[19:31:07 ERROR]: 		net.minecraft.world.level.Level.getChunk(Level.java:977)
+[19:31:07 ERROR]: 		net.minecraft.server.level.ServerLevel.setChunkForced(ServerLevel.java:2643)
+[19:31:07 ERROR]: 		org.bukkit.craftbukkit.CraftWorld.setChunkForceLoaded(CraftWorld.java:646)
+[19:31:07 ERROR]: 		dev.dist.SdkNativeRunnable7fde503fdd70.run(Native Method)
+[19:31:07 ERROR]: 		net.minecraft.server.TickTask.run(TickTask.java:18)
+[19:31:07 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.doRunTask(BlockableEventLoop.java:207)
+[19:31:07 ERROR]: 		net.minecraft.util.thread.ReentrantBlockableEventLoop.doRunTask(ReentrantBlockableEventLoop.java:24)
+[19:31:07 ERROR]: 		net.minecraft.server.MinecraftServer.doRunTask(MinecraftServer.java:1518)
+[19:31:07 ERROR]: 		net.minecraft.server.MinecraftServer.doRunTask(MinecraftServer.java:190)
+[19:31:07 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.pollTask(BlockableEventLoop.java:182)
+[19:31:07 ERROR]: 		net.minecraft.server.MinecraftServer.pollTaskInternal(MinecraftServer.java:1498)
+[19:31:07 ERROR]: 		net.minecraft.server.MinecraftServer.pollTask(MinecraftServer.java:1492)
+[19:31:07 ERROR]: 		net.minecraft.server.MinecraftServer.recordTaskExecutionTimeWhileWaiting(MinecraftServer.java:1221)
+[19:31:07 ERROR]: 		net.minecraft.server.MinecraftServer.runServer(MinecraftServer.java:1338)
+[19:31:07 ERROR]: 		net.minecraft.server.MinecraftServer.lambda$spin$0(MinecraftServer.java:299)
+[19:31:07 ERROR]: 		net.minecraft.server.MinecraftServer$$Lambda/0x0000000005095518.run(Unknown Source)
+[19:31:07 ERROR]: 		java.base@25.0.4.1/java.lang.Thread.runWith(Thread.java:1487)
+[19:31:07 ERROR]: 		java.base@25.0.4.1/java.lang.Thread.run(Thread.java:1474)
+[19:31:07 ERROR]: ------------------------------
+[19:31:07 ERROR]: --- DO NOT REPORT THIS TO PAPER - THIS IS NOT A BUG OR A CRASH ---
+[19:31:07 ERROR]: ------------------------------
+[19:31:11 WARN]: [spark] Timed out waiting for world statistics
+[19:31:12 ERROR]: --- DO NOT REPORT THIS TO PAPER - THIS IS NOT A BUG OR A CRASH  - 26.3-211-2d602d6 (MC: 26.3) ---
+[19:31:12 ERROR]: The server has not responded for 15 seconds! Creating thread dump
+[19:31:12 ERROR]: ------------------------------
+[19:31:12 ERROR]: Server thread dump (Look for plugins here before reporting to Paper!):
+[19:31:12 ERROR]: [ChunkTaskScheduler] Chunk wait task info below: 
+[19:31:12 ERROR]: [ChunkTaskScheduler] Chunk wait: [( 6,4) in 'minecraft:overworld']
+[19:31:12 ERROR]: [ChunkTaskScheduler] Chunk holder: NewChunkHolder{world=minecraft:overworld, chunkX=6, chunkZ=4, entityChunkFromDisk=false, lastChunkCompletion={chunk_class=net.minecraft.world.level.chunk.ProtoChunk,status=minecraft:initialize_light}, currentGenStatus=minecraft:initialize_light, requestedGenStatus=minecraft:full, generationTask=null, generationTaskStatus=null, priority=BLOCKING, priorityLocked=false, neighbourRequestedPriority=null, effective_priority=BLOCKING, oldTicketLevel=31, currentTicketLevel=31, totalNeighboursUsingThisChunk=9, fullNeighbourChunksLoadedBitset=3247335, currentChunkStatus=INACCESSIBLE, pendingChunkStatus=INACCESSIBLE, is_unload_safe=ticket_level, killed=false}
+[19:31:12 ERROR]: ------------------------------
+[19:31:12 ERROR]: Current Thread: Server thread
+[19:31:12 ERROR]: 	PID: 182 | Suspended: false | Native: false | State: TIMED_WAITING
+[19:31:12 ERROR]: 	Stack:
+[19:31:12 ERROR]: 		java.base@25.0.4.1/jdk.internal.misc.Unsafe.park(Native Method)
+[19:31:12 ERROR]: 		java.base@25.0.4.1/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:271)
+[19:31:12 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.waitForTasks(BlockableEventLoop.java:202)
+[19:31:12 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.managedBlock(BlockableEventLoop.java:192)
+[19:31:12 ERROR]: 		net.minecraft.server.level.ServerChunkCache.syncLoad(ServerChunkCache.java:123)
+[19:31:12 ERROR]: 		net.minecraft.server.level.ServerChunkCache.getChunkFallback(ServerChunkCache.java:157)
+[19:31:12 ERROR]: 		net.minecraft.server.level.ServerChunkCache.getChunk(ServerChunkCache.java:318)
+[19:31:12 ERROR]: 		net.minecraft.world.level.Level.getChunk(Level.java:977)
+[19:31:12 ERROR]: 		net.minecraft.server.level.ServerLevel.setChunkForced(ServerLevel.java:2643)
+[19:31:12 ERROR]: 		org.bukkit.craftbukkit.CraftWorld.setChunkForceLoaded(CraftWorld.java:646)
+[19:31:12 ERROR]: 		dev.dist.SdkNativeRunnable7fde503fdd70.run(Native Method)
+[19:31:12 ERROR]: 		net.minecraft.server.TickTask.run(TickTask.java:18)
+[19:31:12 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.doRunTask(BlockableEventLoop.java:207)
+[19:31:12 ERROR]: 		net.minecraft.util.thread.ReentrantBlockableEventLoop.doRunTask(ReentrantBlockableEventLoop.java:24)
+[19:31:12 ERROR]: 		net.minecraft.server.MinecraftServer.doRunTask(MinecraftServer.java:1518)
+[19:31:12 ERROR]: 		net.minecraft.server.MinecraftServer.doRunTask(MinecraftServer.java:190)
+[19:31:12 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.pollTask(BlockableEventLoop.java:182)
+[19:31:12 ERROR]: 		net.minecraft.server.MinecraftServer.pollTaskInternal(MinecraftServer.java:1498)
+[19:31:12 ERROR]: 		net.minecraft.server.MinecraftServer.pollTask(MinecraftServer.java:1492)
+[19:31:12 ERROR]: 		net.minecraft.server.MinecraftServer.recordTaskExecutionTimeWhileWaiting(MinecraftServer.java:1221)
+[19:31:12 ERROR]: 		net.minecraft.server.MinecraftServer.runServer(MinecraftServer.java:1338)
+[19:31:12 ERROR]: 		net.minecraft.server.MinecraftServer.lambda$spin$0(MinecraftServer.java:299)
+[19:31:12 ERROR]: 		net.minecraft.server.MinecraftServer$$Lambda/0x0000000005095518.run(Unknown Source)
+[19:31:12 ERROR]: 		java.base@25.0.4.1/java.lang.Thread.runWith(Thread.java:1487)
+[19:31:12 ERROR]: 		java.base@25.0.4.1/java.lang.Thread.run(Thread.java:1474)
+[19:31:12 ERROR]: ------------------------------
+[19:31:12 ERROR]: --- DO NOT REPORT THIS TO PAPER - THIS IS NOT A BUG OR A CRASH ---
+[19:31:12 ERROR]: ------------------------------
+[c-LoD] c-LoD core force-loaded: 17x17 chunks around atlas center (289 ok) — isChunkLoaded(0,0)=Some(true), height(0,0)=Some(63) — released at finalize
+[19:31:13 INFO]: [c-LoD] c-LoD core force-loaded: 17x17 chunks around atlas center (289 ok) — isChunkLoaded(0,0)=Some(true), height(0,0)=Some(63) — released at finalize
+[19:31:17 ERROR]: --- DO NOT REPORT THIS TO PAPER - THIS IS NOT A BUG OR A CRASH  - 26.3-211-2d602d6 (MC: 26.3) ---
+[19:31:17 ERROR]: The server has not responded for 20 seconds! Creating thread dump
+[19:31:17 ERROR]: ------------------------------
+[19:31:17 ERROR]: Server thread dump (Look for plugins here before reporting to Paper!):
+[19:31:17 ERROR]: [ChunkTaskScheduler] Chunk wait task info below: 
+[19:31:17 ERROR]: [ChunkTaskScheduler] Chunk wait: [( -6,-15) in 'minecraft:overworld']
+[19:31:17 ERROR]: [ChunkTaskScheduler] Chunk holder: NewChunkHolder{world=minecraft:overworld, chunkX=-6, chunkZ=-15, entityChunkFromDisk=false, lastChunkCompletion={chunk_class=net.minecraft.world.level.chunk.ProtoChunk,status=minecraft:initialize_light}, currentGenStatus=minecraft:initialize_light, requestedGenStatus=minecraft:full, generationTask=null, generationTaskStatus=null, priority=BLOCKING, priorityLocked=false, neighbourRequestedPriority=null, effective_priority=BLOCKING, oldTicketLevel=31, currentTicketLevel=31, totalNeighboursUsingThisChunk=25, fullNeighbourChunksLoadedBitset=4064, currentChunkStatus=INACCESSIBLE, pendingChunkStatus=INACCESSIBLE, is_unload_safe=ticket_level, killed=false}
+[19:31:17 ERROR]: ------------------------------
+[19:31:17 ERROR]: Current Thread: Server thread
+[19:31:17 ERROR]: 	PID: 182 | Suspended: false | Native: false | State: TIMED_WAITING
+[19:31:17 ERROR]: 	Stack:
+[19:31:17 ERROR]: 		java.base@25.0.4.1/jdk.internal.misc.Unsafe.park(Native Method)
+[19:31:17 ERROR]: 		java.base@25.0.4.1/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:271)
+[19:31:17 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.waitForTasks(BlockableEventLoop.java:202)
+[19:31:17 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.managedBlock(BlockableEventLoop.java:192)
+[19:31:17 ERROR]: 		net.minecraft.server.level.ServerChunkCache.syncLoad(ServerChunkCache.java:123)
+[19:31:17 ERROR]: 		net.minecraft.server.level.ServerChunkCache.getChunkFallback(ServerChunkCache.java:157)
+[19:31:17 ERROR]: 		net.minecraft.server.level.ServerChunkCache.getChunk(ServerChunkCache.java:318)
+[19:31:17 ERROR]: 		net.minecraft.world.level.Level.getChunk(Level.java:977)
+[19:31:17 ERROR]: 		net.minecraft.server.level.ServerLevel.setChunkForced(ServerLevel.java:2643)
+[19:31:17 ERROR]: 		org.bukkit.craftbukkit.CraftWorld.setChunkForceLoaded(CraftWorld.java:646)
+[19:31:17 ERROR]: 		dev.dist.SdkNativeRunnable7fde503fdd70.run(Native Method)
+[19:31:17 ERROR]: 		net.minecraft.server.TickTask.run(TickTask.java:18)
+[19:31:17 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.doRunTask(BlockableEventLoop.java:207)
+[19:31:17 ERROR]: 		net.minecraft.util.thread.ReentrantBlockableEventLoop.doRunTask(ReentrantBlockableEventLoop.java:24)
+[19:31:17 ERROR]: 		net.minecraft.server.MinecraftServer.doRunTask(MinecraftServer.java:1518)
+[19:31:17 ERROR]: 		net.minecraft.server.MinecraftServer.doRunTask(MinecraftServer.java:190)
+[19:31:17 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.pollTask(BlockableEventLoop.java:182)
+[19:31:17 ERROR]: 		net.minecraft.server.MinecraftServer.pollTaskInternal(MinecraftServer.java:1498)
+[19:31:17 ERROR]: 		net.minecraft.server.MinecraftServer.pollTask(MinecraftServer.java:1492)
+[19:31:17 ERROR]: 		net.minecraft.server.MinecraftServer.recordTaskExecutionTimeWhileWaiting(MinecraftServer.java:1221)
+[19:31:17 ERROR]: 		net.minecraft.server.MinecraftServer.runServer(MinecraftServer.java:1338)
+[19:31:17 ERROR]: 		net.minecraft.server.MinecraftServer.lambda$spin$0(MinecraftServer.java:299)
+[19:31:17 ERROR]: 		net.minecraft.server.MinecraftServer$$Lambda/0x0000000005095518.run(Unknown Source)
+[19:31:17 ERROR]: 		java.base@25.0.4.1/java.lang.Thread.runWith(Thread.java:1487)
+[19:31:17 ERROR]: 		java.base@25.0.4.1/java.lang.Thread.run(Thread.java:1474)
+[19:31:17 ERROR]: ------------------------------
+[19:31:17 ERROR]: --- DO NOT REPORT THIS TO PAPER - THIS IS NOT A BUG OR A CRASH ---
+[19:31:17 ERROR]: ------------------------------
+[c-LoD] scan: tick 0, atlas v1025 (1024/16384 cells chunks 64/1024), ok=1024 unloaded=0 err=0
+[19:31:17 INFO]: [c-LoD] scan: tick 0, atlas v1025 (1024/16384 cells chunks 64/1024), ok=1024 unloaded=0 err=0
+[19:31:21 WARN]: [spark] Timed out waiting for world statistics
+[19:31:22 ERROR]: --- DO NOT REPORT THIS TO PAPER - THIS IS NOT A BUG OR A CRASH  - 26.3-211-2d602d6 (MC: 26.3) ---
+[19:31:22 ERROR]: The server has not responded for 25 seconds! Creating thread dump
+[19:31:22 ERROR]: ------------------------------
+[19:31:22 ERROR]: Server thread dump (Look for plugins here before reporting to Paper!):
+[19:31:22 ERROR]: [ChunkTaskScheduler] Chunk wait task info below: 
+[19:31:22 ERROR]: [ChunkTaskScheduler] Chunk wait: [( 15,-3) in 'minecraft:overworld']
+[19:31:22 ERROR]: [ChunkTaskScheduler] Chunk holder: NewChunkHolder{world=minecraft:overworld, chunkX=15, chunkZ=-3, entityChunkFromDisk=false, lastChunkCompletion={chunk_class=net.minecraft.world.level.chunk.ProtoChunk,status=minecraft:initialize_light}, currentGenStatus=minecraft:initialize_light, requestedGenStatus=minecraft:full, generationTask=null, generationTaskStatus=null, priority=BLOCKING, priorityLocked=false, neighbourRequestedPriority=null, effective_priority=BLOCKING, oldTicketLevel=31, currentTicketLevel=31, totalNeighboursUsingThisChunk=17, fullNeighbourChunksLoadedBitset=3303, currentChunkStatus=INACCESSIBLE, pendingChunkStatus=INACCESSIBLE, is_unload_safe=ticket_level, killed=false}
+[19:31:22 ERROR]: ------------------------------
+[19:31:22 ERROR]: Current Thread: Server thread
+[19:31:22 ERROR]: 	PID: 182 | Suspended: false | Native: false | State: RUNNABLE
+[19:31:22 ERROR]: 	Stack:
+[19:31:22 ERROR]: 		java.base@25.0.4.1/java.lang.Thread.yield0(Native Method)
+[19:31:22 ERROR]: 		java.base@25.0.4.1/java.lang.Thread.yield(Thread.java:462)
+[19:31:22 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.waitForTasks(BlockableEventLoop.java:201)
+[19:31:22 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.managedBlock(BlockableEventLoop.java:192)
+[19:31:22 ERROR]: 		net.minecraft.server.level.ServerChunkCache.syncLoad(ServerChunkCache.java:123)
+[19:31:22 ERROR]: 		net.minecraft.server.level.ServerChunkCache.getChunkFallback(ServerChunkCache.java:157)
+[19:31:22 ERROR]: 		net.minecraft.server.level.ServerChunkCache.getChunk(ServerChunkCache.java:318)
+[19:31:22 ERROR]: 		net.minecraft.world.level.Level.getChunk(Level.java:977)
+[19:31:22 ERROR]: 		net.minecraft.server.level.ServerLevel.setChunkForced(ServerLevel.java:2643)
+[19:31:22 ERROR]: 		org.bukkit.craftbukkit.CraftWorld.setChunkForceLoaded(CraftWorld.java:646)
+[19:31:22 ERROR]: 		dev.dist.SdkNativeRunnable7fde503fdd70.run(Native Method)
+[19:31:22 ERROR]: 		net.minecraft.server.TickTask.run(TickTask.java:18)
+[19:31:22 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.doRunTask(BlockableEventLoop.java:207)
+[19:31:22 ERROR]: 		net.minecraft.util.thread.ReentrantBlockableEventLoop.doRunTask(ReentrantBlockableEventLoop.java:24)
+[19:31:22 ERROR]: 		net.minecraft.server.MinecraftServer.doRunTask(MinecraftServer.java:1518)
+[19:31:22 ERROR]: 		net.minecraft.server.MinecraftServer.doRunTask(MinecraftServer.java:190)
+[19:31:22 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.runTaskIf(BlockableEventLoop.java:74)
+[19:31:22 ERROR]: 		net.minecraft.server.MinecraftServer.runAllTasksAtTickStart(MinecraftServer.java:1169)
+[19:31:22 ERROR]: 		net.minecraft.server.MinecraftServer.processPacketsAndTick(MinecraftServer.java:1661)
+[19:31:22 ERROR]: 		net.minecraft.server.MinecraftServer.runServer(MinecraftServer.java:1332)
+[19:31:22 ERROR]: 		net.minecraft.server.MinecraftServer.lambda$spin$0(MinecraftServer.java:299)
+[19:31:22 ERROR]: 		net.minecraft.server.MinecraftServer$$Lambda/0x0000000005095518.run(Unknown Source)
+[19:31:22 ERROR]: 		java.base@25.0.4.1/java.lang.Thread.runWith(Thread.java:1487)
+[19:31:22 ERROR]: 		java.base@25.0.4.1/java.lang.Thread.run(Thread.java:1474)
+[19:31:22 ERROR]: ------------------------------
+[19:31:22 ERROR]: --- DO NOT REPORT THIS TO PAPER - THIS IS NOT A BUG OR A CRASH ---
+[19:31:22 ERROR]: ------------------------------
+[19:31:27 ERROR]: --- DO NOT REPORT THIS TO PAPER - THIS IS NOT A BUG OR A CRASH  - 26.3-211-2d602d6 (MC: 26.3) ---
+[19:31:27 ERROR]: The server has not responded for 30 seconds! Creating thread dump
+[19:31:27 ERROR]: ------------------------------
+[19:31:27 ERROR]: Server thread dump (Look for plugins here before reporting to Paper!):
+[19:31:27 ERROR]: [ChunkTaskScheduler] Chunk wait task info below: 
+[19:31:27 ERROR]: [ChunkTaskScheduler] Chunk wait: [( 11,11) in 'minecraft:overworld']
+[19:31:27 ERROR]: [ChunkTaskScheduler] Chunk holder: NewChunkHolder{world=minecraft:overworld, chunkX=11, chunkZ=11, entityChunkFromDisk=false, lastChunkCompletion={chunk_class=net.minecraft.world.level.chunk.ProtoChunk,status=minecraft:initialize_light}, currentGenStatus=minecraft:initialize_light, requestedGenStatus=minecraft:full, generationTask=null, generationTaskStatus=null, priority=BLOCKING, priorityLocked=false, neighbourRequestedPriority=null, effective_priority=BLOCKING, oldTicketLevel=31, currentTicketLevel=31, totalNeighboursUsingThisChunk=7, fullNeighbourChunksLoadedBitset=4095, currentChunkStatus=INACCESSIBLE, pendingChunkStatus=INACCESSIBLE, is_unload_safe=ticket_level, killed=false}
+[19:31:27 ERROR]: ------------------------------
+[19:31:27 ERROR]: Current Thread: Server thread
+[19:31:27 ERROR]: 	PID: 182 | Suspended: false | Native: false | State: TIMED_WAITING
+[19:31:27 ERROR]: 	Stack:
+[19:31:27 ERROR]: 		java.base@25.0.4.1/jdk.internal.misc.Unsafe.park(Native Method)
+[19:31:27 ERROR]: 		java.base@25.0.4.1/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:271)
+[19:31:27 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.waitForTasks(BlockableEventLoop.java:202)
+[19:31:27 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.managedBlock(BlockableEventLoop.java:192)
+[19:31:27 ERROR]: 		net.minecraft.server.level.ServerChunkCache.syncLoad(ServerChunkCache.java:123)
+[19:31:27 ERROR]: 		net.minecraft.server.level.ServerChunkCache.getChunkFallback(ServerChunkCache.java:157)
+[19:31:27 ERROR]: 		net.minecraft.server.level.ServerChunkCache.getChunk(ServerChunkCache.java:318)
+[19:31:27 ERROR]: 		net.minecraft.world.level.Level.getChunk(Level.java:977)
+[19:31:27 ERROR]: 		net.minecraft.server.level.ServerLevel.setChunkForced(ServerLevel.java:2643)
+[19:31:27 ERROR]: 		org.bukkit.craftbukkit.CraftWorld.setChunkForceLoaded(CraftWorld.java:646)
+[19:31:27 ERROR]: 		dev.dist.SdkNativeRunnable7fde503fdd70.run(Native Method)
+[19:31:27 ERROR]: 		net.minecraft.server.TickTask.run(TickTask.java:18)
+[19:31:27 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.doRunTask(BlockableEventLoop.java:207)
+[19:31:27 ERROR]: 		net.minecraft.util.thread.ReentrantBlockableEventLoop.doRunTask(ReentrantBlockableEventLoop.java:24)
+[19:31:27 ERROR]: 		net.minecraft.server.MinecraftServer.doRunTask(MinecraftServer.java:1518)
+[19:31:27 ERROR]: 		net.minecraft.server.MinecraftServer.doRunTask(MinecraftServer.java:190)
+[19:31:27 ERROR]: 		net.minecraft.util.thread.BlockableEventLoop.runTaskIf(BlockableEventLoop.java:74)
+[19:31:27 ERROR]: 		net.minecraft.server.MinecraftServer.runAllTasksAtTickStart(MinecraftServer.java:1169)
+[19:31:27 ERROR]: 		net.minecraft.server.MinecraftServer.processPacketsAndTick(MinecraftServer.java:1661)
+[19:31:27 ERROR]: 		net.minecraft.server.MinecraftServer.runServer(MinecraftServer.java:1332)
+[19:31:27 ERROR]: 		net.minecraft.server.MinecraftServer.lambda$spin$0(MinecraftServer.java:299)
+[19:31:27 ERROR]: 		net.minecraft.server.MinecraftServer$$Lambda/0x0000000005095518.run(Unknown Source)
+[19:31:27 ERROR]: 		java.base@25.0.4.1/java.lang.Thread.runWith(Thread.java:1487)
+[19:31:27 ERROR]: 		java.base@25.0.4.1/java.lang.Thread.run(Thread.java:1474)
+[19:31:27 ERROR]: ------------------------------
+[19:31:27 ERROR]: --- DO NOT REPORT THIS TO PAPER - THIS IS NOT A BUG OR A CRASH ---
+[19:31:27 ERROR]: ------------------------------
+[19:31:31 WARN]: [spark] Timed out waiting for world statistics
+[19:31:32 INFO]: [c-LoD] scan: tick 25, atlas v16385 (16384/16384 cells chunks 1024/1024), ok=16384 unloaded=0 err=0
+[c-LoD] scan: tick 25, atlas v16385 (16384/16384 cells chunks 1024/1024), ok=16384 unloaded=0 err=0
+[c-LoD] scan: tick 50, atlas v16385 (16384/16384 cells chunks 1024/1024), ok=16384 unloaded=0 err=0
+[c-LoD] scan: tick 75, atlas v16385 (16384/16384 cells chunks 1024/1024), ok=16384 unloaded=0 err=0
+[c-LoD] scan: tick 100, atlas v16385 (16384/16384 cells chunks 1024/1024), ok=16384 unloaded=0 err=0
+[c-LoD] scan: tick 125, atlas v16385 (16384/16384 cells chunks 1024/1024), ok=16384 unloaded=0 err=0
+[19:31:32 INFO]: [c-LoD] scan: tick 50, atlas v16385 (16384/16384 cells chunks 1024/1024), ok=16384 unloaded=0 err=0
+[19:31:32 INFO]: [c-LoD] scan: tick 75, atlas v16385 (16384/16384 cells chunks 1024/1024), ok=16384 unloaded=0 err=0
+[19:31:32 INFO]: [c-LoD] scan: tick 100, atlas v16385 (16384/16384 cells chunks 1024/1024), ok=16384 unloaded=0 err=0
+[19:31:32 INFO]: [c-LoD] scan: tick 125, atlas v16385 (16384/16384 cells chunks 1024/1024), ok=16384 unloaded=0 err=0
+[c-LoD] scan: tick 150, atlas v16385 (16384/16384 cells chunks 1024/1024), ok=16384 unloaded=0 err=0
+[19:31:32 INFO]: [c-LoD] scan: tick 150, atlas v16385 (16384/16384 cells chunks 1024/1024), ok=16384 unloaded=0 err=0
+[c-LoD] c-LoD atlas snapshot saved: c-LoD-atlas.bin (16384 cells, 131100 bytes)
+[19:31:32 INFO]: [c-LoD] c-LoD atlas snapshot saved: c-LoD-atlas.bin (16384 cells, 131100 bytes)
+[c-LoD] c-LoD pack finalized (ONE-TIME, static): 16384/16384 cells (100%), 1577422 bytes, sha1 ee73f896ce867c0c4bb64d5877df5c90da73ca56
+[19:31:32 INFO]: [c-LoD] c-LoD pack finalized (ONE-TIME, static): 16384/16384 cells (100%), 1577422 bytes, sha1 ee73f896ce867c0c4bb64d5877df5c90da73ca56
+[19:31:32 INFO]: [c-LoD] c-LoD core force-load released (289 chunks) — static snapshot retained
+[c-LoD] c-LoD core force-load released (289 chunks) — static snapshot retained
+[crussty-runtime] transform 'net/minecraft/network/PacketDecoder' failed; class runs untransformed: StackMapTable entry #0 (full_frame local) [head 00 05 ff 00 1d 00 05 07 00 08 07 00 38 07 00 0e 07 00 65 01 00 01 07 00 21 fd 00 12 00 07 00 21 ff 00 02 00 06 07 00 08 07 00 38 07 00 0e 07 00 65 01 07 00 1f 00 00 fc]: unknown verification_type_info tag 56 (near [00 05 ff 00 1d 00 05 07 00 08 07 00] at abs 12 )
+[crussty-runtime] transform 'net/minecraft/network/PacketEncoder' failed; class runs untransformed: StackMapTable entry #3 (full_frame local) [head 00 09 fd 00 7e 07 00 d6 01 3c 0a ff 00 07 00 05 07 00 08 07 00 18 07 00 0e 07 00 44 07 00 d6 00 01 07 00 97 fc 00 22 07 00 97 ff 00 02 00 05 07 00 08 07 00 18 07 00 0e]: unknown verification_type_info tag 24 (near [00 09 fd 00 7e 07 00 d6 01 3c 0a ff 00 07 00 05 07 00 08 07 00] at abs 21 )
+[19:31:54 INFO]: UUID of player Stepan is d1652ad9-77ce-3200-9642-f973c97adf36
+[19:31:56 INFO]: System chat: Stepan joined the game
+[19:31:56 INFO]: Stepan[/127.0.0.1:57430] logged in with entity id 557 at ([minecraft:overworld]8.5, 74.0, -7.5)
+[c-LoD] pack pushed to d1652ad9-77ce-3200-9642-f973c97adf36 (http://10.1.0.203:8199/clod-pack.zip): 1577422 bytes, sha1 ee73f896ce867c0c4bb64d5877df5c90da73ca56
+[19:31:56 INFO]: [c-LoD] pack pushed to d1652ad9-77ce-3200-9642-f973c97adf36 (http://10.1.0.203:8199/clod-pack.zip): 1577422 bytes, sha1 ee73f896ce867c0c4bb64d5877df5c90da73ca56
+[c-LoD] tier Off -> Full for d1652ad9-77ce-3200-9642-f973c97adf36 at (8, -8) world
+[19:31:56 INFO]: [c-LoD] tier Off -> Full for d1652ad9-77ce-3200-9642-f973c97adf36 at (8, -8) world
+[19:32:20 INFO]: System chat: Incorrect argument for command
+gamerule doDaylightCycle false<--[HERE]
+[19:32:20 INFO]: System chat: Set minecraft:overworld to 6000 tick(s)
+[19:32:20 INFO]: System chat: Set the weather to clear
+[19:32:20 INFO]: System chat: Set Stepan's game mode to Spectator Mode
+[19:32:22 INFO]: System chat: Teleported Stepan to 0.500000, 72.000000, 0.500000
+[19:32:26 INFO]: System chat: Teleported Stepan to 0.500000, 96.000000, 0.500000
+[19:32:31 INFO]: System chat: Teleported Stepan to 0.500000, 120.000000, 0.500000
+[19:32:35 INFO]: System chat: Teleported Stepan to 0.500000, 72.000000, 0.500000
+[19:32:40 INFO]: System chat: Teleported Stepan to 0.500000, 72.000000, 0.500000
+[19:32:44 INFO]: System chat: Teleported Stepan to 0.500000, 72.000000, 0.500000
+[19:32:49 INFO]: System chat: Teleported Stepan to 700.500000, 90.000000, 0.500000
+[c-LoD] tier Full -> Veil for d1652ad9-77ce-3200-9642-f973c97adf36 at (700, 0) world
+[19:32:50 INFO]: [c-LoD] tier Full -> Veil for d1652ad9-77ce-3200-9642-f973c97adf36 at (700, 0) world
+[19:32:54 INFO]: System chat: Teleported Stepan to 0.500000, 72.000000, 0.500000
+[19:32:54 INFO]: [c-LoD] tier Veil -> Full for d1652ad9-77ce-3200-9642-f973c97adf36 at (0, 0) world
+[c-LoD] tier Veil -> Full for d1652ad9-77ce-3200-9642-f973c97adf36 at (0, 0) world
+[19:32:59 INFO]: Stepan lost connection: Disconnected
+[19:32:59 INFO]: System chat: Stepan left the game
