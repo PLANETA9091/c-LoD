@@ -5,3 +5,4 @@ Cargo.lock
 *.dylib
 /dist/
 clod.conf
+__pycache__/

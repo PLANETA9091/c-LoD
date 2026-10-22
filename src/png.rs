@@ -1,6 +1,7 @@
 //! Minimal PNG encoder (RGBA8, filter type 0, zlib "stored" deflate blocks).
 //! Used to emit the heightmap atlas into the resource pack. Zero deps.
 
+#[allow(dead_code)] // kept alongside zlib_store for the stored-deflate path
 fn adler32(data: &[u8]) -> u32 {
     let (mut a, mut b) = (1u32, 0u32);
     for &byte in data {
@@ -12,6 +13,7 @@ fn adler32(data: &[u8]) -> u32 {
 
 /// Raw DEFLATE stream with only stored (uncompressed) blocks, wrapped in a
 /// zlib container. Valid for any length.
+#[allow(dead_code)] // superseded by miniz_oxide DEFLATE; used by unit tests
 pub fn zlib_store(data: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(data.len() + data.len() / 65535 * 5 + 16);
     // 0x78 0x01: CM=8 (deflate), 32K window; FCHECK valid (30721 % 31 == 0).
@@ -191,7 +193,11 @@ mod tests {
             for i in 0..stride {
                 let a = if i >= 4 { out[y * stride + i - 4] } else { 0 };
                 let b = if y > 0 { out[(y - 1) * stride + i] } else { 0 };
-                let c = if y > 0 && i >= 4 { out[(y - 1) * stride + i - 4] } else { 0 };
+                let c = if y > 0 && i >= 4 {
+                    out[(y - 1) * stride + i - 4]
+                } else {
+                    0
+                };
                 let pred = match kind {
                     0 => 0,
                     1 => a,
@@ -221,7 +227,9 @@ mod tests {
     #[test]
     fn png_roundtrips_pixels() {
         let (w, h) = (64u32, 32u32);
-        let px: Vec<u8> = (0..(w * h * 4)).map(|i| ((i * 7 + i / 13) % 256) as u8).collect();
+        let px: Vec<u8> = (0..(w * h * 4))
+            .map(|i| ((i * 7 + i / 13) % 256) as u8)
+            .collect();
         let png = encode_png(w, h, &px);
         let (dw, dh, out) = decode(&png);
         assert_eq!((dw, dh), (w, h));
@@ -254,8 +262,7 @@ mod tests {
         let mut p = 8usize; // after signature
         let mut seen = Vec::new();
         while p + 8 <= png.len() {
-            let len =
-                u32::from_be_bytes([png[p], png[p + 1], png[p + 2], png[p + 3]]) as usize;
+            let len = u32::from_be_bytes([png[p], png[p + 1], png[p + 2], png[p + 3]]) as usize;
             let kind = &png[p + 4..p + 8];
             let data = &png[p + 8..p + 8 + len];
             seen.push((String::from_utf8_lossy(kind).to_string(), len));

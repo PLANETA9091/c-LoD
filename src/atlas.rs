@@ -3,7 +3,7 @@
 //!   - height: i16 block Y (decoded from the atlas PNG's R/G channels),
 //!   - water:  bool (sea surface instead of terrain),
 //!   - top:    0xRRGGBB average colour of the block's top face (mip average,
-//!             biome tint applied) — what Voxy's model atlas collapses to,
+//!     biome tint applied) — what Voxy's model atlas collapses to,
 //!   - side:   0xRRGGBB same for the side face, used on cliff/step faces.
 //!
 //! Static-pack lifecycle (v3): the atlas is filled ONCE (JNI budget per tick
@@ -198,7 +198,11 @@ impl Atlas {
                 let cell = snap[z * n + x];
                 let (y16, water, side) = if cell.valid {
                     let h = (i32::from(cell.height) + 64).max(0) << 6;
-                    (h.min(0xFFFF) as u16, cell.water, Self::side_index(&lut, cell.side))
+                    (
+                        h.min(0xFFFF) as u16,
+                        cell.water,
+                        Self::side_index(&lut, cell.side),
+                    )
                 } else {
                     (0, false, 0)
                 };

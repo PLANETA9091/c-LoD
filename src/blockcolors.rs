@@ -2,9 +2,13 @@
 // Per-block average top/side texture colours (mip average, alpha weighted),
 // resolved blockstate -> model -> texture out of the vanilla client jar.
 
+#[allow(dead_code)] // tint table is generated: entries are referenced by ordinal
 pub const TINT_NONE: u8 = 0;
+#[allow(dead_code)]
 pub const TINT_GRASS: u8 = 1;
+#[allow(dead_code)]
 pub const TINT_FOLIAGE: u8 = 2;
+#[allow(dead_code)]
 pub const TINT_WATER: u8 = 3;
 
 /// (block path, top rgb, side rgb, top tint, side tint), sorted by name.
@@ -261,7 +265,13 @@ pub static BLOCK_COLORS: &[(&str, u32, u32, u8, u8)] = &[
     ("cracked_deepslate_bricks", 0x414141, 0x414141, 0, 0),
     ("cracked_deepslate_tiles", 0x353535, 0x353535, 0, 0),
     ("cracked_nether_bricks", 0x281418, 0x281418, 0, 0),
-    ("cracked_polished_blackstone_bricks", 0x2C262C, 0x2C262C, 0, 0),
+    (
+        "cracked_polished_blackstone_bricks",
+        0x2C262C,
+        0x2C262C,
+        0,
+        0,
+    ),
     ("cracked_stone_bricks", 0x767676, 0x767676, 0, 0),
     ("crafter", 0x706364, 0x726D65, 0, 0),
     ("crafting_table", 0x78492A, 0x816A46, 0, 0),
@@ -787,7 +797,13 @@ pub static BLOCK_COLORS: &[(&str, u32, u32, u8, u8)] = &[
     ("polished_blackstone_brick_wall", 0x302B32, 0x302B32, 0, 0),
     ("polished_blackstone_bricks", 0x302B32, 0x302B32, 0, 0),
     ("polished_blackstone_button", 0x353139, 0x353139, 0, 0),
-    ("polished_blackstone_pressure_plate", 0x353139, 0x353139, 0, 0),
+    (
+        "polished_blackstone_pressure_plate",
+        0x353139,
+        0x353139,
+        0,
+        0,
+    ),
     ("polished_blackstone_slab", 0x353139, 0x353139, 0, 0),
     ("polished_blackstone_stairs", 0x353139, 0x353139, 0, 0),
     ("polished_blackstone_wall", 0x353139, 0x353139, 0, 0),
@@ -1160,7 +1176,13 @@ pub static BLOCK_COLORS: &[(&str, u32, u32, u8, u8)] = &[
     ("waxed_exposed_copper_chain", 0x7E6654, 0x7E6654, 0, 0),
     ("waxed_exposed_copper_chest", 0xA17E68, 0xA17E68, 0, 0),
     ("waxed_exposed_copper_door", 0xA47B6A, 0x997664, 0, 0),
-    ("waxed_exposed_copper_golem_statue", 0xA17E68, 0xA17E68, 0, 0),
+    (
+        "waxed_exposed_copper_golem_statue",
+        0xA17E68,
+        0xA17E68,
+        0,
+        0,
+    ),
     ("waxed_exposed_copper_grate", 0xA27E69, 0xA27E69, 0, 0),
     ("waxed_exposed_copper_lantern", 0x96856A, 0x96856A, 0, 0),
     ("waxed_exposed_copper_trapdoor", 0xA17D69, 0xA17D69, 0, 0),
@@ -1176,7 +1198,13 @@ pub static BLOCK_COLORS: &[(&str, u32, u32, u8, u8)] = &[
     ("waxed_oxidized_copper_chain", 0x3E7663, 0x3E7663, 0, 0),
     ("waxed_oxidized_copper_chest", 0x52A385, 0x52A385, 0, 0),
     ("waxed_oxidized_copper_door", 0x52A085, 0x50997F, 0, 0),
-    ("waxed_oxidized_copper_golem_statue", 0x52A385, 0x52A385, 0, 0),
+    (
+        "waxed_oxidized_copper_golem_statue",
+        0x52A385,
+        0x52A385,
+        0,
+        0,
+    ),
     ("waxed_oxidized_copper_grate", 0x52A183, 0x52A183, 0, 0),
     ("waxed_oxidized_copper_lantern", 0x508C70, 0x508C70, 0, 0),
     ("waxed_oxidized_copper_trapdoor", 0x54A184, 0x54A184, 0, 0),
@@ -1191,13 +1219,25 @@ pub static BLOCK_COLORS: &[(&str, u32, u32, u8, u8)] = &[
     ("waxed_weathered_copper_chain", 0x496D5C, 0x496D5C, 0, 0),
     ("waxed_weathered_copper_chest", 0x6C996E, 0x6C996E, 0, 0),
     ("waxed_weathered_copper_door", 0x6E976E, 0x6B8F66, 0, 0),
-    ("waxed_weathered_copper_golem_statue", 0x6C996E, 0x6C996E, 0, 0),
+    (
+        "waxed_weathered_copper_golem_statue",
+        0x6C996E,
+        0x6C996E,
+        0,
+        0,
+    ),
     ("waxed_weathered_copper_grate", 0x6A996F, 0x6A996F, 0, 0),
     ("waxed_weathered_copper_lantern", 0x618765, 0x618765, 0, 0),
     ("waxed_weathered_copper_trapdoor", 0x6D996E, 0x6D996E, 0, 0),
     ("waxed_weathered_cut_copper", 0x6D916C, 0x6D916C, 0, 0),
     ("waxed_weathered_cut_copper_slab", 0x6D916C, 0x6D916C, 0, 0),
-    ("waxed_weathered_cut_copper_stairs", 0x6D916C, 0x6D916C, 0, 0),
+    (
+        "waxed_weathered_cut_copper_stairs",
+        0x6D916C,
+        0x6D916C,
+        0,
+        0,
+    ),
     ("waxed_weathered_lightning_rod", 0x618E69, 0x618E69, 0, 0),
     ("weathered_chiseled_copper", 0x69976F, 0x69976F, 0, 0),
     ("weathered_copper", 0x6C996E, 0x6C996E, 0, 0),
@@ -1266,7 +1306,12 @@ pub fn lookup(path: &str) -> Option<(u32, u32, u8, u8)> {
         .binary_search_by(|e| e.0.cmp(path))
         .ok()
         .map(|i| {
-            (BLOCK_COLORS[i].1, BLOCK_COLORS[i].2, BLOCK_COLORS[i].3, BLOCK_COLORS[i].4)
+            (
+                BLOCK_COLORS[i].1,
+                BLOCK_COLORS[i].2,
+                BLOCK_COLORS[i].3,
+                BLOCK_COLORS[i].4,
+            )
         })
 }
 

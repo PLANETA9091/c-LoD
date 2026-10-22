@@ -191,6 +191,7 @@ struct MatInfo {
 static MAT_CACHE: Mutex<Vec<Option<MatInfo>>> = Mutex::new(Vec::new());
 /// One-entry biome tint cache: the scan walks chunk-major, so consecutive
 /// columns almost always share a biome.
+#[allow(clippy::type_complexity)] // (chunkX, chunkZ) -> (grass, foliage, water) tint triple
 static BIOME_CACHE: Mutex<Option<((i32, i32), (u32, u32, u32))>> = Mutex::new(None);
 
 fn key_ids(env: Env, key: jobject) -> Option<KeyIds> {
@@ -314,11 +315,7 @@ fn biome_tint(env: Env, world: jobject, wid: &WorldIds, x: i32, y: i32, z: i32) 
         }
     }
     let resolved = (|| {
-        let biome = jobj(env.call_object_method(
-            world,
-            wid.m_get_biome,
-            &[ji(x), ji(y), ji(z)],
-        ))?;
+        let biome = jobj(env.call_object_method(world, wid.m_get_biome, &[ji(x), ji(y), ji(z)]))?;
         let bid = biome_ids(env, biome)?;
         let kobj = jobj(env.call_object_method(biome, bid.m_get_key, &[]))?;
         let kid = key_ids(env, kobj)?;
@@ -362,7 +359,8 @@ pub fn sample_column(env: Env, world: jobject, x: i32, z: i32) -> Option<(i32, b
         return Some((y, false, 0x808080, 0x808080));
     }
     let gray = 0x808080u32;
-    let Some(block) = jobj(env.call_object_method(world, wid.m_get_block_at, &[ji(x), ji(y), ji(z)]))
+    let Some(block) =
+        jobj(env.call_object_method(world, wid.m_get_block_at, &[ji(x), ji(y), ji(z)]))
     else {
         clear_if_pending(env);
         return Some((y, false, gray, gray));
@@ -403,7 +401,12 @@ pub fn sample_column(env: Env, world: jobject, x: i32, z: i32) -> Option<(i32, b
         _ => 0xFFFFFF,
     };
     SCAN_OK.fetch_add(1, Ordering::Relaxed);
-    Some((y, liquid, mul_rgb(info.top, t_top), mul_rgb(info.side, t_side)))
+    Some((
+        y,
+        liquid,
+        mul_rgb(info.top, t_top),
+        mul_rgb(info.side, t_side),
+    ))
 }
 
 fn method_or_log(env: Env, cls: jobject, name: &str, sig: &str) -> Option<jmethodID> {
@@ -935,6 +938,7 @@ pub static SCAN_OK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64:
 pub static SCAN_UNLOADED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub static SCAN_ERR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+#[allow(dead_code)] // reserved for the pending-scan probe path
 pub fn sample_height(env: Env, world: jobject, x: i32, z: i32) -> Option<(i32, bool)> {
     use std::sync::atomic::Ordering;
     let wid = world_ids(env, world)?;
