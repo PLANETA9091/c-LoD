@@ -500,7 +500,7 @@ mod tests {
             sky.contains("Bob rows out of the folded projection"),
             "bob extraction missing"
         );
-        assert!(sky.contains("r0 = normalize(vec3(ProjMat")), "ProjMat rows not read");
+        assert!(sky.contains("r0 = normalize(vec3(ProjMat"), "ProjMat rows not read");
         assert!(
             sky.contains("#include <minecraft:projection.glsl>"),
             "ProjMat include missing"
