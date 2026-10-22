@@ -551,7 +551,7 @@ mod tests {
         for len in 3..=258usize {
             let (sym, ebits, eval) = length_code(len);
             let s = (sym - 257) as usize;
-            assert_eq!(ebits, RFC_EBITS[s], "len {len}: ebits");
+            assert_eq!(ebits, u32::from(RFC_EBITS[s]), "len {len}: ebits");
             assert_eq!(RFC_BASE[s] as usize + eval as usize, len, "len {len}: base+extra");
             assert!(
                 (eval as u64) < (1u64 << ebits),
