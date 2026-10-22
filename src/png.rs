@@ -421,7 +421,7 @@ mod tests {
     }
     impl<'a> R<'a> {
         fn bit(&mut self) -> u32 {
-            let b = (self.z[self.p] >> self.bit) & 1;
+            let b = ((self.z[self.p] >> self.bit) & 1) as u32;
             self.bit += 1;
             if self.bit == 8 {
                 self.bit = 0;
@@ -512,7 +512,7 @@ mod tests {
                     }
                 }
             }
-            if bfinal == 1 {
+            if bfinal {
                 break;
             }
         }
