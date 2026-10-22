@@ -115,12 +115,13 @@ vec3 voxy_lightmap(float lightId) {
     // turned sky=15 into sky=1 — 2% brightness, i.e. black LOD).
     float block = floor(lightId / 16.0);
     float sky = lightId - block * 16.0;
-    // Sky term: daylight colour graded by the cell's own sky light. Open sky
-    // (15) keeps the exact good-pack full brightness (0.22 + 0.78*1 = 1.0);
-    // shadowed columns fall toward a 0.22 ambient floor — the Voxy-style
-    // relief shadows without ever going pitch black.
-    vec3 color = vanilla_lightmap0_15(GameTime)
-        * (0.22 + 0.78 * lm_brightness(sky / 15.0));
+    // Sky term: constant DAY light (the good pack's look — LOD terrain reads
+    // bright at any world time; the night-graded GameTime term made LODs go
+    // dark/blue at night, which the user rejected). The cell's own sky light
+    // still grades it: open sky (15) keeps the exact good-pack full
+    // brightness (0.22 + 0.78*1 = 1.0); shadowed columns fall toward a 0.22
+    // ambient floor — Voxy-style relief shadows, never pitch black.
+    vec3 color = vec3(1.0) * (0.22 + 0.78 * lm_brightness(sky / 15.0));
     // BlockLightColor = mix(BlockLightTint, 1, 0.9 * (2b-1)^2), tint = white.
     float b = block / 15.0;
     vec3 blockColor = mix(vec3(1.0), vec3(1.0), 0.9 * (2.0 * b - 1.0) * (2.0 * b - 1.0));
