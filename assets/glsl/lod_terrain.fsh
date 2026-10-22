@@ -186,7 +186,11 @@ float pyrMax(ivec2 cid, int k, int n) {
 }
 
 // The random functions for the fake-texture noise (copied from DH's
-// terrain blaze shader so the look matches).
+// terrain blaze shader so the look matches). v4.2.1: restore the scalar
+// overload — rand(vec3) calls rand(co.z), and without rand(float) the
+// compile dies with 'rand' : no matching overloaded function found, which
+// made MC drop the whole pack on join.
+float rand(float co) { return fract(sin(co * 91.3458) * 47453.5453); }
 float rand(vec2 co) { return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453); }
 float rand(vec3 co) { return rand(co.xy + rand(co.z)); }
 
