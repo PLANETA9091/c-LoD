@@ -265,20 +265,22 @@ mod tests {
     /// target only round-trips bytes, so any layout change must land in all
     /// three shaders AND here.
     mod camchannel {
-        // sky.fsh enc16 / lod_terrain.fsh c16.
+        // sky.fsh enc16 / lod_terrain.fsh c16. The GLSL decoders read the
+        // RGBA8-stored float n/255, so the byte-level mirror is
+        // (hi*256 + lo) / 65535 remapped back to [-1, 1].
         fn enc16(c: f32) -> (u8, u8) {
             let q = (((c + 1.0) * 0.5).clamp(0.0, 1.0) * 65535.0 + 0.5).floor() as u32;
             ((q / 256) as u8, (q % 256) as u8)
         }
         fn c16(hi: u8, lo: u8) -> f32 {
-            ((hi as f32) * 65280.0 + (lo as f32) * 255.0) / 65535.0 * 2.0 - 1.0
+            ((hi as f32) * 256.0 + (lo as f32)) / 65535.0 * 2.0 - 1.0
         }
         // sky.fsh enc8s (signed +-1 over one byte).
         fn enc8s(c: f32) -> u8 {
             (((c + 1.0) * 0.5).clamp(0.0, 1.0) * 255.0 + 0.5).floor() as u8
         }
         fn dec8s(b: u8) -> f32 {
-            (b as f32) * 2.0 - 1.0
+            (b as f32 / 255.0) * 2.0 - 1.0
         }
 
         #[test]
@@ -293,8 +295,9 @@ mod tests {
                 max_err = max_err.max((back - c).abs());
                 c += 0.00005;
             }
-            // One quantization step is 2/65535 ~ 3.05e-5.
-            assert!(max_err <= 3.1e-5, "max roundtrip error {max_err}");
+            // One quantization step is 2/65535 ~ 3.05e-5; float32 rounding
+            // on the decode adds a hair.
+            assert!(max_err <= 3.2e-5, "max roundtrip error {max_err}");
         }
 
         #[test]
@@ -490,9 +493,14 @@ mod tests {
         let sky = String::from_utf8_lossy(sky);
         assert!(sky.contains("camera channel"), "payload marker missing");
         assert!(
-            sky.contains("transpose(mat3(ModelViewMat))"),
+            sky.contains("mat3(ModelViewMat)"),
             "basis source missing"
         );
+        assert!(
+            sky.contains("Bob rows out of the folded projection"),
+            "bob extraction missing"
+        );
+        assert!(sky.contains("r0 = normalize(vec3(ProjMat")), "ProjMat rows not read");
         assert!(
             sky.contains("#include <minecraft:projection.glsl>"),
             "ProjMat include missing"
