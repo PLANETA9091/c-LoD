@@ -573,13 +573,16 @@ mod tests {
         assert_eq!(gpx[og + 1], 0x70);
         assert_eq!(gpx[og + 2], 0x30);
 
-        // pyramid: level 1 (16x16) texel containing the island maxes to 120
+        // pyramid: level 1 (16x16) texel containing the island maxes to 120.
+        // Island cell (ix=5, iz=5) -> level-1 texel (x=2, z=2), written at
+        // px row 2 (level 1 packs from row 0), column 2.
         let (pw, ph, ppx) = a.encode_pyramid();
         assert_eq!((pw, ph), (32, 32));
-        let l1 = (5 * 32 + 2) * 4; // row 0, x=2 covers cells x 4..6
+        let l1 = (2 * 32 + 2) * 4; // row 2, col 2: covers cells x 4..5, z 4..5
         let v = ((ppx[l1] as u16) << 8) | ppx[l1 + 1] as u16;
         assert_eq!(v, ((120 + 64) << 6) as u16);
-        // level 2 starts at row 16; texel x=1 covers cells x 0..4 (no island? island x=5 -> x=4..8 cell 1)
+        // level 2 starts at row 16; texel (x=1, z=1) -> row 17, col 1 covers
+        // level-1 texels x 2..3, z 2..3 — the island is inside.
         let l2 = ((16 + 1) * 32 + 1) * 4;
         let v2 = ((ppx[l2] as u16) << 8) | ppx[l2 + 1] as u16;
         assert_eq!(v2, ((120 + 64) << 6) as u16);
