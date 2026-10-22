@@ -35,12 +35,17 @@ sleep 12
 ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -frames:v 1 "$SHOTS/00_pack_applied.png"
 echo "pack-accept clicked"
 
-# 3. world state: lock NOON (the v4.0-killer scenario) + clear weather
+# 3. world state: lock NOON + clear weather, then the user's reference matrix.
+#    Reference viewpoint (user): seed 4819696040575474753, camera
+#    /execute in minecraft:overworld run tp @s -929.67 173.38 796.37 -856.27 15.40
+#    (yaw -856.27 normalizes to 223.73 = facing NE, pitch 15.40 slightly down)
 srv "gamerule doDaylightCycle false"
 srv "time set 6000"
 srv "weather clear"
 srv "gamemode spectator Stepan"
 sleep 2
+
+UX=-929.67; UY=173.38; UZ=796.37; UYAW=-856.27; UPITCH=15.40
 
 shot() { # name yaw pitch x y z
   srv "tp Stepan $4 $5 $6 $2 $3"
@@ -49,14 +54,23 @@ shot() { # name yaw pitch x y z
   echo "shot $1 (yaw=$2 pitch=$3 at $4,$5,$6)"
 }
 
-shot 01_noon_ground  90  0    0 100 0
-shot 02_noon_high    90  5    0 120 0
-shot 03_noon_aerial  90  15   0 160 0
-shot 04_yaw_south     0  5    0 130 0
-shot 05_yaw_north   180  5    0 130 0
-shot 06_yaw_east    270  5    0 130 0
-shot 07_veil_outside 90 10  700 140 0
-shot 08_back_inside  90  0    0 120 0
+shot 01_user_day    "$UYAW" "$UPITCH" "$UX" "$UY" "$UZ"   # the reference view
+shot 02_yaw_south    0      "$UPITCH" "$UX" "$UY" "$UZ"
+shot 03_yaw_east    90      "$UPITCH" "$UX" "$UY" "$UZ"
+shot 04_yaw_north   180     "$UPITCH" "$UX" "$UY" "$UZ"
+shot 05_aerial      "$UYAW" "$UPITCH" "$UX" 240  "$UZ"    # higher vantage, same heading
+
+srv "time set 12610"   # dusk — vanilla sunset gradient (red-band probe)
+sleep 2
+shot 06_sunset     "$UYAW" "$UPITCH" "$UX" "$UY" "$UZ"
+
+srv "time set 18000"   # midnight — water-glow + veil-darkness probe
+sleep 2
+shot 07_night      "$UYAW" "$UPITCH" "$UX" "$UY" "$UZ"
+
+srv "time set 6000"    # back to noon — sanity that lighting tracks time
+sleep 2
+shot 08_day_return "$UYAW" "$UPITCH" "$UX" "$UY" "$UZ"
 
 echo "=== client log pack markers ==="
 rg -N -i "pack|post" /tmp/client.log | tail -12 || true

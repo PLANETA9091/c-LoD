@@ -26,8 +26,10 @@ fi
 printf 'eula=true\n' > "$D/eula.txt"
 {
   echo 'online-mode=false'
-  echo 'view-distance=4'
-  echo 'simulation-distance=4'
+  # Fixed bench world — the user's reference view lives on this seed
+  echo 'level-seed=4819696040575474753'
+  echo 'view-distance=6'
+  echo 'simulation-distance=6'
   echo 'server-port=25565'
   echo 'spawn-protection=0'
   echo 'white-list=false'
