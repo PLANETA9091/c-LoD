@@ -2,19 +2,26 @@
 #extension GL_ARB_separate_shader_objects : require
 #include <minecraft:globals.glsl>
 
-// c-LoD pass 4 (v4.3.3 "VOXY CORE"): the LOD renderer, with the SUBSTANCE
+// c-LoD pass 4 (v4.4.0 "VOXY CORE"): the LOD renderer, with the SUBSTANCE
 // of Voxy's LOD pipeline (analysis/voxy-e2e.md), not just its colors:
 //
 //   - The height PNG carries the real Voxy mip pyramid: level 0 cells plus
-//     levels 1..4 reduced by the ported Mipper. v4.3.3 marches and renders
-//     the LEVEL-0 field exclusively: Voxy's screen-area detail selection
-//     keeps the finest level while a cell covers more than ~a pixel, and
-//     inside this atlas it always does — the old distance-keyed level
-//     schedule handed 64x64 regions to a single Mipper-picked column, whose
-//     corner pick leaked ocean through canopies, floated trunk tips as flat
-//     bark slabs and sprayed sky dots along every terrace edge. The L0
-//     field is the real scanned surface: real heights, real states, real
-//     light, real tints, no picks, no leaks.
+//     levels 1..4 reduced by the ported Mipper. v4.3.3 marches the LEVEL-0
+//     field exclusively: the old distance-keyed level schedule handed
+//     64x64 regions to a single Mipper-picked column, whose corner pick
+//     leaked ocean through canopies, floated trunk tips as flat bark slabs
+//     and sprayed sky dots along every terrace edge. The L0 field is the
+//     real scanned surface: real heights, no picks, no leaks.
+//   - v4.4.0 SHADING detail selection: geometry stays L0, but the shading
+//     inputs (state tile, gradient normal, tint, light) coarsen through the
+//     SAME pyramid once a surface pixel covers more than one L0 cell
+//     (Voxy's screen-area detail rule). Below that rate every L0 cell is
+//     its own texel and the per-column variety (stone/grass/dirt/leaves on
+//     one mountainside) IS the texture — sub-pixel detail sampled at the
+//     tile rate: the far horizon rendered as 1-px salt-and-pepper mush
+//     (run-30 evidence). Coarsened, neighbouring pixels share one coarse
+//     cell: one state, one face, one tint — the smooth Voxy far masses
+//     (green forests, gray peaks, blue water) with zero data changes.
 //   - Every hit is textured from the blockModelAtlas (baked server-side from
 //     the real vanilla 26.3 block textures): per state 3x2 face tiles +
 //     manual mip strip (16/8/4/2/1 px). The tile grid is WORLD-ANCHORED at
@@ -451,17 +458,12 @@ void main() {
     vec2 local = clamp((hitPos.xz - origin) / size, vec2(0.0), vec2(0.999999));
 
     // ---- data at the hit cell (the RAW L0 scan — v4.3.3) -------------------
-    // The hit cell IS a scanned column: real height, real blockstate, real
-    // light, real biome tint. The mip pyramid above L0 remains in the atlas
-    // (the Mipper strip is part of the format) but the renderer no longer
-    // reads it — every coarse-level pick was a source of the artifacts the
-    // L0 march removed.
     float cellL = cell;
     float h; bool isWater; float sid;
     atlas_cell(0, local, h, isWater, sid);
 
-    // Height-gradient normal over one 4-block cell — 16x finer than the old
-    // L4 gradient: real relief steps, individual canopy crowns, riverbanks.
+    // Provisional L0 height-gradient normal (feeds the grazing factor below;
+    // re-derived at the shading level when one is selected).
     vec2 e = vec2(1.0 / level_cells(0), 0.0);
     float hL; bool wtmp; float stmp;
     atlas_cell(0, clamp(local - e.xy, vec2(0.0), vec2(0.999999)), hL, wtmp, stmp);
@@ -470,12 +472,52 @@ void main() {
     float hU; atlas_cell(0, clamp(local + e.yx, vec2(0.0), vec2(0.999999)), hU, wtmp, stmp);
     vec3 n = normalize(vec3(hL - hR, 2.0 * cellL, hD - hU));
 
+    // ---- screen footprint (quads.frag textureGrad, vanilla scale) ----------
+    // pxSurface is the footprint ALONG THE SURFACE: a ray grazing the
+    // heightfield sweeps pxFoot / |dot(dir,n)| blocks per pixel — without
+    // the grazing factor mountainsides under-mip and alias. tpp < 1 (pixel
+    // smaller than a texel) clamps to mip 0 = vanilla-crisp magnification;
+    // at the far edge tpp >> 16 reaches the strip's 1px average — Voxy's
+    // solid-colour distant terrain.
+    float pxFoot = tHit * (2.0 * tanH / max(OutSize.y, 1.0));
+    float grazing = max(abs(dot(dir, n)), 0.08);
+    float pxSurface = pxFoot / grazing;
+
+    // ---- v4.4.0 SCREEN-AREA SHADING LEVEL ----------------------------------
+    // Voxy's detail rule: keep the finest level while a cell still covers
+    // more than ~a pixel — past that rate the level's own granularity IS
+    // sub-pixel and rendering it per-column aliases into noise. The march
+    // stays L0 (real silhouette), but once a surface pixel spans more than
+    // one L0 cell the shading inputs switch to the pyramid level whose cell
+    // matches the footprint: state/water from the Mipper-max cell (the
+    // region's top surface), the gradient normal over one coarse step, and
+    // tint/light from that group's winner. Neighbouring pixels then share
+    // one state, one face, one tint — smooth far masses instead of the
+    // per-column stone/grass/dirt speckle the far band degraded into.
+    // Discrete like every LOD scheme; the switch ring sits where one cell
+    // ≈ one pixel and is invisible at that rate.
+    float cpp = pxSurface / cell; // L0 cells per surface pixel
+    int Ls = int(clamp(floor(log2(max(cpp, 1.0))), 0.0, 4.0));
+    if (Ls > 0) {
+        float stepBlocks = cell * exp2(float(Ls));
+        atlas_cell(Ls, local, h, isWater, sid);
+        vec2 ec = vec2(1.0 / level_cells(Ls), 0.0);
+        atlas_cell(Ls, clamp(local - ec.xy, vec2(0.0), vec2(0.999999)), hL, wtmp, stmp);
+        atlas_cell(Ls, clamp(local + ec.xy, vec2(0.0), vec2(0.999999)), hR, wtmp, stmp);
+        atlas_cell(Ls, clamp(local - ec.yx, vec2(0.0), vec2(0.999999)), hD, wtmp, stmp);
+        atlas_cell(Ls, clamp(local + ec.yx, vec2(0.0), vec2(0.999999)), hU, wtmp, stmp);
+        n = normalize(vec3(hL - hR, 2.0 * stepBlocks, hD - hU));
+    }
+
     // ---- FACE + TEXTURE (quads.frag math) ----------------------------------
     float face = n.y > 0.577 ? 1.0 : (abs(n.x) > abs(n.z)
         ? (n.x > 0.0 ? 5.0 : 4.0)
         : (n.z > 0.0 ? 3.0 : 2.0));
 
-    vec4 colData = col_fetch(0, local);
+    // Tint + light follow the same level as the state: at Ls > 0 the group's
+    // +x+z winner cell carries the region's biome tint and light id exactly
+    // like the Mipper's own reduction would.
+    vec4 colData = col_fetch(Ls, local);
     float lightId = floor(colData.a * 255.0 + 0.5);
 
     // ---- texture detail (quads.frag textureGrad, vanilla scale) ------------
@@ -494,15 +536,10 @@ void main() {
     //   texels-per-pixel at mip 0 = 16 * pxSurface / TILE_BLOCKS
     //   mip m divides the rate by 2^m; a real GPU trilinearly resolves
     //   m = log2(tpp), blending the two strips around it.
-    // pxSurface is the footprint ALONG THE SURFACE: a ray grazing the
-    // heightfield sweeps pxFoot / |dot(dir,n)| blocks per pixel — without
-    // the grazing factor mountainsides under-mip and alias. tpp < 1 (pixel
-    // smaller than a texel) clamps to mip 0 = vanilla-crisp magnification;
-    // at the far edge tpp >> 16 reaches the strip's 1px average — Voxy's
-    // solid-colour distant terrain.
-    float pxFoot = tHit * (2.0 * tanH / max(OutSize.y, 1.0));
-    float grazing = max(abs(dot(dir, n)), 0.08);
-    float pxSurface = pxFoot / grazing;
+    // pxSurface was computed above from the L0-provisional grazing factor —
+    // the shading-level normal differs only in smooth regions where the
+    // mip is already clamped, so reusing it keeps one footprint for both
+    // the level pick and the strip pick.
     float tpp = 16.0 * pxSurface / TILE_BLOCKS; // texels per pixel at mip 0
     // Continuous LOD for the manual strip: a real GPU trilinearly BLENDS the
     // two mips around the continuous LOD log2(tpp); rounding alone hard-

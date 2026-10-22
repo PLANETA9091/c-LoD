@@ -18,6 +18,12 @@ Image gates (V):
       collapses into a wrong flat band)
   V5  the sub-horizon veil plane is alive (not black) — the posteffect
       actually drew the far-world plane below the horizon
+  V6  the far LOD band is NOT salt-and-pepper mush: v4.3.3's L0-only shading
+      rendered every sub-pixel 2-block cell with its own block tile — the
+      horizon degrades into 1-px stone/grass/dirt speckle (02_noon_high
+      far band, world seed is CI-fixed so the metric is comparable across
+      runs). v4.4.0 screen-area shading coarsens far shading through the
+      mip pyramid: measured speckle 0.21 (mush baseline) -> expect <= 0.13.
 
 Client-log gates (C):
   C1  the server resource pack was accepted/applied
@@ -79,6 +85,13 @@ MIN_DARK = 0.008         # V3: terrain-tone fragments in the horizon band
 MAX_DARK_OUT = 0.50     # V3 inverted: an out-of-window frame must stay mostly clean
 MIN_SKY = 0.50          # V4: measured 89-100% on v4.1.0
 MIN_VEIL_LUMA = 80.0    # V5: measured 156-201 on v4.1.0
+# V6 far-band mush (02_noon_high): fixed crop over the LOD range beyond the
+# vanilla RD, world seed c-LoDCI. Baseline (v4.3.3/v4.3.4, L0 shading) measured
+# 0.21 speckle fraction / mean|d| 32; the screen-area fix should land well
+# under half of that (simulation: 3.2x reduction).
+V6_BOX = (335, 335, 655, 415)  # x0, y0, x1, y1 in the 1280x720 frame
+V6_SPECKLE_MAX = 0.13
+V6_DELTA_MAX = 26.0
 
 
 def read_png(path):
@@ -144,6 +157,13 @@ def luma_at(px, o, ch):
     if ch == 1:
         return px[o]
     return (px[o] * 54 + px[o + 1] * 183 + px[o + 2] * 19) >> 8
+
+
+def luma_triple(px, o, ch):
+    """RGB triple for V6's per-channel mush metric (gray frames replicate)."""
+    if ch == 1:
+        return (px[o], px[o], px[o])
+    return (px[o], px[o + 1], px[o + 2])
 
 
 def is_sky(r, g, b):
@@ -248,6 +268,25 @@ def analyze(name, path):
     else:
         lines.append(
             f"  OK   V5 {name}: sub-horizon alive (luma {veil:.0f}, stddev {vstd:.1f} — far plane or textured LOD ground)")
+
+    # V6: far-band mush (the v4.3.3 L0-only shading regression detector).
+    # Only on the one frame whose far LOD band is guaranteed terrain.
+    if name == "02_noon_high":
+        x0, y0, x1, y1 = V6_BOX
+        rows = []
+        for y in range(y0, y1):
+            row = y * W * ch
+            rows.append([luma_triple(px, row + x * ch, ch) for x in range(x0, x1)])
+        d = [sum(abs(rows[i][x + 1][k] - rows[i][x][k]) for k in range(3))
+             for i in range(len(rows)) for x in range(len(rows[0]) - 1)]
+        mean_d = sum(d) / max(len(d), 1)
+        speckle = sum(1 for v in d if v > 60) / max(len(d), 1)
+        if speckle > V6_SPECKLE_MAX and mean_d > V6_DELTA_MAX:
+            problems.append(
+                f"  FAIL V6 {name}: far band is salt-and-pepper mush (speckle {speckle:.2f} > {V6_SPECKLE_MAX:.2f}, mean|d| {mean_d:.0f} > {V6_DELTA_MAX:.0f}) — shading level not coarsening?")
+        else:
+            lines.append(
+                f"  OK   V6 {name}: far band coherent (speckle {speckle:.2f} <= {V6_SPECKLE_MAX:.2f}, mean|d| {mean_d:.0f} <= {V6_DELTA_MAX:.0f})")
     return not problems, lines + problems
 
 
