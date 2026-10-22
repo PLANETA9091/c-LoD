@@ -2,24 +2,32 @@
 #extension GL_ARB_separate_shader_objects : require
 #include <minecraft:globals.glsl>
 
-// c-LoD pass 4 (v4.3 "VOXY CORE"): the LOD renderer, now with the SUBSTANCE
+// c-LoD pass 4 (v4.3.3 "VOXY CORE"): the LOD renderer, with the SUBSTANCE
 // of Voxy's LOD pipeline (analysis/voxy-e2e.md), not just its colors:
 //
 //   - The height PNG carries the real Voxy mip pyramid: level 0 cells plus
-//     levels 1..4 reduced by the ported Mipper (max-OPACITY corner voxel
-//     keeps its full blockstate id — distant LODs are real blocks, never
-//     averaged colors). The ray marches the level matching its distance,
-//     exactly like Voxy's screen-area detail selection.
+//     levels 1..4 reduced by the ported Mipper. v4.3.3 marches and renders
+//     the LEVEL-0 field exclusively: Voxy's screen-area detail selection
+//     keeps the finest level while a cell covers more than ~a pixel, and
+//     inside this atlas it always does — the old distance-keyed level
+//     schedule handed 64x64 regions to a single Mipper-picked column, whose
+//     corner pick leaked ocean through canopies, floated trunk tips as flat
+//     bark slabs and sprayed sky dots along every terrace edge. The L0
+//     field is the real scanned surface: real heights, real states, real
+//     light, real tints, no picks, no leaks.
 //   - Every hit is textured from the blockModelAtlas (baked server-side from
 //     the real vanilla 26.3 block textures): per state 3x2 face tiles +
-//     manual mip strip (16/8/4/2/1 px). uv = fract(worldXZ / 2^L) gives the
-//     Voxy greedy-quad tiling — ONE texture tile per 2^L-block CELL (the
-//     march level), and the mip follows the screen footprint exactly like
-//     quads.frag's textureGrad (mip = round(log2(16*pxFoot/2^L))): distant
-//     quads auto-blur to the tile's average colour, side faces tile
-//     vertically along world Y.
+//     manual mip strip (16/8/4/2/1 px). The tile grid is WORLD-ANCHORED at
+//     vanilla scale (one 16px tile per 16 blocks = 1 texel/block) and
+//     therefore seamless across whatever geometry the march hits; the mip
+//     follows the true texel rate like quads.frag's textureGrad
+//     (tpp = 16*pxSurface/16, mip = log2(tpp), trilinear across the strip):
+//     distant terrain auto-blurs to the tile's average colour, side faces
+//     tile vertically along world Y.
 //   - Fragment math = Voxy quads.frag: albedo x (lightmap x faceShade) x
-//     biomeTint, cutout discard at alpha <= 0.1, water translucent.
+//     biomeTint, cutout rendered SOLID (every heightfield cell is a merged
+//     quad — makeQuadFlags disables discard for quadSize > 1 — and a
+//     posteffect pixel has no geometry behind it to reveal).
 //     faceShade = vanilla cardinal light: UP 1.0 / N,S 0.8 / E,W 0.6 /
 //     DOWN 0.5 (NormalRenderPipeline cardinalLighting).
 //   - lightmap(b, s) = Ambient + SkyLightColor*brightness(s)*SkyFactor +
@@ -77,10 +85,11 @@ layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 
 const float PI = 3.14159265358979;
-const int MAX_STEPS = 220;
+const int MAX_STEPS = 260;
 const int BISECT = 7;
 const float VOID_Y = -63.5;   // cells below this are unscanned = no data
 const float FADE_START = 0.9; // Voxy: fade begins at 90% of the view radius
+const float TILE_BLOCKS = 16.0; // one 16px texture tile per block (vanilla scale)
 const float DEBUG = __DEBUG__; // 0 off; 1 = sky->vec3(conf,0,0); 2 = hit distance
 
 // ---- vanilla 26.3 lightmap ------------------------------------------------
@@ -325,35 +334,36 @@ void main() {
         dir.y = 1.0e-6;
     }
 
-    // March (Voxy level stepping): level L = floor(log2(t / cell)) clamped
-    // to the pyramid depth; each step samples that level's heightfield with
-    // a stride proportional to the level's cell size.
+    // March on the LEVEL-0 field (v4.3.3). The heightfield is sampled at the
+    // RAW scan resolution (`cell`-block cells) for BOTH the stepping and the
+    // hit — Voxy's screen-area detail selection keeps the finest level while
+    // a cell still covers more than ~a pixel, and inside this atlas it
+    // always does: even at the horizon a 4-block cell spans 384*0.75*2*tanH
+    // / OutSize.y ≈ 1.5 blocks/px on a 360p render — 2.7 px per cell (more
+    // on every real resolution). The old schedule L = floor(log2(t/cell))
+    // ignored the screen metric entirely and reached L4 (64-block cells)
+    // already at lod_near — ONE scanned column then decided the height of a
+    // 64x64 region (the Mipper corner pick): rays sailed over canopies whose
+    // corner column was low (sky-leak rectangles showing the ocean behind),
+    // trunk-tip columns floated as flat bark slabs above the canopy line,
+    // and every height discontinuity sprayed single-pixel vanilla-sky dots
+    // along terrace edges. The L0 field is the real scanned surface — no
+    // pick, no average, no leaks.
     //
     // HIT = ENTRY into the heightfield: above = ground - p.y crosses from
-    // <= 0 (ray point above the surface) to > 0 (ray point under it). The
-    // v4.3-and-earlier test had the signs swapped — it caught the EXIT from
-    // terrain, i.e. the far side of ridges. Consequences: on flat ground the
-    // ray dives below the surface and never exits, so flat/low-relief worlds
-    // rendered NO LOD at all (CI V3 dark-LOD fraction 0.0% on every v4.3
-    // run), and relief worlds rendered back-slopes with inverted lighting.
+    // <= 0 (ray point above the surface) to > 0 (ray point under it).
     float horizon = size * 0.75;
     float t = LodParams.x;
     float tHit = -1.0;
-    int hitL = 0;
 
     // Sample the START point before stepping: the entry test needs a real
     // "above surface" reference. A sentinel would fake a hit at the first
-    // step (> 0) or suppress the first legit entry (< 0).
+    // step (> 0) or suppress the first legit entry (< 0). The START point is
+    // sampled for real (not a sentinel): a sentinel > 0 fakes a hit at the
+    // first step, a sentinel < 0 fakes an entry for rays that are already
+    // inside the heightfield at lod_near (steep-down rays; see the
+    // SKY-LEAK RESCUE below for how those are painted).
     float prevT = t;
-    // The camera stands in AIR above the heightfield: the surface hit is the
-    // air -> underground transition of 'above' (<= 0 -> > 0). v4.3.1-rc
-    // tested the OPPOSITE transition with prevDiff = +1e9, so the very first
-    // sample fired the branch and the bisect collapsed to ~lod_near — every
-    // downward ray got a ghost hit at a fixed distance (the "ghost wall").
-    // The START point is sampled for real (not a sentinel): a sentinel > 0
-    // fakes a hit at the first step, a sentinel < 0 fakes an entry for rays
-    // that are already inside the heightfield at lod_near (steep-down rays;
-    // see the SKY-LEAK RESCUE below for how those are painted).
     float prevDiff;
     // The llvmpipe JIT (CI client + local harness) segfaults on a bool flag
     // kept alive across the march loop together with the rescue assignment
@@ -366,16 +376,13 @@ void main() {
             prevDiff = -1.0; // start off-atlas: open sky, entries ahead are real
             startUnder = 0.0;
         } else {
-            int L0 = int(clamp(floor(log2(max(t, cell) / cell)), 0.0, 4.0));
-            prevDiff = ground_at(L0, local0) - p0.y;
+            prevDiff = ground_at(0, local0) - p0.y;
             startUnder = prevDiff > 0.0 ? 1.0 : 0.0;
         }
     }
 
     for (int i = 0; i < MAX_STEPS; ++i) {
-        int L = int(clamp(floor(log2(max(t, cell) / cell)), 0.0, 4.0));
-        float cellL = cell * exp2(float(L));
-        float dt = max(cellL * 0.35, t * (2.0 * tanH / max(OutSize.y, 1.0)));
+        float dt = max(cell * 0.35, t * (2.0 * tanH / max(OutSize.y, 1.0)));
         prevT = t;
         t = min(t + dt, horizon);
 
@@ -385,7 +392,7 @@ void main() {
         if (any(lessThan(local, vec2(0.0))) || any(greaterThan(local, vec2(1.0)))) {
             break; // left the atlas
         }
-        float above = ground_at(L, local) - p.y;
+        float above = ground_at(0, local) - p.y;
 
         if (above > 0.0 && prevDiff <= 0.0) {
             // lo tracks the air side (ground below the ray), hi the
@@ -397,8 +404,7 @@ void main() {
                 float mid = (lo + hi) * 0.5;
                 vec3 mp = cam + dir * mid;
                 vec2 mlocal = (mp.xz - origin) / size;
-                int mL = int(clamp(floor(log2(max(mid, cell) / cell)), 0.0, 4.0));
-                float g = ground_at(mL, mlocal);
+                float g = ground_at(0, mlocal);
                 if (g - mp.y <= 0.0) {
                     lo = mid;   // still air: the hit is farther
                 } else {
@@ -406,7 +412,6 @@ void main() {
                 }
             }
             tHit = (lo + hi) * 0.5;
-            hitL = int(clamp(floor(log2(max(tHit, cell) / cell)), 0.0, 4.0));
             break;
         }
         prevDiff = above;
@@ -445,19 +450,24 @@ void main() {
     vec3 hitPos = cam + dir * tHit;
     vec2 local = clamp((hitPos.xz - origin) / size, vec2(0.0), vec2(0.999999));
 
-    // ---- data at the hit cell (Voxy Mipper-picked level L) -----------------
-    int L = hitL;
-    float cellL = cell * exp2(float(L));
+    // ---- data at the hit cell (the RAW L0 scan — v4.3.3) -------------------
+    // The hit cell IS a scanned column: real height, real blockstate, real
+    // light, real biome tint. The mip pyramid above L0 remains in the atlas
+    // (the Mipper strip is part of the format) but the renderer no longer
+    // reads it — every coarse-level pick was a source of the artifacts the
+    // L0 march removed.
+    float cellL = cell;
     float h; bool isWater; float sid;
-    atlas_cell(L, local, h, isWater, sid);
+    atlas_cell(0, local, h, isWater, sid);
 
-    // Height-gradient normal at the hit level (Voxy-flat quads).
-    vec2 e = vec2(1.0 / level_cells(L), 0.0);
+    // Height-gradient normal over one 4-block cell — 16x finer than the old
+    // L4 gradient: real relief steps, individual canopy crowns, riverbanks.
+    vec2 e = vec2(1.0 / level_cells(0), 0.0);
     float hL; bool wtmp; float stmp;
-    atlas_cell(L, clamp(local - e.xy, vec2(0.0), vec2(0.999999)), hL, wtmp, stmp);
-    float hR; atlas_cell(L, clamp(local + e.xy, vec2(0.0), vec2(0.999999)), hR, wtmp, stmp);
-    float hD; atlas_cell(L, clamp(local - e.yx, vec2(0.0), vec2(0.999999)), hD, wtmp, stmp);
-    float hU; atlas_cell(L, clamp(local + e.yx, vec2(0.0), vec2(0.999999)), hU, wtmp, stmp);
+    atlas_cell(0, clamp(local - e.xy, vec2(0.0), vec2(0.999999)), hL, wtmp, stmp);
+    float hR; atlas_cell(0, clamp(local + e.xy, vec2(0.0), vec2(0.999999)), hR, wtmp, stmp);
+    float hD; atlas_cell(0, clamp(local - e.yx, vec2(0.0), vec2(0.999999)), hD, wtmp, stmp);
+    float hU; atlas_cell(0, clamp(local + e.yx, vec2(0.0), vec2(0.999999)), hU, wtmp, stmp);
     vec3 n = normalize(vec3(hL - hR, 2.0 * cellL, hD - hU));
 
     // ---- FACE + TEXTURE (quads.frag math) ----------------------------------
@@ -465,32 +475,35 @@ void main() {
         ? (n.x > 0.0 ? 5.0 : 4.0)
         : (n.z > 0.0 ? 3.0 : 2.0));
 
-    vec4 colData = col_fetch(L, local);
+    vec4 colData = col_fetch(0, local);
     float lightId = floor(colData.a * 255.0 + 0.5);
 
-    // ---- Voxy texture detail level (quads.frag textureGrad) ----------------
-    // Voxy quads carry uv in CELL units: frac(uv) repeats ONE texture tile
-    // per 2^L-block cell (analysis §2.1: "одна ячейка = один тайл"), and the
-    // GPU picks the atlas mip from the screen-space derivative — distant
-    // quads auto-blur to the tile's AVERAGE colour (solid distant leaves,
-    // smooth water). textureGrad equivalent, derived here:
+    // ---- texture detail (quads.frag textureGrad, vanilla scale) ------------
+    // v4.3.3 decouples the tile grid from the heightfield level. The old
+    // uvf = fract(uvWorld / 2^L) repeated one tile per 2^L blocks while the
+    // hit quads were 64-block L4 cells: the 16-block tile grid never aligned
+    // with the quad edges, textures re-anchored at every level switch, and
+    // neighbouring cells at different heights showed offset copies of the
+    // same tile — the "textures overlap" report. The tile now repeats every
+    // TILE_BLOCKS (16) blocks of WORLD space — vanilla's 1 texel/block —
+    // world-anchored and identical across every cell, so the grid is ALWAYS
+    // seamless regardless of what geometry the march hits.
     //
-    //   texels-per-pixel at mip 0 = 16 * pxFoot / 2^L
-    //     (16px tile spanning one 2^L-block cell; pxFoot = blocks/pixel)
-    //   mip m divides the texel rate by 2^m; the GPU (TRILINEAR) resolves
-    //   m = round(log2(texels-per-pixel)).
-    //
-    // pxFoot is the PERPENDICULAR footprint; the derivative textureGrad
-    // actually sees runs ALONG THE SURFACE: a ray grazing the heightfield
-    // sweeps pxFoot / |dot(dir,n)| surface blocks per pixel. Without the
-    // grazing factor mountainsides under-mip and alias (the run-30 slope
-    // chevrons) even with a correct mip chain. tpp < 1 (pixel smaller than
-    // a texel, near LOD0) clamps to mip 0 = vanilla-crisp magnification.
+    // The mip follows the true texel rate, exactly quads.frag's
+    // textureGrad(blockModelAtlas, texPos, dFdx(uv), dFdy(uv)):
+    //   texels-per-pixel at mip 0 = 16 * pxSurface / TILE_BLOCKS
+    //   mip m divides the rate by 2^m; a real GPU trilinearly resolves
+    //   m = log2(tpp), blending the two strips around it.
+    // pxSurface is the footprint ALONG THE SURFACE: a ray grazing the
+    // heightfield sweeps pxFoot / |dot(dir,n)| blocks per pixel — without
+    // the grazing factor mountainsides under-mip and alias. tpp < 1 (pixel
+    // smaller than a texel) clamps to mip 0 = vanilla-crisp magnification;
+    // at the far edge tpp >> 16 reaches the strip's 1px average — Voxy's
+    // solid-colour distant terrain.
     float pxFoot = tHit * (2.0 * tanH / max(OutSize.y, 1.0));
     float grazing = max(abs(dot(dir, n)), 0.08);
     float pxSurface = pxFoot / grazing;
-    float tpp = 16.0 * pxSurface / exp2(float(L)); // texels per pixel at mip 0
-    int texMip = int(clamp(floor(log2(max(tpp, 0.03125)) + 0.5), 0.0, 4.0));
+    float tpp = 16.0 * pxSurface / TILE_BLOCKS; // texels per pixel at mip 0
     // Continuous LOD for the manual strip: a real GPU trilinearly BLENDS the
     // two mips around the continuous LOD log2(tpp); rounding alone hard-
     // switches strips per pixel, and the round() contour lines across a
@@ -499,20 +512,17 @@ void main() {
     // the exact behaviour quads.frag gets from the sampler for free.
     float mipF = clamp(log2(max(tpp, 0.03125)), 0.0, 4.0);
 
-    // Greedy-quad uv, world-anchored, ONE TILE PER CELL (2^L blocks). UP
-    // faces tile in xz; side faces tile along the horizontal axis AND
-    // vertically along world Y (Voxy quad uv is 2D in cells) — without the
-    // Y term every cliff showed one smeared texel row instead of stacked
-    // texture tiles.
+    // World-anchored uv: UP faces tile in xz; side faces tile along the
+    // horizontal axis AND vertically along world Y — without the Y term
+    // every cliff showed one smeared texel row instead of stacked tiles.
     vec2 uvWorld = (abs(n.x) > abs(n.z)) ? vec2(hitPos.z, hitPos.y)
                                          : vec2(hitPos.x, hitPos.y);
     if (face < 1.5) {
         uvWorld = hitPos.xz; // UP (the heightfield never yields DOWN)
     }
-    vec2 uvf = fract(uvWorld / exp2(float(L)));
+    vec2 uvf = fract(uvWorld / TILE_BLOCKS);
 
     vec3 albedo;
-    float texAlpha = 1.0;
     // StatesInfo.x = the pack's state count. A client can hold a STALE pack
     // (join-time pack swap races: "post effect does not exist" window) while
     // the server atlas already uses a newer registry — out-of-range sids then
@@ -528,27 +538,20 @@ void main() {
         float mf = mipF - float(m0);
         vec4 tex = mix(state_tile(sid, face, m0, uvf),
                        state_tile(sid, face, m1, uvf), mf);
-        // Cutout — Voxy makeQuadFlags/ModelFactory semantics, exactly:
-        //   * merged quads (quadSize > 1) disable discard via the alpha
-        //     cutout override — the heightfield's every L >= 1 cell IS a
-        //     Mipper-merged quad, so coarse cells render SOLID (distant
-        //     forests have no sky holes);
-        //   * unmerged single-cell quads (L == 0) discard on the MIP-0
-        //     alpha at the exact tile position — quads.frag samples
-        //     textureLod(blockModelAtlas, texPos, 0).a <= 0.1 for the test
-        //     while the colour stays at the distance mip (per-block holes
-        //     punched into slightly blurred foliage, never random specks).
-        if (L == 0 && !isWater && state_tile(sid, face, 0, uvf).a <= 0.1) {
-            fragColor = scene;
-            return;
-        }
+        // Cutout: NO discard (v4.3.3). quads.frag only discards UNMERGED
+        // quads (makeQuadFlags disables it for quadSize > 1), and every cell
+        // of this heightfield IS a merged surface — 4x4 columns behind one
+        // hit. A discard here would punch through to `scene` = raw vanilla
+        // sky (there is no geometry behind a posteffect pixel), spraying
+        // sky-speckle over every canopy. The atlas tiles are SOLIDIFIED at
+        // bake time (transparent texels carry their nearest-opaque RGB), so
+        // rendering them opaque gives exactly the merged-quad look: distant
+        // forests with no sky holes.
         albedo = tex.rgb;
-        texAlpha = isWater ? 0.75 : tex.a;
     } else {
         // Unknown state: height gradient fallback (v4.1 look).
         float hn = clamp((hitPos.y - sea) / max(LodParams.y - sea, 1.0), 0.0, 1.0);
         albedo = isWater ? ColWater.rgb : mix(ColLow.rgb, ColHigh.rgb, smoothstep(0.15, 0.9, hn));
-        texAlpha = isWater ? 0.75 : 1.0;
     }
 
     // Vanilla face shade (cardinal light), exact Voxy constants.

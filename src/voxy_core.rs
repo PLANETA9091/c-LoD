@@ -3,8 +3,9 @@
 //! heightfield world of c-LoD:
 //!
 //! - `Mipper` (common/world/other/Mipper.java): a LOD cell at level L keeps
-//!   the **max-opacity corner voxel's full id** — never an averaged color.
-//!   Distant terrain is real blocks, thinned at 2^L.
+//!   the top surface of the merged 3D group — height = MAX of the columns,
+//!   the surface block id = the column AT that max height (ties: +x+z
+//!   corner, Voxy's 111-first scan order). Never an averaged color.
 //! - Opacity classes: solid = 15 (`getLightDampening`), water = 1, leaves
 //!   forced solid (they ARE solid here — every cell is a surface).
 //! - Corner priority (x | z<<1 for the heightfield's two free axes): ties
@@ -146,18 +147,31 @@ pub struct VCell {
     pub light: u8, // (block << 4) | sky, Voxy lightId layout
 }
 
-/// Mipper (heightfield port of other/Mipper.java): among the four columns
-/// of a 2x2 group, the winner is the max (opacity, corner) rank — land
-/// (op 15) beats water (op 1), ties resolve to the +x+z corner, exactly
-/// like Voxy's (opacity<<4 | cornerIdx) maximum. Void loses to everything.
+/// Mipper (heightfield port of other/Mipper.java), v4.3.3 semantics.
+///
+/// Voxy merges 2x2x2 voxel groups in 3D: the group's TOP SURFACE is the
+/// highest non-air voxel (the octree cell's extent = the max of its
+/// children), and the surface voxel's own id is what face culling renders.
+/// The max-OPACITY rule only fills the interior volume — it never lowers
+/// the surface. The heightfield equivalent is therefore:
+///   - height  = MAX over the valid columns (a corner pick would let rays
+///     sail over the taller columns the group still contains — the v4.3.x
+///     sky-leak rectangles),
+///   - state/water/light/tint = the column AT that max height (the block
+///     you actually see from above), ties resolved to the +x+z corner
+///     exactly like Voxy's 111-first scan order,
+///   - land (op 15) beats water (op 1) at equal height (a beach column
+///     poking at sea level renders sand, not water).
+///
+/// Void loses to everything; an all-void group stays void.
 pub fn mip4(a: &VCell, b: &VCell, c: &VCell, d: &VCell) -> VCell {
     // Corner rank: bit0 = x (a=0,b=1), bit1 = z (a=0,c=1) — d wins ties.
-    let rank = |cell: &VCell, corner: u8| -> (u8, u8) {
+    let rank = |cell: &VCell, corner: u8| -> (i16, u8, u8) {
         if cell.valid {
             let op = if cell.water { 1 } else { 15 };
-            (op, corner)
+            (cell.height, op, corner)
         } else {
-            (0, corner)
+            (i16::MIN, 0, corner)
         }
     };
     let cands = [
@@ -374,30 +388,45 @@ mod tests {
     }
 
     #[test]
-    fn mipper_land_beats_water_low_terrain() {
-        // Island in the ocean: land wins even at height 1 vs water at 63.
+    fn mipper_max_height_and_argmax_surface() {
+        // v4.3.3: the merged cell's height = MAX of the group (rays can never
+        // sail over a canopy the group contains), and the surface data comes
+        // from the column AT that max height — not from the +x+z corner.
         let out = mip4(
-            &cell(1, false, 3),  // land, low
-            &cell(63, true, 99), // water, high
+            &cell(70, false, 1),
+            &cell(80, false, 2),
+            &cell(90, false, 3), // tallest: canopy column wins the surface
+            &cell(10, false, 4),
+        );
+        assert_eq!(out.height, 90);
+        assert_eq!(out.state, 3);
+    }
+
+    #[test]
+    fn mipper_equal_height_ties_to_corner() {
+        // Equal heights: the +x+z corner column wins (Voxy 111-first order).
+        let out = mip4(
+            &cell(70, false, 1),
+            &cell(70, false, 2),
+            &cell(70, false, 3),
+            &cell(70, false, 4),
+        );
+        assert_eq!(out.state, 4);
+        assert_eq!(out.height, 70);
+    }
+
+    #[test]
+    fn mipper_land_beats_water_at_equal_height() {
+        // Beach poking at sea level next to water: land wins the surface.
+        let out = mip4(
+            &cell(63, true, 99),
+            &cell(63, false, 3),
             &cell(63, true, 99),
             &cell(63, true, 99),
         );
         assert_eq!(out.state, 3);
         assert!(!out.water);
-        assert_eq!(out.height, 1);
-    }
-
-    #[test]
-    fn mipper_corner_priority_plus_x_plus_z() {
-        // All land: the +x+z corner column wins (Voxy 111-first order).
-        let out = mip4(
-            &cell(70, false, 1),
-            &cell(80, false, 2),
-            &cell(90, false, 3),
-            &cell(10, false, 4),
-        );
-        assert_eq!(out.state, 4);
-        assert_eq!(out.height, 10);
+        assert_eq!(out.height, 63);
     }
 
     #[test]
@@ -419,7 +448,10 @@ mod tests {
         assert_eq!(levels.len(), 5);
         assert_eq!(levels[1].len(), 64);
         assert_eq!(levels[4].len(), 1);
-        // The single L4 cell must be the +x+z corner of the whole grid.
+        // v4.3.3: the single L4 cell carries the MAX height of the grid
+        // (64 + 255 = 319) with the argmax column's state — the tallest
+        // column, i.e. the +x+z corner for this monotonic ramp.
+        assert_eq!(levels[4][0].height, 64 + 255);
         assert_eq!(levels[4][0].state, l0[15 * n + 15].state);
     }
 
