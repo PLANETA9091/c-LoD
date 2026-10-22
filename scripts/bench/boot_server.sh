@@ -25,7 +25,7 @@ SRV=$!
 exec 9>/tmp/server.in
 echo "launcher pid $SRV"
 
-for i in $(seq 1 150); do
+for i in $(seq 1 360); do
   if grep -q "pack finalized (ONE-TIME, static)" /tmp/server.log 2>/dev/null; then break; fi
   if ! kill -0 $SRV 2>/dev/null; then echo "SERVER DIED"; tail -40 /tmp/server.log; exit 1; fi
   sleep 2
