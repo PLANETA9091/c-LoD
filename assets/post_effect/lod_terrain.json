@@ -39,7 +39,10 @@
                 { "sampler_name": "In", "target": "minecraft:main" },
                 { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
                 { "sampler_name": "Atlas", "location": "clod:atlas", "width": __ATLAS_CELLS__, "height": __ATLAS_CELLS__, "bilinear": false },
+                { "sampler_name": "Geom", "location": "clod:geom", "width": __ATLAS_CELLS__, "height": __ATLAS_CELLS__, "bilinear": false },
+                { "sampler_name": "Pyr", "location": "clod:pyr", "width": __ATLAS_CELLS__, "height": __ATLAS_CELLS__, "bilinear": false },
                 { "sampler_name": "Color", "location": "clod:color", "width": __ATLAS_CELLS__, "height": __ATLAS_CELLS__, "bilinear": true },
+                { "sampler_name": "Ground", "location": "clod:ground", "width": __ATLAS_CELLS__, "height": __ATLAS_CELLS__, "bilinear": true },
                 { "sampler_name": "Side", "location": "clod:side", "width": 256, "height": 1, "bilinear": false },
                 { "sampler_name": "Rot", "target": "clod_rot_a" }
             ],
@@ -59,6 +62,9 @@
                 ],
                 "ClodFog": [
                     { "name": "FogParams", "type": "vec4", "value": [__FOG_START__, __FOG_END__, __FOV__, 0.0] }
+                ],
+                "ClodPyr": [
+                    { "name": "PyrParams", "type": "vec4", "value": [__PYR_LEVELS__, __CELL__, 0.0, 0.0] }
                 ],
                 "ClodColors": [
                     { "name": "ColLow", "type": "vec4", "value": __COL_LOW__ },

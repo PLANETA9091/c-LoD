@@ -65,6 +65,12 @@ pub struct State {
     pub tick_no: AtomicU64,
     /// Rate limiter for pack-push failure logs.
     pub push_fails: AtomicU32,
+    /// SETTLE: last atlas version seen by the finalize driver.
+    pub last_ver: AtomicU64,
+    /// SETTLE: consecutive frozen-version finalize-driver calls.
+    pub settle: AtomicU32,
+    /// Classic (non-streamed) sweep completion flag.
+    pub sweep_done: AtomicU8,
 }
 
 #[derive(Clone)]
@@ -164,6 +170,9 @@ impl State {
             pack_uuid: Mutex::new(0),
             tick_no: AtomicU64::new(0),
             push_fails: AtomicU32::new(0),
+            last_ver: AtomicU64::new(0),
+            settle: AtomicU32::new(0),
+            sweep_done: AtomicU8::new(0),
             cfg,
         })
     }
@@ -341,10 +350,19 @@ fn scan_batch(state: &Arc<State>, env: Env) {
         for (ix, iz) in tasks.iter().copied() {
             let x = state.atlas.cell_world_x(ix);
             let z = state.atlas.cell_world_z(iz);
-            if let Some((y, liquid, top, side)) = jni::sample_column(env, world, x, z) {
-                state
-                    .atlas
-                    .set(ix, iz, (y.clamp(-64, 1023)) as i16, liquid, top, side);
+            if let Some(s) = jni::sample_column(env, world, x, z) {
+                state.atlas.set(
+                    ix,
+                    iz,
+                    (s.y.clamp(-64, 1023)) as i16,
+                    s.liquid,
+                    s.top,
+                    s.side,
+                    (s.bot.clamp(-64, 1023)) as i16,
+                    (s.seg2.clamp(-64, 1023)) as i16,
+                    s.has_gap,
+                    s.seg2_top,
+                );
             }
         }
     }
@@ -423,19 +441,30 @@ fn scan_stream(state: &Arc<State>, env: Env, world: jvmti_bindings::jni::jobject
                 if ix < 0 || iz < 0 || ix as u32 >= atlas.cells || iz as u32 >= atlas.cells {
                     continue;
                 }
-                if let Some((y, liquid, top, side)) = jni::sample_column(env, world, x, z) {
+                if let Some(s) = jni::sample_column(env, world, x, z) {
                     atlas.set(
                         ix as u32,
                         iz as u32,
-                        (y.clamp(-64, 1023)) as i16,
-                        liquid,
-                        top,
-                        side,
+                        (s.y.clamp(-64, 1023)) as i16,
+                        s.liquid,
+                        s.top,
+                        s.side,
+                        (s.bot.clamp(-64, 1023)) as i16,
+                        (s.seg2.clamp(-64, 1023)) as i16,
+                        s.has_gap,
+                        s.seg2_top,
                     );
                 }
             }
         }
         let _ = jni::warm_chunk(env, world, cx, cz, false);
+    }
+    // Classic sweep completion: the cursor walked the whole chunk grid, so
+    // every cell that CAN be sampled has been (the rest are outside the
+    // world). maybe_finalize uses this to settle instead of idling to the
+    // scan deadline.
+    if state.scan_cursor.load(Ordering::Relaxed) >= total {
+        state.sweep_done.store(1, Ordering::Relaxed);
     }
 }
 
@@ -641,8 +670,39 @@ pub fn maybe_finalize(state: &Arc<State>) {
         Some(t) => t.elapsed().as_secs() >= state.cfg.scan_deadline_secs || state.restored,
         None => state.restored,
     };
-    if !complete && !deadline_hit {
+    // SETTLE: the sweep visited every chunk of the atlas grid AND the
+    // snapshot stopped changing — whatever cells remain unscanned are
+    // outside the world (world border / clipped non-aligned edges, which can
+    // NEVER reach 100% cells). Finalize instead of idling to the deadline:
+    // a pregenerated world finishes its scan in minutes, and waiting the
+    // deadline out rendered no LOD the whole time.
+    let (side, _, _) = chunk_grid(&state.atlas);
+    let sweep_exhausted = state.scan_cursor.load(Ordering::Relaxed)
+        >= (side as u64) * (side as u64)
+        || state.sweep_done.load(Ordering::Relaxed) == 1;
+    const SETTLE_TICKS: u32 = 40; // 40 engine calls x tick_ms(50) = 2 s frozen
+    let settled = if sweep_exhausted {
+        let ver = state.atlas.version();
+        if ver == state.last_ver.load(Ordering::Relaxed) {
+            state.settle.fetch_add(1, Ordering::Relaxed) + 1 >= SETTLE_TICKS
+        } else {
+            state.last_ver.store(ver, Ordering::Relaxed);
+            state.settle.store(0, Ordering::Relaxed);
+            false
+        }
+    } else {
+        state.settle.store(0, Ordering::Relaxed);
+        false
+    };
+    if !complete && !deadline_hit && !settled {
         return;
+    }
+    if settled {
+        let (scanned, total) = (state.atlas.scanned_cells(), state.atlas.total_cells());
+        crate::log_info(&format!(
+            "c-LoD scan settled: sweep exhausted with {}/{} cells valid (rest are outside the world) — finalizing",
+            scanned, total
+        ));
     }
     finalize(state);
 }
@@ -752,7 +812,7 @@ mod tests {
         st.phase.store(PHASE_SCANNING, Ordering::SeqCst);
         *st.world_obj.lock().unwrap() = 1; // pretend the world resolved
         *st.world_seen_at.lock().unwrap() = Some(std::time::Instant::now());
-        st.atlas.set(0, 0, 70, false, 0x808080, 0x707070);
+        st.atlas.set(0, 0, 70, false, 0x808080, 0x707070, 70, 0, false, 0);
 
         // Deadline NOT reached yet, atlas incomplete -> no finalize.
         maybe_finalize(&st);

@@ -121,6 +121,8 @@ struct WorldIds {
     m_chunk_loaded: jmethodID,
     m_set_force_loaded: jmethodID,
     m_get_biome: jmethodID,
+    m_min_height: jmethodID,
+    m_max_height: jmethodID,
 }
 // Raw method-ID pointers cached process-lifetime; consumed main-thread-only.
 unsafe impl Send for WorldIds {}
@@ -152,6 +154,7 @@ static LOCATION_IDS: Mutex<Option<LocationIds>> = Mutex::new(None);
 struct BlockIds {
     m_is_liquid: jmethodID,
     m_get_type: jmethodID,
+    m_is_empty: jmethodID,
 }
 // Raw method-ID pointers cached process-lifetime; consumed main-thread-only.
 unsafe impl Send for BlockIds {}
@@ -330,12 +333,106 @@ fn biome_tint(env: Env, world: jobject, wid: &WorldIds, x: i32, y: i32, z: i32) 
     resolved
 }
 
-/// Sample one column: (blockY, isLiquid, top rgb, side rgb).
+/// One scanned column, DH-style: the surface block plus the SLAB it belongs
+/// to and, when a void gap hides a second surface (tree canopies, floating
+/// islands, overhangs), that ground segment as well. A heightfield can only
+/// ever show the top face; the slab model is what lets the renderer draw
+/// island walls that stop at `bot` and the ground BELOW a canopy.
+pub struct ColumnSample {
+    pub y: i32,
+    pub liquid: bool,
+    pub top: u32,
+    pub side: u32,
+    /// Lowest solid Y of the contiguous run that starts at the surface
+    /// block (inclusive). Equal to `y` for plain ground.
+    pub bot: i32,
+    /// Top Y of the ground segment below an air gap (bot > y implies a gap).
+    pub has_gap: bool,
+    pub seg2: i32,
+    pub seg2_top: u32,
+}
+
+/// How far a slab may run below the surface before we give up (JNI budget).
+const SLAB_WALK: i32 = 32;
+/// How deep below a found gap we look for the ground segment.
+const GAP_WALK: i32 = 32;
+
+/// Average biome-tinted (top, side) colour of the block at (x, y, z), or
+/// None when the block/material could not be resolved (caller substitutes
+/// the placeholder gray).
+fn block_color_at(
+    env: Env,
+    world: jobject,
+    wid: &WorldIds,
+    x: i32,
+    y: i32,
+    z: i32,
+) -> Option<(u32, u32)> {
+    let gray = 0x808080u32;
+    let block = jobj(env.call_object_method(
+        world,
+        wid.m_get_block_at,
+        &[ji(x), ji(y), ji(z)],
+    ))?;
+    let bid = block_ids(env, block)?;
+    let mat = jobj(env.call_object_method(block, bid.m_get_type, &[]));
+    clear_if_pending(env);
+    let mat = mat?;
+    let mid = material_ids(env, mat)?;
+    let ordinal = env.call_int_method(mat, mid.m_ordinal, &[]);
+    clear_if_pending(env);
+    let info = mat_info(env, mat, &mid, ordinal).unwrap_or(MatInfo {
+        top: gray,
+        side: gray,
+        tint_top: 0,
+        tint_side: 0,
+    });
+    let (grass, foliage, water) = biome_tint(env, world, wid, x, y, z);
+    let t_top = match info.tint_top {
+        1 => grass,
+        2 => foliage,
+        3 => water,
+        _ => 0xFFFFFF,
+    };
+    let t_side = match info.tint_side {
+        1 => grass,
+        2 => foliage,
+        3 => water,
+        _ => 0xFFFFFF,
+    };
+    Some((mul_rgb(info.top, t_top), mul_rgb(info.side, t_side)))
+}
+
+/// Whether the block at (x, y, z) is air (Bukkit Block#isEmpty). Returns
+/// None on JNI trouble; the caller treats that as "stop walking".
+fn block_is_empty(
+    env: Env,
+    world: jobject,
+    wid: &WorldIds,
+    bid: &BlockIds,
+    x: i32,
+    y: i32,
+    z: i32,
+) -> Option<bool> {
+    let block = jobj(env.call_object_method(
+        world,
+        wid.m_get_block_at,
+        &[ji(x), ji(y), ji(z)],
+    ))?;
+    let empty = env.call_boolean_method(block, bid.m_is_empty, &[]);
+    clear_if_pending(env);
+    Some(empty)
+}
+
+/// Sample one column: surface block + DH-style slab geometry.
 ///
 /// The colours come from the baked block table (average texture colour) times
 /// the biome tint, i.e. exactly the value Voxy's block-model atlas collapses to
-/// at the LOD levels where individual texels stop being visible.
-pub fn sample_column(env: Env, world: jobject, x: i32, z: i32) -> Option<(i32, bool, u32, u32)> {
+/// at the LOD levels where individual texels stop being visible. The slab walk
+/// costs one `isEmpty` JNI call per solid block below the surface (1 call for
+/// plain ground, a handful under tree canopies) and is bounded so that deep
+/// void gaps simply end the slab.
+pub fn sample_column(env: Env, world: jobject, x: i32, z: i32) -> Option<ColumnSample> {
     use std::sync::atomic::Ordering;
     let wid = world_ids(env, world)?;
     if env.exception_check() {
@@ -352,58 +449,147 @@ pub fn sample_column(env: Env, world: jobject, x: i32, z: i32) -> Option<(i32, b
         SCAN_UNLOADED.fetch_add(1, Ordering::Relaxed);
         return None;
     }
+    let min_y = env.call_int_method(world, wid.m_min_height, &[]);
+    let min_y = if env.exception_check() {
+        env.exception_clear();
+        -64i32
+    } else {
+        min_y.max(-2032)
+    };
     let y = env.call_int_method(world, wid.m_highest_block, &[ji(x), ji(z)]);
     if env.exception_check() {
         env.exception_clear();
         SCAN_ERR.fetch_add(1, Ordering::Relaxed);
         return None;
     }
-    if y < -64 {
-        return Some((y, false, 0x808080, 0x808080));
-    }
     let gray = 0x808080u32;
-    let Some(block) = jobj(env.call_object_method(world, wid.m_get_block_at, &[ji(x), ji(y), ji(z)]))
-    else {
+    if y < -64 {
+        return Some(ColumnSample {
+            y,
+            liquid: false,
+            top: gray,
+            side: gray,
+            bot: y,
+            has_gap: false,
+            seg2: y,
+            seg2_top: 0,
+        });
+    }
+    let Some((top, side)) = block_color_at(env, world, &wid, x, y, z) else {
         clear_if_pending(env);
-        return Some((y, false, gray, gray));
+        SCAN_OK.fetch_add(1, Ordering::Relaxed);
+        return Some(ColumnSample {
+            y,
+            liquid: false,
+            top: gray,
+            side: gray,
+            bot: y,
+            has_gap: false,
+            seg2: y,
+            seg2_top: 0,
+        });
+    };
+    let Some(block) = jobj(env.call_object_method(
+        world,
+        wid.m_get_block_at,
+        &[ji(x), ji(y), ji(z)],
+    )) else {
+        clear_if_pending(env);
+        return Some(ColumnSample {
+            y,
+            liquid: false,
+            top,
+            side,
+            bot: y,
+            has_gap: false,
+            seg2: y,
+            seg2_top: 0,
+        });
     };
     let Some(bid) = block_ids(env, block) else {
         clear_if_pending(env);
-        return Some((y, false, gray, gray));
+        return Some(ColumnSample {
+            y,
+            liquid: false,
+            top,
+            side,
+            bot: y,
+            has_gap: false,
+            seg2: y,
+            seg2_top: 0,
+        });
     };
     let liquid = env.call_boolean_method(block, bid.m_is_liquid, &[]);
-    let mat = jobj(env.call_object_method(block, bid.m_get_type, &[]));
     clear_if_pending(env);
-    let Some(mat) = mat else {
+
+    // Water columns stay single-surface: the sea plane is the render surface.
+    if liquid {
         SCAN_OK.fetch_add(1, Ordering::Relaxed);
-        return Some((y, liquid, gray, gray));
+        return Some(ColumnSample {
+            y,
+            liquid: true,
+            top,
+            side,
+            bot: y,
+            has_gap: false,
+            seg2: y,
+            seg2_top: 0,
+        });
+    }
+
+    // Slab walk: the surface run continues down while blocks are solid.
+    let mut bot = y;
+    while bot - 1 > min_y && y - (bot - 1) <= SLAB_WALK {
+        match block_is_empty(env, world, &wid, &bid, x, bot - 1, z) {
+            Some(false) => bot -= 1,
+            Some(true) => break,
+            None => break,
+        }
+    }
+    let empty_below = if bot - 1 > min_y {
+        block_is_empty(env, world, &wid, &bid, x, bot - 1, z).unwrap_or(false)
+    } else {
+        false
     };
-    let Some(mid) = material_ids(env, mat) else {
-        return Some((y, liquid, gray, gray));
-    };
-    let ordinal = env.call_int_method(mat, mid.m_ordinal, &[]);
-    clear_if_pending(env);
-    let info = mat_info(env, mat, &mid, ordinal).unwrap_or(MatInfo {
-        top: gray,
-        side: gray,
-        tint_top: 0,
-        tint_side: 0,
-    });
-    let (grass, foliage, water) = biome_tint(env, world, &wid, x, y, z);
-    let t_top = match info.tint_top {
-        1 => grass,
-        2 => foliage,
-        3 => water,
-        _ => 0xFFFFFF,
-    };
-    let t_side = match info.tint_side {
-        1 => grass,
-        2 => foliage,
-        3 => water,
-        _ => 0xFFFFFF,
-    };
+
+    // Ground segment under a canopy/island: walk the air gap, then take the
+    // first solid block as the second surface (and bake its colour).
+    let mut has_gap = false;
+    let mut seg2 = bot;
+    let mut seg2_top = 0u32;
+    if empty_below {
+        let mut yy = bot - 1;
+        while yy > min_y && bot - 1 - yy < GAP_WALK {
+            match block_is_empty(env, world, &wid, &bid, x, yy, z) {
+                Some(true) => yy -= 1,
+                Some(false) => {
+                    has_gap = true;
+                    seg2 = yy;
+                    break;
+                }
+                None => break,
+            }
+        }
+        if has_gap {
+            if let Some((c, _)) = block_color_at(env, world, &wid, x, seg2, z) {
+                seg2_top = c;
+            } else {
+                clear_if_pending(env);
+                seg2_top = gray;
+            }
+        }
+    }
     SCAN_OK.fetch_add(1, Ordering::Relaxed);
-    Some((y, liquid, mul_rgb(info.top, t_top), mul_rgb(info.side, t_side)))
+    Some(ColumnSample {
+        y,
+        liquid,
+        top,
+        side,
+        bot,
+        has_gap,
+        seg2,
+        seg2_top,
+    })
 }
 
 fn method_or_log(env: Env, cls: jobject, name: &str, sig: &str) -> Option<jmethodID> {
@@ -460,6 +646,8 @@ fn world_ids(env: Env, world: jobject) -> Option<WorldIds> {
             "getBiome",
             "(III)Lorg/bukkit/block/Biome;",
         )?,
+        m_min_height: bind_method(env, cls_local, cls, "getMinHeight", "()I")?,
+        m_max_height: bind_method(env, cls_local, cls, "getMaxHeight", "()I")?,
     };
     *WORLD_IDS.lock().unwrap() = Some(ids);
     Some(ids)
@@ -533,6 +721,7 @@ fn block_ids(env: Env, block: jobject) -> Option<BlockIds> {
     let ids = BlockIds {
         m_is_liquid: bind_method(env, cls_local, cls, "isLiquid", "()Z")?,
         m_get_type: bind_method(env, cls_local, cls, "getType", "()Lorg/bukkit/Material;")?,
+        m_is_empty: bind_method(env, cls_local, cls, "isEmpty", "()Z")?,
     };
     *BLOCK_IDS.lock().unwrap() = Some(ids);
     Some(ids)

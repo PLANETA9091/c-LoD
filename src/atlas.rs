@@ -18,10 +18,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 
 /// On-disk snapshot magic + format version.
-const MAGIC: &[u8; 8] = b"CLODAT02";
-/// Bytes per cell in the on-disk snapshot: i16 height, u32 top, u32 side,
-/// u8 flags.
-const CELL_BYTES: usize = 11;
+/// v4.2 (CLODAT03): per-column slab geometry — `bot` (bottom of the surface
+/// run) and `seg2` (ground below an air gap: canopies, floating islands).
+const MAGIC: &[u8; 8] = b"CLODAT03";
+/// Bytes per cell in the on-disk snapshot: i16 height, i16 bot, i16 seg2,
+/// u32 top, u32 side, u32 seg2_top, u8 flags.
+const CELL_BYTES: usize = 19;
 
 pub struct Atlas {
     pub center_x: i32,
@@ -48,6 +50,14 @@ pub struct Cell {
     pub top: u32,
     /// Average side-face colour (0xRRGGBB), already biome tinted.
     pub side: u32,
+    /// DH-style slab: lowest solid Y of the run that starts at the surface.
+    /// Only meaningful when `has_gap` (otherwise the column is solid down).
+    pub bot: i16,
+    /// Top Y of the ground segment below the air gap.
+    pub seg2: i16,
+    pub has_gap: bool,
+    /// Average top-face colour of the ground segment below the gap.
+    pub seg2_top: u32,
 }
 
 impl Atlas {
@@ -80,7 +90,20 @@ impl Atlas {
         Some(((dx / self.cell) as u32, (dz / self.cell) as u32))
     }
 
-    pub fn set(&self, ix: u32, iz: u32, height: i16, water: bool, top: u32, side: u32) {
+    #[allow(clippy::too_many_arguments)]
+    pub fn set(
+        &self,
+        ix: u32,
+        iz: u32,
+        height: i16,
+        water: bool,
+        top: u32,
+        side: u32,
+        bot: i16,
+        seg2: i16,
+        has_gap: bool,
+        seg2_top: u32,
+    ) {
         let idx = (iz * self.cells + ix) as usize;
         if let Ok(mut data) = self.data.write() {
             if let Some(cell) = data.get_mut(idx) {
@@ -89,6 +112,10 @@ impl Atlas {
                     || cell.water != water
                     || cell.top != top
                     || cell.side != side
+                    || cell.bot != bot
+                    || cell.seg2 != seg2
+                    || cell.has_gap != has_gap
+                    || cell.seg2_top != seg2_top
                 {
                     if !cell.valid {
                         self.scanned.fetch_add(1, Ordering::Relaxed);
@@ -99,6 +126,10 @@ impl Atlas {
                         valid: true,
                         top,
                         side,
+                        bot,
+                        seg2,
+                        has_gap,
+                        seg2_top,
                     };
                     self.version.fetch_add(1, Ordering::Relaxed);
                 }
@@ -232,12 +263,125 @@ impl Atlas {
         (self.cells, self.cells, px)
     }
 
+    /// Slab geometry image, sampled NEAREST:
+    ///   RG = bottom of the surface slab ((bot + 64) << 6, big-endian);
+    ///        0 (== -64) when the column is solid down (no gap).
+    ///   BA = top of the ground segment below the gap; 0 when absent.
+    pub fn encode_geom(&self) -> (u32, u32, Vec<u8>) {
+        let snap = self.snapshot();
+        let n = self.cells as usize;
+        let mut px = vec![0u8; n * n * 4];
+        let enc = |y: i32| -> u16 {
+            (((y + 64).max(0) << 6).min(0xFFFF)) as u16
+        };
+        for z in 0..n {
+            for x in 0..n {
+                let cell = snap[z * n + x];
+                let o = (z * n + x) * 4;
+                if cell.valid && cell.has_gap {
+                    let b = enc(i32::from(cell.bot));
+                    let s = enc(i32::from(cell.seg2));
+                    px[o] = (b >> 8) as u8;
+                    px[o + 1] = (b & 0xFF) as u8;
+                    px[o + 2] = (s >> 8) as u8;
+                    px[o + 3] = (s & 0xFF) as u8;
+                }
+                // gap-less columns stay zero = solid down / no segment
+            }
+        }
+        (self.cells, self.cells, px)
+    }
+
+    /// Ground-segment top colour (RGB, alpha 255), bilinearly filtered.
+    pub fn encode_ground(&self) -> (u32, u32, Vec<u8>) {
+        let snap = self.snapshot();
+        let n = self.cells as usize;
+        let mut px = vec![0u8; n * n * 4];
+        for z in 0..n {
+            for x in 0..n {
+                let cell = snap[z * n + x];
+                let o = (z * n + x) * 4;
+                if cell.valid && cell.has_gap && cell.seg2_top != 0 {
+                    px[o] = ((cell.seg2_top >> 16) & 0xFF) as u8;
+                    px[o + 1] = ((cell.seg2_top >> 8) & 0xFF) as u8;
+                    px[o + 2] = (cell.seg2_top & 0xFF) as u8;
+                }
+                px[o + 3] = 255;
+            }
+        }
+        (self.cells, self.cells, px)
+    }
+
+    /// Conservative max-height pyramid for the ray march (level k = 1 is the
+    /// 2x2 reduction of the cell grid; the height of a level-k texel is the
+    /// MAXIMUM render height of its 2^k square, water cells count at sea
+    /// level — the ray can never skip terrain that could hit it).
+    ///
+    /// Packed top-down into a `cells`-wide, `cells`-tall image: level k has
+    /// dim = cells >> k texels per side and starts at row `cells - 2*dim`.
+    /// Same R/G height encoding as the base atlas.
+    pub fn encode_pyramid(&self) -> (u32, u32, Vec<u8>) {
+        let n = self.cells as usize;
+        let snap = self.snapshot();
+        let enc = |y: i32| -> u16 { (((y + 64).max(0) << 6).min(0xFFFF)) as u16 };
+        // Effective render height per cell (what the marcher tests against).
+        let mut cur: Vec<u16> = vec![0; n * n];
+        for z in 0..n {
+            for x in 0..n {
+                let cell = &snap[z * n + x];
+                cur[z * n + x] = if cell.valid {
+                    if cell.water {
+                        enc(self.sea_level)
+                    } else {
+                        enc(i32::from(cell.height))
+                    }
+                } else {
+                    0
+                };
+            }
+        }
+        let mut px = vec![0u8; n * n * 4];
+        let mut dim = n / 2;
+        let mut row = 0usize;
+        while dim >= 1 {
+            let next: Vec<u16> = (0..dim * dim)
+                .map(|i| {
+                    let x = i % dim;
+                    let z = i / dim;
+                    let mut m = 0u16;
+                    for (dz, dx) in [(0usize, 0usize), (0, 1), (1, 0), (1, 1)] {
+                        let sx = x * 2 + dx;
+                        let sz = z * 2 + dz;
+                        if sx < n && sz < n {
+                            m = m.max(cur[sz * n + sx]);
+                        }
+                    }
+                    m
+                })
+                .collect();
+            for (i, &v) in next.iter().enumerate() {
+                let x = i % dim;
+                let z = i / dim;
+                let o = ((row + z) * n + x) * 4;
+                px[o] = (v >> 8) as u8;
+                px[o + 1] = (v & 0xFF) as u8;
+                px[o + 2] = 0;
+                px[o + 3] = 255;
+            }
+            row += dim;
+            cur = next;
+            dim /= 2;
+        }
+        (n as u32, n as u32, px)
+    }
+
     // -----------------------------------------------------------------------
     // Disk persistence (static-pack determinism across restarts).
     // -----------------------------------------------------------------------
 
-    /// Serialize the atlas snapshot: MAGIC + header + 11 bytes per cell
-    /// (height i16 LE, top u32, side u32, flags: bit0 water, bit1 valid).
+    /// Serialize the atlas snapshot: MAGIC + header + 19 bytes per cell
+    /// (height i16 LE, bot i16 LE, seg2 i16 LE, top u32, side u32,
+    /// seg2_top u32, flags: bit0 water, bit1 valid, bit2 has_gap).
     pub fn to_bytes(&self) -> Vec<u8> {
         let snap = self.snapshot();
         let n = snap.len();
@@ -250,9 +394,16 @@ impl Atlas {
         out.extend_from_slice(&self.sea_level.to_le_bytes());
         for c in &snap {
             out.extend_from_slice(&c.height.to_le_bytes());
+            out.extend_from_slice(&c.bot.to_le_bytes());
+            out.extend_from_slice(&c.seg2.to_le_bytes());
             out.extend_from_slice(&(c.top & 0xFFFFFF).to_le_bytes());
             out.extend_from_slice(&(c.side & 0xFFFFFF).to_le_bytes());
-            out.push((u8::from(c.water)) | (u8::from(c.valid) << 1));
+            out.extend_from_slice(&(c.seg2_top & 0xFFFFFF).to_le_bytes());
+            out.push(
+                (u8::from(c.water))
+                    | (u8::from(c.valid) << 1)
+                    | (u8::from(c.has_gap) << 2),
+            );
         }
         out
     }
@@ -297,9 +448,12 @@ impl Atlas {
         for (i, cell_out) in data.iter_mut().enumerate() {
             let o = base + i * CELL_BYTES;
             let height = i16::from_le_bytes([buf[o], buf[o + 1]]);
-            let top = u32::from_le_bytes([buf[o + 2], buf[o + 3], buf[o + 4], 0]) & 0xFFFFFF;
-            let side = u32::from_le_bytes([buf[o + 6], buf[o + 7], buf[o + 8], 0]) & 0xFFFFFF;
-            let flags = buf[o + 10];
+            let bot = i16::from_le_bytes([buf[o + 2], buf[o + 3]]);
+            let seg2 = i16::from_le_bytes([buf[o + 4], buf[o + 5]]);
+            let top = u32::from_le_bytes([buf[o + 6], buf[o + 7], buf[o + 8], 0]) & 0xFFFFFF;
+            let side = u32::from_le_bytes([buf[o + 10], buf[o + 11], buf[o + 12], 0]) & 0xFFFFFF;
+            let seg2_top = u32::from_le_bytes([buf[o + 14], buf[o + 15], buf[o + 16], 0]) & 0xFFFFFF;
+            let flags = buf[o + 18];
             if flags & 0b10 != 0 {
                 *cell_out = Cell {
                     height,
@@ -307,6 +461,10 @@ impl Atlas {
                     valid: true,
                     top,
                     side,
+                    bot,
+                    seg2,
+                    has_gap: flags & 0b100 != 0,
+                    seg2_top,
                 };
                 scanned += 1;
             }
@@ -367,8 +525,8 @@ mod tests {
     fn set_get_encode() {
         let a = Atlas::new(0, 0, 64, 4, 63);
         assert_eq!(a.cells, 16);
-        a.set(3, 5, 100, false, 0x808080, 0x707070);
-        a.set(0, 0, 62, true, 0x808080, 0x707070);
+        a.set(3, 5, 100, false, 0x808080, 0x707070, 100, 0, false, 0);
+        a.set(0, 0, 62, true, 0x808080, 0x707070, 62, 0, false, 0);
         assert_eq!(a.get(3, 5).unwrap().height, 100);
         assert!(a.get(0, 0).unwrap().water);
         assert!(a.get(1, 1).is_none());
@@ -390,12 +548,48 @@ mod tests {
     }
 
     #[test]
+    fn slab_geom_and_pyramid() {
+        let a = Atlas::new(0, 0, 32, 1, 62); // 32x32 cells
+        // island at (5,5): top 120, bottom 100, ground 30 below
+        a.set(5, 5, 120, false, 0xA0A0A0, 0x909090, 100, 30, true, 0x507030);
+        // plain ground at (6,5)
+        a.set(6, 5, 40, false, 0x707070, 0x606060, 40, 0, false, 0);
+        let (w, h, px) = a.encode_geom();
+        assert_eq!((w, h), (32, 32));
+        let o = (5 * 32 + 5) * 4;
+        let bot16 = ((px[o] as u16) << 8) | px[o + 1] as u16;
+        let s216 = ((px[o + 2] as u16) << 8) | px[o + 3] as u16;
+        assert_eq!(bot16, ((100 + 64) << 6) as u16);
+        assert_eq!(s216, ((30 + 64) << 6) as u16);
+        // plain ground: zeros (solid down, no segment)
+        let o2 = (5 * 32 + 6) * 4;
+        assert_eq!(px[o2] + px[o2 + 1] + px[o2 + 2] + px[o2 + 3], 0);
+
+        let (_, _, gpx) = a.encode_ground();
+        let og = (5 * 32 + 5) * 4;
+        assert_eq!(gpx[og], 0x50);
+        assert_eq!(gpx[og + 1], 0x70);
+        assert_eq!(gpx[og + 2], 0x30);
+
+        // pyramid: level 1 (16x16) texel containing the island maxes to 120
+        let (pw, ph, ppx) = a.encode_pyramid();
+        assert_eq!((pw, ph), (32, 32));
+        let l1 = (5 * 32 + 2) * 4; // row 0, x=2 covers cells x 4..6
+        let v = ((ppx[l1] as u16) << 8) | ppx[l1 + 1] as u16;
+        assert_eq!(v, ((120 + 64) << 6) as u16);
+        // level 2 starts at row 16; texel x=1 covers cells x 0..4 (no island? island x=5 -> x=4..8 cell 1)
+        let l2 = ((16 + 1) * 32 + 1) * 4;
+        let v2 = ((ppx[l2] as u16) << 8) | ppx[l2 + 1] as u16;
+        assert_eq!(v2, ((120 + 64) << 6) as u16);
+    }
+
+    #[test]
     fn version_bumps_on_change() {
         let a = Atlas::new(0, 0, 64, 4, 63);
         let v0 = a.version();
-        a.set(1, 1, 10, false, 0x808080, 0x707070);
+        a.set(1, 1, 10, false, 0x808080, 0x707070, 10, 0, false, 0);
         let v1 = a.version();
-        a.set(1, 1, 10, false, 0x808080, 0x707070); // same value — no bump
+        a.set(1, 1, 10, false, 0x808080, 0x707070, 10, 0, false, 0); // same value — no bump
         assert_eq!(v0 + 1, v1);
         assert_eq!(a.version(), v1);
         assert_eq!(a.scanned_cells(), 1);
@@ -422,9 +616,9 @@ mod tests {
         let path = dir.join("atlas.bin");
 
         let a = Atlas::new(123, -456, 64, 4, 62);
-        a.set(3, 5, 100, false, 0x808080, 0x707070);
-        a.set(0, 0, 62, true, 0x808080, 0x707070);
-        a.set(15, 15, 200, false, 0x808080, 0x707070);
+        a.set(3, 5, 100, false, 0x808080, 0x707070, 100, 0, false, 0);
+        a.set(0, 0, 62, true, 0x808080, 0x707070, 62, 0, false, 0);
+        a.set(15, 15, 200, false, 0x808080, 0x707070, 180, 90, true, 0x305040);
         a.save(&path).unwrap();
         // tmp file must be gone after atomic rename
         assert!(!path.with_extension("tmp").exists());
@@ -436,6 +630,11 @@ mod tests {
         assert_eq!(b.get(3, 5).unwrap().height, 100);
         assert!(b.get(0, 0).unwrap().water);
         assert_eq!(b.get(15, 15).unwrap().height, 200);
+        let island = b.get(15, 15).unwrap();
+        assert!(island.has_gap);
+        assert_eq!(island.bot, 180);
+        assert_eq!(island.seg2, 90);
+        assert_eq!(island.seg2_top, 0x305040);
 
         // Deterministic encoding across instances (pack SHA-1 stability).
         let (_, _, px_a) = a.encode_rgba();

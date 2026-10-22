@@ -94,6 +94,9 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
         cfg.snow_line,
     ];
 
+    // Pyramid levels: level k has dim = cells >> k; the last level is 1x1.
+    let pyr_levels = ((atlas.cells as f64).log2().floor() as u32).max(1);
+
     let map: Vec<(&str, String)> = vec![
         ("__FOV__", fmt_f(cfg.fov)),
         ("__ORIGIN_X__", fmt_f(origin_x as f32)),
@@ -125,6 +128,8 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
         ("__ATMO_STRENGTH__", fmt_f(0.0)),
         // 26.3 device depth: d = depth_near / eyeZ (infinite far, sky == 0.0).
         ("__DEPTH_NEAR__", fmt_f(cfg.depth_near)),
+        // v4.2 max-height pyramid: level count for the conservative march.
+        ("__PYR_LEVELS__", format!("{}.0", pyr_levels)),
     ];
 
     let lod_terrain_json = substitute(lod_terrain_tpl, &map);
@@ -165,9 +170,19 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
 
     let (aw, ah, atlas_rgba) = atlas.encode_rgba();
     let atlas_png = png::encode_png(aw, ah, &atlas_rgba);
+    // DH-style slab geometry (gap bottoms + ground segments below canopies
+    // and floating islands). Sampled NEAREST — the values are exact levels.
+    let (gw, gh, geom_rgba) = atlas.encode_geom();
+    let geom_png = png::encode_png(gw, gh, &geom_rgba);
+    // Conservative max-height pyramid for the ray march.
+    let (pw, ph, pyr_rgba) = atlas.encode_pyramid();
+    let pyr_png = png::encode_png(pw, ph, &pyr_rgba);
     // Top-face colours (bilinear, this is what the eye reads as "block colour").
     let (cw, ch, color_rgba) = atlas.encode_colors();
     let color_png = png::encode_png(cw, ch, &color_rgba);
+    // Ground-segment colours below air gaps (bilinear).
+    let (grw, grh, ground_rgba) = atlas.encode_ground();
+    let ground_png = png::encode_png(grw, grh, &ground_rgba);
     // Side/cliff colours: one 256x1 strip, indexed by the atlas alpha channel.
     let side_lut = atlas.side_lut();
     let mut side_rgba = vec![0u8; 256 * 4];
@@ -219,7 +234,10 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
         terrain_vsh.as_bytes(),
     );
     zip.add("assets/clod/textures/effect/atlas.png", &atlas_png);
+    zip.add("assets/clod/textures/effect/geom.png", &geom_png);
+    zip.add("assets/clod/textures/effect/pyr.png", &pyr_png);
     zip.add("assets/clod/textures/effect/color.png", &color_png);
+    zip.add("assets/clod/textures/effect/ground.png", &ground_png);
     zip.add("assets/clod/textures/effect/side.png", &side_png);
     let zip_bytes = zip.finish();
 
