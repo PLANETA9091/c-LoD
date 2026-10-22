@@ -497,16 +497,20 @@ void main() {
     // Discrete like every LOD scheme; the switch ring sits where one cell
     // ≈ one pixel and is invisible at that rate.
     //
-    // v4.4.0-r2 threshold: cpp is CELLS PER PIXEL (pxSurface/cell). The mush
-    // zone is cpp 1..5 (cell spans 1..0.2 px — deep minification). A floor()
-    // schedule fired only at cpp >= 2 and left the whole zone on L0 — run
-    // 1006 rendered pixel-identical to 0932. The rule now targets a coarse
-    // cell coverage of <= 0.75 cells/px (every coarse cell spans >= 1.3 px):
-    // Ls = ceil(log2(cpp / 0.75)), i.e. one level per 2x distance band, so
-    // the mid-field mush (cpp 1-2) lands on L1/L2 and the horizon (cpp ~5)
-    // on L3.
+    // v4.4.0-r3 threshold: cpp is CELLS PER PIXEL (pxSurface/cell). The mush
+    // zone is cpp 1..5 (cell spans 1..0.2 px — deep minification). r2's 0.75
+    // target still let adjacent coarse cells flip hue at a 1.3-2.7 px rate
+    // (stone next to leaves next to dirt — run 1023: speckle 0.20). The rule
+    // now targets <= 0.3 cells/px, i.e. every coarse cell spans >= 3.3 px —
+    // the rate where max-reduced neighbours read as coherent masses:
+    // Ls = ceil(log2(cpp / 0.3)). Mid-field (cpp 1.2) -> L2, horizon (cpp 5)
+    // -> L4. Tint/light STAY on L0 below: biome tint and lightmap are
+    // spatially smooth fields (biomes span tens of blocks, sky light steps
+    // by 1/15) — they carry no per-cell hue flips, so sampling them at the
+    // exact hit cell keeps full accuracy with zero aliasing; the STATE (and
+    // the normal) is the only high-frequency channel that coarsens.
     float cpp = pxSurface / cell; // L0 cells per surface pixel
-    int Ls = cpp > 1.0 ? int(clamp(ceil(log2(cpp / 0.75)), 1.0, 4.0)) : 0;
+    int Ls = cpp > 1.0 ? int(clamp(ceil(log2(cpp / 0.3)), 1.0, 4.0)) : 0;
     if (Ls > 0) {
         float stepBlocks = cell * exp2(float(Ls));
         atlas_cell(Ls, local, h, isWater, sid);
@@ -523,10 +527,11 @@ void main() {
         ? (n.x > 0.0 ? 5.0 : 4.0)
         : (n.z > 0.0 ? 3.0 : 2.0));
 
-    // Tint + light follow the same level as the state: at Ls > 0 the group's
-    // +x+z winner cell carries the region's biome tint and light id exactly
-    // like the Mipper's own reduction would.
-    vec4 colData = col_fetch(Ls, local);
+    // Tint + light stay at the EXACT L0 cell (v4.4.0-r3): both fields are
+    // spatially smooth, so per-cell sampling adds no aliasing, and the tint
+    // then always matches the column the ray actually hit (a coarse group's
+    // corner cell could carry a grass tint over a stone winner).
+    vec4 colData = col_fetch(0, local);
     float lightId = floor(colData.a * 255.0 + 0.5);
 
     // ---- texture detail (quads.frag textureGrad, vanilla scale) ------------
