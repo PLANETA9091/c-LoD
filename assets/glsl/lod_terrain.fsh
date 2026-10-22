@@ -113,6 +113,12 @@ bool atlas_water(vec2 uv) {
     return texture(AtlasSampler, uv).b > 0.5;
 }
 
+// (hi,lo) big-endian 16-bit byte pair from RGBA8 (stored n/255), with the
+// (c+1)/2 * 65535 signed remap used by the v4.3 camera channel.
+float c16(float hi, float lo) {
+    return (hi * 65280.0 + lo * 255.0) / 65535.0 * 2.0 - 1.0;
+}
+
 vec2 atlas_uv(vec2 xz, vec2 origin, float size) {
     return clamp((xz - origin) / size, vec2(0.0015), vec2(0.9985));
 }
@@ -216,8 +222,7 @@ void main() {
     }
 
     bool skyPix = depth <= SKY_DEPTH;
-    vec4 rot = texelFetch(RotSampler, ivec2(0), 0);
-    float conf = rot.b;
+    float conf = texelFetch(RotSampler, ivec2(4, 0), 0).r;
     float minConf = LodParams.w;
     float forceLod = 0.0;
 
@@ -257,16 +262,28 @@ void main() {
         return;
     }
 
-    // v4.0 encoding preserved: R = az/2pi, G = (el+pi/2)/pi, B = conf,
-    // A = fov byte measured from the client's ProjMat[1][1].
-    float az = rot.r * 6.28318530718;
-    float el = rot.g * PI - PI * 0.5;
+    // v4.3 camera channel: the sky shader encodes the BOBBED world-space
+    // right/up basis (16-bit per component, raw bytes in the RGBA8 persistent
+    // target), the bob-corrected vertical fov (16-bit) and the bob eye
+    // wobble (8-bit signed each). This is what makes the LOD march shake
+    // EXACTLY with the world: 26.3 folds view bobbing into the projection
+    // (GameRenderer.renderLevel: projectionMatrix.mul(bobStack)), the sky
+    // extracts it, we consume it. See assets/glsl/sky.fsh + rot_solve.fsh.
+    vec4 rp0 = texelFetch(RotSampler, ivec2(0, 0), 0);
+    vec4 rp1 = texelFetch(RotSampler, ivec2(1, 0), 0);
+    vec4 rp2 = texelFetch(RotSampler, ivec2(2, 0), 0);
+    vec4 rp3 = texelFetch(RotSampler, ivec2(3, 0), 0);
 
-    vec3 F = vec3(cos(el) * cos(az), sin(el), cos(el) * sin(az));
-    vec3 R = vec3(-sin(az), 0.0, cos(az));
-    vec3 U = vec3(-cos(az) * sin(el), cos(el), -sin(az) * sin(el));
+    vec3 R = vec3(c16(rp0.x, rp0.y), c16(rp0.z, rp0.w), c16(rp1.x, rp1.y));
+    vec3 U = vec3(c16(rp1.z, rp1.w), c16(rp2.x, rp2.y), c16(rp2.z, rp2.w));
+    // The quantized pair is near-orthonormal; re-orthonormalize so the
+    // reconstructed horizon can never drift against the real one.
+    R = normalize(R);
+    U = normalize(U - R * dot(R, U));
+    vec3 F = cross(U, R);
 
-    float fov = rot.a > 0.002 ? 5.0 + rot.a * 115.0 : FogParams.z;
+    float fovq = rp3.x * 65280.0 + rp3.y * 255.0;
+    float fov = fovq < 65534.5 ? 5.0 + fovq / 65535.0 * 115.0 : FogParams.z;
     float tanH = tan(radians(fov) * 0.5);
     float aspect = OutSize.x / max(OutSize.y, 1.0);
 
@@ -274,7 +291,10 @@ void main() {
     vec3 dir = normalize(F + R * (ndc.x * tanH * aspect) + U * (ndc.y * tanH));
 
     // 26.3 Globals: CameraBlockPos = floor(camPos), CameraOffset = floor - camPos.
-    vec3 cam = vec3(CameraBlockPos) - CameraOffset;
+    // The bob eye wobble (view-space tx/ty) shifts the LOD eye with the
+    // real camera — sub-pixel at LOD distances, but free and exact.
+    vec2 eyeWob = rp3.zw * 2.0 - 1.0;
+    vec3 cam = vec3(CameraBlockPos) - CameraOffset - (eyeWob.x * R + eyeWob.y * U);
 
     // Clouds are opaque geometry above the highest atlas cell; without this
     // the vanilla cloud layer punches holes into distant mountains.
@@ -475,14 +495,28 @@ void main() {
         albedo = mix(albedo, noisy, distF);
     }
 
-    // Light reference from the SKY IN THIS FRAME: the world clock and the
-    // rendered sky can disagree, and a wrong day factor made the LOD look
-    // lit by moonlight next to sunlit chunks.
-    float skyLum = dot(scene.rgb, vec3(0.299, 0.587, 0.114));
-    float dayF = smoothstep(0.08, 0.45, skyLum);
-    // The fog target is the actual sky behind the pixel, so the far edge of
-    // the LOD band dissolves into the horizon.
-    vec3 veilCol = mix(VeilColor.rgb * mix(0.35, 1.0, dayF), scene.rgb, 0.82);
+    // Day factor from the WORLD CLOCK (GameTime), never from the sky pixels:
+    // stars and the moon are drawn behind the LOD band, and the old per-pixel
+    // sky luminance lit the night LOD in star-shaped speckles (the "night
+    // glow"). Same grading as the atmosphere pass, so both fade in sync.
+    float sunY = sin(fract(GameTime) * 6.28318530718);
+    float dayF = smoothstep(-0.14, 0.22, sunY);
+
+    // The fog target tracks the actual sky behind the pixel so the far edge
+    // of the LOD band dissolves into the horizon — but through a 4-tap min
+    // that kills 1-3px stars, and with a night luminance cap so the moon can
+    // never backlight the fog into a glow patch.
+    vec2 texel = 1.0 / max(InSize, vec2(1.0));
+    vec3 s10 = texture(InSampler, texCoord + vec2(2.0, 0.0) * texel).rgb;
+    vec3 s01 = texture(InSampler, texCoord + vec2(0.0, 2.0) * texel).rgb;
+    vec3 s11 = texture(InSampler, texCoord + vec2(2.0, 2.0) * texel).rgb;
+    vec3 skyRef = min(min(scene.rgb, s10), min(s01, s11));
+    vec3 nightVeil = VeilColor.rgb * mix(0.14, 1.0, dayF);
+    nightVeil = mix(nightVeil * vec3(0.85, 0.9, 1.12), nightVeil, dayF);
+    vec3 veilCol = mix(nightVeil, skyRef, 0.55);
+    float vCap = mix(0.10, 2.0, dayF);
+    float vLum = dot(veilCol, vec3(0.299, 0.587, 0.114));
+    veilCol *= min(1.0, vCap / max(vLum, 1.0e-4));
 
     // Vanilla lightmap substitute: full daylight is 1.0, night keeps a small
     // ambient so the silhouette does not vanish.
@@ -495,8 +529,10 @@ void main() {
     float snow = smoothstep(VeilColor.a * 0.55 + 0.35, VeilColor.a * 0.55 + 0.55, hn);
     lit = mix(lit, vec3(0.93, 0.95, 0.97) * lightMul, snow * 0.9);
 
-    // Distance fog into the day-graded veil color.
-    float fog = smoothstep(FogParams.x, FogParams.y, tHit);
+    // Distance fog into the day-graded veil color. The 1.5 power keeps the
+    // near-mid band (300-800 blocks) solid — the "translucent LOD" fix —
+    // while still dissolving fully before the atlas border.
+    float fog = pow(smoothstep(FogParams.x, FogParams.y, tHit), 1.5);
     lit = mix(lit, veilCol, fog);
 
     fragColor = vec4(mix(scene.rgb, lit, fade), scene.a);

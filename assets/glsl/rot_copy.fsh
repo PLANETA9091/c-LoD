@@ -2,8 +2,8 @@
 #extension GL_ARB_separate_shader_objects : require
 
 // c-LoD pass 4: ping-pong copy for the persistent rotation target
-// (clod_rot_b -> clod_rot_a) so the next frame seeds from the newest solve
-// without ever reading and writing the same target in one pass.
+// (clod_rot_b -> clod_rot_a, 1x5) so the next frame seeds from the newest
+// solve without ever reading and writing the same target in one pass.
 
 uniform sampler2D InSampler;
 
@@ -16,5 +16,5 @@ layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 
 void main() {
-    fragColor = texelFetch(InSampler, ivec2(0, 0), 0);
+    fragColor = texelFetch(InSampler, ivec2(gl_FragCoord.xy), 0);
 }

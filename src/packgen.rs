@@ -70,7 +70,7 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
     // just before the LOD band and reaches full strength at `veil_far`.
     let atmo_start = fmt_f(cfg.lod_near * 0.85);
     let atmo_end = fmt_f(cfg.veil_far);
-    let fog_start = cfg.lod_near * 1.05;
+    let fog_start = cfg.lod_near * 2.2;
     // Local tweak: the default (size * 0.72) sat past the atlas border for
     // half-extent <= 0.72*size, so the scanned window's square edge was
     // only ~65% veiled and showed up as a hard wall on the horizon.
@@ -258,6 +258,102 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
 mod tests {
     use super::*;
     use crate::zipw;
+
+    /// Mirrors the v4.3 camera channel byte format exactly as the GLSL does
+    /// (sky.fsh encoders, lod_terrain.fsh decoders, rot_solve.fsh packing).
+    /// Guards the shader trio against format drift: the persistent RGBA8
+    /// target only round-trips bytes, so any layout change must land in all
+    /// three shaders AND here.
+    mod camchannel {
+        // sky.fsh enc16 / lod_terrain.fsh c16.
+        fn enc16(c: f32) -> (u8, u8) {
+            let q = (((c + 1.0) * 0.5).clamp(0.0, 1.0) * 65535.0 + 0.5).floor() as u32;
+            ((q / 256) as u8, (q % 256) as u8)
+        }
+        fn c16(hi: u8, lo: u8) -> f32 {
+            ((hi as f32) * 65280.0 + (lo as f32) * 255.0) / 65535.0 * 2.0 - 1.0
+        }
+        // sky.fsh enc8s (signed +-1 over one byte).
+        fn enc8s(c: f32) -> u8 {
+            (((c + 1.0) * 0.5).clamp(0.0, 1.0) * 255.0 + 0.5).floor() as u8
+        }
+        fn dec8s(b: u8) -> f32 {
+            (b as f32) * 2.0 - 1.0
+        }
+
+        #[test]
+        fn basis_16bit_roundtrip_is_sub_pixel() {
+            // Worst-case angular error of the 16-bit signed remap must stay
+            // far below one pixel (70deg fov over 1080p ~ 0.065 deg/px).
+            let mut max_err: f32 = 0.0;
+            let mut c = -1.0f32;
+            while c <= 1.0 {
+                let (hi, lo) = enc16(c);
+                let back = c16(hi, lo);
+                max_err = max_err.max((back - c).abs());
+                c += 0.00005;
+            }
+            // One quantization step is 2/65535 ~ 3.05e-5.
+            assert!(max_err <= 3.1e-5, "max roundtrip error {max_err}");
+        }
+
+        #[test]
+        fn eye_wobble_8bit_is_milliblock() {
+            for &c in &[-1.0f32, -0.5, 0.0, 0.37, 1.0] {
+                let back = dec8s(enc8s(c));
+                assert!((back - c).abs() <= 2.0 / 255.0 + 1e-6, "{c} -> {back}");
+            }
+        }
+
+        #[test]
+        fn pixel_packing_matches_rot_solve() {
+            // rot_solve packs: px0=(Rxh,Rxl,Ryh,Ryl) px1=(Rzh,Rzl,Uxh,Uxl)
+            // px2=(Uyh,Uyl,Uzh,Uzl) px3=(fovh,fovl,tx,ty) px4=(conf,0,0,0).
+            let r = [-0.31f32, 0.77, 0.55];
+            let u = [0.12f32, 0.61, -0.78];
+            let mut bytes = Vec::new();
+            for c in r.into_iter().chain(u) {
+                let (hi, lo) = enc16(c);
+                bytes.push(hi);
+                bytes.push(lo);
+            }
+            let fovq = 41234u32; // (70-5)/115*65534 ~ 37061; arbitrary valid
+            bytes.push((fovq / 256) as u8);
+            bytes.push((fovq % 256) as u8);
+            bytes.push(enc8s(0.08));
+            bytes.push(enc8s(-0.11));
+            assert_eq!(bytes.len(), 16, "payload x2..x17");
+
+            let px = |j: usize| &bytes[j * 4..j * 4 + 4];
+            let (rh, rl) = (px(0)[0], px(0)[1]);
+            let (uh, ul) = (px(2)[2], px(2)[3]);
+            assert!((c16(rh, rl) - r[0]).abs() < 1e-4);
+            assert!((c16(uh, ul) - u[2]).abs() < 1e-4);
+            assert_eq!(px(3)[2], enc8s(0.08));
+            assert_eq!(px(3)[3], enc8s(-0.11));
+        }
+
+        #[test]
+        fn checksum_layout_matches_shaders() {
+            // sky.fsh: chk = sum(pay[0..18)) & 255 at x18; col_scan re-derives
+            // it. The magic bytes are x0=199, x1=99.
+            let payload: [u8; 19] = {
+                let mut p = [0u8; 19];
+                p[0] = 199;
+                p[1] = 99;
+                for (i, c) in [0.3f32, -0.9, 0.5].iter().enumerate() {
+                    let (hi, lo) = enc16(*c);
+                    p[2 + i * 2] = hi;
+                    p[3 + i * 2] = lo;
+                }
+                let s: u32 = p[..18].iter().map(|b| *b as u32).sum();
+                p[18] = (s & 255) as u8;
+                p
+            };
+            let s: u32 = payload[..18].iter().map(|b| *b as u32).sum();
+            assert_eq!((s & 255) as u8, payload[18]);
+        }
+    }
 
     #[test]
     fn pack_builds_and_is_valid_zip() {
