@@ -40,7 +40,7 @@
                 { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
                 { "sampler_name": "Atlas", "location": "clod:atlas", "width": __ATLAS_CELLS__, "height": __ATLAS_PNG_H__, "bilinear": false },
                 { "sampler_name": "Col", "location": "clod:atlas_col", "width": __ATLAS_CELLS__, "height": __ATLAS_CELLS__, "bilinear": false },
-                { "sampler_name": "States", "location": "clod:atlas_states", "width": __STATES_W__, "height": __STATES_H__, "bilinear": true },
+                { "sampler_name": "States", "location": "clod:atlas_states", "width": __STATES_W__, "height": __STATES_H__, "bilinear": false },
                 { "sampler_name": "Rot", "target": "clod_rot_a" }
             ],
             "output": "clod_swap",

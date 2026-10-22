@@ -123,6 +123,11 @@ struct WorldIds {
     /// v4.2 surface colors: RegionAccessor#getBiome(int,int,int).
     /// Optional: absent -> palette falls back to a neutral tint.
     m_get_biome: Option<jmethodID>,
+    /// v4.5 VOXY LIGHT: World#getMaxHeight()I — bounds the light probe
+    /// (the air block above a build-limit surface has no Block object).
+    m_get_max_height: Option<jmethodID>,
+    /// Cached getMaxHeight() value (or the 320 fallback).
+    max_height: i32,
 }
 // Raw method-ID pointers cached process-lifetime; consumed main-thread-only.
 unsafe impl Send for WorldIds {}
@@ -156,6 +161,14 @@ struct BlockIds {
     /// v4.2 surface colors: Block#getType() -> org.bukkit.Material.
     /// Optional: absent -> palette falls back to a neutral tint.
     m_get_type: Option<jmethodID>,
+    /// v4.5 VOXY LIGHT: Block#getLightFromSky()B / getLightFromBlocks()B —
+    /// the real light-engine values of the block position (the probe reads
+    /// them at the AIR block above the surface, the top face's neighbour —
+    /// exactly what the vanilla renderer samples). Both return byte (Bukkit
+    /// API since 1.14); Optional: absent -> the scan keeps the sunlit + lava
+    /// heuristic.
+    m_light_from_sky: Option<jmethodID>,
+    m_light_from_blocks: Option<jmethodID>,
 }
 // Raw method-ID pointers cached process-lifetime; consumed main-thread-only.
 unsafe impl Send for BlockIds {}
@@ -231,6 +244,31 @@ fn world_ids(env: Env, world: jobject) -> Option<WorldIds> {
                     None
                 })
         },
+        // v4.5 VOXY LIGHT: optional (older APIs survive without it).
+        m_get_max_height: {
+            let _ = env.get_method_id(cls_local, "getMaxHeight", "()I");
+            env.exception_clear();
+            env.get_method_id(cls, "getMaxHeight", "()I").or_else(|| {
+                env.exception_clear();
+                None
+            })
+        },
+        max_height: 320,
+    };
+    let ids = WorldIds {
+        max_height: match ids.m_get_max_height {
+            Some(m) => {
+                let v = env.call_int_method(world, m, &[]);
+                if env.exception_check() {
+                    env.exception_clear();
+                    320
+                } else {
+                    v
+                }
+            }
+            None => 320,
+        },
+        ..ids
     };
     *WORLD_IDS.lock().unwrap() = Some(ids);
     Some(ids)
@@ -312,9 +350,39 @@ fn block_ids(env: Env, block: jobject) -> Option<BlockIds> {
                     None
                 })
         },
+        // v4.5 VOXY LIGHT: ()B — Bukkit Block light getters return byte.
+        // Optional: absent -> the scan keeps the sunlit + lava heuristic.
+        m_light_from_sky: {
+            let _ = env.get_method_id(cls_local, "getLightFromSky", "()B");
+            env.exception_clear();
+            env.get_method_id(cls, "getLightFromSky", "()B").or_else(|| {
+                env.exception_clear();
+                None
+            })
+        },
+        m_light_from_blocks: {
+            let _ = env.get_method_id(cls_local, "getLightFromBlocks", "()B");
+            env.exception_clear();
+            env.get_method_id(cls, "getLightFromBlocks", "()B").or_else(|| {
+                env.exception_clear();
+                None
+            })
+        },
     };
     *BLOCK_IDS.lock().unwrap() = Some(ids);
     Some(ids)
+}
+
+/// CallByteMethodA through the raw JNI table. The binding wrapper has no
+/// byte call, and Bukkit's Block light getters (v4.5 VOXY LIGHT) return
+/// byte — `getLightFromSky` / `getLightFromBlocks`, `()B` since 1.14.
+fn call_byte_method(env: Env, obj: jobject, method_id: jmethodID) -> i32 {
+    use jvmti_bindings::jni;
+    unsafe {
+        let envp: *mut jni::JNIEnv = env.raw();
+        let vtable = *envp;
+        ((*vtable).CallByteMethodA)(envp, obj, method_id, std::ptr::null()) as i32
+    }
 }
 
 /// Enum#name() resolved once per concrete enum class (Material, Biome).
@@ -788,7 +856,8 @@ pub fn sample_height(env: Env, world: jobject, x: i32, z: i32) -> Option<(i32, b
 }
 
 /// Sample the surface at one column WITH the v4.2 color payload.
-/// Returns (blockY, isLiquid, material name, biome name). The material /
+/// Returns (blockY, isLiquid, material name, biome name, light payload).
+/// The material /
 /// biome names may be empty when the optional lookups are unavailable —
 /// the palette falls back to a neutral surface color in that case.
 pub fn sample_surface(
@@ -796,7 +865,7 @@ pub fn sample_surface(
     world: jobject,
     x: i32,
     z: i32,
-) -> Option<(i32, bool, String, String)> {
+) -> Option<(i32, bool, String, String, Option<u8>)> {
     use std::sync::atomic::Ordering;
     let wid = world_ids(env, world)?;
     if env.exception_check() {
@@ -821,17 +890,17 @@ pub fn sample_surface(
         return None;
     }
     if y < -64 {
-        return Some((y, false, String::new(), String::new()));
+        return Some((y, false, String::new(), String::new(), None));
     }
     let Some(block) =
         jobj(env.call_object_method(world, wid.m_get_block_at, &[ji(x), ji(y), ji(z)]))
     else {
         clear_if_pending(env);
-        return Some((y, false, String::new(), String::new()));
+        return Some((y, false, String::new(), String::new(), None));
     };
     let Some(bid) = block_ids(env, block) else {
         clear_if_pending(env);
-        return Some((y, false, String::new(), String::new()));
+        return Some((y, false, String::new(), String::new(), None));
     };
     let liquid = env.call_boolean_method(block, bid.m_is_liquid, &[]);
     if env.exception_check() {
@@ -872,7 +941,46 @@ pub fn sample_surface(
     }
 
     SCAN_OK.fetch_add(1, Ordering::Relaxed);
-    Some((y, liquid, material, biome))
+    // v4.5 VOXY LIGHT: the REAL block+sky nibbles from the server light
+    // engine, probed at the AIR block above the surface — the top face's
+    // light neighbour. None -> the engine keeps the sunlit + lava heuristic.
+    let light = light_payload(env, world, &wid, &bid, x, y, z);
+    Some((y, liquid, material, biome, light))
+}
+
+/// The real light-engine payload at the air block above the surface column.
+/// `None` when this runtime lacks the Block light getters (the engine then
+/// keeps the heuristic), or when the surface block object was unreachable.
+/// The method ids are class-level (cached on the surface block's BlockIds) —
+/// the air block shares the same CraftBlock class.
+fn light_payload(
+    env: Env,
+    world: jobject,
+    wid: &WorldIds,
+    bid: &BlockIds,
+    x: i32,
+    y: i32,
+    z: i32,
+) -> Option<u8> {
+    let m_sky = bid.m_light_from_sky?;
+    let m_block = bid.m_light_from_blocks?;
+    if y < -64 || y + 1 >= wid.max_height {
+        // Void column or above the build limit: unobstructed sky.
+        return Some(0x0F);
+    }
+    let air = jobj(env.call_object_method(world, wid.m_get_block_at, &[ji(x), ji(y + 1), ji(z)]))?;
+    let sky = call_byte_method(env, air, m_sky);
+    if env.exception_check() {
+        env.exception_clear();
+        return None;
+    }
+    let block = call_byte_method(env, air, m_block);
+    if env.exception_check() {
+        env.exception_clear();
+        return None;
+    }
+    // Layout: (block << 4) | sky — the shader splits block = high nibble.
+    Some(((block.clamp(0, 15) as u8) << 4) | sky.clamp(0, 15) as u8)
 }
 
 // ---------------------------------------------------------------------------

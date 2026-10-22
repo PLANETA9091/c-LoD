@@ -73,7 +73,7 @@ layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 
 const float PI = 3.14159265358979;
-const int MAX_STEPS = 220;
+const int MAX_STEPS = 420;
 const int BISECT = 7;
 const float VOID_Y = -63.5;   // cells below this are unscanned = no data
 const float FADE_START = 0.9; // Voxy: fade begins at 90% of the view radius
@@ -108,9 +108,19 @@ vec3 vanilla_lightmap0_15(float dayFrac) {
 
 // Full lightmap texel for a Voxy lightId ((block<<4)|sky), lightmap.fsh math.
 vec3 voxy_lightmap(float lightId) {
-    float sky = floor(lightId / 16.0 + 0.5);
-    float block = floor(lightId - sky * 16.0 + 0.5);
-    vec3 color = vanilla_lightmap0_15(GameTime) * lm_brightness(sky / 15.0);
+    // Voxy lightId layout: (block << 4) | sky — the scan probes the REAL
+    // server light engine for the air cell above the surface, so sky is the
+    // per-column shadow channel (under canopies/overhangs sky < 15) and
+    // block carries lava/lantern glow. Integer split (no +0.5 rounding: it
+    // turned sky=15 into sky=1 — 2% brightness, i.e. black LOD).
+    float block = floor(lightId / 16.0);
+    float sky = lightId - block * 16.0;
+    // Sky term: daylight colour graded by the cell's own sky light. Open sky
+    // (15) keeps the exact good-pack full brightness (0.22 + 0.78*1 = 1.0);
+    // shadowed columns fall toward a 0.22 ambient floor — the Voxy-style
+    // relief shadows without ever going pitch black.
+    vec3 color = vanilla_lightmap0_15(GameTime)
+        * (0.22 + 0.78 * lm_brightness(sky / 15.0));
     // BlockLightColor = mix(BlockLightTint, 1, 0.9 * (2b-1)^2), tint = white.
     float b = block / 15.0;
     vec3 blockColor = mix(vec3(1.0), vec3(1.0), 0.9 * (2.0 * b - 1.0) * (2.0 * b - 1.0));
@@ -124,7 +134,10 @@ vec3 voxy_lightmap(float lightId) {
 // height (levels 0..4) = cells * (2 - 2^-4) = cells * 31/16.
 float atlas_cells() { return AtlasInfo.z / AtlasInfo.w; }
 
-float level_cells(int L) { return atlas_cells() * exp2(float(L)); }
+/// Cells in level L: the pyramid halves per level (L1 = cells/2), while the
+/// PNG keeps the full L0 width — `atlas_cell` therefore samples x over the
+/// full width but quantises in level cells.
+float level_cells(int L) { return atlas_cells() * exp2(-float(L)); }
 
 float level_top(int L) {
     return atlas_cells() * (2.0 - exp2(1.0 - float(L)));
@@ -145,7 +158,9 @@ void atlas_cell(int L, vec2 local, out float height, out bool water, out float s
     float cellsL = level_cells(L);
     float topPx = level_top(L);
     float totalH = atlas_total_h();
-    float cx = (floor(local.x * cellsL) + 0.5) / cellsL;
+    // Each level is left-aligned inside the L0-wide PNG: one level cell = one
+    // pixel, so x normalises over `atlas_cells()` (the width), not over cellsL.
+    float cx = (floor(local.x * cellsL) + 0.5) / atlas_cells();
     float cy = (topPx + floor(local.y * cellsL) + 0.5) / totalH;
     vec4 a = texture(AtlasSampler, vec2(cx, cy));
     height = atlas_height_at(a);
@@ -157,9 +172,11 @@ void atlas_cell(int L, vec2 local, out float height, out bool water, out float s
 // pyramid keeps the winner's id, so coarse levels resample L0's winner by
 // taking the +x+z cell of each coarse cell, which IS the Mipper's pick).
 vec4 col_fetch(int L, vec2 local) {
-    float cellsL = level_cells(L);
-    float cx = (floor(local.x * cellsL) + 0.5) / cellsL;
-    float cy = (floor(local.y * cellsL) + 0.5) / cellsL;
+    // The colour PNG is level 0 only; a coarse cell samples the Mipper's pick,
+    // i.e. the +x+z L0 cell inside it (Voxy takes the same corner voxel).
+    float n0 = atlas_cells();
+    float cx = (floor(local.x * n0) + 0.5) / n0;
+    float cy = (floor(local.y * n0) + 0.5) / n0;
     return texture(ColSampler, vec2(cx, cy));
 }
 
@@ -168,7 +185,11 @@ float ground_at(int L, vec2 local) {
     float h; bool w; float s;
     atlas_cell(L, local, h, w, s);
     if (h < VOID_Y) {
-        return 1.0e8;
+        // No data (unscanned chunk / cell): the ray must pass through, i.e.
+        // the ground is FAR BELOW. Returning +1e8 made every void cell read as
+        // a solid column above the ray, so the marcher "hit" it and painted a
+        // fog-coloured slab (the flat sky-coloured rectangle).
+        return -1.0e8;
     }
     return w ? LodParams.z : h;
 }
@@ -179,16 +200,20 @@ float ground_at(int L, vec2 local) {
 const float FACE_STRIDE = 31.0;
 const float STATES_PER_ROW = 16.0;
 
-vec4 state_tile(float sid, float face, int mip, vec2 uvf) {
-    float tw = exp2(float(4 - mip));          // 16 >> mip
-    // mip strip offsets within one 31px face column: 0,16,24,28,30 = 32-2^(5-m).
-    float off = 32.0 - exp2(5.0 - float(mip));
-    float sx = mod(sid, STATES_PER_ROW);
-    float sy = floor(sid / STATES_PER_ROW);
-    float ox = sx * 3.0 * FACE_STRIDE + floor(face / 2.0) * FACE_STRIDE + off;
-    float oy = sy * 32.0 + mod(face, 2.0) * 16.0;
-    vec2 texUV = vec2(ox, oy) + clamp(uvf, 0.5 / tw, 1.0 - 0.5 / tw) * tw;
-    return texture(StatesSampler, (texUV + 0.5) / StatesInfo.yz);
+vec4 state_tile(float sidf, float face, int mip, vec2 uvf) {
+    // Exact texel fetch: the block atlas is pixel art packed edge to edge
+    // (mip strip 16/8/4/2/1 inside a 31px face column), so any normalised
+    // sample bleeds into the neighbouring mip/state — that was the confetti
+    // (grass rows reading a transparent leaf texel -> cutout -> sky dots).
+    int sid = int(sidf + 0.5);
+    int tw = 16 >> mip;                       // 16, 8, 4, 2, 1
+    int off = 32 - (32 >> mip);               // 0, 16, 24, 28, 30
+    int sx = sid - (sid / 16) * 16;
+    int sy = sid / 16;
+    int ox = sx * 93 + int(floor(face * 0.5)) * int(FACE_STRIDE) + off;
+    int oy = sy * 32 + int(mod(face, 2.0)) * 16;
+    ivec2 t = clamp(ivec2(floor(uvf * float(tw))), ivec2(0), ivec2(tw - 1));
+    return texelFetch(StatesSampler, ivec2(ox, oy) + t, 0);
 }
 
 // ---- vanilla cardinal face shading (Voxy computeDirectionalFaceTint) -------
@@ -207,6 +232,15 @@ float edge_distance_xz(vec3 cam, vec3 dir, vec2 minW, vec2 maxW) {
     if (dir.z > 0.0) e = min(e, (maxW.y - cam.z) / dir.z);
     if (dir.z < 0.0) e = min(e, (minW.y - cam.z) / dir.z);
     return e * length(dir.xz);
+}
+
+vec2 atlas_uv(vec2 xz, vec2 origin, float size) {
+    return clamp((xz - origin) / size, vec2(0.0015), vec2(0.9985));
+}
+
+/// Index of the side/cliff colour stored in the atlas alpha channel.
+float atlas_side(vec2 uv) {
+    return texture(AtlasSampler, uv).a;
 }
 
 void main() {
@@ -280,11 +314,22 @@ void main() {
     int hitL = 0;
     float prevT = t;
     float prevDiff = 1.0e9;
+    // Voxy draws real quads, so the visible face decides both the texture and
+    // the vanilla face shade. We reconstruct the face from the march: entering a
+    // column whose top is above the ray means we are looking at its SIDE (cliff)
+    // face, otherwise the ray crossed the surface downwards -> TOP face.
+    bool sideHit = false;
+    float faceShade = 1.0;
 
     for (int i = 0; i < MAX_STEPS; ++i) {
-        int L = int(clamp(floor(log2(max(t, cell) / cell)), 0.0, 4.0));
+        // Voxy picks the LOD level from the on-screen footprint, not distance:
+        // one level cell ~= one pixel. At 1080p with cell=1 that is L0 out to
+        // the whole atlas, i.e. full block detail (the coarse levels only kick
+        // in at low resolutions / much longer ranges).
+        float wpp = 2.0 * t * tanH / max(OutSize.y, 1.0);
+        int L = int(clamp(floor(log2(max(wpp, cell) / cell)), 0.0, 4.0));
         float cellL = cell * exp2(float(L));
-        float dt = max(cellL * 0.35, t * (2.0 * tanH / max(OutSize.y, 1.0)));
+        float dt = max(cellL * 0.75, t * 0.010);
         prevT = t;
         t = min(t + dt, horizon);
 
@@ -296,14 +341,19 @@ void main() {
         }
         float above = ground_at(L, local) - p.y;
 
-        if (above <= 0.0 && prevDiff > 0.0) {
+        // above = ground - rayY: negative outside, positive inside the terrain.
+        // A hit is the outside -> inside crossing (the v4.1 test; the ported
+        // WIP had it reversed, so the marcher "hit" the first sky sample and
+        // painted a fog-coloured slab over the sky).
+        if (above >= 0.0 && prevDiff < 0.0) {
             float lo = prevT;
             float hi = t;
             for (int b = 0; b < BISECT; ++b) {
                 float mid = (lo + hi) * 0.5;
                 vec3 mp = cam + dir * mid;
                 vec2 mlocal = (mp.xz - origin) / size;
-                int mL = int(clamp(floor(log2(max(mid, cell) / cell)), 0.0, 4.0));
+                float mwpp = 2.0 * mid * tanH / max(OutSize.y, 1.0);
+                int mL = int(clamp(floor(log2(max(mwpp, cell) / cell)), 0.0, 4.0));
                 float g = ground_at(mL, mlocal);
                 if (g - mp.y <= 0.0) {
                     hi = mid;
@@ -312,7 +362,8 @@ void main() {
                 }
             }
             tHit = (lo + hi) * 0.5;
-            hitL = int(clamp(floor(log2(max(tHit, cell) / cell)), 0.0, 4.0));
+            float hwpp = 2.0 * tHit * tanH / max(OutSize.y, 1.0);
+            hitL = int(clamp(floor(log2(max(hwpp, cell) / cell)), 0.0, 4.0));
             break;
         }
         prevDiff = above;
@@ -336,35 +387,42 @@ void main() {
     float h; bool isWater; float sid;
     atlas_cell(L, local, h, isWater, sid);
 
-    // Height-gradient normal at the hit level (Voxy-flat quads).
-    vec2 e = vec2(1.0 / level_cells(L), 0.0);
-    float hL; bool wtmp; float stmp;
-    atlas_cell(L, clamp(local - e.xy, vec2(0.0), vec2(0.999999)), hL, wtmp, stmp);
-    float hR; atlas_cell(L, clamp(local + e.xy, vec2(0.0), vec2(0.999999)), hR, wtmp, stmp);
-    float hD; atlas_cell(L, clamp(local - e.yx, vec2(0.0), vec2(0.999999)), hD, wtmp, stmp);
-    float hU; atlas_cell(L, clamp(local + e.yx, vec2(0.0), vec2(0.999999)), hU, wtmp, stmp);
-    vec3 n = normalize(vec3(hL - hR, 2.0 * cellL, hD - hU));
-
-    // ---- FACE + TEXTURE (quads.frag math) ----------------------------------
-    float face = n.y > 0.577 ? 1.0 : (abs(n.x) > abs(n.z)
-        ? (n.x > 0.0 ? 5.0 : 4.0)
-        : (n.z > 0.0 ? 3.0 : 2.0));
+    // ---- FACE: which side of the column did the ray enter? -----------------
+    // A heightfield raycast enters a column either through its TOP plane (the
+    // ray descends across the surface) or through a SIDE wall (the column's
+    // top sits above the ray). The old height-gradient normal called almost
+    // every 1-block step a top face, so cliffs wore grass-top textures.
+    // face: 1 UP, 2 NORTH, 3 SOUTH, 4 WEST, 5 EAST.
+    bool sideHitNow = hitPos.y < h - 0.5;
+    float face = !sideHitNow ? 1.0
+        : (abs(dir.x) > abs(dir.z)
+            ? (dir.x > 0.0 ? 4.0 : 5.0)   // travelling east -> the WEST wall
+            : (dir.z > 0.0 ? 2.0 : 3.0)); // travelling south -> the NORTH wall
 
     vec4 colData = col_fetch(L, local);
     float lightId = floor(colData.a * 255.0 + 0.5);
 
-    // Voxy greedy-quad tiling: one texture tile per 2^L cell.
-    vec2 uvf = fract(hitPos.xz / cellL);
+    // Voxy greedy-quad tiling: one texture tile per 2^L cell. The UV plane
+    // follows the FACE (a cliff shows the block side mapped in x/y, not x/z —
+    // using xz everywhere made every wall a set of horizontal stripes).
+    vec2 uvf = face < 1.5
+        ? fract(hitPos.xz / cellL)                                  // UP / DOWN
+        : (face < 3.5
+            ? vec2(fract(hitPos.x / cellL), 1.0 - fract(hitPos.y / cellL))
+            : vec2(fract(hitPos.z / cellL), 1.0 - fract(hitPos.y / cellL)));
 
     vec3 albedo;
     float texAlpha = 1.0;
     bool hasState = sid > 0.5;
     if (hasState) {
-        // Mip = the level (one mip step per detail level, Voxy-style).
-        vec4 tex = state_tile(sid, face, L, uvf);
-        // Cutout (Voxy: discard at mip-0 alpha <= 0.1 — leaves show sky).
-        float a0 = state_tile(sid, face, 0, uvf).a;
-        if (a0 <= 0.1) {
+        // Voxy picks the TEXTURE mip from the on-screen footprint (one texel
+        // ~= one pixel); sampling mip 0 at 900 blocks is pure shimmer/aliasing.
+        float wppHit = 2.0 * tHit * tanH / max(OutSize.y, 1.0);
+        int texMip = int(clamp(floor(log2(max(wppHit * 16.0 / cellL, 1.0))), 0.0, 4.0));
+        vec4 tex = state_tile(sid, face, texMip, uvf);
+        // Cutout on the SAMPLED mip: a mip-0 test dissolves distant canopies
+        // into sky-dot confetti, a mip-averaged one keeps them solid.
+        if (tex.a <= 0.1) {
             fragColor = scene;
             return;
         }

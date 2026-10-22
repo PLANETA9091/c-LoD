@@ -67,6 +67,12 @@ pub struct State {
     pub tick_no: AtomicU64,
     /// Rate limiter for pack-push failure logs.
     pub push_fails: AtomicU32,
+    /// v4.5 SETTLE: last atlas version seen by the finalize driver.
+    pub last_ver: AtomicU64,
+    /// v4.5 SETTLE: consecutive frozen-version finalize-driver calls.
+    pub settle: AtomicU32,
+    /// Classic (non-streamed) sweep completion flag.
+    pub sweep_done: AtomicU8,
 }
 
 #[derive(Clone)]
@@ -160,6 +166,9 @@ impl State {
             world_seen_at: Mutex::new(None),
             scan_seq: AtomicU64::new(0),
             scan_cursor: AtomicU64::new(0),
+            last_ver: AtomicU64::new(0),
+            settle: AtomicU32::new(0),
+            sweep_done: AtomicU8::new(0),
             world_obj: Mutex::new(0),
             world_name: Mutex::new(String::new()),
             keys: Mutex::new(None),
@@ -346,6 +355,14 @@ fn scan_batch(state: &Arc<State>, env: Env) {
             let z = state.atlas.cell_world_z(iz);
             sample_cell(state, env, world, x, z, ix, iz);
         }
+        // Classic sweep completion: the radial order has been fully visited
+        // at least once (scan_task wraps the start index; scan_seq was
+        // already bumped for this tick).
+        if state.scan_seq.load(Ordering::Relaxed) * u64::from(budget)
+            >= u64::from(state.atlas.cells) * u64::from(state.atlas.cells)
+        {
+            state.sweep_done.store(1, Ordering::Relaxed);
+        }
     }
     // Rate-limited scan diagnostics (one line per 25 ticks).
     if seq.is_multiple_of(25) {
@@ -380,7 +397,7 @@ fn sample_cell(
     ix: u32,
     iz: u32,
 ) {
-    if let Some((y, liquid, material, biome)) = jni::sample_surface(env, world, x, z) {
+    if let Some((y, liquid, material, biome, light)) = jni::sample_surface(env, world, x, z) {
         let sid = state.states.id_of(&material);
         let def = state.states.def(sid);
         // Emissive surfaces carry block light 15 (lava flows glow in the
@@ -390,7 +407,10 @@ fn sample_cell(
         } else {
             0
         };
-        let light = (block_light << 4) | 0x0F;
+        // v4.5 VOXY LIGHT: the REAL (block<<4)|sky payload from the server
+        // light engine — per-column sky light drives the shadow depth under
+        // canopies/overhangs; fallback keeps the sunlit + lava heuristic.
+        let light = light.unwrap_or_else(|| (block_light << 4) | 0x0F);
         let tint = if def.water {
             crate::palette::water_tint(&biome)
         } else {
@@ -675,8 +695,39 @@ pub fn maybe_finalize(state: &Arc<State>) {
         Some(t) => t.elapsed().as_secs() >= state.cfg.scan_deadline_secs || state.restored,
         None => state.restored,
     };
-    if !complete && !deadline_hit {
+    // v4.5 SETTLE: the sweep visited every chunk of the atlas grid AND the
+    // snapshot stopped changing — whatever cells remain unscanned are
+    // outside the world (world border / clipped non-aligned edges, which can
+    // NEVER reach 100% cells). Finalize instead of idling to the deadline:
+    // a pregenerated world finishes its scan in minutes, the deadline is
+    // 10-120 minutes, and waiting it out rendered no LOD the whole time.
+    let (side, _, _) = chunk_grid(&state.atlas);
+    let sweep_exhausted = state.scan_cursor.load(Ordering::Relaxed)
+        >= (side as u64) * (side as u64)
+        || state.sweep_done.load(Ordering::Relaxed) == 1;
+    const SETTLE_TICKS: u32 = 40; // 40 engine calls x tick_ms(50) = 2 s frozen
+    let settled = if sweep_exhausted {
+        let ver = state.atlas.version();
+        if ver == state.last_ver.load(Ordering::Relaxed) {
+            state.settle.fetch_add(1, Ordering::Relaxed) + 1 >= SETTLE_TICKS
+        } else {
+            state.last_ver.store(ver, Ordering::Relaxed);
+            state.settle.store(0, Ordering::Relaxed);
+            false
+        }
+    } else {
+        state.settle.store(0, Ordering::Relaxed);
+        false
+    };
+    if !complete && !deadline_hit && !settled {
         return;
+    }
+    if settled {
+        let (scanned, total) = (state.atlas.scanned_cells(), state.atlas.total_cells());
+        crate::log_info(&format!(
+            "c-LoD scan settled: sweep exhausted with {}/{} cells valid (rest are outside the world) — finalizing",
+            scanned, total
+        ));
     }
     finalize(state);
 }
