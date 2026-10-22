@@ -33,5 +33,5 @@ done
 grep -q "pack finalized (ONE-TIME, static)" /tmp/server.log || { echo "TIMEOUT waiting for finalize"; tail -40 /tmp/server.log; exit 1; }
 sleep 2
 echo "=== gates ==="
-python3 /home/z/my-project/c-LoD/scripts/e2e/gates.py /tmp/server.log
+python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"/scripts/e2e/gates.py /tmp/server.log
 echo "=== server is up (stdin: /tmp/server.in, log: /tmp/server.log) ==="

@@ -2,18 +2,26 @@
 #extension GL_ARB_separate_shader_objects : require
 #include <minecraft:globals.glsl>
 
-// c-LoD pass 4: the actual level-of-distant-detail renderer.
+// c-LoD pass 4: Distant Horizons-exact LOD renderer.
 //
-// For every pixel that shows sky (device depth ~ 1) we march a view ray
-// against the heightfield atlas shipped in the server resource pack and
-// shade the hit. The ray is built from the camera basis delivered by the
-// CAMERA CHANNEL (v4.1): the sky shader encodes yaw/pitch/fov into the
-// alpha of the leftmost columns, col_scan + rot_solve decode it into the
-// clod_rot target. Works at any time of day and any camera orientation —
-// no sun in view required. Camera position comes from the Globals UBO
-// (CameraBlockPos + CameraOffset), bound to every post pass.
+// DH renders each LOD column as a flat-coloured BOX: a top quad (when nothing
+// sits on it), a bottom quad, and four side quads that exist only where the
+// neighbouring column is lower (ColumnBox.addBoxQuadsToBuilder). Every quad is
+// shaded with vanilla's directional factor (up 1.0, N/S 0.8, E/W 0.6) at build
+// time and lit through the vanilla lightmap; fog is exponential-squared in the
+// sky colour from 0.4 to 1.0 of the LOD draw distance (GlDhFogShader:
+// uFogScale = 1/lodDrawDistance, farFogStart 0.4, farFogEnd 1.0, density 2.5).
 //
-// Non-sky pixels pass through untouched: real chunks always win.
+// We reproduce that geometry PIXEL-EXACTLY with an Amanatides-Woo voxel DDA
+// over the heightfield atlas: each cell boundary crossing tests the neighbour
+// wall (hNew > rayY -> side face, exposed span [hPrev..hNew] drives the DH
+// grass-side dirt fade), and inside each cell the horizontal plane y=h is
+// tested (top face). This is exactly the set of quads DH would rasterise for
+// the same data — same faces, same shade, same colours, no tunnelling.
+//
+// Camera basis comes from the CAMERA CHANNEL (v4.1): the sky shader encodes
+// yaw/pitch/fov into the rot target. Non-sky pixels pass through untouched:
+// real chunks always win.
 
 uniform sampler2D InSampler;      // minecraft:main color
 uniform sampler2D InDepthSampler; // minecraft:main depth
@@ -37,7 +45,7 @@ layout(std140) uniform ClodParams {
     vec4 LodParams;
 };
 
-// x = fog start (blocks), y = fog end (blocks), z = static fov fallback, w = unused
+// x = fog start (legacy), y = fog end (blocks) == LOD draw distance, z = static fov fallback
 layout(std140) uniform ClodFog {
     vec4 FogParams;
 };
@@ -54,21 +62,31 @@ layout(std140) uniform ClodSky {
 };
 
 layout(std140) uniform ClodColors {
-    vec4 ColLow;    // low terrain
-    vec4 ColHigh;   // high terrain
-    vec4 ColWater;  // water surface
-    vec4 VeilColor; // horizon veil (rgb) + snow whiteness (a)
+    vec4 ColLow;
+    vec4 ColHigh;
+    vec4 ColWater;  // water surface (DH: flat biome water colour, opaque)
+    vec4 VeilColor; // a = snow whiteness threshold
 };
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 
 const float PI = 3.14159265358979;
-// 26.3 device depth: d = near/eyeZ (infinite far) — sky == 0.0, any real
-// geometry reads positive, so 1e-6 keeps terrain out to ~50 km classified.
+// 26.3 device depth: d = near/eyeZ (infinite far) — sky == 0.0.
 const float SKY_DEPTH = 1.0e-6;
-const int MAX_STEPS = 460;
-const int BISECT = 7;
+// A ray crosses at most (cells.x + cells.y) grid boundaries; 256+256 for a
+// 1024-block window at cell 4, plus margin.
+const int MAX_STEPS = 560;
+
+// DH far-fog defaults (Config.Client.Advanced.Graphics.Fog): EXPONENTIAL_SQUARED,
+// farFogStart 0.4, farFogEnd 1.0 (x lodDrawDistance), density 2.5, sky colour.
+const float FOG_START_FRAC = 0.4;
+const float FOG_DENSITY = 2.5;
+
+// Vanilla directional face shade (ClientLevelWrapper.getShade):
+// up 1.0, down 0.5, north/south 0.8, west/east 0.6.
+const float SHADE_NS = 0.8;
+const float SHADE_EW = 0.6;
 
 // Height (block Y) stored in the atlas: (y + 64) << 6, big-endian RG.
 float atlas_height(vec2 uv) {
@@ -83,15 +101,11 @@ bool atlas_water(vec2 uv) {
 
 // Heightfield lookup in world space; clamps to the atlas edge (plateau).
 float world_height(vec2 xz, vec2 origin, float size) {
-    vec2 uv = (xz - origin) / size;
-    uv = clamp(uv, vec2(0.0015), vec2(0.9985));
-    return atlas_height(uv);
+    return atlas_height(clamp((xz - origin) / size, vec2(0.0015), vec2(0.9985)));
 }
 
 bool world_water(vec2 xz, vec2 origin, float size) {
-    vec2 uv = (xz - origin) / size;
-    uv = clamp(uv, vec2(0.0015), vec2(0.9985));
-    return atlas_water(uv);
+    return atlas_water(clamp((xz - origin) / size, vec2(0.0015), vec2(0.9985)));
 }
 
 vec2 atlas_uv(vec2 xz, vec2 origin, float size) {
@@ -131,10 +145,6 @@ void main() {
     float forceLod = 0.0;
 
     // Debug mode 4: LOD hit mask + tracker confidence bar.
-    //   green     = the ray hit the heightfield (this pixel WOULD get LOD)
-    //   orange    = sky, the march ran but never hit
-    //   purple    = the ray leaves the heightfield from above (never hits)
-    //   bar (top-left, 240x24 px): red width = tracker confidence 0..1
     if (DebugParams.x > 3.5) {
         if (gl_FragCoord.x < 240.0 && gl_FragCoord.y > OutSize.y - 24.0) {
             vec3 bar = gl_FragCoord.x < conf * 240.0 ? vec3(1.0, 0.0, 0.0) : vec3(0.0);
@@ -144,19 +154,11 @@ void main() {
         forceLod = 1.0;
     }
 
-    // Debug view: red channel = tracker confidence over sky pixels.
-    //   black sky  -> the tracker never locked (sun never detected)
-    //   red sky    -> tracker locked (conf == 1)
-    //   normal sky -> this pass never classified the pixel as sky
     if (DebugParams.x > 0.5 && DebugParams.x < 1.5) {
         fragColor = vec4(conf, 0.0, 0.0, 1.0);
         return;
     }
 
-    // Debug mode 2 splits the screen:
-    //   left  half -> the real ray march with the confidence gate FORCED open
-    //   right half -> the atlas itself drawn as a height map (uv = screen uv)
-    // so one look tells us whether the march or the atlas data is at fault.
     if (DebugParams.x > 1.5 && DebugParams.x < 2.5) {
         if (texCoord.x >= 0.5) {
             float hm = atlas_height(texCoord);
@@ -177,8 +179,7 @@ void main() {
     }
 
     // v4.0 encoding preserved: R = az/2pi, G = (el+pi/2)/pi, B = conf.
-    // A = fov byte (new in v4.1): the REAL vertical fov measured by the sky
-    // shader from ProjMat[1][1] — spyglass zoom and fov options just work.
+    // A = fov byte (v4.1): the REAL vertical fov measured by the sky shader.
     float az = rot.r * 6.28318530718;
     float el = rot.g * PI - PI * 0.5;
 
@@ -186,9 +187,6 @@ void main() {
     vec3 R = vec3(-sin(az), 0.0, cos(az));
     vec3 U = vec3(-cos(az) * sin(el), cos(el), -sin(az) * sin(el));
 
-    // v4.1 camera channel: fov is measured from the client's ProjMat[1][1]
-    // (spyglass zoom and the fov slider just work). Fall back to the pack
-    // value until the first valid payload row arrives.
     float fov = rot.a > 0.002 ? 5.0 + rot.a * 115.0 : FogParams.z;
     float tanH = tan(radians(fov) * 0.5);
     float aspect = OutSize.x / max(OutSize.y, 1.0);
@@ -196,13 +194,10 @@ void main() {
     vec2 ndc = texCoord * 2.0 - 1.0;
     vec3 dir = normalize(F + R * (ndc.x * tanH * aspect) + U * (ndc.y * tanH));
 
-    // 26.3 Globals: CameraBlockPos = floor(camPos), CameraOffset = floor - camPos
-    // (see GlobalSettingsUniform.update), so the camera is floor - offset.
+    // 26.3 Globals: CameraBlockPos = floor(camPos), CameraOffset = floor - camPos.
     vec3 cam = vec3(CameraBlockPos) - CameraOffset;
 
-    // Clouds are opaque geometry above the highest atlas cell. Without this the
-    // vanilla cloud layer (y=192, far beyond the LOD band) punches holes into
-    // distant mountains, because the LOD pass skips every non-sky pixel.
+    // Clouds are opaque geometry above the highest atlas cell.
     if (!skyPix) {
         float eyeZ = SkyParams.x / max(depth, 1.0e-9);
         float vlen = length(vec3(ndc.x * tanH * aspect, ndc.y * tanH, 1.0));
@@ -221,8 +216,6 @@ void main() {
     float maxY = LodParams.y;
     float sea = LodParams.z;
 
-    // The atlas is a square around `origin`; stop the ray when it leaves.
-    // AtlasInfo.xy is the MIN corner, z the full side: the box is origin..origin+size.
     vec2 minW = origin;
     vec2 maxW = origin + vec2(size);
 
@@ -239,86 +232,130 @@ void main() {
             return;
         }
     }
-    if (dir.y == 0.0) {
+    if (abs(dir.y) < 1.0e-6) {
         dir.y = 1.0e-6;
     }
 
-    // March from the camera. The pass only overwrites SKY pixels, so the near
-    // field is free; starting at 0 also guarantees the first sample is above
-    // the heightfield (the camera always is), which the crossing test needs.
-    float t = 0.0;
-    float dt = max(cell * 0.75, t * 0.008);
-    float tHit = -1.0;
-    float prevT = t;
-    float prevDiff = 1.0e9;
-    // Voxy draws real quads, so the visible face decides both the texture and
-    // the vanilla face shade. We reconstruct the face from the march: entering a
-    // column whose top is above the ray means we are looking at its SIDE (cliff)
-    // face, otherwise the ray crossed the surface downwards -> TOP face.
-    bool sideHit = false;
-    float faceShade = 1.0;
-
-    vec2 xz = cam.xz + dir.xz * t;
-    vec2 cellPrev = floor((xz - origin) / cell);
-    float hPrev = world_water(xz, origin, size) ? sea : world_height(xz, origin, size);
-    float above = hPrev - (cam.y + dir.y * t);
-
-    for (int i = 0; i < MAX_STEPS; ++i) {
-        prevT = t;
-        prevDiff = above;
-        t = min(t + dt, size);
-        // Cell-sized steps near the camera, growing with distance so the whole
-        // atlas stays reachable at 1 block per cell.
-        dt = max(cell * 0.75, t * 0.008);
-
-        xz = cam.xz + dir.xz * t;
-        // Left the atlas? No LOD here.
-        if (any(lessThan(xz, minW)) || any(greaterThan(xz, maxW))) {
-            break;
+    // -------------------------------------------------------------
+    // Amanatides-Woo DDA over the cell grid — the DH quad set, exactly.
+    // -------------------------------------------------------------
+    // Clip the ray to the atlas box (xz). The camera is normally inside;
+    // debug shots can park it outside — enter through the box face then.
+    float tCur = 0.0;
+    vec2 enterXz = cam.xz;
+    if (any(lessThan(cam.xz, minW)) || any(greaterThan(cam.xz, maxW))) {
+        float tEnter = -1.0e9;
+        if (dir.x > 0.0) tEnter = max(tEnter, (minW.x - cam.x) / dir.x);
+        if (dir.x < 0.0) tEnter = max(tEnter, (maxW.x - cam.x) / dir.x);
+        if (dir.z > 0.0) tEnter = max(tEnter, (minW.y - cam.z) / dir.z);
+        if (dir.z < 0.0) tEnter = max(tEnter, (maxW.y - cam.z) / dir.z);
+        if (tEnter < 0.0) {
+            fragColor = DebugParams.x > 3.5 ? vec4(1.0, 0.45, 0.0, 1.0) : scene;
+            return;
         }
-        float ground = world_water(xz, origin, size) ? sea : world_height(xz, origin, size);
-        vec2 cellNow = floor((xz - origin) / cell);
-        above = ground - (cam.y + dir.y * t);
-
-        // `above` = ground - rayY: POSITIVE means the ray is below the
-        // heightfield. A hit is the crossing from outside (-) to inside (+).
-        if (above >= 0.0 && prevDiff < 0.0) {
-            sideHit = any(notEqual(cellNow, cellPrev)) && (ground > hPrev + 0.5);
-            if (sideHit) {
-                // Vanilla directional face shade: N/S = 0.8, E/W = 0.6.
-                faceShade = abs(cellNow.x - cellPrev.x) > 0.5 ? 0.6 : 0.8;
-            }
-            // Bisection between prevT and t.
-            float lo = prevT;
-            float hi = t;
-            for (int b = 0; b < BISECT; ++b) {
-                float mid = (lo + hi) * 0.5;
-                vec2 mxz = cam.xz + dir.xz * mid;
-                float g = world_water(mxz, origin, size) ? sea : world_height(mxz, origin, size);
-                if (g - (cam.y + dir.y * mid) >= 0.0) {
-                    hi = mid;
-                } else {
-                    lo = mid;
-                }
-            }
-            tHit = (lo + hi) * 0.5;
-            break;
-        }
-        cellPrev = cellNow;
-        hPrev = ground;
-        if (t >= size) {
-            break;
-        }
+        tCur = tEnter;
+        enterXz = cam.xz + dir.xz * tCur;
     }
 
-    if (tHit < 0.0) {
+    vec2 cellF = floor((enterXz - origin) / cell);
+    float cellsSide = size / cell;
+
+    // Classic DDA setup: tMax = t to the first x/z grid line, tDelta = t per cell.
+    float tMaxX = 1.0e9;
+    float tMaxZ = 1.0e9;
+    float tDeltaX = 1.0e9;
+    float tDeltaZ = 1.0e9;
+    float stepX = dir.x > 0.0 ? 1.0 : -1.0;
+    float stepZ = dir.z > 0.0 ? 1.0 : -1.0;
+    if (abs(dir.x) > 1.0e-6) {
+        float boundary = cellF.x + (dir.x > 0.0 ? 1.0 : 0.0);
+        tMaxX = (boundary * cell + origin.x - cam.x) / dir.x;
+        tDeltaX = cell / abs(dir.x);
+    }
+    if (abs(dir.z) > 1.0e-6) {
+        float boundary = cellF.y + (dir.z > 0.0 ? 1.0 : 0.0);
+        tMaxZ = (boundary * cell + origin.y - cam.z) / dir.z;
+        tDeltaZ = cell / abs(dir.z);
+    }
+
+    // hCur = surface height of the cell the ray is currently in (water -> sea).
+    float hCur = world_water(enterXz, origin, size) ? sea : world_height(enterXz, origin, size);
+
+    float hitT = -1.0;
+    bool sideHit = false;
+    bool hitAxisX = false;
+    // DH FADE_TO_DIRT state: the wall's exposed span [hHitOld..hHitNew].
+    float hHitOld = 0.0;
+    float hHitNew = 0.0;
+
+    for (int i = 0; i < MAX_STEPS; ++i) {
+        // TOP face: inside this cell the ray may cross the plane y = hCur from
+        // above. DH skips the top quad only when another box covers it — for a
+        // heightfield that case is exactly "the ray reaches y=hCur while still
+        // inside the cell's footprint".
+        if (dir.y < 0.0) {
+            float tTop = (hCur - cam.y) / dir.y;
+            float tExit = min(tMaxX, tMaxZ);
+            if (tTop >= tCur && tTop < tExit) {
+                hitT = tTop;
+                sideHit = false;
+                break;
+            }
+        }
+
+        // Step to the next grid boundary.
+        float tNext;
+        bool axisX;
+        if (tMaxX < tMaxZ) {
+            tNext = tMaxX;
+            axisX = true;
+        } else {
+            tNext = tMaxZ;
+            axisX = false;
+        }
+        tCur = tNext;
+
+        // Moved out of the atlas? No LOD here (fog is 1.0 at the band edge).
+        vec2 nextXz = cam.xz + dir.xz * tCur;
+        if (any(lessThan(nextXz, minW)) || any(greaterThan(nextXz, maxW))) {
+            break;
+        }
+
+        if (axisX) {
+            cellF.x += stepX;
+            tMaxX += tDeltaX;
+        } else {
+            cellF.y += stepZ;
+            tMaxZ += tDeltaZ;
+        }
+        if (cellF.x < 0.0 || cellF.y < 0.0 || cellF.x >= cellsSide || cellF.y >= cellsSide) {
+            break;
+        }
+
+        // SIDE face: entering a cell whose surface is above the ray. The ray
+        // is guaranteed to be above hCur (we never continue below terrain),
+        // so this is exactly DH's wall on the exposed span [hCur..hNew].
+        float rayY = cam.y + dir.y * tCur;
+        float hNew = world_water(nextXz, origin, size) ? sea : world_height(nextXz, origin, size);
+        if (hNew > rayY) {
+            hitT = tCur;
+            sideHit = true;
+            hitAxisX = axisX;
+            hHitOld = hCur;
+            hHitNew = hNew;
+            break;
+        }
+        hCur = hNew;
+    }
+
+    if (hitT < 0.0) {
         fragColor = DebugParams.x > 3.5 ? vec4(1.0, 0.45, 0.0, 1.0) : scene;
         return;
     }
     if (DebugParams.x > 4.5 && DebugParams.x < 5.5) {
         // Distance tint: red < 300 blocks, green ~600, blue > 900.
-        vec3 c = mix(vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), clamp(tHit / 600.0, 0.0, 1.0));
-        c = mix(c, vec3(0.0, 0.25, 1.0), clamp((tHit - 600.0) / 600.0, 0.0, 1.0));
+        vec3 c = mix(vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), clamp(hitT / 600.0, 0.0, 1.0));
+        c = mix(c, vec3(0.0, 0.25, 1.0), clamp((hitT - 600.0) / 600.0, 0.0, 1.0));
         fragColor = vec4(c, 1.0);
         return;
     }
@@ -327,50 +364,78 @@ void main() {
         return;
     }
 
+    // DH renders LOD quads from the vanilla render distance out; nearer hits
+    // would be occluded by real chunks (and are scan noise anyway).
+    if (hitT < near && forceLod < 0.5) {
+        fragColor = scene;
+        return;
+    }
+
     float fade = forceLod > 0.5 ? 1.0 : smoothstep(minConf, minConf + 0.15, conf);
-    vec3 hitPos = cam + dir * tHit;
+    vec3 hitPos = cam + dir * hitT;
+    vec2 auv = atlas_uv(hitPos.xz, origin, size);
+    bool hitWater = world_water(hitPos.xz, origin, size);
 
     // ---------------------------------------------------------------
-    // Surface colour, Voxy model: the block's real average texture colour
-    // (baked from the client jar's blockstate -> model -> texture graph, biome
-    // tinted at scan time) picked per face, times vanilla's directional face
-    // shade, times the daylight light-map factor. Voxy samples the block model
-    // atlas with textureGrad, which at any real distance is exactly this
-    // average -- so the colours match instead of being a hand-picked palette.
+    // DH colour model: one flat colour per column box (the block's baked
+    // average, biome tinted), shaded per face with vanilla's directional
+    // factors. Side walls exist only on the exposed span and grass material
+    // fades to dirt down that span (FADE_TO_DIRT default). Our atlas keeps
+    // top and side colours per cell, so the fade is mix(side, top, spanT).
     // ---------------------------------------------------------------
-    vec2 auv = atlas_uv(hitPos.xz, origin, size);
     vec3 topCol = texture(ColorSampler, auv).rgb;
     vec3 sideCol = texture(
         SideSampler,
         vec2((atlas_side(auv) * 255.0 + 0.5) / 256.0, 0.5)
     ).rgb;
-    vec3 albedo = sideHit ? sideCol * faceShade : topCol;
 
-    // Light reference from the SKY IN THIS FRAME (see v4.1 notes above): the
-    // world clock and the rendered sky can disagree, and a wrong day factor made
-    // the LOD look lit by moonlight next to sunlit chunks.
+    vec3 albedo;
+    if (sideHit) {
+        // Directional shade from the crossed grid line: X boundary -> E/W wall.
+        float shade = hitAxisX ? SHADE_EW : SHADE_NS;
+        if (hitWater) {
+            albedo = ColWater.rgb * shade; // DH: water box walls stay water
+        } else {
+            float span = max(hHitNew - hHitOld, 1.0e-3);
+            float spanT = clamp((hHitNew - (cam.y + dir.y * hitT)) / span, 0.0, 1.0);
+            // top of the span -> top colour, bottom -> side colour (dirt fade)
+            albedo = mix(sideCol, topCol, spanT) * shade;
+        }
+    } else {
+        albedo = hitWater ? ColWater.rgb : topCol; // top faces: shade 1.0
+    }
+
+    // Light: the sky in THIS frame drives the day factor (the world clock and
+    // the rendered sky can disagree). DH samples the vanilla lightmap which
+    // follows the real sky — this is our lightmap substitute; moonlight keeps
+    // a faint blue cast like the vanilla night lightmap.
     float skyLum = dot(scene.rgb, vec3(0.299, 0.587, 0.114));
     float dayF = smoothstep(0.08, 0.45, skyLum);
-    // The fog target is the actual sky behind the pixel, so the far edge of the
-    // LOD band dissolves into the horizon instead of a config colour that can
-    // only ever approximate it. VeilColor only tints it.
-    vec3 veilCol = mix(VeilColor.rgb * mix(0.35, 1.0, dayF), scene.rgb, 0.82);
-
-    // Vanilla lightmap substitute: full daylight is 1.0 (the baked colours are
-    // already the texture colours, which is what a sunlit block shows), night
-    // keeps a small ambient so the silhouette does not vanish.
-    float lightMul = mix(0.14, 1.0, dayF);
-    vec3 lit = albedo * lightMul;
+    float lightMul = mix(0.22, 1.0, dayF);
+    vec3 nightTint = vec3(0.84, 0.89, 1.08);
+    vec3 lit = albedo * lightMul * mix(vec3(1.0), nightTint, 1.0 - dayF);
 
     // Snow: per-block colours cannot see state variants (snowy=true shares the
     // material id with the plain block), so high terrain is whitened by height.
-    float hn = clamp((hitPos.y - sea) / max(maxY - sea, 1.0), 0.0, 1.0);
-    float snow = smoothstep(VeilColor.a * 0.55 + 0.35, VeilColor.a * 0.55 + 0.55, hn);
-    lit = mix(lit, vec3(0.93, 0.95, 0.97) * lightMul, snow * 0.9);
+    // DH's snow comes from actual snow blocks — a white TOP surface with the
+    // regular box sides below — so only top faces whiten here; whitening side
+    // walls turned every high column into a striped white pillar.
+    if (!sideHit) {
+        float hn = clamp((hitPos.y - sea) / max(maxY - sea, 1.0), 0.0, 1.0);
+        float snow = smoothstep(VeilColor.a * 0.55 + 0.42, VeilColor.a * 0.55 + 0.62, hn);
+        lit = mix(lit, vec3(0.93, 0.95, 0.97) * lightMul, snow * 0.9);
+    }
 
-    // Distance fog into the day-graded veil color: merges LOD into the sky.
-    float fog = smoothstep(FogParams.x, FogParams.y, tHit);
-    lit = mix(lit, veilCol, fog);
+    // DH far fog: exponential-squared in the sky colour, 0.4..1.0 x LOD draw
+    // distance, density 2.5 (GlDhFogShader / Config defaults). The fog target
+    // is the actual sky behind the pixel, so the band edge dissolves into the
+    // horizon exactly like DH.
+    float fogFar = max(FogParams.y, 1.0);
+    float fogStart = FOG_START_FRAC * fogFar;
+    float fogLen = max(fogFar - fogStart, 1.0);
+    float fx = max((hitT - fogStart) / fogLen, 0.0) * FOG_DENSITY;
+    float fog = clamp(1.0 - exp(-fx * fx), 0.0, 1.0);
+    lit = mix(lit, scene.rgb, fog);
 
     fragColor = vec4(mix(scene.rgb, lit, fade), scene.a);
 }

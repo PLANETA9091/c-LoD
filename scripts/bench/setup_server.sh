@@ -2,8 +2,8 @@
 # Assemble the CRUSSTY dist root for the c-LoD bench (mirrors CI e2e job).
 set -euo pipefail
 D="$HOME/mc-test/dist"
-CLOD=/home/z/my-project/c-LoD
-CRUSSTY=/home/z/my-project/analysis/crussty
+CLOD="${CLOD_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+CRUSSTY="${CLOD_CRUSSTY:-$HOME/mc-test/crussty}"
 
 rm -rf "$D"
 mkdir -p "$D/versions" "$D/modules/lod"

@@ -15,10 +15,12 @@ import os
 import shutil
 import sys
 import zipfile
+from pathlib import Path
 
-MANIFEST = "/home/z/my-project/analysis/mc263/26.3.json"
-CLIENT_JAR = "/home/z/my-project/analysis/mc263/client.jar"
-ROOT = os.path.expanduser("~/mc-test/client")
+_REPO = Path(__file__).resolve().parents[2]
+MANIFEST = os.environ.get("CLOD_MANIFEST", str(_REPO / "analysis/mc263/26.3.json"))
+CLIENT_JAR = os.environ.get("CLOD_CLIENT_JAR", str(_REPO / "analysis/mc263/client.jar"))
+ROOT = os.environ.get("CLOD_CLIENT_ROOT", os.path.expanduser("~/mc-test/client"))
 UA = {"User-Agent": "c-LoD-bench/4.1 (test harness)"}
 
 
@@ -68,13 +70,17 @@ def main():
             continue
         art = lib.get("downloads", {}).get("artifact")
         if art and art.get("url"):
-            artifacts.append((art["url"], os.path.join(libs_dir, art["path"])))
+            dest = os.path.join(libs_dir, art["path"])
+            if os.path.exists(dest) and os.path.getsize(dest) == art.get("size", -1):
+                artifacts.append((None, dest))  # already present (cache hit)
+            else:
+                artifacts.append((art["url"], dest))
             if "-natives-linux" in art["path"] or art["path"].endswith("natives-linux.jar"):
-                native_jars.append(os.path.join(libs_dir, art["path"]))
+                native_jars.append(dest)
 
     ok = 0
     with futures.ThreadPoolExecutor(max_workers=12) as ex:
-        for good in ex.map(lambda a: fetch(*a), artifacts):
+        for good in ex.map(lambda a: fetch(*a) if a[0] else True, artifacts):
             ok += good
     print(f"libraries: {ok}/{len(artifacts)}", flush=True)
 

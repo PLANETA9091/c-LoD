@@ -4,7 +4,7 @@
 # Run AFTER run_e2e_shots.sh (server finalized, daylight locked).
 set -uo pipefail
 SHOTS="$HOME/mc-test/shots"
-S=/home/z/my-project/scripts/bench
+S="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$SHOTS"
 
 srv() { echo "$1" > /tmp/server.in; }

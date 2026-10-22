@@ -21,7 +21,7 @@ ps aux | grep "[p]aper-26.3" > /dev/null || { echo "server process dead"; exit 2
 curl -s -o /tmp/pack_check.zip -w "pack HTTP %{http_code} %{size_download}B\n" http://127.0.0.1:8199/clod-pack.zip
 
 # 2. client
-bash /home/z/my-project/scripts/bench/run_client.sh
+bash "$S/run_client.sh"
 wait_for "Stepan joined the game" /tmp/server.log 420 || { echo "client never joined"; tail -20 /tmp/client.log; exit 3; }
 echo "client joined"
 sleep 5
@@ -29,8 +29,12 @@ ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -f
 echo "join-state shot taken (pack prompt expected)"
 
 # the server pack prompt is on screen — click Yes (window 640x360 centered on
-# 1280x720 Xvfb: Yes button spans x 489..635, y 376..394 -> center ~562,385)
-python3 /home/z/my-project/scripts/bench/click.py 562 385
+# 1280x720 Xvfb: Yes button spans x 489..635, y 376..394 -> center ~562,385).
+# Click twice: the second click is a no-op once the dialog is gone, and it
+# covers flaky first clicks (Xlib warm-up, dropped XTest events).
+python3 "$S/click.py" 562 385
+sleep 12
+python3 "$S/click.py" 562 385
 sleep 12
 ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -frames:v 1 "$SHOTS/00_pack_applied.png"
 echo "pack-accept clicked"
