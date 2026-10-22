@@ -269,7 +269,7 @@ mod tests {
             cfg.cell_size,
             cfg.sea_level,
         );
-        atlas.set(0, 0, 70, false, 0x808080, 0x707070);
+        atlas.set(0, 0, 70, false, 0x808080, 0x707070, 70, 0, false, 0);
         let pack = build(&cfg, &atlas);
 
         assert!(!pack.zip.is_empty());
@@ -283,8 +283,8 @@ mod tests {
         // Must contain the essential entries: scan by walking central dir.
         let count = u16::from_le_bytes([pack.zip[n - 12], pack.zip[n - 11]]) as usize;
         assert_eq!(
-            count, 15,
-            "pack.mcmeta + 2 json + 6 fsh + 3 textures + sky.vsh/fsh + terrain.vsh"
+            count, 18,
+            "pack.mcmeta + 2 json + 6 fsh + 6 textures + sky.vsh/fsh + terrain.vsh"
         );
 
         // JSON chains are valid JSON (parenthesis balance + token-free).
@@ -320,13 +320,13 @@ mod tests {
         // same pack bytes, regardless of internal version counters.
         let cfg = Config::parse("");
         let a = Atlas::new(0, 0, 256, 4, 63);
-        a.set(1, 1, 90, false, 0x808080, 0x707070);
-        a.set(2, 2, 40, true, 0x808080, 0x707070);
+        a.set(1, 1, 90, false, 0x808080, 0x707070, 90, 0, false, 0);
+        a.set(2, 2, 40, true, 0x808080, 0x707070, 40, 0, false, 0);
         let pack_a = build(&cfg, &a);
 
         let b = Atlas::new(0, 0, 256, 4, 63);
-        b.set(1, 1, 90, false, 0x808080, 0x707070);
-        b.set(2, 2, 40, true, 0x808080, 0x707070);
+        b.set(1, 1, 90, false, 0x808080, 0x707070, 90, 0, false, 0);
+        b.set(2, 2, 40, true, 0x808080, 0x707070, 40, 0, false, 0);
         let pack_b = build(&cfg, &b);
 
         assert_eq!(pack_a.zip, pack_b.zip, "pack bytes must be deterministic");
@@ -374,6 +374,13 @@ mod tests {
             "sky.fsh override missing: {names:?}"
         );
         assert!(names.contains(&"assets/minecraft/shaders/core/sky.vsh"));
+        // v4.2 slab/pyramid/ground textures must ship next to the atlas.
+        for tex in ["atlas", "geom", "pyr", "color", "ground", "side"] {
+            assert!(
+                names.contains(&format!("assets/clod/textures/effect/{tex}.png").as_str()),
+                "effect texture {tex} missing: {names:?}"
+            );
+        }
         assert!(
             !names.iter().any(|n| n.contains("sun_")),
             "sun tracker must be gone"
@@ -409,6 +416,9 @@ mod tests {
             chain.contains("clod:post/rot_solve"),
             "rot_solve pass missing"
         );
+        for loc in ["clod:geom", "clod:pyr", "clod:ground"] {
+            assert!(chain.contains(loc), "sampler location {loc} missing");
+        }
         assert!(
             !chain.contains("sun_"),
             "sun passes must be gone from the chain"
