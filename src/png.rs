@@ -67,8 +67,15 @@ const LEN_BASE: [u16; 29] = [
     3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131,
     163, 195, 227, 258,
 ];
+// RFC 1951 3.2.5: codes 281-284 (s24..s27) ALL carry 5 extra bits; only
+// 285 (s28) carries none. v4.2.1 FIX: s26/s27 were 6 here, which injected a
+// stray bit after every length in 195..=257 — the decoder desynced and hit a
+// false end-of-block ("incorrect data check") or a garbage distance
+// ("invalid distance too far back"). Every atlas PNG in the shipped pack was
+// corrupt because of this; short streams (side.png) never hit those lengths
+// and survived, which is why the old roundtrip test never caught it.
 const LEN_EBITS: [u8; 29] = [
-    0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 6, 6, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
 ];
 const DIST_BASE: [u16; 30] = [
     1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537,
@@ -522,5 +529,132 @@ mod tests {
         let adler = u32::from_be_bytes([z[n - 4], z[n - 3], z[n - 2], z[n - 1]]);
         assert_eq!(adler, adler32(&out), "adler32 must match the payload");
         out
+    }
+
+    /// RFC 1951 3.2.5 verbatim: every length symbol's base AND extra-bit
+    /// count, cross-checked against the encoder tables for all 29 symbols
+    /// and every representable length 3..=258. The v4.2.0 pack shipped with
+    /// EBITS 6 for symbols 283/284 (must be 5) — this test pins the table.
+    #[test]
+    fn length_table_matches_rfc1951() {
+        const RFC_BASE: [u16; 29] = [
+            3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99,
+            115, 131, 163, 195, 227, 258,
+        ];
+        const RFC_EBITS: [u8; 29] = [
+            0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
+        ];
+        for s in 0..29usize {
+            assert_eq!(LEN_BASE[s], RFC_BASE[s], "LEN_BASE[{s}]");
+            assert_eq!(LEN_EBITS[s], RFC_EBITS[s], "LEN_EBITS[{s}] (symbol {})", 257 + s);
+        }
+        for len in 3..=258usize {
+            let (sym, ebits, eval) = length_code(len);
+            let s = (sym - 257) as usize;
+            assert_eq!(ebits as usize, RFC_EBITS[s], "len {len}: ebits");
+            assert_eq!(RFC_BASE[s] as usize + eval as usize, len, "len {len}: base+extra");
+            assert!(
+                (eval as u64) < (1u64 << ebits),
+                "len {len}: extra {eval} does not fit in {ebits} bits"
+            );
+        }
+        // Distance table: same treatment, dists 1..=32768.
+        const RFC_D_BASE: [u16; 30] = [
+            1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025,
+            1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
+        ];
+        const RFC_D_EBITS: [u8; 30] = [
+            0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12,
+            12, 13, 13,
+        ];
+        for d in 0..30usize {
+            assert_eq!(DIST_BASE[d], RFC_D_BASE[d], "DIST_BASE[{d}]");
+            assert_eq!(DIST_EBITS[d], RFC_D_EBITS[d], "DIST_EBITS[{d}]");
+        }
+        for dist in [1usize, 2, 4, 5, 100, 258, 259, 32767, 32768] {
+            let (sym, ebits, eval) = dist_code(dist);
+            assert_eq!(RFC_D_BASE[sym as usize] as usize + eval as usize, dist);
+            assert!((eval as u64) < (1u64 << ebits));
+        }
+    }
+
+    /// Atlas-scale roundtrip: multi-megabyte Sub-filtered heightfield-like
+    /// data with NEAR-repeats (forces LZ77 lengths across the whole 3..=258
+    /// range, including 195..=257 where the v4.2.0 table bug lived) must
+    /// survive the full PNG encode -> inflate -> unfilter path.
+    #[test]
+    fn png_roundtrip_atlas_scale_with_long_matches() {
+        let (w, h) = (512u32, 1024u32);
+        let mut px = vec![0u8; (w * h * 4) as usize];
+        // Pseudo-random heightfield-ish noise (LCG — deterministic).
+        let mut seed = 0x12345678u32;
+        let mut rnd = move || {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            (seed >> 16) as u8
+        };
+        // One 16KB random reference block, then copies of it every 16640
+        // bytes (INSIDE the 32K LZ77 window) with single-byte edits every
+        // ~291 bytes. Matches run to each edit, so lengths sweep the full
+        // 3..=258 window over the copies — including 195..=257.
+        let block: Vec<u8> = (0..16384).map(|_| rnd()).collect();
+        let mut cursor = 0usize;
+        while cursor + 16384 <= px.len() {
+            px[cursor..cursor + 16384].copy_from_slice(&block);
+            cursor += 16640;
+        }
+        for i in (0..px.len()).step_by(291) {
+            px[i] = px[i].wrapping_add(1); // break matches at scattered points
+        }
+        for (i, b) in px.iter_mut().enumerate() {
+            // Keep alpha opaque; leave RGB mostly structured (LZ77 food).
+            if i % 4 == 3 {
+                *b = 255;
+            }
+        }
+        let png = encode_png(w, h, &px);
+        let raw = {
+            let mut pos = 8usize;
+            let mut idat: Option<Vec<u8>> = None;
+            while pos + 12 <= png.len() {
+                let len = u32::from_be_bytes([
+                    png[pos],
+                    png[pos + 1],
+                    png[pos + 2],
+                    png[pos + 3],
+                ]) as usize;
+                let kind = &png[pos + 4..pos + 8];
+                if kind == b"IDAT" {
+                    idat = Some(png[pos + 8..pos + 8 + len].to_vec());
+                }
+                pos += 12 + len;
+            }
+            let idat = idat.expect("IDAT");
+            assert!(
+                idat.len() < raw_len(w, h) / 2,
+                "fixed-huffman must actually compress this ({})",
+                idat.len()
+            );
+            inflate_zlib(&idat)
+        };
+        assert_eq!(raw.len(), raw_len(w, h), "raw size");
+        let stride = w as usize * 4;
+        for y in 0..h as usize {
+            let row = &raw[y * (stride + 1)..(y + 1) * (stride + 1)];
+            let f = row[0];
+            let data = &row[1..];
+            let mut out = vec![0u8; stride];
+            for x in 0..stride {
+                out[x] = match f {
+                    0 => data[x],
+                    1 => data[x].wrapping_add(if x >= 4 { out[x - 4] } else { 0 }),
+                    other => panic!("unexpected filter {other}"),
+                };
+            }
+            assert_eq!(out[..], px[y * stride..(y + 1) * stride], "row {y}");
+        }
+    }
+
+    fn raw_len(w: u32, h: u32) -> usize {
+        (h as usize) * (1 + w as usize * 4)
     }
 }
