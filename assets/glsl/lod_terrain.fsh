@@ -473,43 +473,42 @@ void main() {
     vec3 n = normalize(vec3(hL - hR, 2.0 * cellL, hD - hU));
 
     // ---- screen footprint (quads.frag textureGrad, vanilla scale) ----------
-    // pxSurface is the footprint ALONG THE SURFACE: a ray grazing the
-    // heightfield sweeps pxFoot / |dot(dir,n)| blocks per pixel — without
-    // the grazing factor mountainsides under-mip and alias. tpp < 1 (pixel
-    // smaller than a texel) clamps to mip 0 = vanilla-crisp magnification;
-    // at the far edge tpp >> 16 reaches the strip's 1px average — Voxy's
-    // solid-colour distant terrain.
+    // v4.4.0-r4: TWO footprints drive two different rates.
+    //  1) the LEVEL pick (state variety rate) uses the SMOOTH L2-gradient
+    //     normal: on bumpy ground (forest canopy, 2-block bumps) the L0
+    //     normal tilts ~45°, |dot(dir,n)| lands at 0.6-0.9, the surface
+    //     footprint collapses to ~pxFoot and cpp stays < 1 — r2/r3
+    //     coarsened only the smooth plains that were never mushy (runs
+    //     1023/1029: speckle 0.20 regardless of the target). The smooth
+    //     normal averages canopy bumps out (grazing ~ |dir.y|, cpp grows
+    //     with distance, levels fire) while real cliffs stay steep
+    //     (frontal hit -> grazing ~ 1 -> cpp ~ pxFoot / cell -> L0 detail).
+    //  2) the MIP strip keeps the L0 grazing — it prices the true texel
+    //     rate of the micro-surface, a different concern than the
+    //     state-variety rate.
+    vec2 e2 = vec2(1.0 / level_cells(2), 0.0);
+    atlas_cell(2, clamp(local - e2.xy, vec2(0.0), vec2(0.999999)), hL, wtmp, stmp);
+    atlas_cell(2, clamp(local + e2.xy, vec2(0.0), vec2(0.999999)), hR, wtmp, stmp);
+    atlas_cell(2, clamp(local - e2.yx, vec2(0.0), vec2(0.999999)), hD, wtmp, stmp);
+    atlas_cell(2, clamp(local + e2.yx, vec2(0.0), vec2(0.999999)), hU, wtmp, stmp);
+    vec3 nS = normalize(vec3(hL - hR, 2.0 * cell * 4.0, hD - hU));
+
     float pxFoot = tHit * (2.0 * tanH / max(OutSize.y, 1.0));
-    float grazing = max(abs(dot(dir, n)), 0.08);
-    float pxSurface = pxFoot / grazing;
+    float grazingSel = max(abs(dot(dir, nS)), 0.08);
+    float cpp = (pxFoot / grazingSel) / cell; // L0 cells per surface pixel
 
     // ---- v4.4.0 SCREEN-AREA SHADING LEVEL ----------------------------------
     // Voxy's detail rule: keep the finest level while a cell still covers
     // more than ~a pixel — past that rate the level's own granularity IS
     // sub-pixel and rendering it per-column aliases into noise. The march
-    // stays L0 (real silhouette), but once a surface pixel spans more than
-    // one L0 cell the shading inputs switch to the pyramid level whose cell
-    // matches the footprint: state/water from the Mipper-max cell (the
-    // region's top surface), the gradient normal over one coarse step, and
-    // tint/light from that group's winner. Neighbouring pixels then share
-    // one state, one face, one tint — smooth far masses instead of the
-    // per-column stone/grass/dirt speckle the far band degraded into.
-    // Discrete like every LOD scheme; the switch ring sits where one cell
-    // ≈ one pixel and is invisible at that rate.
-    //
-    // v4.4.0-r3 threshold: cpp is CELLS PER PIXEL (pxSurface/cell). The mush
-    // zone is cpp 1..5 (cell spans 1..0.2 px — deep minification). r2's 0.75
-    // target still let adjacent coarse cells flip hue at a 1.3-2.7 px rate
-    // (stone next to leaves next to dirt — run 1023: speckle 0.20). The rule
-    // now targets <= 0.3 cells/px, i.e. every coarse cell spans >= 3.3 px —
-    // the rate where max-reduced neighbours read as coherent masses:
-    // Ls = ceil(log2(cpp / 0.3)). Mid-field (cpp 1.2) -> L2, horizon (cpp 5)
-    // -> L4. Tint/light STAY on L0 below: biome tint and lightmap are
-    // spatially smooth fields (biomes span tens of blocks, sky light steps
-    // by 1/15) — they carry no per-cell hue flips, so sampling them at the
-    // exact hit cell keeps full accuracy with zero aliasing; the STATE (and
-    // the normal) is the only high-frequency channel that coarsens.
-    float cpp = pxSurface / cell; // L0 cells per surface pixel
+    // stays L0 (real silhouette); the STATE (+ normal) coarsens through the
+    // pyramid once a pixel spans more than one L0 cell, targeting <= 0.3
+    // cells/px (every coarse cell spans >= 3.3 px — the rate where
+    // max-reduced neighbours read as coherent masses, not salt-and-pepper).
+    // Tint/light STAY on L0: biome tint and lightmap are spatially smooth
+    // fields (biomes span tens of blocks, sky light steps by 1/15) — no
+    // per-cell hue flips, so exact-cell sampling stays alias-free and the
+    // tint always matches the hit column.
     int Ls = cpp > 1.0 ? int(clamp(ceil(log2(cpp / 0.3)), 1.0, 4.0)) : 0;
     if (Ls > 0) {
         float stepBlocks = cell * exp2(float(Ls));
@@ -550,10 +549,12 @@ void main() {
     //   texels-per-pixel at mip 0 = 16 * pxSurface / TILE_BLOCKS
     //   mip m divides the rate by 2^m; a real GPU trilinearly resolves
     //   m = log2(tpp), blending the two strips around it.
-    // pxSurface was computed above from the L0-provisional grazing factor —
-    // the shading-level normal differs only in smooth regions where the
-    // mip is already clamped, so reusing it keeps one footprint for both
-    // the level pick and the strip pick.
+    // pxSurface prices the MICRO-surface texel rate with the L0 grazing
+    // factor (canopy bumps really do sweep extra texels per pixel); the
+    // LEVEL pick above separately uses the smooth-normal cpp — two
+    // different rates, two different factors.
+    float grazing = max(abs(dot(dir, n)), 0.08);
+    float pxSurface = pxFoot / grazing;
     float tpp = 16.0 * pxSurface / TILE_BLOCKS; // texels per pixel at mip 0
     // Continuous LOD for the manual strip: a real GPU trilinearly BLENDS the
     // two mips around the continuous LOD log2(tpp); rounding alone hard-
