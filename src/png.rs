@@ -259,13 +259,19 @@ fn crc32_bytes(data: &[u8]) -> [u8; 4] {
 /// Filter one scanline with type 0 (None) or type 1 (Sub), picking the
 /// smaller standard heuristic cost (sum of |signed byte|).
 fn filter_row(row: &[u8], bpp: usize) -> (u8, Vec<u8>) {
-    let none_cost: i64 = row.iter().map(|&b| i64::from((b as i8).unsigned_abs())).sum();
+    let none_cost: i64 = row
+        .iter()
+        .map(|&b| i64::from((b as i8).unsigned_abs()))
+        .sum();
     let mut sub = Vec::with_capacity(row.len());
     for (x, &b) in row.iter().enumerate() {
         let left = if x >= bpp { row[x - bpp] } else { 0 };
         sub.push(b.wrapping_sub(left));
     }
-    let sub_cost: i64 = sub.iter().map(|&b| i64::from((b as i8).unsigned_abs())).sum();
+    let sub_cost: i64 = sub
+        .iter()
+        .map(|&b| i64::from((b as i8).unsigned_abs()))
+        .sum();
     if sub_cost < none_cost {
         (1, sub)
     } else {
@@ -353,7 +359,13 @@ mod tests {
             let y = (i / 4) / w as usize;
             *b = match i % 4 {
                 0 => (x * 2) as u8,
-                1 => if (x / 16) % 2 == 0 { 0x29 } else { 0x91 },
+                1 => {
+                    if (x / 16).is_multiple_of(2) {
+                        0x29
+                    } else {
+                        0x91
+                    }
+                }
                 2 => (y ^ x) as u8,
                 _ => ((x * 7 + y * 13) % 251) as u8,
             };
@@ -507,8 +519,7 @@ mod tests {
                     } else {
                         let s = (sym - 257) as usize;
                         assert!(s < 29, "length symbol {sym}");
-                        let len =
-                            LEN_BASE[s] as usize + r.bits(LEN_EBITS[s] as u32) as usize;
+                        let len = LEN_BASE[s] as usize + r.bits(LEN_EBITS[s] as u32) as usize;
                         let d = r.dist5() as usize;
                         assert!(d < 30, "dist symbol {d}");
                         let dist = DIST_BASE[d] as usize + r.bits(DIST_EBITS[d] as u32) as usize;
@@ -546,13 +557,22 @@ mod tests {
         ];
         for s in 0..29usize {
             assert_eq!(LEN_BASE[s], RFC_BASE[s], "LEN_BASE[{s}]");
-            assert_eq!(LEN_EBITS[s], RFC_EBITS[s], "LEN_EBITS[{s}] (symbol {})", 257 + s);
+            assert_eq!(
+                LEN_EBITS[s],
+                RFC_EBITS[s],
+                "LEN_EBITS[{s}] (symbol {})",
+                257 + s
+            );
         }
         for len in 3..=258usize {
             let (sym, ebits, eval) = length_code(len);
             let s = (sym - 257) as usize;
             assert_eq!(ebits, u32::from(RFC_EBITS[s]), "len {len}: ebits");
-            assert_eq!(RFC_BASE[s] as usize + eval as usize, len, "len {len}: base+extra");
+            assert_eq!(
+                RFC_BASE[s] as usize + eval as usize,
+                len,
+                "len {len}: base+extra"
+            );
             assert!(
                 (eval as u64) < (1u64 << ebits),
                 "len {len}: extra {eval} does not fit in {ebits} bits"
@@ -616,12 +636,8 @@ mod tests {
             let mut pos = 8usize;
             let mut idat: Option<Vec<u8>> = None;
             while pos + 12 <= png.len() {
-                let len = u32::from_be_bytes([
-                    png[pos],
-                    png[pos + 1],
-                    png[pos + 2],
-                    png[pos + 3],
-                ]) as usize;
+                let len = u32::from_be_bytes([png[pos], png[pos + 1], png[pos + 2], png[pos + 3]])
+                    as usize;
                 let kind = &png[pos + 4..pos + 8];
                 if kind == b"IDAT" {
                     idat = Some(png[pos + 8..pos + 8 + len].to_vec());

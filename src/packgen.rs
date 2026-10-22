@@ -214,10 +214,7 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
         "assets/clod/shaders/post/rot_solve.fsh",
         rot_solve.as_bytes(),
     );
-    zip.add(
-        "assets/clod/shaders/post/rot_copy.fsh",
-        rot_copy.as_bytes(),
-    );
+    zip.add("assets/clod/shaders/post/rot_copy.fsh", rot_copy.as_bytes());
     zip.add(
         "assets/clod/shaders/post/lod_terrain.fsh",
         lod_terrain.as_bytes(),
@@ -497,15 +494,15 @@ mod tests {
             .1;
         let sky = String::from_utf8_lossy(sky);
         assert!(sky.contains("camera channel"), "payload marker missing");
-        assert!(
-            sky.contains("mat3(ModelViewMat)"),
-            "basis source missing"
-        );
+        assert!(sky.contains("mat3(ModelViewMat)"), "basis source missing");
         assert!(
             sky.contains("Bob rows out of the folded projection"),
             "bob extraction missing"
         );
-        assert!(sky.contains("r0 = normalize(vec3(ProjMat"), "ProjMat rows not read");
+        assert!(
+            sky.contains("r0 = normalize(vec3(ProjMat"),
+            "ProjMat rows not read"
+        );
         assert!(
             sky.contains("#include <minecraft:projection.glsl>"),
             "ProjMat include missing"
@@ -562,7 +559,10 @@ mod tests {
 
         let scan_v = get("assets/clod/shaders/post/col_scan.fsh");
         let scan = String::from_utf8_lossy(&scan_v);
-        assert!(scan.contains("const int GROUPS = 8;"), "col_scan group count");
+        assert!(
+            scan.contains("const int GROUPS = 8;"),
+            "col_scan group count"
+        );
         assert!(
             scan.contains("const int GROUP_STRIDE = 240;"),
             "col_scan group stride must match sky.fsh"
@@ -570,7 +570,10 @@ mod tests {
 
         let solve_v = get("assets/clod/shaders/post/rot_solve.fsh");
         let solve = String::from_utf8_lossy(&solve_v);
-        assert!(solve.contains("const int SLICES = 5120;"), "solver slice count");
+        assert!(
+            solve.contains("const int SLICES = 5120;"),
+            "solver slice count"
+        );
         assert!(
             solve.contains("min(prev.r + 0.08, 1.0)"),
             "confidence recovery must ramp, not snap"
@@ -593,11 +596,13 @@ mod tests {
             !terrain.contains("toCeil"),
             "the broken toCeil/toEdge early-out must be gone"
         );
-        assert!(terrain.contains("const float PIXF"), "adaptive level constant");
+        assert!(
+            terrain.contains("const float PIXF"),
+            "adaptive level constant"
+        );
         assert!(
             terrain.contains("hitLvl"),
             "adaptive level tracking missing"
         );
     }
 }
-

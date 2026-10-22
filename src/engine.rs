@@ -812,7 +812,8 @@ mod tests {
         st.phase.store(PHASE_SCANNING, Ordering::SeqCst);
         *st.world_obj.lock().unwrap() = 1; // pretend the world resolved
         *st.world_seen_at.lock().unwrap() = Some(std::time::Instant::now());
-        st.atlas.set(0, 0, 70, false, 0x808080, 0x707070, 70, 0, false, 0);
+        st.atlas
+            .set(0, 0, 70, false, 0x808080, 0x707070, 70, 0, false, 0);
 
         // Deadline NOT reached yet, atlas incomplete -> no finalize.
         maybe_finalize(&st);

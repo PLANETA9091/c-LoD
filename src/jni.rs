@@ -122,6 +122,9 @@ struct WorldIds {
     m_set_force_loaded: jmethodID,
     m_get_biome: jmethodID,
     m_min_height: jmethodID,
+    /// Cached alongside min for API symmetry; height clamping in this branch
+    /// uses the hardcoded 384-range probe instead.
+    #[allow(dead_code)]
     m_max_height: jmethodID,
 }
 // Raw method-ID pointers cached process-lifetime; consumed main-thread-only.
@@ -194,7 +197,8 @@ struct MatInfo {
 static MAT_CACHE: Mutex<Vec<Option<MatInfo>>> = Mutex::new(Vec::new());
 /// One-entry biome tint cache: the scan walks chunk-major, so consecutive
 /// columns almost always share a biome.
-static BIOME_CACHE: Mutex<Option<((i32, i32), (u32, u32, u32))>> = Mutex::new(None);
+type BiomeCache = Mutex<Option<((i32, i32), (u32, u32, u32))>>;
+static BIOME_CACHE: BiomeCache = Mutex::new(None);
 
 fn key_ids(env: Env, key: jobject) -> Option<KeyIds> {
     if let Some(k) = KEY_IDS.lock().unwrap().as_ref() {
@@ -317,11 +321,7 @@ fn biome_tint(env: Env, world: jobject, wid: &WorldIds, x: i32, y: i32, z: i32) 
         }
     }
     let resolved = (|| {
-        let biome = jobj(env.call_object_method(
-            world,
-            wid.m_get_biome,
-            &[ji(x), ji(y), ji(z)],
-        ))?;
+        let biome = jobj(env.call_object_method(world, wid.m_get_biome, &[ji(x), ji(y), ji(z)]))?;
         let bid = biome_ids(env, biome)?;
         let kobj = jobj(env.call_object_method(biome, bid.m_get_key, &[]))?;
         let kid = key_ids(env, kobj)?;
@@ -369,11 +369,7 @@ fn block_color_at(
     z: i32,
 ) -> Option<(u32, u32)> {
     let gray = 0x808080u32;
-    let block = jobj(env.call_object_method(
-        world,
-        wid.m_get_block_at,
-        &[ji(x), ji(y), ji(z)],
-    ))?;
+    let block = jobj(env.call_object_method(world, wid.m_get_block_at, &[ji(x), ji(y), ji(z)]))?;
     let bid = block_ids(env, block)?;
     let mat = jobj(env.call_object_method(block, bid.m_get_type, &[]));
     clear_if_pending(env);
@@ -414,11 +410,7 @@ fn block_is_empty(
     y: i32,
     z: i32,
 ) -> Option<bool> {
-    let block = jobj(env.call_object_method(
-        world,
-        wid.m_get_block_at,
-        &[ji(x), ji(y), ji(z)],
-    ))?;
+    let block = jobj(env.call_object_method(world, wid.m_get_block_at, &[ji(x), ji(y), ji(z)]))?;
     let empty = env.call_boolean_method(block, bid.m_is_empty, &[]);
     clear_if_pending(env);
     Some(empty)
@@ -489,11 +481,9 @@ pub fn sample_column(env: Env, world: jobject, x: i32, z: i32) -> Option<ColumnS
             seg2_top: 0,
         });
     };
-    let Some(block) = jobj(env.call_object_method(
-        world,
-        wid.m_get_block_at,
-        &[ji(x), ji(y), ji(z)],
-    )) else {
+    let Some(block) =
+        jobj(env.call_object_method(world, wid.m_get_block_at, &[ji(x), ji(y), ji(z)]))
+    else {
         clear_if_pending(env);
         return Some(ColumnSample {
             y,
@@ -1124,6 +1114,9 @@ pub static SCAN_OK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64:
 pub static SCAN_UNLOADED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub static SCAN_ERR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Single-column height probe kept as the streaming scanner's reference
+/// implementation; the production path walks the JNI column reader instead.
+#[allow(dead_code)]
 pub fn sample_height(env: Env, world: jobject, x: i32, z: i32) -> Option<(i32, bool)> {
     use std::sync::atomic::Ordering;
     let wid = world_ids(env, world)?;

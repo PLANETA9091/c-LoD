@@ -1,10 +1,10 @@
 //! The LOD heightmap atlas: a `cells x cells` grid covering a square world
 //! region. Cell data:
-//!   - height: i16 block Y (decoded from the atlas PNG's R/G channels),
-//!   - water:  bool (sea surface instead of terrain),
-//!   - top:    0xRRGGBB average colour of the block's top face (mip average,
-//!             biome tint applied) — what Voxy's model atlas collapses to,
-//!   - side:   0xRRGGBB same for the side face, used on cliff/step faces.
+//! - height: i16 block Y (decoded from the atlas PNG's R/G channels),
+//! - water: bool (sea surface instead of terrain),
+//! - top: 0xRRGGBB average colour of the block's top face (mip average,
+//!   biome tint applied) — what Voxy's model atlas collapses to,
+//! - side: 0xRRGGBB same for the side face, used on cliff/step faces.
 //!
 //! Static-pack lifecycle (v3): the atlas is filled ONCE (JNI budget per tick
 //! until completion or the scan deadline), optionally persisted to
@@ -229,7 +229,11 @@ impl Atlas {
                 let cell = snap[z * n + x];
                 let (y16, water, side) = if cell.valid {
                     let h = (i32::from(cell.height) + 64).max(0) << 6;
-                    (h.min(0xFFFF) as u16, cell.water, Self::side_index(&lut, cell.side))
+                    (
+                        h.min(0xFFFF) as u16,
+                        cell.water,
+                        Self::side_index(&lut, cell.side),
+                    )
                 } else {
                     (0, false, 0)
                 };
@@ -271,9 +275,7 @@ impl Atlas {
         let snap = self.snapshot();
         let n = self.cells as usize;
         let mut px = vec![0u8; n * n * 4];
-        let enc = |y: i32| -> u16 {
-            (((y + 64).max(0) << 6).min(0xFFFF)) as u16
-        };
+        let enc = |y: i32| -> u16 { (((y + 64).max(0) << 6).min(0xFFFF)) as u16 };
         for z in 0..n {
             for x in 0..n {
                 let cell = snap[z * n + x];
@@ -401,11 +403,7 @@ impl Atlas {
             out.extend_from_slice(&(c.top & 0xFFFFFF).to_le_bytes());
             out.extend_from_slice(&(c.side & 0xFFFFFF).to_le_bytes());
             out.extend_from_slice(&(c.seg2_top & 0xFFFFFF).to_le_bytes());
-            out.push(
-                (u8::from(c.water))
-                    | (u8::from(c.valid) << 1)
-                    | (u8::from(c.has_gap) << 2),
-            );
+            out.push((u8::from(c.water)) | (u8::from(c.valid) << 1) | (u8::from(c.has_gap) << 2));
         }
         out
     }
@@ -454,7 +452,8 @@ impl Atlas {
             let seg2 = i16::from_le_bytes([buf[o + 4], buf[o + 5]]);
             let top = u32::from_le_bytes([buf[o + 6], buf[o + 7], buf[o + 8], 0]) & 0xFFFFFF;
             let side = u32::from_le_bytes([buf[o + 10], buf[o + 11], buf[o + 12], 0]) & 0xFFFFFF;
-            let seg2_top = u32::from_le_bytes([buf[o + 14], buf[o + 15], buf[o + 16], 0]) & 0xFFFFFF;
+            let seg2_top =
+                u32::from_le_bytes([buf[o + 14], buf[o + 15], buf[o + 16], 0]) & 0xFFFFFF;
             let flags = buf[o + 18];
             if flags & 0b10 != 0 {
                 *cell_out = Cell {
@@ -552,8 +551,10 @@ mod tests {
     #[test]
     fn slab_geom_and_pyramid() {
         let a = Atlas::new(0, 0, 32, 1, 62); // 32x32 cells
-        // island at (5,5): top 120, bottom 100, ground 30 below
-        a.set(5, 5, 120, false, 0xA0A0A0, 0x909090, 100, 30, true, 0x507030);
+                                             // island at (5,5): top 120, bottom 100, ground 30 below
+        a.set(
+            5, 5, 120, false, 0xA0A0A0, 0x909090, 100, 30, true, 0x507030,
+        );
         // plain ground at (6,5)
         a.set(6, 5, 40, false, 0x707070, 0x606060, 40, 0, false, 0);
         let (w, h, px) = a.encode_geom();
@@ -623,7 +624,9 @@ mod tests {
         let a = Atlas::new(123, -456, 64, 4, 62);
         a.set(3, 5, 100, false, 0x808080, 0x707070, 100, 0, false, 0);
         a.set(0, 0, 62, true, 0x808080, 0x707070, 62, 0, false, 0);
-        a.set(15, 15, 200, false, 0x808080, 0x707070, 180, 90, true, 0x305040);
+        a.set(
+            15, 15, 200, false, 0x808080, 0x707070, 180, 90, true, 0x305040,
+        );
         a.save(&path).unwrap();
         // tmp file must be gone after atomic rename
         assert!(!path.with_extension("tmp").exists());
