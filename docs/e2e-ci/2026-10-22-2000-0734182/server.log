@@ -1,0 +1,254 @@
+[launcher] kernel:  /home/runner/mc-test/dist/versions/paper-26.3.jar
+[launcher] agent:   /home/runner/mc-test/dist/libcrussty_runtime.so
+[launcher] modules: /home/runner/mc-test/dist/modules (recursive)
+[launcher] exec: /usr/lib/jvm/temurin-25-jdk-amd64/bin/java -agentpath:/home/runner/mc-test/dist/libcrussty_runtime.so=modules=/home/runner/mc-test/dist/modules;versions=/home/runner/mc-test/dist/versions;kernel=paper-26.3.jar -Xms256M -Xmx700M -XX:MaxMetaspaceSize=256M -XX:MaxDirectMemorySize=128M -XX:+UseG1GC -Ddist.root=/home/runner/mc-test/dist -jar /home/runner/mc-test/dist/versions/paper-26.3.jar --nogui
+[crussty-runtime] v2.0.0 loaded (options: modules=/home/runner/mc-test/dist/modules;versions=/home/runner/mc-test/dist/versions;kernel=paper-26.3.jar)
+[c-LoD] booting: atlas 1024x1024 blocks (cell 4), http :8199, fov 70, static pack (scan deadline 500s, cache on)
+[cplug-sdk] log dropped (kernel not ready): [c-LoD] booting: atlas 1024x1024 blocks (cell 4), http :8199, fov 70, static pack (scan deadline 500s, cache on)
+[c-LoD] c-LoD v3.0: static pack mode — one finalize per session, zero rebuilds, zero re-pushes
+[cplug-sdk] log dropped (kernel not ready): [c-LoD] c-LoD v3.0: static pack mode — one finalize per session, zero rebuilds, zero re-pushes
+[crussty-runtime] module lod -> init rc=0
+[crussty-runtime] pipeline ready: 1 module hook(s)
+[c-LoD] c-LoD pack server listening on 0.0.0.0:8199 (GET /clod-pack.zip)
+[crussty-rcon] RCON-WATCH installed (2s cadence)
+[crussty-runtime] transform engine: 23 rule(s) registered
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/Sche[cplug-sdk] log dropped (kernel not ready): du[c-LoD] c-LoD pack server listening on 0.0.0.0:8199 (GET /clod-pack.zip)l
+erHooks" }
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/StorageHooks" }
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/NetHooks" }
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/TickHook" }
+[crussty-runtime] transform hook classes installed (4); transform engine armed
+[crussty:hot-reload] SIGUSR1 reload trigger armed (1 module(s) reloadable)
+Downloading mojang_26.3.jar
+Applying patches
+Starting org.bukkit.craftbukkit.Main
+2026-10-22T19:45:13.245124962Z ServerMain WARN Advanced terminal features are not available in this environment
+[19:45:13 INFO]: [bootstrap] Running Java 25 (OpenJDK 64-Bit Server VM 25.0.4.1+1-LTS; Eclipse Adoptium Temurin-25.0.4.1+1) on Linux 6.17.0-1022-azure (amd64)
+[19:45:13 INFO]: [bootstrap] Loading Paper 26.3-214-main@e65c076 (2026-10-22T13:30:42Z) for Minecraft 26.3
+[19:45:13 INFO]: [PluginInitializerManager] Initializing plugins...
+[19:45:13 INFO]: [PluginInitializerManager] Initialized 0 plugins
+[c-LoD] kernel ready — starting engine loop
+[cplug-sdk] log emit failed: [c-LoD] kernel ready — starting engine loop
+[19:45:16 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Initialising converters for DataConverter...
+[19:45:16 INFO]: [com.destroystokyo.paper.profile.PaperServicesDiscoveryService] Environment: Environment[discoveryUrl=https://discovery.minecraftservices.com/minecraft/client, name=PROD]
+[19:45:17 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Finished initialising converters for DataConverter in 441.9ms
+[19:45:17 INFO]: Found new data pack paper, loading it automatically
+[19:45:18 INFO]: No existing world data, creating new world
+[19:45:18 INFO]: Loaded 1866 advancements
+[19:45:19 INFO]: Starting minecraft server version 26.3
+[19:45:19 INFO]: Loading properties
+[19:45:19 INFO]: This server is running Paper version 26.3-214-main@e65c076 (2026-10-22T13:30:42Z) (Implementing API version 26.3.build.214-stable)
+[19:45:19 INFO]: [spark] This server bundles the spark profiler. For more information please visit https://docs.papermc.io/paper/profiling
+[19:45:19 INFO]: Server Ping Player Sample Count: 12
+[19:45:19 INFO]: Using 4 threads for Netty based IO
+[19:45:19 INFO]: [MoonriseCommon] Paper is using 1 worker threads, 1 I/O threads
+[19:45:20 INFO]: Default game type: SURVIVAL
+[19:45:20 INFO]: Generating keypair
+[19:45:20 INFO]: Starting Minecraft server on *:25565
+[19:45:20 INFO]: Paper: Using libdeflate (Linux x86_64) compression from Velocity.
+[19:45:20 INFO]: Paper: Using OpenSSL 3.x.x (Linux x86_64) cipher from Velocity.
+[19:45:20 WARN]: **** SERVER IS RUNNING IN OFFLINE/INSECURE MODE!
+[19:45:20 WARN]: The server will make no attempt to authenticate usernames. Beware.
+[19:45:20 WARN]: While this makes the game possible to play without internet access, it also opens up the ability for hackers to connect with any username they choose.
+[19:45:20 WARN]: To change this, set "online-mode" to "true" in the server.properties file.
+[19:45:20 INFO]: Preparing level "world"
+[19:45:20 INFO]: Selecting spawn point for level 'minecraft:overworld'...
+[19:45:23 INFO]: Selecting spawn point for level 'minecraft:the_nether'...
+[19:45:23 INFO]: Selecting spawn point for level 'minecraft:the_end'...
+[19:45:24 INFO]: Loading 0 persistent chunks for level 'minecraft:overworld'...
+[19:45:24 INFO]: Preparing spawn area: 100%
+[c-LoD] c-LoD JNI bridge resolved: true
+[19:45:24 INFO]: [c-LoD] c-LoD JNI bridge resolved: true
+[c-LoD] c-LoD atlas world: world
+[19:45:24 INFO]: [c-LoD] c-LoD atlas world: world
+[c-LoD] c-LoD core force-loaded: 17x17 chunks around atlas center (289 ok) — isChunkLoaded(0,0)=Some(true), height(0,0)=Some(62) — released at finalize
+[19:45:31 INFO]: [c-LoD] c-LoD core force-loaded: 17x17 chunks around atlas center (289 ok) — isChunkLoaded(0,0)=Some(true), height(0,0)=Some(62) — released at finalize
+[c-LoD] scan: tick 0, atlas v420 (253/65536 cells chunks 64/4096), ok=506 unloaded=0 err=0
+[19:45:37 INFO]: [c-LoD] scan: tick 0, atlas v420 (253/65536 cells chunks 64/4096), ok=506 unloaded=0 err=0
+[c-LoD] scan: tick 25, atlas v25720 (25553/65536 cells chunks 1664/4096), ok=25806 unloaded=0 err=0
+[19:46:16 INFO]: [c-LoD] scan: tick 25, atlas v25720 (25553/65536 cells chunks 1664/4096), ok=25806 unloaded=0 err=0
+[19:46:58 ERROR]: [ChunkTaskScheduler] Chunk system error at chunk (-55,46), holder: NewChunkHolder{world=minecraft:overworld, chunkX=-55, chunkZ=46, entityChunkFromDisk=false, lastChunkCompletion={chunk_class=net.minecraft.world.level.chunk.ProtoChunk,status=minecraft:terrain}, currentGenStatus=minecraft:terrain, requestedGenStatus=minecraft:full, generationTask=ChunkProgressionTask{class: ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkUpgradeGenericStatusTask, for world: minecraft:overworld, chunk: (-55,46), hashcode: 1017529498, priority: COMPLETING, status: minecraft:features, scheduled: true}, generationTaskStatus=minecraft:features, priority=null, priorityLocked=false, neighbourRequestedPriority=BLOCKING, effective_priority=BLOCKING, oldTicketLevel=32, currentTicketLevel=32, totalNeighboursUsingThisChunk=7, fullNeighbourChunksLoadedBitset=63, currentChunkStatus=INACCESSIBLE, pendingChunkStatus=INACCESSIBLE, is_unload_safe=ticket_level, killed=false}, exception:
+java.lang.Throwable: java.lang.OutOfMemoryError: Java heap space
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler.unrecoverableChunkSystemFailure(ChunkTaskScheduler.java:295) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder.lambda$setGenerationTask$0(NewChunkHolder.java:1594) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkProgressionTask.complete0(ChunkProgressionTask.java:91) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkProgressionTask.complete(ChunkProgressionTask.java:74) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkUpgradeGenericStatusTask.run(ChunkUpgradeGenericStatusTask.java:114) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.concurrentutil.executor.queue.AreaDependentQueue$QueuedTask.run(AreaDependentQueue.java:1154) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool$OrderedStreamGroup$Queue.lambda$createTask$0(BalancedPrioritisedThreadPool.java:467) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.queue.PrioritisedTaskQueue$PrioritisedQueuedTask.execute(PrioritisedTaskQueue.java:345) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool$OrderedStreamGroup.executeTask(BalancedPrioritisedThreadPool.java:344) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool$WorkerThread.pollTasks(BalancedPrioritisedThreadPool.java:630) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.QueueExecutorRunnable.mainLoop(QueueExecutorRunnable.java:38) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.QueueExecutorRunnable.doRun(QueueExecutorRunnable.java:61) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.QueueExecutorRunnable.run(QueueExecutorRunnable.java:30) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.util.LazyRunnable.run(LazyRunnable.java:25) ~[concurrentutil-1.3.2.jar:?]
+	at java.base/java.lang.Thread.run(Thread.java:1474) ~[?:?]
+Caused by: java.lang.OutOfMemoryError: Java heap space
+	at net.minecraft.core.BlockPos.relative(BlockPos.java:207) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.block.MultifaceSpreader$SpreadType$3.getSpreadPos(MultifaceSpreader.java:212) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.block.MultifaceSpreader.getSpreadFromFaceTowardDirection(MultifaceSpreader.java:106) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.block.MultifaceSpreader.spreadFromFaceTowardDirection(MultifaceSpreader.java:88) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.block.MultifaceSpreader.lambda$spreadFromFaceTowardAllDirections$0(MultifaceSpreader.java:74) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.block.MultifaceSpreader$$Lambda/0x000000002bad64c0.apply(Unknown Source) ~[?:?]
+	at java.base/java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:214) ~[?:?]
+	at java.base/java.util.Spliterators$ArraySpliterator.forEachRemaining(Spliterators.java:1024) ~[?:?]
+	at java.base/java.util.stream.AbstractPipeline.copyInto(AbstractPipeline.java:570) ~[?:?]
+	at java.base/java.util.stream.AbstractPipeline.wrapAndCopyInto(AbstractPipeline.java:560) ~[?:?]
+	at java.base/java.util.stream.ReduceOps$ReduceOp.evaluateSequential(ReduceOps.java:921) ~[?:?]
+	at java.base/java.util.stream.ReduceOps$5.evaluateSequential(ReduceOps.java:258) ~[?:?]
+	at java.base/java.util.stream.ReduceOps$5.evaluateSequential(ReduceOps.java:248) ~[?:?]
+	at java.base/java.util.stream.AbstractPipeline.evaluate(AbstractPipeline.java:265) ~[?:?]
+	at java.base/java.util.stream.ReferencePipeline.count(ReferencePipeline.java:750) ~[?:?]
+	at net.minecraft.world.level.block.MultifaceSpreader.spreadFromFaceTowardAllDirections(MultifaceSpreader.java:76) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.block.MultifaceSpreader.lambda$spreadAll$1(MultifaceSpreader.java:50) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.block.MultifaceSpreader$$Lambda/0x000000002bad6020.apply(Unknown Source) ~[?:?]
+	at java.base/java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:214) ~[?:?]
+	at java.base/java.util.stream.ReferencePipeline$2$1.accept(ReferencePipeline.java:197) ~[?:?]
+	at java.base/java.util.Spliterators$ArraySpliterator.forEachRemaining(Spliterators.java:1024) ~[?:?]
+	at java.base/java.util.stream.AbstractPipeline.copyInto(AbstractPipeline.java:570) ~[?:?]
+	at java.base/java.util.stream.AbstractPipeline.wrapAndCopyInto(AbstractPipeline.java:560) ~[?:?]
+	at java.base/java.util.stream.ReduceOps$ReduceOp.evaluateSequential(ReduceOps.java:921) ~[?:?]
+	at java.base/java.util.stream.AbstractPipeline.evaluate(AbstractPipeline.java:265) ~[?:?]
+	at java.base/java.util.stream.ReferencePipeline.reduce(ReferencePipeline.java:693) ~[?:?]
+	at net.minecraft.world.level.block.MultifaceSpreader.spreadAll(MultifaceSpreader.java:51) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.block.SculkBehaviour.attemptSpreadVein(SculkBehaviour.java:59) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.block.SculkSpreader$ChargeCursor.update(SculkSpreader.java:271) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.block.SculkSpreader.updateCursors(SculkSpreader.java:161) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.levelgen.feature.SculkPatchFeature.place(SculkPatchFeature.java:51) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.levelgen.placement.FeaturePlacer.place(FeaturePlacer.java:46) ~[paper-26.3.jar:26.3-214-e65c076]
+[19:46:59 ERROR]: [ChunkTaskScheduler] Chunk system error at chunk (-48,48), holder: NewChunkHolder{world=minecraft:overworld, chunkX=-48, chunkZ=48, entityChunkFromDisk=false, lastChunkCompletion={chunk_class=net.minecraft.world.level.chunk.ProtoChunk,status=minecraft:structure_references}, currentGenStatus=minecraft:structure_references, requestedGenStatus=minecraft:biomes, generationTask=ChunkProgressionTask{class: ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkUpgradeGenericStatusTask, for world: minecraft:overworld, chunk: (-48,48), hashcode: 324813741, priority: COMPLETING, status: minecraft:biomes, scheduled: true}, generationTaskStatus=minecraft:biomes, priority=null, priorityLocked=false, neighbourRequestedPriority=null, effective_priority=null, oldTicketLevel=35, currentTicketLevel=35, totalNeighboursUsingThisChunk=13, fullNeighbourChunksLoadedBitset=0, currentChunkStatus=INACCESSIBLE, pendingChunkStatus=INACCESSIBLE, is_unload_safe=ticket_level, killed=false}, exception:
+java.lang.Throwable: java.lang.OutOfMemoryError: Java heap space
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler.unrecoverableChunkSystemFailure(ChunkTaskScheduler.java:295) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder.lambda$setGenerationTask$0(NewChunkHolder.java:1594) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkProgressionTask.complete0(ChunkProgressionTask.java:91) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkProgressionTask.complete(ChunkProgressionTask.java:74) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkUpgradeGenericStatusTask.run(ChunkUpgradeGenericStatusTask.java:114) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool$OrderedStreamGroup$Queue.lambda$createTask$0(BalancedPrioritisedThreadPool.java:467) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.queue.PrioritisedTaskQueue$PrioritisedQueuedTask.execute(PrioritisedTaskQueue.java:345) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool$OrderedStreamGroup.executeTask(BalancedPrioritisedThreadPool.java:344) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool$WorkerThread.pollTasks(BalancedPrioritisedThreadPool.java:630) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.QueueExecutorRunnable.mainLoop(QueueExecutorRunnable.java:38) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.QueueExecutorRunnable.doRun(QueueExecutorRunnable.java:61) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.QueueExecutorRunnable.run(QueueExecutorRunnable.java:30) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.util.LazyRunnable.run(LazyRunnable.java:25) ~[concurrentutil-1.3.2.jar:?]
+	at java.base/java.lang.Thread.run(Thread.java:1474) ~[?:?]
+Caused by: java.lang.OutOfMemoryError: Java heap space
+	at java.base/java.util.ArrayList.spliterator(ArrayList.java:1624) ~[?:?]
+	at java.base/java.util.Collection.stream(Collection.java:748) ~[?:?]
+	at net.minecraft.world.attribute.EnvironmentAttributeSystem.bakeLayerSampler(EnvironmentAttributeSystem.java:56) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.attribute.EnvironmentAttributeSystem.lambda$new$0(EnvironmentAttributeSystem.java:36) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.attribute.EnvironmentAttributeSystem$$Lambda/0x000000002b2df528.accept(Unknown Source) ~[?:?]
+	at java.base/java.util.HashMap.forEach(HashMap.java:1430) ~[?:?]
+	at net.minecraft.world.attribute.EnvironmentAttributeSystem.<init>(EnvironmentAttributeSystem.java:32) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.attribute.EnvironmentAttributeSystem$Builder.build(EnvironmentAttributeSystem.java:223) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.server.level.WorldGenRegion.<init>(WorldGenRegion.java:139) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.chunk.status.ChunkStatusTasks.generateBiomes(ChunkStatusTasks.java:84) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.chunk.status.ChunkPyramid$$Lambda/0x000000002b1e8d98.doWork(Unknown Source) ~[?:?]
+	at net.minecraft.world.level.chunk.status.ChunkStep.apply(ChunkStep.java:71) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkUpgradeGenericStatusTask.run(ChunkUpgradeGenericStatusTask.java:97) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool$OrderedStreamGroup$Queue.lambda$createTask$0(BalancedPrioritisedThreadPool.java:467) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool$OrderedStreamGroup$Queue$$Lambda/0x000000002b308f60.run(Unknown Source) ~[?:?]
+	at ca.spottedleaf.concurrentutil.executor.queue.PrioritisedTaskQueue$PrioritisedQueuedTask.execute(PrioritisedTaskQueue.java:345) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool$OrderedStreamGroup.executeTask(BalancedPrioritisedThreadPool.java:344) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool$WorkerThread.pollTasks(BalancedPrioritisedThreadPool.java:630) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.QueueExecutorRunnable.mainLoop(QueueExecutorRunnable.java:38) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.QueueExecutorRunnable.doRun(QueueExecutorRunnable.java:61) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.QueueExecutorRunnable.run(QueueExecutorRunnable.java:30) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.util.LazyRunnable.run(LazyRunnable.java:25) ~[concurrentutil-1.3.2.jar:?]
+	at java.base/java.lang.Thread.runWith(Thread.java:1487) ~[?:?]
+	... 1 more
+[19:47:20 ERROR]: [ChunkTaskScheduler] Chunk system error at chunk (-55,47), holder: NewChunkHolder{world=minecraft:overworld, chunkX=-55, chunkZ=47, entityChunkFromDisk=false, lastChunkCompletion={chunk_class=net.minecraft.world.level.chunk.ProtoChunk,status=minecraft:terrain}, currentGenStatus=minecraft:terrain, requestedGenStatus=minecraft:full, generationTask=ChunkProgressionTask{class: ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkUpgradeGenericStatusTask, for world: minecraft:overworld, chunk: (-55,47), hashcode: 2113543689, priority: COMPLETING, status: minecraft:features, scheduled: true}, generationTaskStatus=minecraft:features, priority=null, priorityLocked=false, neighbourRequestedPriority=null, effective_priority=null, oldTicketLevel=33, currentTicketLevel=33, totalNeighboursUsingThisChunk=20, fullNeighbourChunksLoadedBitset=17, currentChunkStatus=INACCESSIBLE, pendingChunkStatus=INACCESSIBLE, is_unload_safe=ticket_level, killed=false}, exception:
+java.lang.Throwable: java.lang.OutOfMemoryError: Java heap space
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler.unrecoverableChunkSystemFailure(ChunkTaskScheduler.java:295) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder.lambda$setGenerationTask$0(NewChunkHolder.java:1594) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkProgressionTask.complete0(ChunkProgressionTask.java:91) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkProgressionTask.complete(ChunkProgressionTask.java:74) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkUpgradeGenericStatusTask.run(ChunkUpgradeGenericStatusTask.java:114) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.concurrentutil.executor.queue.AreaDependentQueue$QueuedTask.run(AreaDependentQueue.java:1154) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool$OrderedStreamGroup$Queue.lambda$createTask$0(BalancedPrioritisedThreadPool.java:467) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.queue.PrioritisedTaskQueue$PrioritisedQueuedTask.execute(PrioritisedTaskQueue.java:345) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool$OrderedStreamGroup.executeTask(BalancedPrioritisedThreadPool.java:344) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool$WorkerThread.pollTasks(BalancedPrioritisedThreadPool.java:630) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.QueueExecutorRunnable.mainLoop(QueueExecutorRunnable.java:38) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.QueueExecutorRunnable.doRun(QueueExecutorRunnable.java:61) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.QueueExecutorRunnable.run(QueueExecutorRunnable.java:30) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.util.LazyRunnable.run(LazyRunnable.java:25) ~[concurrentutil-1.3.2.jar:?]
+	at java.base/java.lang.Thread.run(Thread.java:1474) ~[?:?]
+Caused by: java.lang.OutOfMemoryError: Java heap space
+	at java.base/java.lang.invoke.DirectMethodHandle.allocateInstance(DirectMethodHandle.java:500) ~[?:?]
+	at java.base/java.lang.invoke.DirectMethodHandle$Holder.newInvokeSpecial(DirectMethodHandle$Holder) ~[?:?]
+	at java.base/java.lang.invoke.Invokers$Holder.linkToTargetMethod(Invokers$Holder) ~[?:?]
+	at net.minecraft.world.level.levelgen.feature.OreFeature.doPlace(OreFeature.java:156) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.levelgen.feature.OreFeature.place(OreFeature.java:59) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.levelgen.placement.FeaturePlacer.place(FeaturePlacer.java:65) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.levelgen.placement.FeaturePlacer.placeWithBiomeCheck(FeaturePlacer.java:33) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.chunk.ChunkGenerator.addVanillaDecorations(ChunkGenerator.java:479) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.chunk.ChunkGenerator.applyBiomeDecoration(ChunkGenerator.java:512) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.chunk.ChunkGenerator.applyBiomeDecoration(ChunkGenerator.java:505) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.chunk.status.ChunkStatusTasks.generateFeatures(ChunkStatusTasks.java:150) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.chunk.status.ChunkPyramid$$Lambda/0x000000002b1e96a8.doWork(Unknown Source) ~[?:?]
+	at net.minecraft.world.level.chunk.status.ChunkStep.apply(ChunkStep.java:71) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkUpgradeGenericStatusTask.run(ChunkUpgradeGenericStatusTask.java:97) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.concurrentutil.executor.queue.AreaDependentQueue$QueuedTask.run(AreaDependentQueue.java:1154) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool$OrderedStreamGroup$Queue.lambda$createTask$0(BalancedPrioritisedThreadPool.java:467) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool$OrderedStreamGroup$Queue$$Lambda/0x000000002b308f60.run(Unknown Source) ~[?:?]
+	at ca.spottedleaf.concurrentutil.executor.queue.PrioritisedTaskQueue$PrioritisedQueuedTask.execute(PrioritisedTaskQueue.java:345) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool$OrderedStreamGroup.executeTask(BalancedPrioritisedThreadPool.java:344) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool$WorkerThread.pollTasks(BalancedPrioritisedThreadPool.java:630) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.QueueExecutorRunnable.mainLoop(QueueExecutorRunnable.java:38) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.QueueExecutorRunnable.doRun(QueueExecutorRunnable.java:61) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.QueueExecutorRunnable.run(QueueExecutorRunnable.java:30) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.util.LazyRunnable.run(LazyRunnable.java:25) ~[concurrentutil-1.3.2.jar:?]
+	at java.base/java.lang.Thread.runWith(Thread.java:1487) ~[?:?]
+	... 1 more
+[19:47:21 ERROR]: [ChunkTaskScheduler] Chunk system error at chunk (-91,46), holder: NewChunkHolder{world=minecraft:overworld, chunkX=-91, chunkZ=46, entityChunkFromDisk=false, lastChunkCompletion={chunk_class=net.minecraft.world.level.chunk.ProtoChunk,status=minecraft:spawn}, currentGenStatus=minecraft:spawn, requestedGenStatus=minecraft:full, generationTask=ChunkProgressionTask{class: ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkFullTask, for world: minecraft:overworld, chunk: (-91,46), hashcode: 1907220229, priority: COMPLETING, status: minecraft:full, scheduled: true}, generationTaskStatus=minecraft:full, priority=null, priorityLocked=false, neighbourRequestedPriority=null, effective_priority=null, oldTicketLevel=32, currentTicketLevel=32, totalNeighboursUsingThisChunk=24, fullNeighbourChunksLoadedBitset=3071, currentChunkStatus=INACCESSIBLE, pendingChunkStatus=INACCESSIBLE, is_unload_safe=ticket_level, killed=false}, exception:
+java.lang.Throwable: java.lang.OutOfMemoryError: Java heap space
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler.unrecoverableChunkSystemFailure(ChunkTaskScheduler.java:295) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder.lambda$setGenerationTask$0(NewChunkHolder.java:1594) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkProgressionTask.complete0(ChunkProgressionTask.java:91) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkProgressionTask.complete(ChunkProgressionTask.java:74) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkFullTask.run(ChunkFullTask.java:94) ~[paper-26.3.jar:26.3-214-e65c076]
+	at ca.spottedleaf.concurrentutil.executor.queue.PrioritisedTaskQueue$PrioritisedQueuedTask.execute(PrioritisedTaskQueue.java:345) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.concurrentutil.executor.queue.PrioritisedTaskQueue.executeTask(PrioritisedTaskQueue.java:126) ~[concurrentutil-1.3.2.jar:?]
+	at ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler.executeMainThreadTask(ChunkTaskScheduler.java:329) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.server.level.ServerChunkCache$MainThreadExecutor.pollTask(ServerChunkCache.java:853) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.util.thread.BlockableEventLoop.managedBlock(BlockableEventLoop.java:191) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.server.level.ServerChunkCache.syncLoad(ServerChunkCache.java:123) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.server.level.ServerChunkCache.getChunkFallback(ServerChunkCache.java:157) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.server.level.ServerChunkCache.getChunk(ServerChunkCache.java:318) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.world.level.Level.getChunk(Level.java:977) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.server.level.ServerLevel.setChunkForced(ServerLevel.java:2643) ~[paper-26.3.jar:26.3-214-e65c076]
+	at org.bukkit.craftbukkit.CraftWorld.setChunkForceLoaded(CraftWorld.java:646) ~[paper-26.3.jar:26.3-214-e65c076]
+	at dev.dist.SdkNativeRunnable7f0978af7568.run(Native Method) ~[?:?]
+	at net.minecraft.server.TickTask.run(TickTask.java:18) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.util.thread.BlockableEventLoop.doRunTask(BlockableEventLoop.java:207) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.util.thread.ReentrantBlockableEventLoop.doRunTask(ReentrantBlockableEventLoop.java:24) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.server.MinecraftServer.doRunTask(MinecraftServer.java:1518) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.server.MinecraftServer.doRunTask(MinecraftServer.java:190) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.util.thread.BlockableEventLoop.pollTask(BlockableEventLoop.java:182) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.server.MinecraftServer.pollTaskInternal(MinecraftServer.java:1498) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.server.MinecraftServer.pollTask(MinecraftServer.java:1492) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.util.thread.BlockableEventLoop.runAllTasks(BlockableEventLoop.java:163) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.server.MinecraftServer.executeModerately(MinecraftServer.java:1429) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.server.MinecraftServer.prepareLevel(MinecraftServer.java:898) ~[paper-26.3.jar:26.3-214-e65c076]
+	at io.papermc.paper.world.PaperWorldLoader.loadInitialWorlds(PaperWorldLoader.java:137) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.server.MinecraftServer.loadLevel(MinecraftServer.java:612) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.server.dedicated.DedicatedServer.initServer(DedicatedServer.java:339) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.server.MinecraftServer.runServer(MinecraftServer.java:1249) ~[paper-26.3.jar:26.3-214-e65c076]
+	at net.minecraft.server.MinecraftServer.lambda$spin$0(MinecraftServer.java:299) ~[paper-26.3.jar:26.3-214-e65c076]
+	at java.base/java.lang.Thread.run(Thread.java:1474) ~[?:?]
+Caused by: java.lang.OutOfMemoryError: Java heap space
+[cplug-sdk] main-thread flush timed out (1223 queued)
+
+Exception: java.lang.OutOfMemoryError thrown from the UncaughtExceptionHandler in thread "Paper DensityBuffer garbage collector"
+
+Exception: java.lang.OutOfMemoryError thrown from the UncaughtExceptionHandler in thread "HttpClient-1-SelectorManager"
+
+Exception: java.lang.OutOfMemoryError thrown from the UncaughtExceptionHandler in thread "JNA Cleaner"
+
+Exception: java.lang.OutOfMemoryError thrown from the UncaughtExceptionHandler in thread "Paper Common Worker #0"
+[c-LoD] c-LoD atlas snapshot saved: c-LoD-atlas.bin (65536 cells, 720924 bytes)
+[19:53:44 INFO]: [c-LoD] c-LoD atlas snapshot saved: c-LoD-atlas.bin (65536 cells, 720924 bytes)
+[c-LoD] c-LoD pack finalized (ONE-TIME, static): 28125/65536 cells (42%), 90297 bytes, sha1 ec4558c5ddafe7902e6ec5d53d2992dfbf2031a1
+[19:53:44 INFO]: [c-LoD] c-LoD pack finalized (ONE-TIME, static): 28125/65536 cells (42%), 90297 bytes, sha1 ec4558c5ddafe7902e6ec5d53d2992dfbf2031a1
