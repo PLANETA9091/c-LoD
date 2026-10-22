@@ -2,6 +2,7 @@
 # Client e2e phase: launch vanilla client, auto-join, screenshot matrix.
 # Requires: server already booted and pack finalized (boot_server.sh).
 set -uo pipefail
+S="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHOTS="$HOME/mc-test/shots"
 mkdir -p "$SHOTS"
 
@@ -77,6 +78,6 @@ sleep 2
 shot 08_day_return "$UYAW" "$UPITCH" "$UX" "$UY" "$UZ"
 
 echo "=== client log pack markers ==="
-rg -N -i "pack|post" /tmp/client.log | tail -12 || true
+grep -iE "pack|post" /tmp/client.log | tail -12 || true
 pkill -f "net.minecraft.client.main.Main" 2>/dev/null || true
 echo "E2E CLIENT PHASE DONE"

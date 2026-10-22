@@ -3,7 +3,7 @@
 # Usage: boot_server.sh   (returns once "pack finalized" appears, gates run)
 set -euo pipefail
 D="$HOME/mc-test/dist"
-JAVA="$HOME/mc-test/jdk25/bin/java"
+JAVA="${CLOD_JAVA:-$HOME/mc-test/jdk25/bin/java}"
 # Atlas window centered on the user's reference camera (-929.67, 796.37):
 # the LOD band must hug the vanilla render distance from HIS viewpoint.
 export CLOD_OPTS="scan_deadline_secs=500;tick_ms=100;atlas_size=1024;cell_size=4;stream_chunks=64;http_port=8199;center_x=-930;center_z=796"
@@ -33,5 +33,5 @@ done
 grep -q "pack finalized (ONE-TIME, static)" /tmp/server.log || { echo "TIMEOUT waiting for finalize"; tail -40 /tmp/server.log; exit 1; }
 sleep 2
 echo "=== gates ==="
-python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"/scripts/e2e/gates.py /tmp/server.log
+python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"/scripts/e2e/gates.py /tmp/server.log
 echo "=== server is up (stdin: /tmp/server.in, log: /tmp/server.log) ==="

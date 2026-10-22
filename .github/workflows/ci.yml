@@ -233,7 +233,7 @@ jobs:
     name: e2e visual client (vanilla 26.3 client on Xvfb, DH-exact matrix)
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
-    timeout-minutes: 45
+    timeout-minutes: 60
     # contents:write — the evidence step commits screenshots + zoom crops
     # into docs/e2e-ci/ on master (browsable history of every run's look).
     permissions:
@@ -251,11 +251,20 @@ jobs:
             xvfb python3-xlib python3-pil ffmpeg libgl1 libglx-mesa0 libgl1-mesa-dri mesa-utils
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Resolve CRUSSTY head (cache key)
+        id: crussty_head
+        run: echo "sha=$(git ls-remote https://github.com/PLANETA9091/CRUSSTY.git HEAD | cut -f1)" >> "$GITHUB_OUTPUT"
       - name: Build module (release)
         run: cargo build --release
+      - name: Clone CRUSSTY
+        run: git clone --depth 1 https://github.com/PLANETA9091/CRUSSTY.git crussty
+      - name: CRUSSTY runtime build cache
+        uses: actions/cache@v4
+        with:
+          path: crussty/runtime/target
+          key: crussty-runtime-${{ runner.os }}-${{ steps.crussty_head.outputs.sha }}
       - name: Build CRUSSTY runtime + launcher
         run: |
-          git clone --depth 1 https://github.com/PLANETA9091/CRUSSTY.git crussty
           cargo build --release --manifest-path crussty/runtime/Cargo.toml
           mkdir -p crussty/launcher/out
           javac -d crussty/launcher/out crussty/launcher/src/main/java/dev/dist/launcher/Main.java
