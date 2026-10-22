@@ -214,16 +214,18 @@ pub fn zlib_store(data: &[u8]) -> Vec<u8> {
 fn zlib_deflate(data: &[u8]) -> Vec<u8> {
     let fixed = deflate_fixed(data);
     let stored = zlib_store(data);
-    // Both start with CMF/FLG; pick the smaller payload.
-    let (body, cmf, flg) = if fixed.len() <= stored.len() {
+    // Pick the smaller payload. deflate_fixed is a RAW deflate (no header of
+    // its own); zlib_store carries CMF/FLG + its own adler trailer, so both
+    // get stripped before re-wrapping.
+    let (payload, cmf, flg) = if fixed.len() <= stored.len() {
         (fixed, 0x78u8, 0x9Cu8)
     } else {
-        (stored, 0x78u8, 0x01u8)
+        (stored[2..stored.len() - 4].to_vec(), 0x78u8, 0x01u8)
     };
-    let mut out = Vec::with_capacity(body.len() + 8);
+    let mut out = Vec::with_capacity(payload.len() + 8);
     out.push(cmf);
     out.push(flg);
-    out.extend_from_slice(&body[2..]); // strip the temp header, keep the stream
+    out.extend_from_slice(&payload);
     out.extend_from_slice(&adler32(data).to_be_bytes());
     out
 }

@@ -341,7 +341,8 @@ impl Atlas {
             }
         }
         let mut px = vec![0u8; n * n * 4];
-        let mut dim = n / 2;
+        let mut cdim = n; // side of the grid `cur` currently holds
+        let mut dim = n / 2; // side of the grid being produced
         let mut row = 0usize;
         while dim >= 1 {
             let next: Vec<u16> = (0..dim * dim)
@@ -352,8 +353,8 @@ impl Atlas {
                     for (dz, dx) in [(0usize, 0usize), (0, 1), (1, 0), (1, 1)] {
                         let sx = x * 2 + dx;
                         let sz = z * 2 + dz;
-                        if sx < n && sz < n {
-                            m = m.max(cur[sz * n + sx]);
+                        if sx < cdim && sz < cdim {
+                            m = m.max(cur[sz * cdim + sx]);
                         }
                     }
                     m
@@ -370,6 +371,7 @@ impl Atlas {
             }
             row += dim;
             cur = next;
+            cdim = dim;
             dim /= 2;
         }
         (n as u32, n as u32, px)
