@@ -6363,8 +6363,11 @@ pub static MATERIAL_FACES: &[(&str, &[&str])] = &[
     ("CACTUS", &["cactus_bottom", "cactus_top", "cactus_side"]),
 ];
 
-/// Per-texture tint kind: how the per-cell biome tint applies.
-/// 0 = none, 1 = grass colormap, 2 = foliage colormap, 3 = water.
+/// Per-texture tint kind: how the per-cell biome tint applies (vanilla
+/// BlockTintSources semantics, v4.4). 0 = none, 1 = grass colormap
+/// (partial: the shader tints only the grayscale texels of a combined
+/// tile — the grass overlay over dirt), 2 = foliage colormap, 3 = water,
+/// 4 = dry foliage (pale oak).
 #[rustfmt::skip]
 pub static TEX_TINT: &[(&str, u8)] = &[
     ("acacia_leaves", 2),
@@ -6373,11 +6376,13 @@ pub static TEX_TINT: &[(&str, u8)] = &[
     ("cherry_leaves", 0),
     ("dark_oak_leaves", 2),
     ("flowering_azalea_leaves", 2),
+    ("grass_block_side", 1),
     ("grass_block_top", 1),
     ("jungle_leaves", 2),
     ("mangrove_leaves", 2),
     ("oak_leaves", 2),
-    ("pale_oak_leaves", 0),
+    ("pale_oak_leaves", 4),
     ("spruce_leaves", 2),
+    ("sugar_cane", 1),
     ("water_still", 3),
 ];

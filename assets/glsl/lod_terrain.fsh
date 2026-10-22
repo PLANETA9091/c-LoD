@@ -575,6 +575,10 @@ void main() {
     vec2 uvf = fract(uvWorld / TILE_BLOCKS);
 
     vec3 albedo;
+    // v4.4: the vanilla tint KIND for the hit face. Real states carry it in
+    // the tile alpha (baked server-side, kind * 51/255); the height-gradient
+    // fallback approximates vanilla by tinting water and UP land faces.
+    float kind = isWater ? 3.0 : ((face > 0.5 && face < 1.5) ? 2.0 : 0.0);
     // StatesInfo.x = the pack's state count. A client can hold a STALE pack
     // (join-time pack swap races: "post effect does not exist" window) while
     // the server atlas already uses a newer registry — out-of-range sids then
@@ -600,6 +604,7 @@ void main() {
         // rendering them opaque gives exactly the merged-quad look: distant
         // forests with no sky holes.
         albedo = tex.rgb;
+        kind = floor(tex.a * 255.0 / 51.0 + 0.5);
     } else {
         // Unknown state: height gradient fallback (v4.1 look).
         float hn = clamp((hitPos.y - sea) / max(LodParams.y - sea, 1.0), 0.0, 1.0);
@@ -613,11 +618,20 @@ void main() {
         shade = 1.0;
     }
 
-    // Biome tint: multiply into UP faces when the cell carries one
-    // (white = untinted — matches Voxy's biome LUT behavior for the rest).
+    // ---- BIOME TINT: Voxy tintingState semantics (v4.4) -----------------
+    // quads.frag: tintingState 2 (always) and 3-in-ours (water) tint every
+    // texel; state 1 (grass PARTIAL) probes the EXACT mip-0 texel and tints
+    // only grayscale pixels — the combined grass-side tile (dirt + gray
+    // overlay) gets exactly the vanilla treatment. The color is the per-cell
+    // biome value (grass/foliage/water/dry are distinct colormap channels —
+    // v4.4 replaced the flat grass-for-everything tint).
     vec3 tint = colData.rgb;
-    bool tinted = any(greaterThan(abs(tint - vec3(1.0)), vec3(0.004)));
-    if (tinted && ((face > 0.5 && face < 1.5) || isWater)) {
+    bool doTint = kind > 0.5;
+    if (kind > 0.5 && kind < 1.5) {
+        vec4 probe = state_tile(sid, face, 0, uvf);
+        doTint = abs(probe.r - probe.g) < 0.02 && abs(probe.g - probe.b) < 0.02;
+    }
+    if (doTint) {
         albedo *= tint;
     }
 

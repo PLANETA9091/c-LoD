@@ -408,13 +408,23 @@ fn sample_cell(
             0
         };
         let light = (block_light << 4) | 0x0F;
+        // v4.4 VOXY COLOURS: the tint kind per face selects the color source
+        // exactly like vanilla's BlockTintSources: 1 = grass colormap,
+        // 2 = foliage colormap, 3 = water, 4 = dry foliage; birch/spruce
+        // leaves are vanilla CONSTANT sources and ignore the biome.
         let tint = if def.water {
             crate::palette::water_tint(&biome)
         } else {
-            match def.tint[1] {
-                1 | 2 => crate::palette::grass_tint(&biome),
-                3 => crate::palette::water_tint(&biome),
-                _ => [255, 255, 255],
+            match material.as_str() {
+                "BIRCH_LEAVES" => crate::palette::BIRCH_LEAVES_COLOR,
+                "SPRUCE_LEAVES" => crate::palette::SPRUCE_LEAVES_COLOR,
+                _ => match def.tint[1] {
+                    1 => crate::palette::grass_tint(&biome),
+                    2 => crate::palette::foliage_tint(&biome),
+                    3 => crate::palette::water_tint(&biome),
+                    4 => crate::palette::dry_foliage_tint(&biome),
+                    _ => [255, 255, 255],
+                },
             }
         };
         state.atlas.set(

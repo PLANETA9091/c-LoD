@@ -20,6 +20,7 @@
 //!      tiers) — the only dynamic part, pure `/posteffect`.
 
 mod atlas;
+mod biome_colors_data;
 mod config;
 mod engine;
 mod http;

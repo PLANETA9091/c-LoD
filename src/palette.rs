@@ -1,77 +1,120 @@
-//! Surface color resolution: block material + biome -> final albedo RGB.
+//! Biome colors — vanilla-exact, sampled like the 26.3 client (v4.4.0).
 //!
-//! This is the server-side counterpart of what Voxy computes from live voxel
-//! data: LOD cells are painted with the REAL surface colors of the world
-//! (vanilla map-style block colors, biome-tinted grass/foliage/water), so the
-//! distant terrain reads as Minecraft terrain instead of a flat two-tone
-//! gradient. Runs once per scanned atlas cell on the main thread; the result
-//! is baked into the static pack (`atlas_col.png`) — zero runtime cost.
+//! The hand-written per-biome tables are gone. The module embeds the REAL
+//! vanilla colormaps (grass / foliage / dry_foliage) and the REAL worldgen
+//! biome parameters, generated from the reference client.jar by
+//! `scripts/gen_biome_colors.py` (see src/biome_colors_data.rs).
+//!
+//! Sampling is byte-exact `net.minecraft.world.level.ColorMapColorUtil.get`:
+//!     downfall *= temperature;
+//!     x = (int)((1.0 - temperature) * 255.0);
+//!     y = (int)((1.0 - downfall) * 255.0);   // downfall already scaled
+//!     idx = (y << 8) | x;                    // row-major 256x256
+//! with the decompiled vanilla fallbacks for the out-of-range indices and
+//! the fixed per-block colors (birch / spruce leaves) applied by the scan.
 
-/// Vanilla-ish grass tint per biome (grass top / foliage base multiply).
+use crate::biome_colors_data::{BiomeClimateRow, BIOME_CLIMATE};
+
+const GRASS_MAP: &[u8] = include_bytes!("colormaps/grass.bin");
+const FOLIAGE_MAP: &[u8] = include_bytes!("colormaps/foliage.bin");
+const DRY_FOLIAGE_MAP: &[u8] = include_bytes!("colormaps/dry_foliage.bin");
+
+// Decompiled vanilla default water color (every 26.3 biome JSON carries
+// `water_color`, so this only guards unknown biome names).
+const WATER_DEFAULT: [u8; 3] = [0x3F, 0x76, 0xE4];
+
+/// Fixed per-block leaf colors (vanilla `BlockTintSources` constant sources):
+/// birch and spruce leaves ignore the biome entirely.
+pub const BIRCH_LEAVES_COLOR: [u8; 3] = [0x80, 0xA7, 0x55];
+pub const SPRUCE_LEAVES_COLOR: [u8; 3] = [0x61, 0x99, 0x61];
+
+fn climate(biome: &str) -> Option<BiomeClimateRow> {
+    BIOME_CLIMATE
+        .iter()
+        .find(|(name, ..)| *name == biome)
+        .copied()
+}
+
+/// `ColorMapColorUtil.get` — index arithmetic is exact. Vanilla indexes
+/// `pixels[idx]` with the raw int (an out-of-range climate would crash the
+/// client; no biome that renders grass/foliage ever goes out of range). For
+/// the degenerate climates (nether temp=2.0) the sampler returns the
+/// vanilla default-biome color instead of a garbage texel.
+fn sample_map(map: &[u8], temp: f64, downfall: f64) -> [u8; 3] {
+    let d2 = downfall * temp;
+    let x = ((1.0 - temp) * 255.0) as i32;
+    let y = ((1.0 - d2) * 255.0) as i32;
+    if !(0..=255).contains(&x) || !(0..=255).contains(&y) {
+        return default_sample(map);
+    }
+    let idx = ((y as usize) << 8) | x as usize;
+    [map[idx * 3], map[idx * 3 + 1], map[idx * 3 + 2]]
+}
+
+/// The vanilla default biome: get(0.5, 1.0) — x = y = 127.
+fn default_sample(map: &[u8]) -> [u8; 3] {
+    let idx = (127 << 8) | 127;
+    [map[idx * 3], map[idx * 3 + 1], map[idx * 3 + 2]]
+}
+
+fn channel(c: Option<u32>) -> Option<[u8; 3]> {
+    c.map(|v| {
+        [
+            ((v >> 16) & 0xFF) as u8,
+            ((v >> 8) & 0xFF) as u8,
+            (v & 0xFF) as u8,
+        ]
+    })
+}
+
+/// Grass colormap color (tint kind 1): the biome's `grass_color` override
+/// wins, else the grass colormap at the biome climate. The swamp /
+/// dark_forest noise modifiers are pinned to their documented means in the
+/// generated table (a server-side scan cannot run the position noise).
 pub fn grass_tint(biome: &str) -> [u8; 3] {
-    match biome {
-        "PLAINS" | "SUNFLOWER_PLAINS" | "ICE_SPIKES" => [0x91, 0xBD, 0x59],
-        "FOREST" | "FLOWER_FOREST" | "WOODED_HILLS" => [0x79, 0xC0, 0x5A],
-        "BIRCH_FOREST" | "OLD_GROWTH_BIRCH_FOREST" => [0x88, 0xBB, 0x67],
-        "DARK_FOREST" => [0x50, 0x7A, 0x32],
-        "OLD_GROWTH_PINE_TAIGA" | "OLD_GROWTH_SPRUCE_TAIGA" => [0x68, 0xA4, 0x64],
-        "TAIGA" | "WINDSWEPT_FOREST" => [0x86, 0xB7, 0x83],
-        "SNOWY_PLAINS" | "SNOWY_SLOPES" | "FROZEN_PEAKS" | "JAGGED_PEAKS" | "SNOWY_BEACH"
-        | "SNOWY_TAIGA" | "GROVE" | "FROZEN_RIVER" | "FROZEN_OCEAN" | "DEEP_FROZEN_OCEAN" => {
-            [0x80, 0xB4, 0x97]
+    match climate(biome) {
+        Some((_, t, d, g, _, _, _)) => {
+            channel(g).unwrap_or_else(|| sample_map(GRASS_MAP, t as f64, d as f64))
         }
-        "SAVANNA" | "SAVANNA_PLATEAU" | "WINDSWEPT_SAVANNA" => [0xBF, 0xB7, 0x55],
-        "JUNGLE" | "BAMBOO_JUNGLE" => [0x59, 0xC9, 0x3C],
-        "SPARSE_JUNGLE" => [0x64, 0xC7, 0x3F],
-        "BADLANDS" | "WOODED_BADLANDS" | "ERODED_BADLANDS" => [0x90, 0x81, 0x4D],
-        "DESERT" => [0xBF, 0xB7, 0x55],
-        "SWAMP" | "MANGROVE_SWAMP" => [0x6A, 0x70, 0x39],
-        "MEADOW" => [0x83, 0xBB, 0x6D],
-        "CHERRY_GROVE" => [0xB6, 0xDB, 0x61],
-        "WINDSWEPT_HILLS" | "WINDSWEPT_GRAVELLY_HILLS" => [0x8A, 0xB6, 0x89],
-        "STONY_PEAKS" | "STONY_SHORE" => [0x8A, 0xB6, 0x89],
-        "RIVER" | "BEACH" => [0x71, 0xA7, 0x4D],
-        "OCEAN"
-        | "DEEP_OCEAN"
-        | "WARM_OCEAN"
-        | "LUKEWARM_OCEAN"
-        | "COLD_OCEAN"
-        | "DEEP_LUKEWARM_OCEAN"
-        | "DEEP_COLD_OCEAN" => [0x8E, 0xB9, 0x71],
-        "MUSHROOM_FIELDS" => [0x55, 0xC9, 0x3F],
-        "THE_VOID" | "END_HIGHLANDS" | "NETHER_WASTES" | "CRIMSON_FOREST" | "WARPED_FOREST"
-        | "SOUL_SAND_VALLEY" | "BASALT_DELTAS" | "THE_END" | "SMALL_END_ISLANDS"
-        | "END_MIDLANDS" | "END_BARRENS" => [0x8E, 0xB9, 0x71],
-        _ => [0x91, 0xBD, 0x59],
+        // Vanilla default biome: GrassColor.getDefaultColor() = get(0.5, 1.0)
+        None => sample_map(GRASS_MAP, 0.5, 1.0),
     }
 }
 
-/// Water color per biome (vanilla water tint base).
+/// Foliage colormap color (tint kind 2).
+pub fn foliage_tint(biome: &str) -> [u8; 3] {
+    match climate(biome) {
+        Some((_, t, d, _, f, _, _)) => {
+            channel(f).unwrap_or_else(|| sample_map(FOLIAGE_MAP, t as f64, d as f64))
+        }
+        // Vanilla default biome: FoliageColor.getDefaultColor() = get(0.5, 1.0)
+        None => sample_map(FOLIAGE_MAP, 0.5, 1.0),
+    }
+}
+
+/// Dry foliage colormap color (tint kind 4 — pale oak leaves).
+pub fn dry_foliage_tint(biome: &str) -> [u8; 3] {
+    match climate(biome) {
+        Some((_, t, d, _, _, df, _)) => match channel(df) {
+            Some(c) => c,
+            None => sample_map(DRY_FOLIAGE_MAP, t as f64, d as f64),
+        },
+        // Vanilla default biome: get(0.5, 1.0) on the dry map
+        None => sample_map(DRY_FOLIAGE_MAP, 0.5, 1.0),
+    }
+}
+
+/// Water color (tint kind 3): every 26.3 biome JSON carries `water_color`.
 pub fn water_tint(biome: &str) -> [u8; 3] {
-    match biome {
-        "SWAMP" | "MANGROVE_SWAMP" => [0x61, 0x7B, 0x64],
-        "WARM_OCEAN" | "LUKEWARM_OCEAN" | "DEEP_LUKEWARM_OCEAN" => [0x43, 0xD5, 0xEE],
-        "COLD_OCEAN" | "DEEP_COLD_OCEAN" => [0x3D, 0x57, 0xD6],
-        "FROZEN_OCEAN" | "DEEP_FROZEN_OCEAN" | "FROZEN_RIVER" => [0x39, 0x38, 0xC9],
-        "RIVER" => [0x3F, 0x76, 0xE4],
-        _ => [0x3F, 0x76, 0xE4],
+    match climate(biome) {
+        Some((_, _, _, _, _, _, w)) => channel(Some(w)).unwrap(),
+        None => WATER_DEFAULT,
     }
 }
-
-#[allow(dead_code)] // used by surface_color (tests keep it alive)
-fn mul(base: [u8; 3], tint: [u8; 3]) -> [u8; 3] {
-    [
-        ((base[0] as u16 * tint[0] as u16) / 255) as u8,
-        ((base[1] as u16 * tint[1] as u16) / 255) as u8,
-        ((base[2] as u16 * tint[2] as u16) / 255) as u8,
-    ]
-}
-
 /// Final surface color for one atlas cell.
 ///
-/// `material` is the Bukkit `Material.name()` of the top block, `biome` the
-/// Bukkit `Biome.name()` of the column. Unknown names fall through keyword
-/// rules; the last resort is a neutral stone gray (never bright, never void).
+/// Legacy v4.2 flattened albedo — the real pipeline textures from the block
+/// tiles and tints in-shader; kept for the fallback tests only.
 #[allow(dead_code)] // v4.3: the shader textures from real block tiles now;
 pub fn surface_color(material: &str, biome: &str, liquid: bool) -> [u8; 3] {
     let grass = grass_tint(biome);
@@ -126,8 +169,8 @@ pub fn surface_color(material: &str, biome: &str, liquid: bool) -> [u8; 3] {
 
         // Vegetation blocks that carry the biome tint.
         "OAK_LEAVES" => mul([0x48, 0xB5, 0x18], grass),
-        "SPRUCE_LEAVES" => [0x61, 0x77, 0x61],
-        "BIRCH_LEAVES" => [0x80, 0xA7, 0x55],
+        "SPRUCE_LEAVES" => SPRUCE_LEAVES_COLOR,
+        "BIRCH_LEAVES" => BIRCH_LEAVES_COLOR,
         "JUNGLE_LEAVES" => mul([0x30, 0xA0, 0x24], grass),
         "ACACIA_LEAVES" => mul([0x30, 0xA0, 0x24], grass),
         "DARK_OAK_LEAVES" => mul([0x30, 0x70, 0x24], grass),
@@ -164,7 +207,7 @@ pub fn surface_color(material: &str, biome: &str, liquid: bool) -> [u8; 3] {
 fn keyword_fallback(material: &str, biome: &str) -> [u8; 3] {
     let m = material;
     if m.contains("LEAVES") {
-        return mul([0x48, 0xB5, 0x18], grass_tint(biome));
+        return foliage_tint(biome);
     }
     if m.contains("GRASS") || m.contains("FERN") || m.contains("MOSS") || m.contains("AZALEA") {
         return mul([0x7F, 0xA8, 0x54], grass_tint(biome));
@@ -200,19 +243,64 @@ fn keyword_fallback(material: &str, biome: &str) -> [u8; 3] {
     [0x7A, 0x7A, 0x7A]
 }
 
+#[allow(dead_code)] // used by surface_color (tests keep it alive)
+fn mul(base: [u8; 3], tint: [u8; 3]) -> [u8; 3] {
+    [
+        ((base[0] as u16 * tint[0] as u16) / 255) as u8,
+        ((base[1] as u16 * tint[1] as u16) / 255) as u8,
+        ((base[2] as u16 * tint[2] as u16) / 255) as u8,
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn grass_follows_biome() {
-        let plains = surface_color("GRASS_BLOCK", "PLAINS", false);
-        let swamp = surface_color("GRASS_BLOCK", "SWAMP", false);
-        let snowy = surface_color("GRASS_BLOCK", "SNOWY_PLAINS", false);
-        assert_ne!(plains, swamp);
-        assert_ne!(plains, snowy);
-        // Snowy grass is desaturated vs plains.
-        assert!(snowy[0] < plains[0]);
+        let plains = grass_tint("PLAINS");
+        let jungle = grass_tint("JUNGLE");
+        let snowy = grass_tint("SNOWY_PLAINS");
+        // Vanilla colormap values (well-known anchors).
+        assert_eq!(plains, [0x91, 0xBD, 0x59], "plains grass");
+        assert_eq!(jungle, [0x59, 0xC9, 0x3C], "jungle grass");
+        assert_eq!(snowy, [0x80, 0xB4, 0x97], "snowy grass");
+        assert_ne!(plains, jungle);
+    }
+
+    #[test]
+    fn foliage_differs_from_grass() {
+        // Vanilla: forest grass 0x79C05A, forest foliage 0x59AE30.
+        assert_eq!(grass_tint("FOREST"), [0x79, 0xC0, 0x5A]);
+        assert_eq!(foliage_tint("FOREST"), [0x59, 0xAE, 0x30]);
+        // Desert (temp 2.0) never renders vanilla foliage — the vanilla
+        // sampler would index out of bounds; our sampler returns the
+        // default-biome texel instead. Both degenerate climates agree.
+        assert_eq!(foliage_tint("DESERT"), foliage_tint("BASALT_DELTAS"));
+    }
+
+    #[test]
+    fn overrides_win_over_colormaps() {
+        // Cherry grove pins both grass and foliage.
+        assert_eq!(grass_tint("CHERRY_GROVE"), [0xB6, 0xDB, 0x61]);
+        assert_eq!(foliage_tint("CHERRY_GROVE"), [0xB6, 0xDB, 0x61]);
+        // Swamp grass uses the pinned modifier mean.
+        assert_eq!(grass_tint("SWAMP"), [0x6A, 0x70, 0x39]);
+        assert_eq!(water_tint("SWAMP"), [0x61, 0x7B, 0x64]);
+        // Warm ocean water.
+        assert_eq!(water_tint("WARM_OCEAN"), [0x43, 0xD5, 0xEE]);
+    }
+
+    #[test]
+    fn unknown_biome_falls_back_to_vanilla_defaults() {
+        // GrassColor.getDefaultColor() = get(0.5, 1.0) = the map texel at
+        // (127, 127). OCEAN has its own climate (downfall 0.4) and its own
+        // color — it must NOT equal the default.
+        assert_eq!(grass_tint("SOME_FUTURE_BIOME"), [0x7C, 0xBD, 0x6B]);
+        assert_ne!(grass_tint("OCEAN"), grass_tint("SOME_FUTURE_BIOME"));
+        assert_eq!(foliage_tint("NOT_A_BIOME"), foliage_tint("DESERT"));
+        assert_eq!(dry_foliage_tint("NOT_A_BIOME"), dry_foliage_tint("DESERT"));
+        assert_eq!(water_tint("NOT_A_BIOME"), WATER_DEFAULT);
     }
 
     #[test]
@@ -243,6 +331,6 @@ mod tests {
         let a = surface_color("SPRUCE_LEAVES", "TAIGA", false);
         let b = surface_color("SPRUCE_LEAVES", "TAIGA", false);
         assert_eq!(a, b);
-        assert_eq!(a, [0x61, 0x77, 0x61]);
+        assert_eq!(a, SPRUCE_LEAVES_COLOR);
     }
 }

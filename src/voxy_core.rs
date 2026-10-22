@@ -360,11 +360,17 @@ pub fn bake_states_atlas(registry: &StateRegistry) -> (u32, u32, Vec<u8>) {
                 let tw = MIP_W[m];
                 let ox = col * 3 * FACE_STRIDE + face_col * FACE_STRIDE + MIP_X[m];
                 let oy = row * ATLAS_STATE_H + face_row * TILE;
+                // v4.4: the tint kind rides in the ALPHA channel (the render
+                // ignores tile alpha — albedo = tex.rgb). kind * 51 covers
+                // kinds 0..5; every texel of the tile carries the same kind,
+                // so the mip averaging below preserves it exactly.
+                let kind_alpha = def.tint[f].min(5) * 51;
                 for y in 0..tw {
                     for x in 0..tw {
                         let s = (y * tw + x) * 4;
                         let d = ((oy + y) * ATLAS_W + ox + x) * 4;
-                        px[d..d + 4].copy_from_slice(&tile[s..s + 4]);
+                        px[d..d + 3].copy_from_slice(&tile[s..s + 3]);
+                        px[d + 3] = kind_alpha;
                     }
                 }
             }
@@ -483,12 +489,13 @@ mod tests {
         assert_eq!(w as usize, ATLAS_W);
         assert!(h as usize >= ATLAS_STATE_H);
         assert_eq!(px.len(), ATLAS_W * h as usize * 4);
-        // The stone state's mip-4 (1x1) tile must be a solid opaque pixel.
+        // The stone state's mip-4 (1x1) tile must be a solid gray pixel;
+        // v4.4 the ALPHA channel carries the tint kind (stone = kind 0).
         let stone = reg.id_of("stone") as usize;
         let ox = stone % STATES_PER_ROW * 3 * FACE_STRIDE + MIP_X[4];
         let oy = stone / STATES_PER_ROW * ATLAS_STATE_H;
         let d = (oy * ATLAS_W + ox) * 4;
-        assert_eq!(px[d + 3], 255, "stone 1x1 mip alpha");
+        assert_eq!(px[d + 3], 0, "stone 1x1 mip alpha (kind 0)");
         assert!(
             px[d] > 60 && px[d] < 200,
             "stone 1x1 mip is gray, got {}",
@@ -602,22 +609,22 @@ mod tests {
                     let d = ((ay * w as usize) + ax) * 4;
                     let s = base + (ty * TILE + tx) * 4;
                     // The stored L0 tile is the SOLIDIFIED source (transparent
-                    // texels carry the nearest opaque RGB, alpha untouched) —
-                    // compare RGB only where the source texel is opaque, and
-                    // always compare alpha (solidify never touches it).
+                    // texels carry the nearest opaque RGB) — v4.4 the alpha
+                    // channel carries the tint kind (kind * 51), so compare
+                    // RGB always and alpha against the face's kind.
+                    let kind_alpha = reg.def(sid as u8).tint[face].min(5) * 51;
                     if TEX_RGBA[s + 3] != 0 {
                         assert_eq!(
-                            &px[d..d + 4],
-                            &TEX_RGBA[s..s + 4],
+                            &px[d..d + 3],
+                            &TEX_RGBA[s..s + 3],
                             "{mat} face {face} texel ({tx},{ty})"
                         );
-                    } else {
-                        assert_eq!(
-                            px[d + 3],
-                            TEX_RGBA[s + 3],
-                            "{mat} face {face} texel ({tx},{ty}) alpha"
-                        );
                     }
+                    assert_eq!(
+                        px[d + 3],
+                        kind_alpha,
+                        "{mat} face {face} texel ({tx},{ty}) kind alpha"
+                    );
                 }
             }
         }
