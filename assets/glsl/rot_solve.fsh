@@ -30,7 +30,7 @@ uniform sampler2D PrevSampler; // clod:clod_rot_a (1x5 persistent)
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 
-const int SLICES = 640;
+const int SLICES = 5120;
 
 void main() {
     int j = int(gl_FragCoord.x); // 0..4, one output pixel per fragment
@@ -51,7 +51,11 @@ void main() {
     if (j == 4) {
         // Confidence pixel: 1.0 while the channel is alive, slow decay when
         // the column is occluded (facing a wall of terrain / GUI overlay).
-        fragColor = vec4(best >= 0 ? 1.0 : prev.r * 0.99, 0.0, 0.0, 0.0);
+        // v4.4: recovery RAMPS back up (+0.08/frame ≈ 0.2 s) instead of
+        // snapping — a fresh payload after an occlusion no longer pops the
+        // whole LOD in at full strength (the other half of the pan flicker).
+        fragColor = vec4(best >= 0 ? min(prev.r + 0.08, 1.0) : prev.r * 0.99,
+                         0.0, 0.0, 0.0);
         return;
     }
 

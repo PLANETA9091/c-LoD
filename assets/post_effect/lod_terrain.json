@@ -1,6 +1,6 @@
 {
     "targets": {
-        "clod_scan": { "width": 640, "height": 1 },
+        "clod_scan": { "width": 5120, "height": 1 },
         "clod_rot_a": { "width": 5, "height": 1, "persistent": true },
         "clod_rot_b": { "width": 5, "height": 1, "persistent": true },
         "clod_swap": {}

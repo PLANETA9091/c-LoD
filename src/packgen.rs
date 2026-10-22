@@ -70,7 +70,12 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
     // just before the LOD band and reaches full strength at `veil_far`.
     let atmo_start = fmt_f(cfg.lod_near * 0.85);
     let atmo_end = fmt_f(cfg.veil_far);
-    let fog_start = cfg.lod_near * 2.2;
+    // v4.4: the fog used to start at 2.2*lod_near (~211 blocks), which veiled
+    // the whole mid-band and read as "less detailed than DH" — DH stays crisp
+    // for kilometres. Start the fade only in the outer half of the atlas
+    // (never before 2.2*lod_near) and still dissolve fully before the border
+    // (the old hard-edge fix below).
+    let fog_start = (atlas.half() as f32 * 0.45).max(cfg.lod_near * 2.2);
     // Local tweak: the default (size * 0.72) sat past the atlas border for
     // half-extent <= 0.72*size, so the scanned window's square edge was
     // only ~65% veiled and showed up as a hard wall on the horizon.
@@ -526,6 +531,72 @@ mod tests {
         assert!(
             !chain.contains("sun_"),
             "sun passes must be gone from the chain"
+        );
+    }
+
+    #[test]
+    fn v4_4_channel_groups_and_adaptive_march_are_shipped() {
+        // v4.4 pan-flicker fix: the payload must be written into eight column
+        // groups (sky.fsh), scanned group-wise at 5120 slices (col_scan +
+        // rot_solve + the chain target), and the march must carry the fixed
+        // early-out plus the adaptive PIXF level.
+        let cfg = Config::parse("");
+        let atlas = Atlas::new(0, 0, 256, 4, 63);
+        let pack = build(&cfg, &atlas);
+        let entries = zip_entries(&pack.zip);
+        let get = |name: &str| {
+            entries
+                .iter()
+                .find(|(n, _)| n == name)
+                .unwrap_or_else(|| panic!("{name} missing"))
+                .1
+                .clone()
+        };
+
+        let sky_v = get("assets/minecraft/shaders/core/sky.fsh");
+        let sky = String::from_utf8_lossy(&sky_v);
+        assert!(
+            sky.contains("px.x % 240 < 19"),
+            "sky payload must use 8 column groups"
+        );
+
+        let scan_v = get("assets/clod/shaders/post/col_scan.fsh");
+        let scan = String::from_utf8_lossy(&scan_v);
+        assert!(scan.contains("const int GROUPS = 8;"), "col_scan group count");
+        assert!(
+            scan.contains("const int GROUP_STRIDE = 240;"),
+            "col_scan group stride must match sky.fsh"
+        );
+
+        let solve_v = get("assets/clod/shaders/post/rot_solve.fsh");
+        let solve = String::from_utf8_lossy(&solve_v);
+        assert!(solve.contains("const int SLICES = 5120;"), "solver slice count");
+        assert!(
+            solve.contains("min(prev.r + 0.08, 1.0)"),
+            "confidence recovery must ramp, not snap"
+        );
+
+        let chain_v = get("assets/clod/post_effect/lod_terrain.json");
+        let chain = String::from_utf8_lossy(&chain_v);
+        assert!(
+            chain.contains("\"clod_scan\": { \"width\": 5120, \"height\": 1 }"),
+            "scan target must be 5120x1 for the 8 group columns"
+        );
+
+        let terrain_v = get("assets/clod/shaders/post/lod_terrain.fsh");
+        let terrain = String::from_utf8_lossy(&terrain_v);
+        assert!(
+            terrain.contains("cam.y > maxY + 64.0"),
+            "early-out must only fire above the whole heightfield (cloud-cut fix)"
+        );
+        assert!(
+            !terrain.contains("toCeil"),
+            "the broken toCeil/toEdge early-out must be gone"
+        );
+        assert!(terrain.contains("const float PIXF"), "adaptive level constant");
+        assert!(
+            terrain.contains("hitLvl"),
+            "adaptive level tracking missing"
         );
     }
 }

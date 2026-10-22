@@ -329,12 +329,12 @@ impl Atlas {
         for z in 0..n {
             for x in 0..n {
                 let cell = &snap[z * n + x];
+                // v4.4: water cells encode their STORED height (the actual
+                // fluid surface), not the sea level — the shader renders the
+                // surface from the pyramid too, and mountain lakes must not
+                // sink to sea level in the coarse levels.
                 cur[z * n + x] = if cell.valid {
-                    if cell.water {
-                        enc(self.sea_level)
-                    } else {
-                        enc(i32::from(cell.height))
-                    }
+                    enc(i32::from(cell.height))
                 } else {
                     0
                 };

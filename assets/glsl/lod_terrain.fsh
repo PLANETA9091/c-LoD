@@ -90,8 +90,15 @@ const float PI = 3.14159265358979;
 // 26.3 device depth: d = near/eyeZ (infinite far) — sky == 0.0, any real
 // geometry reads positive, so 1e-6 keeps terrain out to ~50 km classified.
 const float SKY_DEPTH = 1.0e-6;
-const int MAX_STEPS = 460;
+const int MAX_STEPS = 600;
 const int BISECT = 14;
+
+// v4.4 adaptive level-of-detail march (DH-style LOD levels on a raymarcher):
+// the sampled cell grows with the pixel footprint so the far field renders
+// through coarse pyramid levels (stable, no per-pixel speckle) while the
+// near field keeps the exact cell grid. PIXF scales how aggressively the
+// level coarsens; 2.5 keeps one cell ~2.5 pixels wide before coarsening.
+const float PIXF = 2.5;
 
 // DH-look tuning: quantized world-position noise stands in for textures the
 // way DH's "fake texture noise" does — luminance-scaled, fading with distance.
@@ -155,7 +162,11 @@ Cell cellAt(ivec2 cid, vec2 origin, float cell, int n, float sea) {
     c.valid = true;
     c.water = a.b > 0.5;
     c.side = a.a;
-    c.top = c.water ? sea : h16 / 64.0 - 64.0;
+    // v4.4: render the water surface at its STORED height, not the sea
+    // level — the scan captures the actual fluid block (ocean = 63 = sea,
+    // but mountain lakes sit at their own Y and used to render as pits).
+    // (`sea` stays an argument for signature stability; unused here.)
+    c.top = h16 / 64.0 - 64.0;
     vec4 g = texelFetch(GeomSampler, cid, 0);
     float b16 = g.r * 65280.0 + g.g * 255.0;
     float s16 = g.b * 65280.0 + g.a * 255.0;
@@ -316,40 +327,49 @@ void main() {
     float sea = LodParams.z;
     int n = int(AtlasInfo.z / AtlasInfo.w + 0.5);
     int K = int(PyrParams.x + 0.5);
-    float baseStep = cell * 0.75;
 
     vec2 minW = origin;
     vec2 maxW = origin + vec2(size);
 
-    // Rays that leave the heightfield from above can never hit: early-out.
-    if (dir.y > 0.0) {
-        float toCeil = (maxY + 64.0 - cam.y) / dir.y;
-        float toEdge = 1.0e9;
-        if (dir.x > 0.0) toEdge = min(toEdge, (maxW.x - cam.x) / dir.x);
-        if (dir.x < 0.0) toEdge = min(toEdge, (minW.x - cam.x) / dir.x);
-        if (dir.z > 0.0) toEdge = min(toEdge, (maxW.y - cam.z) / dir.z);
-        if (dir.z < 0.0) toEdge = min(toEdge, (minW.y - cam.z) / dir.z);
-        if (toCeil < toEdge) {
-            fragColor = DebugParams.x > 3.5 ? vec4(0.6, 0.0, 0.9, 1.0) : scene;
-            return;
-        }
+    // v4.4 early-out, FIXED: the old test killed every upward ray that
+    // crossed the ceiling plane (maxY + 64) before leaving the atlas side
+    // walls — but such a ray STARTS below the ceiling and can hit terrain
+    // on the way up. That was the "high LODs cut off at cloud level when
+    // standing below" bug (from a low eye the cut line sat right around
+    // y≈196, i.e. exactly where the user saw it). The only safe early-out
+    // is an eye that is itself above the whole heightfield: such a ray can
+    // never descend back into it.
+    if (dir.y > 0.0 && cam.y > maxY + 64.0) {
+        fragColor = DebugParams.x > 3.5 ? vec4(0.6, 0.0, 0.9, 1.0) : scene;
+        return;
     }
     if (dir.y == 0.0) {
         dir.y = 1.0e-6;
     }
 
     // ---------------------------------------------------------------
-    // The march. Small constant base step (cell * 0.75) for crisp voxel
-    // edges, accelerated by conservative pyramid jumps: the ray may skip a
-    // 2^k-cell block only when it clears that block's max height at BOTH
-    // ends of the skipped segment (the ray is linear, so endpoint checks are
-    // exact). Hits are refined by bisection on the solid() predicate, which
-    // with NEAREST cell heights converges onto the exact voxel plane.
+    // The march (v4.4 adaptive, DH-style LOD levels on a raymarcher).
+    // The sampled cell size grows with the pixel footprint: level k tests
+    // the 2^k max-height pyramid (one conservative height per 2^k*cell
+    // block) and steps by that coarse cell. The far field becomes a
+    // STABLE coarse staircase (one column several pixels wide, like DH's
+    // distant LOD rings) instead of per-pixel speckle, and the same step
+    // budget now reaches the far atlas border — the old constant
+    // cell*0.75 step died at ~460*0.75 ≈ 345 blocks on grazing rays and
+    // punched flickering holes into the horizon while panning. Level 0
+    // keeps the exact v4.2 voxel path: slab/ground geometry, NEAREST
+    // heights, crisp voxel edges. Hits are refined by bisection on the
+    // level's own solid predicate, which converges onto that level's
+    // exact voxel plane.
     // ---------------------------------------------------------------
     float t = 0.0;
     float prevT = 0.0;
     bool seenAir = false; // camera may start inside a canopy: march out first
     float tHit = -1.0;
+    int hitLvl = 0;
+    float hitSurf = 0.0; // coarse surface plane (noise/snow anchor, level > 0)
+    // World size covered by one pixel per block of ray distance.
+    float pixAng = 2.0 * tanH / max(OutSize.y, 1.0);
 
     for (int i = 0; i < MAX_STEPS; ++i) {
         vec2 xz = cam.xz + dir.xz * t;
@@ -358,9 +378,23 @@ void main() {
         }
         float y = cam.y + dir.y * t;
         ivec2 cid = ivec2(floor((xz - origin) / cell));
-        Cell cd = cellAt(cid, origin, cell, n, sea);
 
-        if (solid(cd, y)) {
+        // Adaptive level: the pyramid level whose cells are about PIXF
+        // pixels wide at this distance (floor keeps the near field exact).
+        float foot = max(t * pixAng * PIXF, cell);
+        int lvl = foot > cell ? min(int(floor(log2(foot / cell))), K) : 0;
+        float csize = cell * float(1 << lvl);
+
+        bool sol;
+        float hmax = -64.0;
+        if (lvl == 0) {
+            sol = solid(cellAt(cid, origin, cell, n, sea), y);
+        } else {
+            hmax = pyrMax(cid, lvl, n);
+            sol = hmax > -63.5 && y <= hmax;
+        }
+
+        if (sol) {
             if (seenAir) {
                 float lo = prevT;
                 float hi = t;
@@ -369,13 +403,22 @@ void main() {
                     vec2 mxz = cam.xz + dir.xz * mid;
                     float my = cam.y + dir.y * mid;
                     ivec2 mcid = ivec2(floor((mxz - origin) / cell));
-                    if (solid(cellAt(mcid, origin, cell, n, sea), my)) {
+                    bool ms;
+                    if (lvl == 0) {
+                        ms = solid(cellAt(mcid, origin, cell, n, sea), my);
+                    } else {
+                        float mh = pyrMax(mcid, lvl, n);
+                        ms = mh > -63.5 && my <= mh;
+                    }
+                    if (ms) {
                         hi = mid;
                     } else {
                         lo = mid;
                     }
                 }
                 tHit = (lo + hi) * 0.5;
+                hitLvl = lvl;
+                hitSurf = hmax;
                 break;
             }
             // Started inside geometry (camera in a canopy/wall): march out.
@@ -412,7 +455,7 @@ void main() {
                 break;
             }
         }
-        t += max(adv, baseStep);
+        t += max(adv, csize * 0.75);
     }
 
     if (tHit < 0.0) {
@@ -448,9 +491,7 @@ void main() {
     // ---------------------------------------------------------------
     ivec2 cidHit = ivec2(floor((xzHit - origin) / cell));
     Cell cd = cellAt(cidHit, origin, cell, n, sea);
-    vec3 backPos = hitPos - dir * 0.25;
-    ivec2 cidBack = ivec2(floor((backPos.xz - origin) / cell));
-    bool lateral = any(notEqual(cidHit, cidBack));
+    float csize = cell * float(1 << hitLvl);
 
     vec2 auv = atlas_uv(xzHit, origin, size);
     vec3 topCol = texture(ColorSampler, auv).rgb;
@@ -462,32 +503,77 @@ void main() {
 
     float faceShade;
     vec3 albedo;
-    if (lateral) {
-        faceShade = abs(cidHit.x - cidBack.x) > 0.5 ? 0.6 : 0.8;
-        if (yHit > cd.bot) {
-            albedo = sideCol;   // canopy/cliff wall
+    float sy;             // noise anchor: the exact surface plane of the hit
+    bool waterFace = false;
+
+    if (hitLvl > 0) {
+        // Coarse hit: pyramid columns carry no slab/gap data, so the entry
+        // face comes from the last air sample one step back. Side colours
+        // read the base cell under the COARSE cell centre, so a whole
+        // coarse column shades (and texts) as one stable block — no
+        // per-pixel colour speckle on distant cliffs.
+        ivec2 cHit = ivec2(floor((xzHit - origin) / csize));
+        vec3 prevPos = cam + dir * prevT;
+        ivec2 cPrev = ivec2(floor((prevPos.xz - origin) / csize));
+        if (any(notEqual(cHit, cPrev))) {
+            faceShade = abs(cHit.x - cPrev.x) > 0.5 ? 0.6 : 0.8;
+            vec2 cc = origin + (vec2(cHit) + 0.5) * csize;
+            Cell cdc = cellAt(ivec2(floor((cc - origin) / cell)), origin, cell, n, sea);
+            albedo = texture(
+                SideSampler,
+                vec2((cdc.side * 255.0 + 0.5) / 256.0, 0.5)
+            ).rgb;
+            sy = yHit;
         } else {
-            albedo = groundCol; // wall of the ground under a gap
+            faceShade = 1.0;
+            albedo = topCol;
+            sy = hitSurf;
         }
-    } else if (backPos.y > cd.top) {
-        faceShade = 1.0;
-        albedo = topCol;        // surface top (or sea surface)
-    } else if (yHit <= cd.g2) {
-        faceShade = 1.0;
-        albedo = groundCol;     // ground top below a canopy
     } else {
-        faceShade = 0.5;
-        albedo = sideCol;       // canopy underside
+    // ---------------------------------------------------------------
+    // Face classification (level 0, unchanged v4.2 model): which face of
+    // the voxel did the ray enter through? The state 0.25 blocks back
+    // along the ray tells us the entry direction regardless of how big
+    // the last march step was.
+    //   lateral  -> vertical wall: slab/cliff side (or ground wall below a
+    //               gap), vanilla directional shade 0.8 N/S / 0.6 E/W
+    //   from above the slab top     -> TOP face
+    //   from the gap onto the ground-> ground top below a canopy
+    //   from the gap into the slab  -> slab UNDERSIDE (down shade 0.5)
+    // ---------------------------------------------------------------
+        vec3 backPos = hitPos - dir * 0.25;
+        ivec2 cidBack = ivec2(floor((backPos.xz - origin) / cell));
+        bool lateral = any(notEqual(cidHit, cidBack));
+        waterFace = cd.water;
+        if (lateral) {
+            faceShade = abs(cidHit.x - cidBack.x) > 0.5 ? 0.6 : 0.8;
+            if (yHit > cd.bot) {
+                albedo = sideCol;   // canopy/cliff wall
+            } else {
+                albedo = groundCol; // wall of the ground under a gap
+            }
+            sy = yHit;
+        } else if (backPos.y > cd.top) {
+            faceShade = 1.0;
+            albedo = topCol;        // surface top (or sea surface)
+            sy = cd.top;
+        } else if (yHit <= cd.g2) {
+            faceShade = 1.0;
+            albedo = groundCol;     // ground top below a canopy
+            sy = cd.g2;
+        } else {
+            faceShade = 0.5;
+            albedo = sideCol;       // canopy underside
+            sy = cd.bot;
+        }
     }
 
     // DH fake-texture noise: quantized world-position hash, scaled down on
     // very dark/bright colours, fading with distance. The noise anchor is
     // snapped to the exact surface plane so it never shimmers between frames.
-    if (!cd.water) {
+    if (!waterFace) {
         float lum = dot(albedo, vec3(0.299, 0.587, 0.114));
         float amp = NOISE_AMP * (1.0 - pow(2.0 * lum - 1.0, 2.0));
-        float sy = lateral ? yHit
-                 : (backPos.y > cd.top ? cd.top : (yHit <= cd.g2 ? cd.g2 : cd.bot));
         vec3 q = floor(vec3(xzHit.x, sy, xzHit.y) / NOISE_STEPS);
         float rv = rand(q) * 2.0 * amp - amp;
         vec3 noisy = clamp(albedo + (1.0 - albedo) * rv, 0.0, 1.0);
