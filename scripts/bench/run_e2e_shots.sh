@@ -74,6 +74,25 @@ shot 06_yaw_east    270  0    0 72 0
 shot 07_veil_outside 90  5  700 90 0
 shot 08_back_inside  90  0    0 72 0
 
+# 09 fade probe (v4.3.4): teleport into fresh chunks and capture the
+# streaming window. Vanilla 26.3 fades newly streamed sections in from the
+# fog colour (a white flash) via chunkVisibility; the pack's terrain
+# overrides force sections born fully opaque. The early captures must show
+# crisp sections popping in — a white blend over the fresh chunks means the
+# fade survived somewhere.
+srv "tp Stepan 200 90 96 90 0"
+sleep 0.7
+ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -frames:v 1 "$SHOTS/09_fade_early.png"
+echo "fade probe: early capture (streaming in progress)"
+sleep 0.8
+ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -frames:v 1 "$SHOTS/09_fade_mid.png"
+echo "fade probe: mid capture"
+sleep 3
+ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -frames:v 1 "$SHOTS/09_fade_settled.png"
+echo "fade probe: settled capture"
+srv "tp Stepan 0 72 0 90 0"
+sleep 3
+
 echo "=== client log pack markers ==="
 grep -iE "pack|post" /tmp/client.log | tail -12 || true
 pkill -f "net.minecraft.client.main.Main" 2>/dev/null || true

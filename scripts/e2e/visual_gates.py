@@ -42,6 +42,11 @@ WIN = (324, 184, 956, 536)  # x0, y0, x1, y1 (4px inset)
 
 # shots that must show the LOD world (everything except the two UI shots)
 UI_SHOTS = {"00_join_state", "00_pack_applied"}
+# v4.3.4 fade probe: captured DURING chunk streaming right after a teleport —
+# only V1 (exists/decodes/size) applies; the frame content is transient by
+# design (the white-blend check on these is a human zoom review of the
+# evidence, not a statistical gate)
+PROBE_SHOTS = {"09_fade_early", "09_fade_mid", "09_fade_settled"}
 # shots taken OUTSIDE the atlas window: the LOD must NOT paint there (the
 # edge fade releases before the border) — V3's expectation is inverted
 OUT_SHOTS = {"07_veil_outside"}
@@ -160,6 +165,7 @@ def analyze(name, path):
     wx0, wy0, wx1, wy1 = WIN
     step = 2  # sample every 2nd pixel — plenty for statistics
     is_ui = name in UI_SHOTS
+    is_probe = name in PROBE_SHOTS
 
     lum = []
     for y in range(wy0, wy1, step):
@@ -169,6 +175,9 @@ def analyze(name, path):
     n = len(lum)
     mean = sum(lum) / n
     std = (sum((v - mean) ** 2 for v in lum) / n) ** 0.5
+    if is_probe:
+        lines.append(f"  OK   V2 {name}: probe shot — luma stddev {std:.1f} (content check skipped)")
+        return not problems, lines + problems
     min_std = MIN_STD_UI if is_ui else MIN_STD_WORLD
     if std <= min_std:
         problems.append(f"  FAIL V2 {name}: flat frame (luma stddev {std:.1f} <= {min_std}) — pipeline dead?")
@@ -313,7 +322,8 @@ def main():
     logs = sys.argv[2:]
     all_names = sorted(UI_SHOTS | {"01_noon_ground", "02_noon_high", "03_noon_aerial",
                                    "04_yaw_south", "05_yaw_north", "06_yaw_east",
-                                   "07_veil_outside", "08_back_inside"})
+                                   "07_veil_outside", "08_back_inside"}
+                       | PROBE_SHOTS)
     jobs = [(n, str(shots / f"{n}.png")) for n in all_names]
     with multiprocessing.Pool(min(4, len(jobs))) as pool:
         results = pool.map(one, jobs)

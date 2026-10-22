@@ -149,6 +149,83 @@ for fsh in sorted(list(Path("assets/glsl").glob("*.fsh")) + list(Path("assets/gl
         extra.append("layout(location = 0) in vec2 texCoord;")
     ext = "vert" if fsh.suffix == ".vsh" else "frag"
     (work / (fsh.stem + ".comp." + ext)).write_text(src + "\n" + "\n".join(extra) + "\n")
+
+# ---------------------------------------------------------------------------
+# v4.3.4: the vanilla core-shader overrides (assets/mc/) are validated against
+# the REAL 26.3 include headers, extracted from the committed client.jar —
+# these files replace vanilla sources at runtime, so any drift from the true
+# interface (UBO layouts, varyings, helper functions) would kill the whole
+# terrain pipeline on the client. Every pipeline variant the game compiles is
+# checked: multidraw, per-section UBO, alpha-cutout, and the OIT stages.
+# ---------------------------------------------------------------------------
+inc_root = work / "inc_root"
+JAR = Path("analysis/mc263/client.jar")
+if not JAR.exists():
+    print(f"FAIL mc overrides: {JAR} missing (committed reference jar)")
+    sys.exit(1)
+import subprocess
+subprocess.run(
+    ["unzip", "-o", "-q", str(JAR), "assets/minecraft/shaders/include/*",
+     "-d", str(inc_root)],
+    check=True,
+)
+inc_dir = inc_root / "assets" / "minecraft" / "shaders" / "include"
+
+def resolve_includes(src: str, stack: list) -> str:
+    out = []
+    for line in src.splitlines():
+        m = re.match(r"\s*#include <minecraft:([A-Za-z0-9_.]+)>\s*$", line)
+        if m:
+            name = m.group(1)
+            if name in stack:
+                print(f"FAIL mc overrides: include cycle at {name}")
+                sys.exit(1)
+            p = inc_dir / name
+            if not p.exists():
+                print(f"FAIL mc overrides: vanilla include {name} not in jar")
+                sys.exit(1)
+            out.append(resolve_includes(p.read_text(), stack + [name]))
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+# stage -> (file, defines) matrix. "" = the plain per-section-UBO variant.
+MC_VARIANTS = {
+    "terrain.vsh": ["MULTIDRAW_TERRAIN", ""],
+    "terrain.fsh": ["MULTIDRAW_TERRAIN", "OIT_ALPHA_ONLY",
+                    "OIT OIT_ACCUMULATE OIT_COEFF_COUNT=8 OIT_WAVELET_RANK=3"],
+    "block.vsh": [""],
+    "block.fsh": ["", "OIT OIT_ACCUMULATE OIT_COEFF_COUNT=8 OIT_WAVELET_RANK=3"],
+}
+
+for fname, variants in MC_VARIANTS.items():
+    fsh = Path("assets/mc") / fname
+    raw = fsh.read_text()
+    if "#moj_import" in raw:
+        print(f"FAIL {fsh}: #moj_import is not supported by the 26.3 pipeline")
+        sys.exit(1)
+    for vi, defines in enumerate(variants):
+        src = resolve_includes(raw, [])
+        src = re.sub(r"__[A-Z0-9_]+__", "0", src)
+        src = src.replace(
+            "#version 330",
+            "#version 330\n#extension GL_ARB_shading_language_420pack : enable",
+            1,
+        )
+        seen = {}
+        def add_binding(m):
+            name = m.group(1)
+            if name not in seen:
+                seen[name] = len(seen) + 1
+            return f"layout(std140, binding={seen[name]}) uniform {name}"
+        src = re.sub(r"layout\(std140\) uniform (\w+)", add_binding, src)
+        dflags = " ".join(f"-D{d}" for d in defines.split()) if defines else ""
+        tag = defines.replace(" ", "_") if defines else "plain"
+        ext = "vert" if fsh.suffix == ".vsh" else "frag"
+        out = work / f"mc__{fsh.name}__{tag}.comp.{ext}"
+        out.write_text(src + "\n")
+        # stash the define flags for the validation loop
+        (work / f"mc__{fsh.name}__{tag}.defines").write_text(dflags)
 PYEOF
 
 status=0
@@ -159,10 +236,21 @@ for comp in "$WORK"/*.comp.frag "$WORK"/*.comp.vert; do
     case "$comp" in
         *.vert) stage=vert ;;
     esac
-    if glslangValidator -S "$stage" -G -o /dev/null "$comp" > "$WORK/$base.log" 2>&1; then
-        echo "OK   assets/glsl/${base%.comp.*}.$([ "$stage" = vert ] && echo vsh || echo fsh)"
+    # mc override variants carry their pipeline defines next to the source.
+    dflags=""
+    if [ -f "$WORK/${base%.comp.*}.defines" ]; then
+        dflags=$(cat "$WORK/${base%.comp.*}.defines")
+        label="assets/mc/${base#mc__}"
+        label="${label%.comp.*}"
+        label="${label/__/ [}"
+        label="$label]"
     else
-        echo "FAIL assets/glsl/${base%.comp.*}"
+        label="assets/glsl/${base%.comp.*}"
+    fi
+    if glslangValidator -S "$stage" -G $dflags -o /dev/null "$comp" > "$WORK/$base.log" 2>&1; then
+        echo "OK   $label"
+    else
+        echo "FAIL $label"
         cat "$WORK/$base.log"
         status=1
     fi

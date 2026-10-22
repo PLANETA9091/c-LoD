@@ -176,10 +176,17 @@ pub fn build(cfg: &Config, atlas: &Atlas, states: &StateRegistry) -> Pack {
     // server pack layers the payload-instrumented sky on top of vanilla.
     let sky_vsh = substitute(include_str!("../assets/glsl/sky.vsh"), &map);
     let sky_fsh = substitute(include_str!("../assets/glsl/sky.fsh"), &map);
-    // Vanilla terrain fog is disabled through a core-shader override: vanilla
+    // Vanilla terrain fog is disabled through core-shader overrides: vanilla
     // fades the real chunks to the fog colour at the server view distance,
-    // which drew a bright ring exactly where the LOD band starts.
+    // which drew a bright ring exactly where the LOD band starts. Both stages
+    // of BOTH terrain programs are layered (v4.3.4): terrain.vsh zeroes the
+    // fog distances and the section visibility fade, terrain.fsh drops
+    // apply_fog() and the FogColor blend outright, and block.vsh/.fsh cover
+    // the instanced block pipelines (transient geometry) the same way.
     let terrain_vsh = substitute(include_str!("../assets/mc/terrain.vsh"), &map);
+    let terrain_fsh = substitute(include_str!("../assets/mc/terrain.fsh"), &map);
+    let block_vsh = substitute(include_str!("../assets/mc/block.vsh"), &map);
+    let block_fsh = substitute(include_str!("../assets/mc/block.fsh"), &map);
 
     // 26.3 moved resource packs to the major.minor scheme (26.3 = 97.1) and
     // REJECTS a bare `pack_format` when it is newer than 64:
@@ -233,6 +240,18 @@ pub fn build(cfg: &Config, atlas: &Atlas, states: &StateRegistry) -> Pack {
         "assets/minecraft/shaders/core/terrain.vsh",
         terrain_vsh.as_bytes(),
     );
+    zip.add(
+        "assets/minecraft/shaders/core/terrain.fsh",
+        terrain_fsh.as_bytes(),
+    );
+    zip.add(
+        "assets/minecraft/shaders/core/block.vsh",
+        block_vsh.as_bytes(),
+    );
+    zip.add(
+        "assets/minecraft/shaders/core/block.fsh",
+        block_fsh.as_bytes(),
+    );
     zip.add("assets/clod/textures/effect/atlas.png", &atlas_png);
     zip.add("assets/clod/textures/effect/atlas_col.png", &col_png);
     zip.add("assets/clod/textures/effect/atlas_states.png", &states_png);
@@ -282,8 +301,8 @@ mod tests {
         // Must contain the essential entries: scan by walking central dir.
         let count = u16::from_le_bytes([pack.zip[n - 12], pack.zip[n - 11]]) as usize;
         assert_eq!(
-            count, 15,
-            "pack.mcmeta + 2 json + 6 fsh + atlas/atlas_col/atlas_states.png + sky.vsh/fsh + terrain.vsh"
+            count, 18,
+            "pack.mcmeta + 2 json + 6 fsh + atlas/atlas_col/atlas_states.png + sky.vsh/fsh + terrain.vsh/fsh + block.vsh/fsh"
         );
 
         // JSON chains are valid JSON (parenthesis balance + token-free).
@@ -527,5 +546,63 @@ mod tests {
             !chain.contains("sun_"),
             "sun passes must be gone from the chain"
         );
+    }
+
+    #[test]
+    fn vanilla_fog_and_fade_overrides_are_shipped() {
+        // v4.3.4: the pack must layer fog-free / fade-free versions of BOTH
+        // stages of the terrain program and the instanced block program over
+        // vanilla. The user report: "ванильный фог" + the white chunk
+        // fade-in still visible on a real client — the fragment-side kill
+        // and the block-pipeline coverage make the removal unconditional
+        // (the v4.1 vsh-only override left every other stage untouched).
+        let cfg = Config::parse("");
+        let atlas = Atlas::new(0, 0, 256, 4, 63);
+        let states = StateRegistry::build();
+        let pack = build(&cfg, &atlas, &states);
+        let entries = zip_entries(&pack.zip);
+        let names: Vec<&str> = entries.iter().map(|(n, _)| n.as_str()).collect();
+
+        for required in [
+            "assets/minecraft/shaders/core/terrain.vsh",
+            "assets/minecraft/shaders/core/terrain.fsh",
+            "assets/minecraft/shaders/core/block.vsh",
+            "assets/minecraft/shaders/core/block.fsh",
+        ] {
+            assert!(names.contains(&required), "{required} missing: {names:?}");
+        }
+
+        let src = |name: &str| {
+            String::from_utf8_lossy(&entries.iter().find(|(n, _)| n == name).unwrap().1)
+                .into_owned()
+        };
+
+        // terrain.fsh: no apply_fog call, no FogColor blend (the white
+        // fade-in), OIT accumulate path intact.
+        let tfsh = src("assets/minecraft/shaders/core/terrain.fsh");
+        assert!(!tfsh.contains("apply_fog("), "terrain.fsh still fogs");
+        assert!(
+            !tfsh.contains("mix(FogColor"),
+            "terrain.fsh still blends sections to FogColor (white fade-in)"
+        );
+        assert!(
+            tfsh.contains("sampleColorForAccumulation"),
+            "OIT accumulate path must survive the fog kill"
+        );
+        assert!(
+            tfsh.contains("executeAlphaOnlyPhase"),
+            "OIT alpha-only path must survive the fog kill"
+        );
+
+        // terrain.vsh: distances zeroed, visibility forced opaque.
+        let tvsh = src("assets/minecraft/shaders/core/terrain.vsh");
+        assert!(tvsh.contains("sphericalVertexDistance = 0.0;"));
+        assert!(tvsh.contains("chunkVisibility = 1.0;"));
+
+        // block programs: fog dropped on both stages.
+        let bvsh = src("assets/minecraft/shaders/core/block.vsh");
+        assert!(bvsh.contains("sphericalVertexDistance = 0.0;"));
+        let bfsh = src("assets/minecraft/shaders/core/block.fsh");
+        assert!(!bfsh.contains("apply_fog("), "block.fsh still fogs");
     }
 }

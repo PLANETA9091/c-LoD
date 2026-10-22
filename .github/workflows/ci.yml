@@ -316,6 +316,12 @@ jobs:
             z "$s.png" 320 300 640 140 2 hor
           done
           z 07_veil_outside.png 320 180 640 200 2 veil
+          # v4.3.4 fade probe: zoom the streaming window — freshly appeared
+          # sections must be fully opaque (a white blend = the vanilla
+          # chunkVisibility fade survived somewhere)
+          for s in 09_fade_early 09_fade_mid 09_fade_settled; do
+            z "$s.png" 320 184 640 352 2 fade
+          done
           ls zoom/
       - name: Commit E2E evidence into the repo (screenshots + zooms + logs)
         if: always()

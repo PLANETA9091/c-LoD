@@ -12,9 +12,14 @@
 //
 // Camera: the payload is measured, not fitted — confidence jumps to 1 on
 // the first valid row and the basis is frame-exact. When the column is
-// fully occluded the previous estimate decays at 0.99/frame (~3 s).
-// Fog: no decay semantics needed — values persist unchanged until a new
-// valid group B row arrives (the fog state is constant between changes).
+// fully occluded the previous estimate decays VERY slowly at 0.999/frame
+// (~15 s to the fade gate, ~38 s to zero; v4.3.4). The v4.2 value (0.99,
+// ~2.3 s) made the whole LOD band blink to the vanilla fog plane whenever
+// the left payload columns were covered for a moment — a cloud bank, a
+// canopy, looking down while flying — which read as a white "chunks
+// appearing" fade animation. Fog: no decay semantics needed — values
+// persist unchanged until a new valid group B row arrives (the fog state
+// is constant between changes).
 
 uniform sampler2D ScanSampler; // clod:clod_scan (640x2 slice reports)
 uniform sampler2D InSampler;   // minecraft:main (payload rows)
@@ -46,7 +51,7 @@ void main() {
     if (px == ivec2(0, 0)) {
         // Camera pixel (v4.1 semantics).
         vec4 prev = texelFetch(PrevSampler, ivec2(0, 0), 0);
-        vec4 rot = vec4(prev.r, prev.g, prev.b * 0.99, prev.a);
+        vec4 rot = vec4(prev.r, prev.g, prev.b * 0.999, prev.a);
         int best = best_row(0);
         if (best >= 0) {
             float a[6];
