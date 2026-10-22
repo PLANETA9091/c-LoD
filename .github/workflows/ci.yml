@@ -229,11 +229,139 @@ jobs:
             dist/boot2.log
             dist/logs/server.log
 
+  e2e-visual:
+    name: e2e visual client (vanilla 26.3 client on Xvfb, DH-exact matrix)
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 45
+    # contents:write — the evidence step commits screenshots + zoom crops
+    # into docs/e2e-ci/ on master (browsable history of every run's look).
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - name: Install X/GL harness deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq --no-install-recommends \
+            xvfb python3-xlib python3-pil ffmpeg libgl1 libglx-mesa0 libgl1-mesa-dri mesa-utils
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build module (release)
+        run: cargo build --release
+      - name: Build CRUSSTY runtime + launcher
+        run: |
+          git clone --depth 1 https://github.com/PLANETA9091/CRUSSTY.git crussty
+          cargo build --release --manifest-path crussty/runtime/Cargo.toml
+          mkdir -p crussty/launcher/out
+          javac -d crussty/launcher/out crussty/launcher/src/main/java/dev/dist/launcher/Main.java
+          jar cfe crussty/launcher/launcher.jar dev.dist.launcher.Main -C crussty/launcher/out .
+      - name: Fetch Paper 26.3
+        run: |
+          URL=$(curl -s https://fill.papermc.io/v3/projects/paper/versions/26.3/builds/latest \
+            | python3 -c "import json,sys;print(json.load(sys.stdin)['downloads']['server:default']['url'])")
+          curl -sL -o paper.jar "$URL"
+          mkdir -p ~/mc-test/dl && cp paper.jar ~/mc-test/dl/paper-26.3.jar
+      - name: Assemble dist root (seeded world + camera-centered atlas)
+        env:
+          CLOD_CRUSSTY: ${{ github.workspace }}/crussty
+          CLOD_JAVA: ${{ env.JAVA_HOME }}/bin/java
+        run: bash scripts/bench/setup_server.sh
+      - name: Client runtime cache
+        uses: actions/cache@v4
+        with:
+          path: ~/mc-test/client
+          key: clod-client-${{ runner.os }}-${{ hashFiles('analysis/mc263/26.3.json') }}
+      - name: Rebuild vanilla 26.3 client runtime
+        run: python3 scripts/bench/setup_client.py
+      - name: Build the sRGB GLX shim
+        run: |
+          mkdir -p ~/mc-test/shim
+          gcc -shared -fPIC -O2 scripts/bench/libclodgl.c -o ~/mc-test/shim/libGL.so.1 -ldl
+      - name: Boot + client shot matrix (user reference seed/camera)
+        env:
+          CLOD_JAVA: ${{ env.JAVA_HOME }}/bin/java
+        run: bash scripts/bench/run_full_e2e.sh
+      - name: Visual + client-log gates
+        run: |
+          python3 scripts/e2e/visual_gates.py ~/mc-test/shots /tmp/client.log /tmp/server.log
+      - name: Zoom evidence (NEAREST crops of the defect-prone regions)
+        if: always()
+        run: |
+          mkdir -p zoom
+          z() { # src x y w h scale tag
+            [ -f "$HOME/mc-test/shots/$1" ] || return 0
+            ffmpeg -y -loglevel error -i "$HOME/mc-test/shots/$1" \
+              -vf "crop=$4:$5:$2:$3,scale=iw*$6:ih*$6:flags=neighbor" "zoom/$1_z_$7.png"
+          }
+          # reference view: geometry steps, snow terraces, cliff faces
+          z 01_user_day.png 320 180 640 360 2 full
+          z 01_user_day.png 620 290 320 180 3 snow
+          z 01_user_day.png 340 380 320 160 3 left
+          z 01_user_day.png 480 300 320 180 3 center
+          # yaw sweep horizon bands
+          for s in 02_yaw_south 03_yaw_east 04_yaw_north 05_aerial; do
+            z "$s.png" 320 250 640 180 2 hor
+          done
+          # dusk red-band probe + night water-glow probe
+          z 06_sunset.png 320 180 640 360 2 full
+          z 07_night.png 320 180 640 360 2 full
+          z 07_night.png 320 380 640 160 3 water
+          ls zoom/
+      - name: Commit E2E evidence into the repo (screenshots + zooms + logs)
+        if: always()
+        run: |
+          STAMP=$(date -u +%Y-%m-%d-%H%M)
+          DEST="docs/e2e-ci/${STAMP}-${GITHUB_SHA:0:7}"
+          mkdir -p "$DEST/zoom"
+          cp ~/mc-test/shots/*.png "$DEST"/ 2>/dev/null || true
+          cp zoom/*.png "$DEST"/zoom/ 2>/dev/null || true
+          cp /tmp/client.log "$DEST"/client.log 2>/dev/null || true
+          cp /tmp/server.log "$DEST"/server.log 2>/dev/null || true
+          git config user.name "c-LoD CI"
+          git config user.email "actions@github.com"
+          git add "$DEST"
+          git commit -q -m "visual evidence: $DEST [skip ci]" || echo "nothing to commit"
+          git push -q origin HEAD:master || echo "evidence push failed (non-fatal)"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-visual
+          path: |
+            zoom/
+            /tmp/client.log
+            /tmp/server.log
+
   strict:
     name: strictness gate (all green)
-    needs: [fmt, clippy, test, glsl, build, packaging, e2e-live]
-    if: always() && (needs.e2e-live.result == 'success' || needs.e2e-live.result == 'skipped')
+    needs: [fmt, clippy, test, glsl, build, packaging, e2e-live, e2e-visual]
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Everything passed
-        run: "echo 'c-LoD CI: all gates green'"
+        env:
+          R_FMT: ${{ needs.fmt.result }}
+          R_CLIPPY: ${{ needs.clippy.result }}
+          R_TEST: ${{ needs.test.result }}
+          R_GLSL: ${{ needs.glsl.result }}
+          R_BUILD: ${{ needs.build.result }}
+          R_PACKAGING: ${{ needs.packaging.result }}
+          R_E2E_LIVE: ${{ needs.e2e-live.result }}
+          R_E2E_VISUAL: ${{ needs.e2e-visual.result }}
+        run: |
+          red=0
+          for pair in "fmt=$R_FMT" "clippy=$R_CLIPPY" "test=$R_TEST" "glsl=$R_GLSL" \
+                      "build=$R_BUILD" "packaging=$R_PACKAGING" \
+                      "e2e-live=$R_E2E_LIVE" "e2e-visual=$R_E2E_VISUAL"; do
+            echo "  $pair"
+            case "$pair" in
+              *=success|*=skipped) ;;
+              *) red=1 ;;
+            esac
+          done
+          if [ "$red" -ne 0 ]; then echo 'some gates are RED'; exit 1; fi
+          echo 'c-LoD CI: all gates green'
