@@ -294,6 +294,10 @@ jobs:
       - name: Boot + client shot matrix (user reference seed/camera)
         env:
           CLOD_JAVA: ${{ env.JAVA_HOME }}/bin/java
+          # 16GB runner: the 4 worldgen workers peak far above the 2-worker
+          # local box; without this the scan OOMs and the pack server starves
+          # the client mid-login ("client never joined").
+          CLOD_SERVER_XMX: 3G
         run: bash scripts/bench/run_full_e2e.sh
       - name: Visual + client-log gates
         run: |

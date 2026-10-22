@@ -7,9 +7,11 @@ JAVA="${CLOD_JAVA:-$HOME/mc-test/jdk25/bin/java}"
 # Atlas window centered on the user's reference camera (-929.67, 796.37):
 # the LOD band must hug the vanilla render distance from HIS viewpoint.
 export CLOD_OPTS="scan_deadline_secs=500;tick_ms=100;atlas_size=1024;cell_size=4;stream_chunks=64;http_port=8199;center_x=-930;center_z=796"
-# 4GB container: Paper+module must fit alongside the client later;
-# host OOM-killer targets the fattest RSS — stay small and fast
-export DIST_JAVA_OPTS="-Xms256M -Xmx700M -XX:MaxMetaspaceSize=256M -XX:MaxDirectMemorySize=128M -XX:+UseG1GC"
+# Server heap: the launcher relays DIST_JAVA_OPTS verbatim to the Paper JVM
+# (its own CLI flags size only the tiny launcher process). 700M survives the
+# 2-worker local box; CI's 4 worldgen workers need the CLOD_SERVER_XMX bump
+# or the scan OOMs and the pack server starves the client mid-login.
+export DIST_JAVA_OPTS="-Xms256M -Xmx${CLOD_SERVER_XMX:-700M} -XX:MaxMetaspaceSize=256M -XX:MaxDirectMemorySize=128M -XX:+UseG1GC"
 
 pkill -f launcher.jar 2>/dev/null || true
 pkill -f paper-26.3 2>/dev/null || true
@@ -20,7 +22,7 @@ mkfifo /tmp/server.in
 cd "$D"
 # reader first (tail blocks on open until the writer side opens), then
 # hold the write end open for the lifetime of the server
-tail -f /tmp/server.in 2>/tmp/tail.err | "$JAVA" -Xmx2G -jar launcher.jar > /tmp/server.log 2>&1 &
+tail -f /tmp/server.in 2>/tmp/tail.err | "$JAVA" -Xmx256M -jar launcher.jar > /tmp/server.log 2>&1 &
 SRV=$!
 exec 9>/tmp/server.in
 echo "launcher pid $SRV"

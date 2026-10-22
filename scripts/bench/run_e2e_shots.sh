@@ -23,7 +23,11 @@ curl -s -o /tmp/pack_check.zip -w "pack HTTP %{http_code} %{size_download}B\n" h
 
 # 2. client
 bash "$S/run_client.sh"
-wait_for "Stepan joined the game" /tmp/server.log 420 || { echo "client never joined"; tail -20 /tmp/client.log; exit 3; }
+wait_for "Stepan joined the game" /tmp/server.log 420 || {
+  echo "client never joined"; tail -25 /tmp/client.log
+  echo "--- server tail (join-side view) ---"; tail -25 /tmp/server.log
+  exit 3
+}
 echo "client joined"
 sleep 5
 ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -frames:v 1 "$SHOTS/00_join_state.png"
