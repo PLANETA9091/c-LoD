@@ -496,8 +496,17 @@ void main() {
     // per-column stone/grass/dirt speckle the far band degraded into.
     // Discrete like every LOD scheme; the switch ring sits where one cell
     // ≈ one pixel and is invisible at that rate.
+    //
+    // v4.4.0-r2 threshold: cpp is CELLS PER PIXEL (pxSurface/cell). The mush
+    // zone is cpp 1..5 (cell spans 1..0.2 px — deep minification). A floor()
+    // schedule fired only at cpp >= 2 and left the whole zone on L0 — run
+    // 1006 rendered pixel-identical to 0932. The rule now targets a coarse
+    // cell coverage of <= 0.75 cells/px (every coarse cell spans >= 1.3 px):
+    // Ls = ceil(log2(cpp / 0.75)), i.e. one level per 2x distance band, so
+    // the mid-field mush (cpp 1-2) lands on L1/L2 and the horizon (cpp ~5)
+    // on L3.
     float cpp = pxSurface / cell; // L0 cells per surface pixel
-    int Ls = int(clamp(floor(log2(max(cpp, 1.0))), 0.0, 4.0));
+    int Ls = cpp > 1.0 ? int(clamp(ceil(log2(cpp / 0.75)), 1.0, 4.0)) : 0;
     if (Ls > 0) {
         float stepBlocks = cell * exp2(float(Ls));
         atlas_cell(Ls, local, h, isWater, sid);
