@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Bake per-block average top/side colours from a vanilla client jar.
 
-This is the offline half of what Voxy does at runtime with its
-`SoftwareModelTextureBakery`: resolve blockstate -> model -> texture, rasterise
-(or in our case: average) the texture, so the LOD is painted with the *real*
-block colours instead of a hand-picked palette. An average is exactly what
-Voxy's mip chain collapses to at high LOD levels, so far terrain ends up the
-same colour.
+Colour math mirrors Distant Horizons 3.3.4 ClientBlockStateColorCache
+(analysis/dh-lod-pipeline.md §4): the average is computed in LINEAR light
+space, alpha-weighted, then converted back to sRGB — the sRGB-space average
+this script used before is measurably brighter/desaturated compared to DH.
+Texture pick order also mirrors DH: UP -> unculled -> N/E/W/S -> DOWN, rotated
+pillars (logs) use their bark side, liquids use the particle sprite.
 
 Output: src/blockcolors.rs
 
@@ -24,6 +24,40 @@ except ImportError:  # pragma: no cover
 
 # Tint kinds (must match src/blockcolors.rs / lod_terrain.fsh)
 TINT_NONE, TINT_GRASS, TINT_FOLIAGE, TINT_WATER = 0, 1, 2, 3
+
+# ClientBlockStateColorCache.FLOWER_COLOR_SCALE
+FLOWER_COLOR_SCALE = 5
+
+# Blocks whose models carry no elements (DH treats every FlowerBlock via
+# instanceof); the ×5 weighting only matters on these.
+FLOWERS = {
+    "dandelion", "poppy", "blue_orchid", "allium", "azure_bluet",
+    "red_tulip", "orange_tulip", "white_tulip", "pink_tulip", "oxeye_daisy",
+    "cornflower", "lily_of_the_valley", "wither_rose", "torchflower",
+    "open_eyeblossom", "closed_eyeblossom", "sunflower", "lilac",
+    "rose_bush", "peony", "pink_petals", "wildflowers",
+}
+
+# DH: HugeMushroomBlock resolves the DEFAULT state (all sides primary colour).
+MUSHROOM_BLOCKS = {"brown_mushroom_block", "red_mushroom_block", "mushroom_stem"}
+
+
+def _srgb_to_linear(c):
+    """Standard sRGB EOTF — the exact curve DH's lookup table quantises."""
+    v = c / 255.0
+    return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+
+
+SRGB_TO_LINEAR = [_srgb_to_linear(i) for i in range(256)]
+
+
+def LINEAR_TO_SRGB(v):
+    """Standard inverse EOTF (DH's fast table approximates this to <=1 LSB)."""
+    if v <= 0.0031308:
+        v *= 12.92
+    else:
+        v = 1.055 * (v ** (1.0 / 2.4)) - 0.055
+    return max(0, min(255, int(round(v * 255.0))))
 
 GRASS_TINT = {
     "grass_block", "short_grass", "grass", "tall_grass", "fern", "large_fern",
@@ -80,8 +114,106 @@ class Baker:
         self.models[ref] = entry
         return entry
 
+    # -- shared helpers (also used by bake_block_textures.py) ------------
+    def blockstate_model_ref(self, name):
+        """The model ref DH's blockstate would resolve to (single-variant pick)."""
+        path = "assets/minecraft/blockstates/%s.json" % name
+        if path not in self.names:
+            return None
+        data = json.loads(self.z.read(path))
+        model_ref = None
+        if "variants" in data:
+            variants = data["variants"]
+            if name in MUSHROOM_BLOCKS:
+                keys = sorted(variants.keys(), key=lambda k: (-k.count("=true"), k))
+            else:
+                keys = sorted(variants.keys(), key=lambda k: (k != "", k.count(","), k))
+            for k in keys:
+                v = variants[k]
+                if isinstance(v, list) and v:
+                    v = v[0]
+                if isinstance(v, dict) and "model" in v:
+                    model_ref = v["model"]
+                    break
+        elif "multipart" in data:
+            for part in data["multipart"]:
+                ap = part.get("apply")
+                if isinstance(ap, list) and ap:
+                    ap = ap[0]
+                if isinstance(ap, dict) and "model" in ap:
+                    model_ref = ap["model"]
+                    break
+        return model_ref
+
+    def model_for_block(self, name):
+        ref = self.blockstate_model_ref(name)
+        if not ref:
+            return None
+        return self.model(ref.replace("minecraft:", ""))
+
+    def face_texture_ref(self, model, name, face):
+        """Resolved texture path of the largest element face, DH quad rules.
+
+        face=None probes the unculled quads (cross models). The untinted quad
+        wins when a face mixes tinted and untinted elements (pickFaceQuad).
+        """
+        if face is None:
+            ref = self.resolve_tex(model, model["textures"].get("cross"))
+            if ref is not None:
+                return ref
+            for d in ("north", "up", "west", "east", "south", "down"):
+                r = self.face_texture_ref(model, name, d)
+                if r is not None:
+                    return r
+            return None
+        els = model.get("elements") or []
+        untinted = tinted = None
+        for el in els:
+            f = (el.get("faces") or {}).get(face)
+            if not f:
+                continue
+            lo, hi = el.get("from", [0, 0, 0]), el.get("to", [16, 16, 16])
+            dx = max(1.0, hi[0] - lo[0])
+            dy = max(1.0, hi[1] - lo[1])
+            dz = max(1.0, hi[2] - lo[2])
+            score = dy if face in ("up", "down") else (
+                dx * dy if face in ("north", "south") else dz * dy
+            )
+            cand = (score, f.get("texture"), f.get("tintindex"))
+            if cand[2] is None:
+                if untinted is None or score > untinted[0]:
+                    untinted = cand
+            elif tinted is None or score > tinted[0]:
+                tinted = cand
+        best = untinted or tinted
+        return self.resolve_tex(model, best[1]) if best else None
+
+    def tile_pixels(self, tex):
+        """16x16 RGBA ratio tile of the texture's first frame (DH encoding)."""
+        from bake_block_textures import ratio_encode
+
+        if not tex:
+            return None
+        if not hasattr(self, "_tile_cache"):
+            self._tile_cache = {}
+        if tex in self._tile_cache:
+            return self._tile_cache[tex]
+        path = "assets/minecraft/textures/%s.png" % tex.replace("minecraft:", "")
+        tile = None
+        if Image is not None and path in self.names:
+            im = Image.open(io.BytesIO(self.z.read(path))).convert("RGBA")
+            tile = ratio_encode(im.load(), *im.size)
+        self._tile_cache[tex] = tile
+        return tile
+
     def resolve_tex(self, model, ref, depth=0):
-        """Follow '#var' indirections down to a texture path."""
+        """Follow '#var' indirections down to a texture path.
+
+        MC 26.3 texture values may be sprite objects:
+        {"force_translucent": true, "sprite": "minecraft:block/glass"}.
+        """
+        if isinstance(ref, dict):
+            ref = ref.get("sprite")
         if ref is None or depth > 8:
             return None
         if ref.startswith("#"):
@@ -114,42 +246,72 @@ class Baker:
                 best = (score, f.get("texture"), f.get("tintindex"))
         return (best[1], best[2]) if best else (None, None)
 
+    def _face_tinted(self, model, face):
+        """True when the largest face of `face` carries a tintindex."""
+        _ref, tint = self._face(model, face)
+        return tint is not None
+
     # -- textures -------------------------------------------------------
-    def avg_color(self, tex):
+    @staticmethod
+    def _color_mode(name):
+        """ClientBlockStateColorCache.EColorMode.getColorMode (instanceof chain)."""
+        if name.endswith("_leaves") or name in ("azalea", "flowering_azalea",
+                                                 "mangrove_roots"):
+            return "Leaves"
+        if name in FLOWERS:
+            return "Flower"
+        if "glass" in name:
+            return "Glass"
+        return "Default"
+
+    def avg_color(self, tex, mode="Default"):
+        """DH calculateColorFromTexture: LINEAR-space alpha-weighted average."""
         if not tex:
             return None
-        if tex in self.tex_cache:
-            return self.tex_cache[tex]
+        key = (tex, mode)
+        if key in self.tex_cache:
+            return self.tex_cache[key]
         path = "assets/minecraft/textures/%s.png" % tex.replace("minecraft:", "")
         if path not in self.names:
-            self.tex_cache[tex] = None
+            self.tex_cache[key] = None
             return None
-        raw = self.z.read(path)
         col = None
         if Image is not None:
-            im = Image.open(io.BytesIO(raw)).convert("RGBA")
+            im = Image.open(io.BytesIO(self.z.read(path))).convert("RGBA")
             w, h = im.size
             # Animated textures are vertical strips; only the first frame counts.
             frame = min(w, h)
             px = im.crop((0, 0, w, frame)).load()
-            tr = tg = tb = ta = 0.0
+            count = 0
+            alpha = 0
+            red = green = blue = 0.0
             for y in range(frame):
                 for x in range(w):
                     r, g, b, a = px[x, y]
-                    if a < 26:  # alpha cutout (leaves, plants, glass) is air
+                    scale = 1
+                    if mode == "Leaves":
+                        if a == 0:
+                            continue
+                        a = 255  # semi-transparent pixels count as solid
+                    elif a == 0 and mode != "Glass":
                         continue
-                    wgt = a / 255.0
-                    tr += r * wgt
-                    tg += g * wgt
-                    tb += b * wgt
-                    ta += wgt
-            if ta > 0:
+                    elif mode == "Flower" and (g + 25 < b or g + 25 < r):
+                        scale = FLOWER_COLOR_SCALE
+                    count += scale
+                    alpha += a * scale
+                    # "gamma correction is complicated" — sums are linear-light,
+                    # weighted by the (linear) alpha.
+                    red += SRGB_TO_LINEAR[r] * a * scale
+                    green += SRGB_TO_LINEAR[g] * a * scale
+                    blue += SRGB_TO_LINEAR[b] * a * scale
+            if count > 0 and alpha > 0:
                 col = (
-                    int(round(tr / ta)),
-                    int(round(tg / ta)),
-                    int(round(tb / ta)),
+                    LINEAR_TO_SRGB(red / alpha),
+                    LINEAR_TO_SRGB(green / alpha),
+                    LINEAR_TO_SRGB(blue / alpha),
                 )
-        self.tex_cache[tex] = col
+            # count == 0 (fully transparent / chisel) -> invisible
+        self.tex_cache[key] = col
         return col
 
     # -- blocks ---------------------------------------------------------
@@ -161,8 +323,14 @@ class Baker:
         model_ref = None
         if "variants" in data:
             variants = data["variants"]
-            # Prefer the plain variant, then the one with the fewest properties.
-            keys = sorted(variants.keys(), key=lambda k: (k != "", k.count(","), k))
+            if name in MUSHROOM_BLOCKS:
+                # DH: HugeMushroomBlock uses the DEFAULT state, i.e. the
+                # all-props-true variant (the primary colour on every side),
+                # not the fewest-props one.
+                keys = sorted(variants.keys(), key=lambda k: (-k.count("=true"), k))
+            else:
+                # Prefer the plain variant, then the one with the fewest properties.
+                keys = sorted(variants.keys(), key=lambda k: (k != "", k.count(","), k))
             for k in keys:
                 v = variants[k]
                 if isinstance(v, list) and v:
@@ -184,29 +352,66 @@ class Baker:
         if not model:
             return None
 
-        up_ref, up_tint = self._face(model, "up")
-        north_ref, north_tint = self._face(model, "north")
-        up = self.resolve_tex(model, up_ref)
-        north = self.resolve_tex(model, north_ref)
+        # DH texture pick order (COLOR_RESOLUTION_DIRECTION_ORDER): UP, then the
+        # unculled faces (cross models), then N/E/W/S, then DOWN. Rotated
+        # pillars (logs) skip UP so the bark side wins over the ring top.
+        order = ["up", None, "north", "east", "west", "south", "down"]
+        if name.endswith(("_log", "_stem")) and not name.endswith("_hyphae"):
+            order = [None, "north", "east", "west", "south", "down"]
+        mode = self._color_mode(name)
+        top = side = None
+        top_tinted = side_tinted = False
+        top_concrete = side_concrete = False
+        for d in order:
+            ref, tint = self._face(model, d) if d else (None, None)
+            resolved = self.resolve_tex(model, ref)
+            concrete = resolved is not None
+            if resolved is None and d is None:
+                # unculled probe: cross models keep their texture under "cross";
+                # the cross planes are the model's north/south faces
+                resolved = self.resolve_tex(model, model["textures"].get("cross"))
+                _r, tint = self._face(model, "north")
+            if resolved is not None and self.avg_color(resolved, mode) is not None:
+                top, top_tinted, top_concrete = resolved, tint is not None, concrete
+                break
+        # side: independent probe (the wall colour), no pillar rule
+        for d in ["north", None, "west", "east", "south", "down"]:
+            ref, tint = self._face(model, d) if d else (None, None)
+            resolved = self.resolve_tex(model, ref)
+            concrete = resolved is not None
+            if resolved is None and d is None:
+                resolved = self.resolve_tex(model, model["textures"].get("cross"))
+                _r, tint = self._face(model, "north")
+            if resolved is not None and self.avg_color(resolved, mode) is not None:
+                side, side_tinted, side_concrete = resolved, tint is not None, concrete
+                break
         tex = model["textures"]
-        if up is None:
-            up = self.resolve_tex(model, tex.get("top") or tex.get("all") or tex.get("particle"))
-        if north is None:
-            north = self.resolve_tex(model, tex.get("side") or tex.get("north") or tex.get("all") or tex.get("particle"))
-        top = self.avg_color(up) or self.avg_color(north)
-        side = self.avg_color(north) or top
         if top is None:
+            # liquids (no elements) and textureless models: DH falls back to
+            # the PARTICLE sprite; liquids keep needing tint, other
+            # textureless blocks render with the raw base colour
+            top = self.resolve_tex(model, tex.get("particle"))
+            top_tinted = name in WATER_TINT
+            if top is not None and self.avg_color(top, mode) is None:
+                top = None
+        if side is None:
+            side = top
+            side_tinted = top_tinted
+        top_col = self.avg_color(top, mode) if top else None
+        side_col = self.avg_color(side, mode) if side else None
+        top_col = top_col or side_col
+        side_col = side_col or top_col
+        if top_col is None:
             return None
-        # Tint is per face: grass_block's top is tinted, its side (dirt with a
-        # green rim) is not. Models without elements (fluids) fall back to the
-        # block-name heuristic.
+        if name.endswith(("_log", "_wood", "_stem")) or name.endswith("_hyphae"):
+            # bark both ways (the ring top is never what LOD tops should show)
+            top_col = side_col
+        # DH: tint applies when the chosen quad is tinted (needPostTinting);
+        # a textureless fallback keeps the tint only for liquids.
         base = tint_kind(name)
-        if up_ref is None and north_ref is None:
-            t_top = t_side = base
-        else:
-            t_top = base if (up_ref is None or up_tint is not None) else TINT_NONE
-            t_side = base if (north_ref is None or north_tint is not None) else TINT_NONE
-        return top, side, t_top, t_side
+        t_top = base if top_tinted else TINT_NONE if top_concrete else (TINT_WATER if name in WATER_TINT else TINT_NONE)
+        t_side = base if side_tinted else TINT_NONE if side_concrete else (TINT_WATER if name in WATER_TINT else TINT_NONE)
+        return top_col, side_col, t_top, t_side
 
 
 def _colormap_color(pixels, size, temperature, downfall, default):
@@ -321,12 +526,18 @@ def main():
 
     out = [
         "// @generated by scripts/bake_block_colors.py — do not edit by hand.",
-        "// Per-block average top/side texture colours (mip average, alpha weighted),",
-        "// resolved blockstate -> model -> texture out of the vanilla client jar.",
+        "// Per-block average top/side texture colours, Distant Horizons 3.3.4",
+        "// colour math (linear-light alpha-weighted average, see",
+        "// analysis/dh-lod-pipeline.md §4), resolved blockstate -> model ->",
+        "// texture out of the vanilla client jar.",
         "",
+        "#[allow(dead_code)] // referenced by ordinal in jni.rs, not by name",
         "pub const TINT_NONE: u8 = 0;",
+        "#[allow(dead_code)] // referenced by ordinal in jni.rs, not by name",
         "pub const TINT_GRASS: u8 = 1;",
+        "#[allow(dead_code)]",
         "pub const TINT_FOLIAGE: u8 = 2;",
+        "#[allow(dead_code)]",
         "pub const TINT_WATER: u8 = 3;",
         "",
         "/// (block path, top rgb, side rgb, top tint, side tint), sorted by name.",
@@ -339,6 +550,14 @@ def main():
         )
     out.append("];")
     out.append("")
+    # The sea/lake surface colour: DH paints water LODs with the water data
+    # point's colour = particle sprite (water_still) × biome water tint. Emit
+    # the baked base so jni.rs no longer hardcodes a guess.
+    water_row = next((r for r in rows if r[0] == "water"), None)
+    if water_row is not None:
+        out.append("/// Baked water_still average (DH liquid particle colour).")
+        out.append("pub const WATER_BASE: u32 = 0x%02X%02X%02X;" % tuple(water_row[1]))
+        out.append("")
     out.append("/// Binary search over [`BLOCK_COLORS`] by block path.")
     out.append("pub fn lookup(path: &str) -> Option<(u32, u32, u8, u8)> {")
     out.append("    BLOCK_COLORS")

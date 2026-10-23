@@ -25,10 +25,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 
 /// On-disk snapshot magic + format version.
-const MAGIC: &[u8; 8] = b"CLODAT02";
+const MAGIC: &[u8; 8] = b"CLODAT03";
 /// Bytes per cell in the on-disk snapshot: i16 height, u32 top, u32 side,
-/// u8 flags.
-const CELL_BYTES: usize = 11;
+/// u8 flags, u16 top tile id, u16 side tile id.
+const CELL_BYTES: usize = 15;
 
 pub struct Atlas {
     pub center_x: i32,
@@ -77,6 +77,10 @@ pub struct Cell {
     pub top: u32,
     /// Average side-face colour (0xRRGGBB), already biome tinted.
     pub side: u32,
+    /// DH 3.3.4 textured LODs: ratio-tile ids (0 = flat) for the top and side
+    /// faces of the column's top block (blocktextures::BLOCK_SETS).
+    pub tex_top: u16,
+    pub tex_side: u16,
 }
 
 impl Atlas {
@@ -110,7 +114,18 @@ impl Atlas {
         Some(((dx / self.cell) as u32, (dz / self.cell) as u32))
     }
 
-    pub fn set(&self, ix: u32, iz: u32, height: i16, water: bool, top: u32, side: u32) {
+    #[allow(clippy::too_many_arguments)]
+    pub fn set(
+        &self,
+        ix: u32,
+        iz: u32,
+        height: i16,
+        water: bool,
+        top: u32,
+        side: u32,
+        tex_top: u16,
+        tex_side: u16,
+    ) {
         let idx = (iz * self.cells + ix) as usize;
         if let Ok(mut data) = self.data.write() {
             if let Some(cell) = data.get_mut(idx) {
@@ -119,6 +134,8 @@ impl Atlas {
                     || cell.water != water
                     || cell.top != top
                     || cell.side != side
+                    || cell.tex_top != tex_top
+                    || cell.tex_side != tex_side
                 {
                     if !cell.valid {
                         self.scanned.fetch_add(1, Ordering::Relaxed);
@@ -129,6 +146,8 @@ impl Atlas {
                         valid: true,
                         top,
                         side,
+                        tex_top,
+                        tex_side,
                     };
                     self.version.fetch_add(1, Ordering::Relaxed);
                 }
@@ -273,6 +292,28 @@ impl Atlas {
         (self.cells, self.cells, px)
     }
 
+    /// Per-cell ratio-tile ids (DH 3.3.4 textured LODs): R/G = top tile id
+    /// big-endian, B/A = side tile id big-endian. Nearest-filtered on the GPU
+    /// so ids never blend between cells. Tile id 0 = the reserved flat tile.
+    pub fn encode_tiles(&self) -> (u32, u32, Vec<u8>) {
+        let snap = self.snapshot();
+        let n = self.cells as usize;
+        let mut px = vec![0u8; n * n * 4];
+        for z in 0..n {
+            for x in 0..n {
+                let cell = snap[z * n + x];
+                if cell.valid {
+                    let o = (z * n + x) * 4;
+                    px[o] = (cell.tex_top >> 8) as u8;
+                    px[o + 1] = (cell.tex_top & 0xFF) as u8;
+                    px[o + 2] = (cell.tex_side >> 8) as u8;
+                    px[o + 3] = (cell.tex_side & 0xFF) as u8;
+                }
+            }
+        }
+        (self.cells, self.cells, px)
+    }
+
     // -----------------------------------------------------------------------
     // Disk persistence (static-pack determinism across restarts).
     // -----------------------------------------------------------------------
@@ -294,6 +335,8 @@ impl Atlas {
             out.extend_from_slice(&(c.top & 0xFFFFFF).to_le_bytes());
             out.extend_from_slice(&(c.side & 0xFFFFFF).to_le_bytes());
             out.push((u8::from(c.water)) | (u8::from(c.valid) << 1));
+            out.extend_from_slice(&c.tex_top.to_le_bytes());
+            out.extend_from_slice(&c.tex_side.to_le_bytes());
         }
         out
     }
@@ -341,6 +384,8 @@ impl Atlas {
             let top = u32::from_le_bytes([buf[o + 2], buf[o + 3], buf[o + 4], 0]) & 0xFFFFFF;
             let side = u32::from_le_bytes([buf[o + 6], buf[o + 7], buf[o + 8], 0]) & 0xFFFFFF;
             let flags = buf[o + 10];
+            let tex_top = u16::from_le_bytes([buf[o + 11], buf[o + 12]]);
+            let tex_side = u16::from_le_bytes([buf[o + 13], buf[o + 14]]);
             if flags & 0b10 != 0 {
                 *cell_out = Cell {
                     height,
@@ -348,6 +393,8 @@ impl Atlas {
                     valid: true,
                     top,
                     side,
+                    tex_top,
+                    tex_side,
                 };
                 scanned += 1;
             }
@@ -408,9 +455,11 @@ mod tests {
     fn set_get_encode() {
         let a = Atlas::new(0, 0, 64, 4, 63);
         assert_eq!(a.cells, 16);
-        a.set(3, 5, 100, false, 0x808080, 0x707070);
-        a.set(0, 0, 62, true, 0x808080, 0x707070);
+        a.set(3, 5, 100, false, 0x808080, 0x707070, 33, 281);
+        a.set(0, 0, 62, true, 0x808080, 0x707070, 0, 0);
         assert_eq!(a.get(3, 5).unwrap().height, 100);
+        assert_eq!(a.get(3, 5).unwrap().tex_top, 33);
+        assert_eq!(a.get(3, 5).unwrap().tex_side, 281);
         assert!(a.get(0, 0).unwrap().water);
         assert!(a.get(1, 1).is_none());
 
@@ -429,15 +478,26 @@ mod tests {
         assert_eq!(px[o3], 0);
         assert_eq!(px[o3 + 2], 0);
         assert_eq!(px[o3 + 3], 255);
+
+        // tile ids ride a separate nearest-filtered image, big-endian pairs
+        let (tw, th, tpx) = a.encode_tiles();
+        assert_eq!((tw, th), (16, 16));
+        let t = (5 * 16 + 3) * 4;
+        assert_eq!(tpx[t], 0);
+        assert_eq!(tpx[t + 1], 33);
+        assert_eq!(tpx[t + 2], (281u16 >> 8) as u8);
+        assert_eq!(tpx[t + 3], (281u16 & 0xFF) as u8);
+        // invalid cells stay 0/0/0/0 (both tiles flat)
+        assert_eq!(&tpx[(7 * 16 + 7) * 4..(7 * 16 + 7) * 4 + 4], &[0, 0, 0, 0]);
     }
 
     #[test]
     fn version_bumps_on_change() {
         let a = Atlas::new(0, 0, 64, 4, 63);
         let v0 = a.version();
-        a.set(1, 1, 10, false, 0x808080, 0x707070);
+        a.set(1, 1, 10, false, 0x808080, 0x707070, 0, 0);
         let v1 = a.version();
-        a.set(1, 1, 10, false, 0x808080, 0x707070); // same value — no bump
+        a.set(1, 1, 10, false, 0x808080, 0x707070, 0, 0); // same value — no bump
         assert_eq!(v0 + 1, v1);
         assert_eq!(a.version(), v1);
         assert_eq!(a.scanned_cells(), 1);
@@ -472,9 +532,9 @@ mod tests {
         let path = dir.join("atlas.bin");
 
         let a = Atlas::new(123, -456, 64, 4, 62);
-        a.set(3, 5, 100, false, 0x808080, 0x707070);
-        a.set(0, 0, 62, true, 0x808080, 0x707070);
-        a.set(15, 15, 200, false, 0x808080, 0x707070);
+        a.set(3, 5, 100, false, 0x808080, 0x707070, 12, 34);
+        a.set(0, 0, 62, true, 0x808080, 0x707070, 0, 0);
+        a.set(15, 15, 200, false, 0x808080, 0x707070, 0, 0);
         a.save(&path).unwrap();
         // tmp file must be gone after atomic rename
         assert!(!path.with_extension("tmp").exists());
@@ -484,6 +544,8 @@ mod tests {
         assert_eq!(b.center_z, -456);
         assert_eq!(b.scanned_cells(), 3);
         assert_eq!(b.get(3, 5).unwrap().height, 100);
+        assert_eq!(b.get(3, 5).unwrap().tex_top, 12);
+        assert_eq!(b.get(3, 5).unwrap().tex_side, 34);
         assert!(b.get(0, 0).unwrap().water);
         assert_eq!(b.get(15, 15).unwrap().height, 200);
 

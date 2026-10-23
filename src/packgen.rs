@@ -89,6 +89,11 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
         .max()
         .unwrap_or(0) as f32;
 
+    // DH 3.3.4 textured LODs: ratio-tile atlas geometry (256 tiles/row).
+    let tiles_w = crate::blocktextures::TILES_PER_ROW * crate::blocktextures::TILE_PX;
+    let tile_rows = crate::blocktextures::TILE_COUNT.div_ceil(crate::blocktextures::TILES_PER_ROW);
+    let tiles_h = (tile_rows * crate::blocktextures::TILE_PX).max(16);
+
     let veil_rgba = [
         cfg.color_veil[0],
         cfg.color_veil[1],
@@ -103,6 +108,8 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
         ("__ATLAS_SIZE__", fmt_f(atlas.size as f32)),
         ("__ATLAS_CELLS__", atlas.cells.to_string()),
         ("__CELL__", fmt_f(atlas.cell as f32)),
+        ("__TILES_W__", tiles_w.to_string()),
+        ("__TILES_H__", tiles_h.to_string()),
         ("__LOD_NEAR__", fmt_f(cfg.lod_near)),
         ("__MAX_HEIGHT__", fmt_f(cfg.max_height as f32)),
         ("__SEA_LEVEL__", fmt_f(cfg.sea_level as f32)),
@@ -118,6 +125,7 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
         ("__VEIL_RGBA__", vec4(veil_rgba)),
         ("__DEBUG__", format!("{}.0", cfg.debug_lod)),
         ("__ATLAS_MAX_H__", fmt_f(atlas_max_h + 3.0)),
+        ("__TILE_ROWS__", tile_rows.to_string()),
         ("__ATMO_START__", atmo_start),
         ("__ATMO_END__", atmo_end),
         // The distance veil is disabled (strength 0): it sits on real geometry
@@ -180,6 +188,16 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
         side_rgba[i * 4 + 3] = 255;
     }
     let side_png = png::encode_png(256, 1, &side_rgba);
+    // DH 3.3.4 textured LODs: the ratio-tile atlas (16px tiles, 256/row) and
+    // the per-cell tile ids (nearest-filtered, ids never blend). The last
+    // atlas row is zero-padded to a full rectangle (unreferenced ids).
+    let tiles_len = (tiles_w * tiles_h * 4) as usize;
+    let mut tiles_rgba = vec![0u8; tiles_len];
+    let src = crate::blocktextures::TILE_PIXELS;
+    tiles_rgba[..src.len()].copy_from_slice(src);
+    let tiles_png = png::encode_png(tiles_w, tiles_h, &tiles_rgba);
+    let (txw, txh, tex_rgba) = atlas.encode_tiles();
+    let tex_png = png::encode_png(txw, txh, &tex_rgba);
 
     let mut zip = ZipWriter::new();
     zip.add("pack.mcmeta", mcmeta.as_bytes());
@@ -220,6 +238,8 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
     zip.add("assets/clod/textures/effect/atlas.png", &atlas_png);
     zip.add("assets/clod/textures/effect/color.png", &color_png);
     zip.add("assets/clod/textures/effect/side.png", &side_png);
+    zip.add("assets/clod/textures/effect/tiles.png", &tiles_png);
+    zip.add("assets/clod/textures/effect/tex.png", &tex_png);
     let zip_bytes = zip.finish();
 
     let mut h = Sha1::new();
@@ -250,7 +270,7 @@ mod tests {
             cfg.cell_size,
             cfg.sea_level,
         );
-        atlas.set(0, 0, 70, false, 0x808080, 0x707070);
+        atlas.set(0, 0, 70, false, 0x808080, 0x707070, 0, 0);
         let pack = build(&cfg, &atlas);
 
         assert!(!pack.zip.is_empty());
@@ -264,8 +284,8 @@ mod tests {
         // Must contain the essential entries: scan by walking central dir.
         let count = u16::from_le_bytes([pack.zip[n - 12], pack.zip[n - 11]]) as usize;
         assert_eq!(
-            count, 15,
-            "pack.mcmeta + 2 json + 6 fsh + 3 textures + sky.vsh/fsh + terrain.vsh"
+            count, 17,
+            "pack.mcmeta + 2 json + 6 fsh + 5 textures + sky.vsh/fsh + terrain.vsh"
         );
 
         // JSON chains are valid JSON (parenthesis balance + token-free).
@@ -301,13 +321,13 @@ mod tests {
         // same pack bytes, regardless of internal version counters.
         let cfg = Config::parse("");
         let a = Atlas::new(0, 0, 256, 4, 63);
-        a.set(1, 1, 90, false, 0x808080, 0x707070);
-        a.set(2, 2, 40, true, 0x808080, 0x707070);
+        a.set(1, 1, 90, false, 0x808080, 0x707070, 0, 0);
+        a.set(2, 2, 40, true, 0x808080, 0x707070, 0, 0);
         let pack_a = build(&cfg, &a);
 
         let b = Atlas::new(0, 0, 256, 4, 63);
-        b.set(1, 1, 90, false, 0x808080, 0x707070);
-        b.set(2, 2, 40, true, 0x808080, 0x707070);
+        b.set(1, 1, 90, false, 0x808080, 0x707070, 0, 0);
+        b.set(2, 2, 40, true, 0x808080, 0x707070, 0, 0);
         let pack_b = build(&cfg, &b);
 
         assert_eq!(pack_a.zip, pack_b.zip, "pack bytes must be deterministic");

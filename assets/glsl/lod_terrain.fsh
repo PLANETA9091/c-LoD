@@ -28,6 +28,8 @@ uniform sampler2D InDepthSampler; // minecraft:main depth
 uniform sampler2D AtlasSampler;   // RG = height, B = water, A = side colour index
 uniform sampler2D ColorSampler;   // top-face block colour (baked texture average)
 uniform sampler2D SideSampler;    // 256x1 side/cliff colour LUT
+uniform sampler2D TilesSampler;   // DH ratio-tile atlas (16px tiles, 256/row)
+uniform sampler2D TexIdsSampler;  // per-cell tile ids: RG top, BA side (big-endian)
 uniform sampler2D RotSampler;     // clod:clod_rot_a (1x1 persistent, camera channel)
 // NOTE: the vanilla `Fog` UBO (FogColor) is NOT declared here on purpose —
 // renderpearl rejects any shader UBO that is not registered in the pipeline's
@@ -64,7 +66,8 @@ layout(std140) uniform ClodDebug {
     vec4 DebugParams;
 };
 
-// x = device depth near plane (blocks), y = cloud ceiling (atlas max + margin)
+// x = device depth near plane (blocks), y = cloud ceiling (atlas max + margin),
+// z = ratio-tile atlas rows (DH textured LODs)
 layout(std140) uniform ClodSky {
     vec4 SkyParams;
 };
@@ -105,6 +108,11 @@ const float NOISE_DROPOFF = 1024.0;
 const float SHADE_NS = 0.8;
 const float SHADE_EW = 0.6;
 
+// DH 3.3.4 textured LODs (BlockTextureRegistry + terrain/gl/frag.frag):
+// tile pixels are ratios, 128/255 == 1.0, so the sampler value doubles.
+const float TILE_PX = 16.0;
+const float TILES_PER_ROW = 256.0;
+
 // Height (block Y) stored in the atlas: (y + 64) << 6, big-endian RG.
 float atlas_height(vec2 uv) {
     vec4 a = texture(AtlasSampler, uv);
@@ -141,6 +149,39 @@ vec2 atlas_uv(vec2 xz, vec2 origin, float size) {
 /// Index of the side/cliff colour stored in the atlas alpha channel.
 float atlas_side(vec2 uv) {
     return texture(AtlasSampler, uv).a;
+}
+
+// ------------------------------------------------------------------
+// DH 3.3.4 textured LODs (terrain/gl/frag.frag): the per-cell tile id
+// picks a 16px ratio tile; the UV repeats once per CELL horizontally
+// (vBlockPos is in data-point units) and once per BLOCK vertically
+// (wall heights stay in block units). Orientation mirrors DH's
+// blockFaceUv: up (x,z), north (1-x,1-y), south (x,1-y),
+// west (z,1-y), east (1-z,1-y).
+// ------------------------------------------------------------------
+float tile_id(vec2 uv, bool side) {
+    vec4 t = texture(TexIdsSampler, uv);
+    vec2 pair = side ? t.ba : t.rg;
+    return floor(pair.x * 255.0 + 0.5) * 256.0 + floor(pair.y * 255.0 + 0.5);
+}
+
+/// DH tile application: albedo = mix(albedo, albedo * (tile.rgb * 2.0), tile.a)
+/// with the tile's 16x16 texels mapped into the fract() UV cell. Half-texel
+/// clamping keeps bilinear sampling inside the tile (no neighbour bleed).
+vec3 apply_dh_tile(vec3 albedo, float tileId, vec2 faceUv, float tileRows) {
+    if (tileId < 0.5) {
+        return albedo; // tile 0 = the reserved flat tile
+    }
+    float tx = mod(tileId, TILES_PER_ROW);
+    float ty = floor(tileId / TILES_PER_ROW);
+    vec2 halfTexel = vec2(0.5) / vec2(TILE_PX, TILE_PX);
+    vec2 f = clamp(faceUv, halfTexel, 1.0 - halfTexel);
+    vec2 uv = vec2(
+        (tx + f.x) * TILE_PX / (TILES_PER_ROW * TILE_PX),
+        (ty + f.y) * TILE_PX / (tileRows * TILE_PX)
+    );
+    vec4 tile = texture(TilesSampler, uv);
+    return mix(albedo, albedo * (tile.rgb * 2.0), tile.a);
 }
 
 // ------------------------------------------------------------------
@@ -480,6 +521,27 @@ void main() {
         albedo = topCol; // top faces: shade 1.0
     }
 
+    // DH 3.3.4 textured LODs: the ratio tile of this column's top block.
+    // Horizontal repeats = one per CELL (vBlockPos is in data-point units in
+    // DH), vertical repeats on walls = one per BLOCK.
+    float tileRows = SkyParams.z;
+    float tileId = tile_id(auv, sideHit);
+    vec2 faceUv;
+    if (sideHit) {
+        float yF = fract(hitPos.y); // walls repeat per block vertically
+        if (hitAxisX) {
+            // ray moving +X hits a west-facing wall: (z, 1-y); +X wall: (1-z, 1-y)
+            float u = fract(hitPos.z / cell);
+            faceUv = vec2((stepX > 0.0) ? u : (1.0 - u), yF);
+        } else {
+            // ray moving +Z hits a north-facing wall: (1-x, 1-y); south: (x, 1-y)
+            float u = fract(hitPos.x / cell);
+            faceUv = vec2((stepZ > 0.0) ? (1.0 - u) : u, yF);
+        }
+    } else {
+        faceUv = fract(hitPos.xz / cell); // up: (x, z)
+    }
+
     // Light: the day factor comes from the camera-channel's celestial probe
     // (rot pixel 1: the darkest true-sky luminance across the frame, mapped
     // through the vanilla lightmap-ish curve by rot_solve). DH lights distant
@@ -492,14 +554,21 @@ void main() {
     vec3 nightTint = vec3(0.84, 0.89, 1.08);
     vec3 lit = albedo * lightMul * mix(vec3(1.0), nightTint, 1.0 - dayF);
 
+    // DH order: the texture multiplies the ALREADY-LIT flat colour
+    // (vertexColor = lightmap * color, then the tile mix in frag).
+    lit = apply_dh_tile(lit, tileId, faceUv, tileRows);
+
     // DH fake-texture grain (terrain pass applies it after lighting, before
-    // the fog pass): the noise cell is anchored to the FACE — tops use the up
-    // normal, walls the normal of the crossed grid line pointing back at the
-    // camera side (-stepX / -stepZ of the crossing).
-    vec3 faceN = sideHit
-        ? (hitAxisX ? vec3(-stepX, 0.0, 0.0) : vec3(0.0, 0.0, -stepZ))
-        : vec3(0.0, 1.0, 0.0);
-    lit = dh_noise(lit, hitPos, faceN, hitT);
+    // the fog pass) — ONLY on untextured pixels (vTextureTileId == 0u):
+    // textured blocks carry their real grain. The noise cell is anchored to
+    // the FACE — tops use the up normal, walls the normal of the crossed grid
+    // line pointing back at the camera side (-stepX / -stepZ).
+    if (tileId < 0.5) {
+        vec3 faceN = sideHit
+            ? (hitAxisX ? vec3(-stepX, 0.0, 0.0) : vec3(0.0, 0.0, -stepZ))
+            : vec3(0.0, 1.0, 0.0);
+        lit = dh_noise(lit, hitPos, faceN, hitT);
+    }
 
     // DH far fog: exponential-squared, 0.4..1.0 x LOD draw distance, density
     // 2.5, spherical distance (GlDhFogShader + config defaults). The fog

@@ -180,13 +180,16 @@ struct BiomeIds {
 unsafe impl Send for BiomeIds {}
 static BIOME_IDS: Mutex<Option<BiomeIds>> = Mutex::new(None);
 
-/// Baked average top/side colours + per-face tint kind for one Material.
+/// Baked average top/side colours + per-face tint kind + ratio-tile set for
+/// one Material (DH 3.3.4 textured LODs ride the same table).
 #[derive(Clone, Copy)]
 struct MatInfo {
     top: u32,
     side: u32,
     tint_top: u8,
     tint_side: u8,
+    tex_top: u16,
+    tex_side: u16,
 }
 static MAT_CACHE: Mutex<Vec<Option<MatInfo>>> = Mutex::new(Vec::new());
 /// One-entry biome tint cache: the scan walks chunk-major, so consecutive
@@ -298,12 +301,16 @@ fn mat_info(env: Env, mat: jobject, ids: &MaterialIds, ordinal: i32) -> Option<M
             side,
             tint_top,
             tint_side,
+            tex_top: crate::blocktextures::lookup(&name).map_or(0, |(t, _)| t),
+            tex_side: crate::blocktextures::lookup(&name).map_or(0, |(_, s)| s),
         },
         None => MatInfo {
             top: 0x7F7F7F,
             side: 0x7A746C,
             tint_top: 0,
             tint_side: 0,
+            tex_top: 0,
+            tex_side: 0,
         },
     };
     let mut cache = MAT_CACHE.lock().unwrap();
@@ -335,18 +342,18 @@ fn biome_tint(env: Env, world: jobject, wid: &WorldIds, x: i32, y: i32, z: i32) 
     resolved
 }
 
-/// Sample one column: (blockY, isLiquid, top rgb, side rgb).
+/// Sample one column: (blockY, isLiquid, top rgb, side rgb, top tile, side tile).
 ///
 /// The colours come from the baked block table (average texture colour) times
-/// the biome tint, i.e. exactly the value Voxy's block-model atlas collapses to
-/// at the LOD levels where individual texels stop being visible.
+/// the biome tint — Distant Horizons' flat LOD colour. The tile ids point into
+/// the ratio-tile atlas (DH 3.3.4 textured LODs); 0 = flat.
 pub fn sample_column(
     env: Env,
     world: jobject,
     x: i32,
     z: i32,
     sea: i32,
-) -> Option<(i32, bool, u32, u32)> {
+) -> Option<(i32, bool, u32, u32, u16, u16)> {
     use std::sync::atomic::Ordering;
     let wid = world_ids(env, world)?;
     if env.exception_check() {
@@ -370,28 +377,28 @@ pub fn sample_column(
         return None;
     }
     if y < -64 {
-        return Some((y, false, 0x808080, 0x808080));
+        return Some((y, false, 0x808080, 0x808080, 0, 0));
     }
     let gray = 0x808080u32;
     let Some(block) =
         jobj(env.call_object_method(world, wid.m_get_block_at, &[ji(x), ji(y), ji(z)]))
     else {
         clear_if_pending(env);
-        return Some((y, false, gray, gray));
+        return Some((y, false, gray, gray, 0, 0));
     };
     let Some(bid) = block_ids(env, block) else {
         clear_if_pending(env);
-        return Some((y, false, gray, gray));
+        return Some((y, false, gray, gray, 0, 0));
     };
     let liquid = env.call_boolean_method(block, bid.m_is_liquid, &[]);
     let mat = jobj(env.call_object_method(block, bid.m_get_type, &[]));
     clear_if_pending(env);
     let Some(mat) = mat else {
         SCAN_OK.fetch_add(1, Ordering::Relaxed);
-        return Some((y, liquid, gray, gray));
+        return Some((y, liquid, gray, gray, 0, 0));
     };
     let Some(mid) = material_ids(env, mat) else {
-        return Some((y, liquid, gray, gray));
+        return Some((y, liquid, gray, gray, 0, 0));
     };
     let ordinal = env.call_int_method(mat, mid.m_ordinal, &[]);
     clear_if_pending(env);
@@ -400,6 +407,8 @@ pub fn sample_column(
         side: gray,
         tint_top: 0,
         tint_side: 0,
+        tex_top: 0,
+        tex_side: 0,
     });
     let (grass, foliage, water) = biome_tint(env, world, &wid, x, y, z);
     let t_top = match info.tint_top {
@@ -416,6 +425,8 @@ pub fn sample_column(
     };
     let mut top = mul_rgb(info.top, t_top);
     let mut side = mul_rgb(info.side, t_side);
+    let mut tex_top = info.tex_top;
+    let mut tex_side = info.tex_side;
     let mut height = y;
     let mut is_liquid = liquid;
 
@@ -436,10 +447,15 @@ pub fn sample_column(
                 if let Some(amid) = material_ids(env, amat) {
                     if let Some(name) = material_path(env, amat, &amid) {
                         match name.as_str() {
-                            // snow layer(s): white top, height unchanged (a
-                            // 1-block offset is invisible at cell resolution)
+                            // snow layer(s): white top (DH tintWithAvoidedBlocks:
+                            // the layer recolours the block below), height
+                            // unchanged (a 1-block offset is invisible at cell
+                            // resolution); snow's own ratio tile rides along
                             "snow" => {
                                 top = 0xF9FEFE;
+                                if let Some((st, _ss)) = crate::blocktextures::lookup("snow") {
+                                    tex_top = st;
+                                }
                             }
                             // water over ground: the column IS a water box
                             // (ocean/lake floor under a MOTION_BLOCKING
@@ -449,8 +465,13 @@ pub fn sample_column(
                             "water" => {
                                 is_liquid = true;
                                 height = sea.max(y + 1);
-                                top = mul_rgb(0xB1B1B1, water);
-                                side = mul_rgb(0xB1B1B1, water);
+                                let wb = crate::blockcolors::WATER_BASE;
+                                top = mul_rgb(wb, water);
+                                side = mul_rgb(wb, water);
+                                if let Some((wt, ws)) = crate::blocktextures::lookup("water") {
+                                    tex_top = wt;
+                                    tex_side = ws;
+                                }
                             }
                             _ => {}
                         }
@@ -461,7 +482,7 @@ pub fn sample_column(
     }
 
     SCAN_OK.fetch_add(1, Ordering::Relaxed);
-    Some((height, is_liquid, top, side))
+    Some((height, is_liquid, top, side, tex_top, tex_side))
 }
 
 fn method_or_log(env: Env, cls: jobject, name: &str, sig: &str) -> Option<jmethodID> {
