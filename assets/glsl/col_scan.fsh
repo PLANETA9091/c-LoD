@@ -16,6 +16,7 @@
 // of magnitude below the v4.0 256x256 sun scan, and no sun is required.
 
 uniform sampler2D InSampler; // minecraft:main
+uniform sampler2D InDepthSampler; // minecraft:main depth (sky discriminator)
 
 layout(std140) uniform SamplerInfo {
     vec2 OutSize;
@@ -26,6 +27,9 @@ layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 
 const int ROWS_PER_SLICE = 4;
+const int PROBE_ROWS = 96;
+// 26.3 device depth: sky == 0.0 (infinite far), anything drawn has depth > 0.
+const float SKY_DEPTH = 1.0e-6;
 
 bool row_valid(int y) {
     float a[8];
@@ -40,6 +44,26 @@ bool row_valid(int y) {
     return abs(chk - a[7]) < 1.0;
 }
 
+// Day-light probe: the DARKEST true-sky pixel (depth == 0) in this column's
+// top band. The zenith sky tracks the celestial angle the way the vanilla
+// lightmap does — bright blue at noon, dim slate at dusk, near-black at
+// night — while the horizon glow that fooled the old per-pixel luminance
+// stays out of the way. Clouds/sun/moon/terrain all have depth or are bright
+// outliers, so the minimum is the clean celestial signal.
+float day_probe(int x, int rows) {
+    float best = 1.0;
+    bool found = false;
+    for (int r = 0; r < PROBE_ROWS; ++r) {
+        int y = rows - 1 - r;
+        if (y < 0) break;
+        if (texelFetch(InDepthSampler, ivec2(x, y), 0).r > SKY_DEPTH) continue;
+        vec3 c = texelFetch(InSampler, ivec2(x, y), 0).rgb;
+        best = min(best, dot(c, vec3(0.299, 0.587, 0.114)));
+        found = true;
+    }
+    return found ? best : 0.0;
+}
+
 void main() {
     int slice = int(gl_FragCoord.x);
     int rows = int(InSize.y);
@@ -51,9 +75,10 @@ void main() {
             best = y; // ascending: last valid = topmost within the slice
         }
     }
+    float probe = day_probe(slice, rows);
     if (best < 0) {
-        fragColor = vec4(0.0, 0.0, 0.0, 0.0);
+        fragColor = vec4(0.0, 0.0, 0.0, probe);
     } else {
-        fragColor = vec4(1.0, float(best / 256) / 255.0, mod(float(best), 256.0) / 255.0, 0.0);
+        fragColor = vec4(1.0, float(best / 256) / 255.0, mod(float(best), 256.0) / 255.0, probe);
     }
 }

@@ -1,20 +1,22 @@
 #version 330
 #extension GL_ARB_separate_shader_objects : require
 
-// c-LoD pass 2 (v4.1): decode the camera basis from the channel scan.
+// c-LoD pass 2 (v4.1 + day channel): decode the camera basis from the channel
+// scan and solve the day-light factor.
 //
-// Picks the topmost intact payload row across all col_scan slices, decodes
-// azimuth / elevation / fov and writes the persistent rotation target in the
-// EXACT v4.0 encoding consumed by clod:post/lod_terrain:
+// The rot targets are 2x1: pixel x=0 carries the camera in the EXACT v4.0
+// encoding consumed by clod:post/lod_terrain:
 //
 //   R = az / (2*pi),  G = (el + pi/2) / pi,  B = confidence,  A = fov byte.
 //
-// The payload is measured, not fitted — no blending, no warm-up: confidence
-// jumps straight to 1 on the first valid row and the basis is frame-exact
-// (blending would make the LOD horizon swim behind the true one). When the
-// column is fully occluded (facing a wall of terrain), the previous estimate
-// decays at 0.99/frame (~3 s) and the LOD fades instead of popping — same
-// policy as the v4.0 sun tracker, minus the sun dependency entirely.
+// Pixel x=1 carries the DAY-LIGHT factor in R: the vanilla lightmap stand-in.
+// DH lights distant LODs through the vanilla lightmap at (skyLight 15, block
+// light 0), which follows the celestial angle — not the horizon glow. The
+// col_scan slices already probe each screen column for its darkest true-sky
+// pixel (depth == 0); this pixel takes the MAX over the 640 probes (the most
+// open view of the sky wins — columns blocked by walls just report 0) and
+// maps it through the lightmap-ish curve. Noon ≈ 1.0, dusk dims smoothly,
+// night floors at the moonlight level inside lod_terrain.
 
 uniform sampler2D ScanSampler; // clod:clod_scan (640x1 slice report)
 uniform sampler2D InSampler;   // minecraft:main (payload rows)
@@ -27,6 +29,24 @@ const int SLICES = 640;
 const float PI = 3.14159265358979;
 
 void main() {
+    if (gl_FragCoord.x > 0.5) {
+        // Day-light pixel: max over the 640 per-column sky probes, mapped
+        // through the celestial curve. Measured on the bench camera: noon
+        // zenith-band ≈ 0.74, dusk ≈ 0.40, night ≈ 0.027 — the curve puts
+        // dusk at dayF ≈ 0.5 (lightMul ≈ 0.61, the vanilla dusk lightmap
+        // level), night at 0 (moonlight floor), noon at 1. When no sky is
+        // visible at all (walls everywhere) the previous frame's value holds
+        // so a short glance at the ground doesn't strobe the LOD.
+        float probe = 0.0;
+        for (int j = 0; j < SLICES; ++j) {
+            probe = max(probe, texelFetch(ScanSampler, ivec2(j, 0), 0).a);
+        }
+        float dayF = smoothstep(0.08, 0.72, probe);
+        float prevDay = texelFetch(PrevSampler, ivec2(1, 0), 0).r;
+        fragColor = vec4(probe > 0.001 ? dayF : prevDay, 0.0, 0.0, 1.0);
+        return;
+    }
+
     vec4 prev = texelFetch(PrevSampler, ivec2(0), 0);
     vec4 rot = vec4(prev.r, prev.g, prev.b * 0.99, prev.a);
 

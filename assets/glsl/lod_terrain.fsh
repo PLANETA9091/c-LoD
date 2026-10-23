@@ -29,6 +29,14 @@ uniform sampler2D AtlasSampler;   // RG = height, B = water, A = side colour ind
 uniform sampler2D ColorSampler;   // top-face block colour (baked texture average)
 uniform sampler2D SideSampler;    // 256x1 side/cliff colour LUT
 uniform sampler2D RotSampler;     // clod:clod_rot_a (1x1 persistent, camera channel)
+// NOTE: the vanilla `Fog` UBO (FogColor) is NOT declared here on purpose —
+// renderpearl rejects any shader UBO that is not registered in the pipeline's
+// bind group layout, and post chains can only register the Globals snippet +
+// the chain-JSON groups (a JSON "Fog" group would pin a STATIC packed buffer
+// that then overrides the live one in PostPass.render). DH reads the vanilla
+// world fog colour (USE_WORLD_FOG_COLOR); at the horizon that colour equals
+// the sky behind the band, so mixing toward the scene pixel is the closest
+// legal equivalent (and is what the approved v4.2 look used).
 
 layout(std140) uniform SamplerInfo {
     vec2 OutSize;
@@ -79,9 +87,17 @@ const float SKY_DEPTH = 1.0e-6;
 const int MAX_STEPS = 560;
 
 // DH far-fog defaults (Config.Client.Advanced.Graphics.Fog): EXPONENTIAL_SQUARED,
-// farFogStart 0.4, farFogEnd 1.0 (x lodDrawDistance), density 2.5, sky colour.
+// farFogStart 0.4, farFogEnd 1.0 (x lodDrawDistance), density 2.5, spherical
+// (heightFogMixMode SPHERICAL -> 3D distance), colour = world fog colour.
 const float FOG_START_FRAC = 0.4;
 const float FOG_DENSITY = 2.5;
+
+// DH Config.Client.Advanced.Graphics.NoiseTexture defaults: the fake-texture
+// grain that makes flat-coloured LODs look like terrain. enableNoiseTexture
+// true, steps 4, intensity 0.05, dropoff 1024 blocks (fades out past that).
+const float NOISE_STEPS = 4.0;
+const float NOISE_INTENSITY = 0.05;
+const float NOISE_DROPOFF = 1024.0;
 
 // Vanilla directional face shade (ClientLevelWrapper.getShade):
 // up 1.0, down 0.5, north/south 0.8, west/east 0.6.
@@ -115,6 +131,34 @@ vec2 atlas_uv(vec2 xz, vec2 origin, float size) {
 /// Index of the side/cliff colour stored in the atlas alpha channel.
 float atlas_side(vec2 uv) {
     return texture(AtlasSampler, uv).a;
+}
+
+// ------------------------------------------------------------------
+// DH terrain/gl/frag.frag applyNoise — ported verbatim (defaults above).
+// Random grain quantised to 1/NOISE_STEPS-block world cells, strongest on
+// mid-luminance colours, faded out by view distance. This is what makes DH
+// LODs look "textured" without any texture.
+// ------------------------------------------------------------------
+float dh_rand1(float co) {
+    return fract(sin(co * 91.3458) * 47453.5453);
+}
+float dh_rand2(vec2 co) {
+    return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
+}
+float dh_rand3(vec3 co) {
+    return dh_rand2(co.xy + dh_rand1(co.z));
+}
+vec3 dh_quantize(vec3 v, float steps) {
+    return floor(v * steps) / steps;
+}
+vec3 dh_noise(vec3 col, vec3 worldPos, vec3 faceN, float viewDist) {
+    float lum = (col.r + col.g + col.b) / 3.0;
+    float amp = (1.0 - pow(lum * 2.0 - 1.0, 2.0)) * NOISE_INTENSITY;
+    vec3 fixedPos = worldPos + faceN * 0.001; // keep the grain on one side of a face
+    float r = dh_rand3(dh_quantize(fixedPos, NOISE_STEPS)) * 2.0 * amp - amp;
+    vec3 newCol = clamp(col + (1.0 - col) * r, 0.0, 1.0);
+    float distF = min(viewDist / NOISE_DROPOFF, 1.0);
+    return mix(newCol, col, distF);
 }
 
 void main() {
@@ -214,7 +258,6 @@ void main() {
     float cell = AtlasInfo.w;
     float near = LodParams.x;
     float maxY = LodParams.y;
-    float sea = LodParams.z;
 
     vec2 minW = origin;
     vec2 maxW = origin + vec2(size);
@@ -278,8 +321,12 @@ void main() {
         tDeltaZ = cell / abs(dir.z);
     }
 
-    // hCur = surface height of the cell the ray is currently in (water -> sea).
-    float hCur = world_water(enterXz, origin, size) ? sea : world_height(enterXz, origin, size);
+    // hCur = surface height of the cell the ray is currently in. Liquid cells
+    // store their WATER SURFACE height (the scan reconciles heightmap variants
+    // against sea level), so the march treats water boxes exactly like DH: a
+    // column whose top quad sits at the water surface, coloured with the
+    // biome-tinted water colour.
+    float hCur = world_height(enterXz, origin, size);
 
     float hitT = -1.0;
     bool sideHit = false;
@@ -336,7 +383,7 @@ void main() {
         // is guaranteed to be above hCur (we never continue below terrain),
         // so this is exactly DH's wall on the exposed span [hCur..hNew].
         float rayY = cam.y + dir.y * tCur;
-        float hNew = world_water(nextXz, origin, size) ? sea : world_height(nextXz, origin, size);
+        float hNew = world_height(nextXz, origin, size);
         if (hNew > rayY) {
             hitT = tCur;
             sideHit = true;
@@ -374,15 +421,17 @@ void main() {
     float fade = forceLod > 0.5 ? 1.0 : smoothstep(minConf, minConf + 0.15, conf);
     vec3 hitPos = cam + dir * hitT;
     vec2 auv = atlas_uv(hitPos.xz, origin, size);
-    bool hitWater = world_water(hitPos.xz, origin, size);
 
-    // ---------------------------------------------------------------
     // DH colour model: one flat colour per column box (the block's baked
     // average, biome tinted), shaded per face with vanilla's directional
-    // factors. Side walls exist only on the exposed span and grass material
-    // fades to dirt down that span (FADE_TO_DIRT default). Our atlas keeps
-    // top and side colours per cell, so the fade is mix(side, top, spanT).
-    // ---------------------------------------------------------------
+    // factors. Water columns carry their own biome-tinted water colour in the
+    // atlas (DH: the water data point's colour — no global water constant),
+    // so every hit reads the cell colours and the UBO colour stays unused.
+    // Side walls exist only on the exposed span; grass material fades from
+    // the top colour at the wall's TOP edge to the side (dirt) colour at its
+    // BOTTOM edge — LodQuadBuilder FADE_TO_DIRT: the bottom vertex row of a
+    // grass wall is recoloured to getDirtBlockColor() and the GPU interpolates
+    // the span linearly.
     vec3 topCol = texture(ColorSampler, auv).rgb;
     vec3 sideCol = texture(
         SideSampler,
@@ -393,43 +442,40 @@ void main() {
     if (sideHit) {
         // Directional shade from the crossed grid line: X boundary -> E/W wall.
         float shade = hitAxisX ? SHADE_EW : SHADE_NS;
-        if (hitWater) {
-            albedo = ColWater.rgb * shade; // DH: water box walls stay water
-        } else {
-            float span = max(hHitNew - hHitOld, 1.0e-3);
-            float spanT = clamp((hHitNew - (cam.y + dir.y * hitT)) / span, 0.0, 1.0);
-            // top of the span -> top colour, bottom -> side colour (dirt fade)
-            albedo = mix(sideCol, topCol, spanT) * shade;
-        }
+        float span = max(hHitNew - hHitOld, 1.0e-3);
+        float spanT = clamp((hHitNew - (cam.y + dir.y * hitT)) / span, 0.0, 1.0);
+        // wall top edge -> column colour, wall bottom edge -> side (dirt) colour
+        albedo = mix(topCol, sideCol, spanT) * shade;
     } else {
-        albedo = hitWater ? ColWater.rgb : topCol; // top faces: shade 1.0
+        albedo = topCol; // top faces: shade 1.0
     }
 
-    // Light: the sky in THIS frame drives the day factor (the world clock and
-    // the rendered sky can disagree). DH samples the vanilla lightmap which
-    // follows the real sky — this is our lightmap substitute; moonlight keeps
-    // a faint blue cast like the vanilla night lightmap.
-    float skyLum = dot(scene.rgb, vec3(0.299, 0.587, 0.114));
-    float dayF = smoothstep(0.08, 0.45, skyLum);
+    // Light: the day factor comes from the camera-channel's celestial probe
+    // (rot pixel 1: the darkest true-sky luminance across the frame, mapped
+    // through the vanilla lightmap-ish curve by rot_solve). DH lights distant
+    // LODs through the vanilla lightmap at (skyLight 15, blockLight 0), which
+    // follows the celestial angle — the horizon-glow-independent probe is the
+    // faithful stand-in; moonlight keeps a faint blue cast like the vanilla
+    // night lightmap.
+    float dayF = texelFetch(RotSampler, ivec2(1, 0), 0).r;
     float lightMul = mix(0.22, 1.0, dayF);
     vec3 nightTint = vec3(0.84, 0.89, 1.08);
     vec3 lit = albedo * lightMul * mix(vec3(1.0), nightTint, 1.0 - dayF);
 
-    // Snow: per-block colours cannot see state variants (snowy=true shares the
-    // material id with the plain block), so high terrain is whitened by height.
-    // DH's snow comes from actual snow blocks — a white TOP surface with the
-    // regular box sides below — so only top faces whiten here; whitening side
-    // walls turned every high column into a striped white pillar.
-    if (!sideHit) {
-        float hn = clamp((hitPos.y - sea) / max(maxY - sea, 1.0), 0.0, 1.0);
-        float snow = smoothstep(VeilColor.a * 0.55 + 0.42, VeilColor.a * 0.55 + 0.62, hn);
-        lit = mix(lit, vec3(0.93, 0.95, 0.97) * lightMul, snow * 0.9);
-    }
+    // DH fake-texture grain (terrain pass applies it after lighting, before
+    // the fog pass): the noise cell is anchored to the FACE — tops use the up
+    // normal, walls the normal of the crossed grid line pointing back at the
+    // camera side (-stepX / -stepZ of the crossing).
+    vec3 faceN = sideHit
+        ? (hitAxisX ? vec3(-stepX, 0.0, 0.0) : vec3(0.0, 0.0, -stepZ))
+        : vec3(0.0, 1.0, 0.0);
+    lit = dh_noise(lit, hitPos, faceN, hitT);
 
-    // DH far fog: exponential-squared in the sky colour, 0.4..1.0 x LOD draw
-    // distance, density 2.5 (GlDhFogShader / Config defaults). The fog target
-    // is the actual sky behind the pixel, so the band edge dissolves into the
-    // horizon exactly like DH.
+    // DH far fog: exponential-squared, 0.4..1.0 x LOD draw distance, density
+    // 2.5, spherical distance (GlDhFogShader + config defaults). The fog
+    // target is the vanilla WORLD FOG COLOUR read as the sky behind the pixel
+    // (the legal stand-in — see the uniform note above); at the band edge the
+    // LOD dissolves into the horizon exactly like DH.
     float fogFar = max(FogParams.y, 1.0);
     float fogStart = FOG_START_FRAC * fogFar;
     float fogLen = max(fogFar - fogStart, 1.0);

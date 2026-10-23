@@ -127,7 +127,11 @@ impl Default for Config {
             effect_atmosphere: "clod:atmosphere".to_string(),
             color_low: [0.35, 0.52, 0.28],
             color_high: [0.48, 0.44, 0.40],
-            color_water: [0.12, 0.24, 0.45],
+            // DH-exact ocean water: water_still.png average (0.694 grey) x the
+            // vanilla 0x3F76E4 water tint = (0.172, 0.321, 0.621). Only a
+            // fallback now — the scan bakes the per-biome tinted water colour
+            // into the atlas and the renderer reads it.
+            color_water: [0.172, 0.321, 0.621],
             snow_line: 0.78,
             color_veil: [0.62, 0.74, 0.86],
             max_height: 320,

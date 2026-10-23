@@ -1,8 +1,8 @@
 {
     "targets": {
         "clod_scan": { "width": 640, "height": 1 },
-        "clod_rot_a": { "width": 1, "height": 1, "persistent": true },
-        "clod_rot_b": { "width": 1, "height": 1, "persistent": true },
+        "clod_rot_a": { "width": 2, "height": 1, "persistent": true },
+        "clod_rot_b": { "width": 2, "height": 1, "persistent": true },
         "clod_swap": {}
     },
     "passes": [
@@ -10,7 +10,8 @@
             "vertex_shader": "minecraft:core/screenquad",
             "fragment_shader": "clod:post/col_scan",
             "inputs": [
-                { "sampler_name": "In", "target": "minecraft:main" }
+                { "sampler_name": "In", "target": "minecraft:main" },
+                { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true }
             ],
             "output": "clod_scan"
         },

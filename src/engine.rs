@@ -341,7 +341,9 @@ fn scan_batch(state: &Arc<State>, env: Env) {
         for (ix, iz) in tasks.iter().copied() {
             let x = state.atlas.cell_world_x(ix);
             let z = state.atlas.cell_world_z(iz);
-            if let Some((y, liquid, top, side)) = jni::sample_column(env, world, x, z) {
+            if let Some((y, liquid, top, side)) =
+                jni::sample_column(env, world, x, z, state.cfg.sea_level)
+            {
                 state
                     .atlas
                     .set(ix, iz, (y.clamp(-64, 1023)) as i16, liquid, top, side);
@@ -423,7 +425,9 @@ fn scan_stream(state: &Arc<State>, env: Env, world: jvmti_bindings::jni::jobject
                 if ix < 0 || iz < 0 || ix as u32 >= atlas.cells || iz as u32 >= atlas.cells {
                     continue;
                 }
-                if let Some((y, liquid, top, side)) = jni::sample_column(env, world, x, z) {
+                if let Some((y, liquid, top, side)) =
+                    jni::sample_column(env, world, x, z, state.cfg.sea_level)
+                {
                     atlas.set(
                         ix as u32,
                         iz as u32,

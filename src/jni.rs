@@ -269,6 +269,14 @@ fn mul_rgb(c: u32, t: u32) -> u32 {
     (r << 16) | (g << 8) | b
 }
 
+/// Registry path of a Bukkit Material ("snow", "water", ...) via its Key.
+/// Uncached — the surface-layer probe calls this once per scanned column.
+fn material_path(env: Env, mat: jobject, ids: &MaterialIds) -> Option<String> {
+    let key = jobj(env.call_object_method(mat, ids.m_get_key, &[]))?;
+    let kid = key_ids(env, key)?;
+    namespaced_key_path(env, key, kid)
+}
+
 /// Resolve (and memoise by enum ordinal) the baked colours of one Material.
 fn mat_info(env: Env, mat: jobject, ids: &MaterialIds, ordinal: i32) -> Option<MatInfo> {
     if ordinal < 0 {
@@ -332,7 +340,13 @@ fn biome_tint(env: Env, world: jobject, wid: &WorldIds, x: i32, y: i32, z: i32) 
 /// The colours come from the baked block table (average texture colour) times
 /// the biome tint, i.e. exactly the value Voxy's block-model atlas collapses to
 /// at the LOD levels where individual texels stop being visible.
-pub fn sample_column(env: Env, world: jobject, x: i32, z: i32) -> Option<(i32, bool, u32, u32)> {
+pub fn sample_column(
+    env: Env,
+    world: jobject,
+    x: i32,
+    z: i32,
+    sea: i32,
+) -> Option<(i32, bool, u32, u32)> {
     use std::sync::atomic::Ordering;
     let wid = world_ids(env, world)?;
     if env.exception_check() {
@@ -400,13 +414,54 @@ pub fn sample_column(env: Env, world: jobject, x: i32, z: i32) -> Option<(i32, b
         3 => water,
         _ => 0xFFFFFF,
     };
+    let mut top = mul_rgb(info.top, t_top);
+    let mut side = mul_rgb(info.side, t_side);
+    let mut height = y;
+    let mut is_liquid = liquid;
+
+    // DH surface-layer semantics (FullDataToRenderDataTransformer):
+    // whatever sits ON TOP of the heightmap block recolours the column —
+    // a snow LAYER whitens the block below it, and water above solid ground
+    // means the column renders as a water box. Heightmaps differ in whether
+    // they already return that layer as the top block (WORLD_SURFACE does,
+    // MOTION_BLOCKING does not), so read one block up and reconcile.
+    if let Some(above) =
+        jobj(env.call_object_method(world, wid.m_get_block_at, &[ji(x), ji(y + 1), ji(z)]))
+    {
+        clear_if_pending(env);
+        if let Some(aid) = block_ids(env, above) {
+            let amat = jobj(env.call_object_method(above, aid.m_get_type, &[]));
+            clear_if_pending(env);
+            if let Some(amat) = amat {
+                if let Some(amid) = material_ids(env, amat) {
+                    if let Some(name) = material_path(env, amat, &amid) {
+                        match name.as_str() {
+                            // snow layer(s): white top, height unchanged (a
+                            // 1-block offset is invisible at cell resolution)
+                            "snow" => {
+                                top = 0xF9FEFE;
+                            }
+                            // water over ground: the column IS a water box
+                            // (ocean/lake floor under a MOTION_BLOCKING
+                            // heightmap). Render at sea level with the
+                            // water colour; the stored height becomes the
+                            // surface the shader marches against.
+                            "water" => {
+                                is_liquid = true;
+                                height = sea.max(y + 1);
+                                top = mul_rgb(0xB1B1B1, water);
+                                side = mul_rgb(0xB1B1B1, water);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     SCAN_OK.fetch_add(1, Ordering::Relaxed);
-    Some((
-        y,
-        liquid,
-        mul_rgb(info.top, t_top),
-        mul_rgb(info.side, t_side),
-    ))
+    Some((height, is_liquid, top, side))
 }
 
 fn method_or_log(env: Env, cls: jobject, name: &str, sig: &str) -> Option<jmethodID> {
