@@ -63,6 +63,13 @@ shot() { # name yaw pitch x y z
   echo "shot $1 (yaw=$2 pitch=$3 at $4,$5,$6)"
 }
 
+# The reference view is the FIRST shot after the long cross-world tp. The
+# post-effect chain re-applies on the client after a teleport and its first
+# activation at the new view compiles the 10-pass pipeline (5-15s under
+# llvmpipe) — live-observed on CI: shot 01 at tp+3s showed NO LOD band while
+# the same view 2 minutes later (08) showed the full band. Settle before the
+# reference frame.
+sleep 15
 shot 01_user_day    "$UYAW" "$UPITCH" "$UX" "$UY" "$UZ"   # the reference view
 shot 02_yaw_south    0      "$UPITCH" "$UX" "$UY" "$UZ"
 shot 03_yaw_east    90      "$UPITCH" "$UX" "$UY" "$UZ"

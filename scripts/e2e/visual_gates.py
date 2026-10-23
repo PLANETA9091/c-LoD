@@ -20,6 +20,11 @@ not scene-calibrated:
         the detected horizon has terrain structure (std) and is not a flat
         white fog wall (mean). Catches "band missing entirely", which the
         day/night pair cannot see (both frames would agree on no band)
+  G-V7  the reference view 01 shows the SAME band as 08_day_return: the box
+        is anchored to the horizon of 08 (the chain is fully warm by then —
+        live-observed: shot 01 right after the tp had no band while 08, the
+        same camera minutes later, showed the full band). The same box must
+        contain structure in 01. Catches "the reference frame lost its LOD"
 """
 import re
 import sys
@@ -229,6 +234,33 @@ def main() -> int:
             std > 8.0 and mean < 190.0,
             f"band std {std:.1f} mean {mean:.1f}",
         )
+
+    # G-V7: the reference view must show the band that 08_day_return shows.
+    # Anchor the band box to the horizon of 08 (the post-effect chain is
+    # fully warm there) and demand structure in 01 at the SAME coordinates
+    # (identical camera). Live-observed hole: shot 01 taken seconds after
+    # the tp had NO band (chain re-activation) while every other gate
+    # passed — the day/night pair and the near-terrain anchor could not see
+    # it. With the band missing, 01's box is flat sky (std ~ 2); with the
+    # band present it matches 08's structure (std >= 8).
+    day_ref = shots / "01_user_day.png"
+    ret = shots / "08_day_return.png"
+    if day_ref.exists() and ret.exists():
+        rim = Image.open(ret).convert("RGB")
+        dim = Image.open(day_ref).convert("RGB")
+        rvp = viewport(rim)
+        rhr = horizon_row(rim, rvp)
+        if rhr is None:
+            gate("V7 01 shows the 08 band", False, "08 horizon not found")
+        else:
+            box = band_box(rvp, rhr)
+            _, rstd = img_stats(rim, box)
+            _, dstd = img_stats(dim, box)
+            gate(
+                "V7 01 shows the 08 band",
+                dstd > 8.0,
+                f"band std 08 {rstd:.1f} -> 01 {dstd:.1f} box {box}",
+            )
 
     # G-V4 client log
     try:
