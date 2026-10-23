@@ -162,3 +162,32 @@
   воду — DH держит liquid-ветку). Реализовано в пробе поверхности `jni.rs`
   через `Material#isSolid`/`#isOccluding` (прокси NMS isSolid / opacity 15);
   промах таблицы цветов оставляет цвет грунта — поверхность не сереет.
+
+## 8. Voxy 0.2.20 A/B — наблюдения по исходникам и живому стенду (v4.5.2)
+
+Voxy (me.cortex.voxy) — второй эталон LOD-рендера, изучен alongside DH:
+- **Данные**: Voxy хранит ПОЛНЫЕ воксельные секции (не heightmap как DH!) —
+  ingest копирует чанки клиента в lmdb-БД (`.voxy/saves`), каждый join создаёт
+  НОВЫЙ world-engine id (seed@hash), старые данные осиротевшие. DH хранит
+  производимые heightmap/columns — voxy хранит «сырой мир» и строит пирамиду
+  мешей на лету. c-LoD ближе к DH: статичный атлас высот.
+- **Рендер**: иерархический HiZ-траверсал на COMPUTE-шейдерах
+  (`traversal_dev.comp`, `hiz.comp`) — окклюзионный куллинг от корней пирамиды
+  с ридбеком vanilla depth. Требует GLSL 460 (4.6 core): subgroup-опы
+  (KHR_shader_subgroup_* — в 450 это расширения, llvmpipe их умеет),
+  gl_BaseInstance (ARB_shader_draw_parameters), uint64 за
+  ARB_gpu_shader_int64. Патч jar до 450 — в scripts/patch_voxy_gl450.py.
+- **Цвет**: voxy ТЕКСТУРНЫЙ (как Voxy-репутация): бейк моделей в атлас
+  (SoftwareRasterizer, ModelFactory.MODEL_TEXTURE_SIZE) + освещение/SSAO.
+  DH — плоские цвета из среднего. c-LoD = DH-подход (плоские + ratio-тайлы §5).
+- **Туман**: post-blit fog (blit_texture_depth_cutout.frag) — линейный рамп
+  environmentalStart→End (≈render distance), цвет = environment. При
+  FOG_AND_FADE полоса растворяется в небе к краю — у DH exp-squared с farFogStart
+  0.4×radius (§6) — поведение близкое, механика другая.
+- **Живой стенд**: voxy-клиент на llvmpipe — стек поднят полностью (join,
+  мир, ингест ±256 = 75MB БД, полёт, шоты), но LOD-полоса не отрисовывается:
+  основной подозреваемый — compute-траверсал/HiZ-ридбек на llvmpipe кульит все
+  ноды (geometry строится, не рисуется). Проверка требует F3-энтри voxy
+  (не отрисовалось на этом билде) или DEBUG-логов (logconfig 26.3 не подхватил
+  logger). Не блокер для c-LoD: A/B против DH (§7) — полный, voxy-суита
+  задокументирована в scripts/bench/README.md.

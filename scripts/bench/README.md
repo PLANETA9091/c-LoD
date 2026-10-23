@@ -87,3 +87,78 @@ bash   scripts/bench/run_full_e2e.sh           # boot + client + shots
 ```
 
 Screenshots land in `~/mc-test/shots/`.
+
+## The Voxy A/B suite (v4.5.2+) — what it took to run Voxy 0.2.20 on the bench
+
+The A/B matrix ends with a real-Voxy baseline (`20_voxy_day … 23_voxy_day_return`).
+Voxy is a client-side mod, so its baseline does not need the c-LoD server at all
+— that turned out to be the key to fitting it on the 4 GB box at all.
+
+| file | role |
+|------|------|
+| `run_voxy_client.sh` | vanilla client + Fabric 0.20.1 + **voxy 0.2.20-beta-gl450.jar** + fabric-api + sodium (see below), Xvfb :99, llvmpipe, fresh `servers.dat` + voxy DB + Mesa shader cache every launch |
+| `boot_paper_plain.sh` | **plain Paper 26.3** (no CRUSSTY agent/launcher/module) on the same world dir — frees ~300 MB RSS; stdin fifo for the flight `tp`s |
+| `run_voxy_full.sh` | phase A: boot + join (server- AND client-side markers) + pixel-based world detector (the Mojang screen is saturated red at the frame center; requires ≥100 s post-join, 2 non-red samples AND a changing frame) + the 4-stop strip flight (spacing 128 ≤ vanilla-RD ring 2×64 — wider spacing leaves HOLES in the band exactly where the shots look) + an F3 diagnostic grab; leaves the client ALIVE |
+| `run_voxy_shots.sh` | phase B (separate call; the client may or may not survive between calls — nondeterministic reaper): 45 s mesh settle + the 4 shots at the user camera, then cleanup |
+| `run_voxy_join.sh` / `run_voxy_ab.sh` | the phase halves of `run_voxy_full.sh`, kept for reuse |
+| `scripts/patch_voxy_gl450.py` (repo root scripts/) | rebuilds `voxy-0.2.20-beta-gl450.jar` from the pristine Modrinth jar |
+
+### The voxy jar GLSL patch (llvmpipe)
+
+Voxy 0.2.20 ships `#version 460 core` shaders; Mesa 25.0 llvmpipe accepts at
+most GLSL 4.50 **even when the GL context reports 4.6** (Mesa's GLSL compiler
+caps at 4.50; `MESA_GL_VERSION_OVERRIDE=4.6` only changes what the context
+claims). The patch rewrites, byte-exact (constant-pool-safe):
+
+- `#version 460` → `#version 450` in 2 classes (ShaderLoader prepends it to
+  every shader; Capabilities probes with one) + 19 shader assets (the loader
+  strips the asset version line, patched for external tools);
+- `gl_BaseInstance` → `gl_BaseInstanceARB` in 3 vertex shaders (under 450 the
+  unsuffixed builtin exists only in 460 core; llvmpipe implements
+  `GL_ARB_shader_draw_parameters`, and its device feature report
+  `shaderDrawParameters=true` confirms it);
+- the quad-subgroup extension uncommented in `quads.frag` (core in 460, an
+  extension under 450 — llvmpipe warns it is unsupported in fragment shaders
+  but the compile survives);
+- the geometry-SSBO floor `512*1024*1024` → `160*1024*1024` in
+  RenderResourceReuse (on llvmpipe that buffer is malloc'd RAM; 512 MB + the
+  uploads OOM-killed the client three times).
+
+Everything else is 4.5-safe: no uint64 (int64 is used behind
+`#extension GL_ARB_gpu_shader_int64`), the KHR subgroup extensions are already
+declared in the shaders that need them.
+
+### Memory map of the voxy client on this box (live-verified)
+
+- client RSS peak ≈ 2.3–2.7 GB: heap ≤1 GB (Xmx1024M) + geometry SSBO 160 MB
+  + GL textures/buffers + llvm arenas + lmdb dirty pages + netty;
+- plain Paper at Xmx400M ≈ 0.8 GB — **the full CRUSSTY stack (+0.3–0.4 GB) +
+  voxy does not fit 4 GB** (three OOM-killer kills verified in dmesg);
+- `pack_push=0` (new v4.5.2 module option, `CLOD_EXTRA_OPTS=";pack_push=0"`)
+  stops the server pushing the c-LoD pack: the 26.3 client AUTO-APPLIES it
+  with no decline dialog, the pack's `terrain.vsh` override makes sodium
+  reject the terrain shaders and voxy's render restart wedges the world load
+  in a restart loop (stuck at ~35 % "Downloading terrain" forever);
+- every voxy join creates a NEW world-engine id — old `.voxy/saves` data is
+  orphaned; the accumulated stale pyramid fed garbage sizes into the
+  AsyncNodeManager scratch-resize loop → a giant llvmpipe memset that
+  safepoint-stalls the whole JVM (jcmd attach = connection reset). The client
+  script wipes `.voxy/saves` every launch;
+- `service_threads` 2 vs 1: irrelevant to the freezes (those were the
+  corrupted DB); 2 drains the ingest queue faster.
+
+### Where the A/B stands
+
+The suite runs end-to-end: join → world → ±256-band ingest (75 MB DB) →
+flight → shots. The one thing it has NOT produced: the visible voxy LOD band.
+The band does not appear with `section_render_distance` 4 or 16 (the render
+distance is `sectionRenderDistance × 512` blocks per NormalRenderPipeline, so
+2048/8192 — the band is well inside it), with fog on/off paths, after 5 min
+mesh settles. Prime suspect: voxy 0.2.20's hierarchical traversal is a
+COMPUTE occlusion culler over a Hi-Z pyramid built from the vanilla depth
+readback — on llvmpipe the readback/cull chain plausibly rejects every node
+(geometry built, never drawn). Verifying that needs the voxy F3 debug line
+(`VoxyDebugScreenEntry` registers a 26.3 debug-screen group; it did not
+render on this build) or DEBUG-level voxy logs (the 26.3 logconfig.xml did
+not pick up a `me.cortex.voxy` logger). Until then the voxy baseline shots
+show vanilla + the void beyond RD — documented honestly rather than faked.
