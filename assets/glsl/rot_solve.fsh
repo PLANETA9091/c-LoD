@@ -61,6 +61,16 @@
 // ~3 frames), residual fade window 12 -> 5 degrees (the half-faded tail of
 // the old 12-degree window still showed a 3-6 degree tilt).
 //
+// v4.4.6 GAP RETUNE + HISTORY OSCILLOSCOPE: the v4.4.5 gap fade (0.12/frame)
+// punished SHORT payload dropouts that are harmless while the camera holds
+// still (a cloud pixel crossing a column): the LOD visibly "breathed" every
+// few seconds — worse than the artifact it replaced. Constants retuned:
+// grace now ~5 frames, dissolve ~16 frames (fog-like), materialize ~7
+// frames. px5 = ring-buffer write cursor (slot/255, byte-exact round trip),
+// px6..px261 = 256-frame history of (conf, day, res, gap) written every
+// frame; lod_terrain's debug HUD (debug_lod=4) draws the trace so a single
+// screenshot shows exactly what the camera channel was doing.
+//
 // Confidence jumps to 1 on the first valid row; while the column is fully
 // occluded the previous payload is kept and confidence decays at 0.995/frame
 // (v4.4.4, was 0.99 — the glide+fade path now covers gaps up to ~13 s).
@@ -91,8 +101,8 @@ const int SLICES = 5120;
 const float GLIDE_DOT = 0.9986; // cos(~3 deg): below this the held basis is stale
 const float GLIDE_K = 0.8;      // v4.4.5: 0.6 -> 0.8, converge in ~3 frames
 const float FADE_WIN = 0.0873;  // radians(5 deg): residual -> LOD fade scale
-const float GAP_UP = 0.12;      // v4.4.5: gap ramp per occluded frame (grace ~2)
-const float GAP_DOWN = 0.3;     // v4.4.5: gap decay per alive frame (materialize ~3)
+const float GAP_UP = 0.05;      // v4.4.6: 0.12 -> 0.05, grace ~5 frames
+const float GAP_DOWN = 0.15;    // v4.4.6: 0.3 -> 0.15, materialize ~7 frames
 
 // Day-grade window (luminance of the sky): night ~0.03-0.06, dawn/dusk ramps
 // through it, day >= 0.45 (deep-blue zenith and rain-gray sky included).
@@ -157,18 +167,14 @@ void main() {
         Rp = vec3(c16(p0.x, p0.y), c16(p0.z, p0.w), c16(p1.x, p1.y));
         Rn = vec3(c16(b[0] / 255.0, b[1] / 255.0), c16(b[2] / 255.0, b[3] / 255.0),
                   c16(b[4] / 255.0, b[5] / 255.0));
-        // Adaptive glide gate (see header). The old pc.r > 0.02 gate is
-        // gone: a zeroed (never-solved) target has length ~0 and is caught
-        // by the length checks, so every re-acquisition after a REAL gap
-        // glides instead of snapping, no matter how long the gap was.
+        // Adaptive glide gate (see header). A zeroed (never-solved) target
+        // has length ~0 and is caught by the length checks.
         float lp = length(Rp);
         float ln = length(Rn);
         // v4.4.5 LATCHED GATE: glide only when a gap actually happened
         // (gapPrev) or one is still converging (prev residual). During
         // continuous tracking both are zero — the fresh basis is exact and
-        // is forwarded bit-exact at ANY pan speed; the old unconditional
-        // angle gate glided every >180 deg/s pan and faded the LOD while
-        // turning ("LODs rotate strangely when I look around").
+        // is forwarded bit-exact at ANY pan speed.
         if (lp > 0.5 && ln > 0.5
             && (gapPrev > 0.001 || pc.b > 0.002)
             && dot(Rp, Rn) / (lp * ln) < GLIDE_DOT) {
@@ -176,42 +182,48 @@ void main() {
         }
     }
 
-    if (j == 4) {
-        // Confidence pixel: 1.0 while the channel is alive, slow decay when
-        // the column is occluded (facing a wall of terrain / GUI overlay).
-        // The day grade rides the same pixel: while a row is alive, average
-        // its 19 RGB pixels (pure unblended sky — clouds/stars/moon rows
-        // fail the checksum and never win), map through the day window and
-        // exponentially smooth against the persistent byte; while occluded,
-        // hold the last grade. px4.b publishes the glide residual for the
-        // LOD fade (held while occluded — the LOD keeps the held basis, so
-        // its residual relative to truth is unknown but inherited).
-        float conf = best >= 0 ? min(pc.r + 0.08, 1.0) : pc.r * 0.995;
-        float day = pc.g;
-        float res = pc.b;
-        if (best >= 0) {
-            vec3 skySum = vec3(0.0);
-            for (int i = 0; i < 19; ++i) {
-                skySum += texelFetch(InSampler, ivec2(i, best), 0).rgb;
-            }
-            float dayRaw = smoothstep(DAY_LO, DAY_HI,
-                dot(skySum / 19.0, vec3(0.299, 0.587, 0.114)));
-            float dayByte = floor(clamp(dayRaw, 0.0, 1.0) * 255.0 + 0.5);
-            day = pc.r > 0.02
-                ? floor(mix(pc.g * 255.0, dayByte, DAY_SMOOTH) + 0.5)
-                : dayByte;
-            if (k < 1.0) {
-                // Angle between the blended basis and the fresh one AFTER
-                // this frame's blend, over the fade window: 1 = the pose is
-                // at least 12 degrees off (LOD fully held back by the LOD
-                // pass), 0 = converged.
-                float d = clamp(dot(normalize(mix(Rp, Rn, k)), normalize(Rn)),
-                                -1.0, 1.0);
-                res = clamp(acos(d) / FADE_WIN, 0.0, 1.0);
-            } else {
-                res = 0.0;
-            }
+    // v4.4.6: diagnostics shared by px4 and the history ring — identical for
+    // every fragment, computed once.
+    float conf = best >= 0 ? min(pc.r + 0.08, 1.0) : pc.r * 0.995;
+    float day = pc.g;
+    float res = pc.b;
+    if (best >= 0) {
+        vec3 skySum = vec3(0.0);
+        for (int i = 0; i < 19; ++i) {
+            skySum += texelFetch(InSampler, ivec2(i, best), 0).rgb;
         }
+        float dayRaw = smoothstep(DAY_LO, DAY_HI,
+            dot(skySum / 19.0, vec3(0.299, 0.587, 0.114)));
+        float dayByte = floor(clamp(dayRaw, 0.0, 1.0) * 255.0 + 0.5);
+        day = pc.r > 0.02
+            ? floor(mix(pc.g * 255.0, dayByte, DAY_SMOOTH) + 0.5)
+            : dayByte;
+        if (k < 1.0) {
+            // Angle between the blended basis and the fresh one AFTER this
+            // frame's blend, over the fade window (5 deg = fully wrong).
+            float d = clamp(dot(normalize(mix(Rp, Rn, k)), normalize(Rn)),
+                            -1.0, 1.0);
+            res = clamp(acos(d) / FADE_WIN, 0.0, 1.0);
+        } else {
+            res = 0.0;
+        }
+    }
+
+    // v4.4.6 HISTORY RING: px5 = write cursor (slot/255, byte-exact round
+    // trip), px6..px261 = 256-frame trace of (conf, day, res, gap). Slots
+    // that are not the current one forward their previous contents.
+    int slot = (int(texelFetch(PrevSampler, ivec2(5, 0), 0).r * 255.0 + 0.5) + 1) % 256;
+
+    if (j == 5) {
+        fragColor = vec4(float(slot) / 255.0, 0.0, 0.0, 0.0);
+        return;
+    }
+    if (j >= 6) {
+        fragColor = (j - 6 == slot) ? vec4(conf, day, res, gap) : prev;
+        return;
+    }
+
+    if (j == 4) {
         fragColor = vec4(conf, day, res, gap);
         return;
     }

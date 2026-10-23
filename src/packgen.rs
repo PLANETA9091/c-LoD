@@ -608,12 +608,26 @@ mod tests {
             solve.contains("vec4(conf, day, res, gap)"),
             "px4.a must publish the gap counter"
         );
+        // v4.4.6: history ring + softened gap fade.
+        assert!(
+            solve.contains("% 256") && solve.contains("ivec2(5, 0), 0).r * 255.0"),
+            "history ring write cursor missing"
+        );
+        assert!(
+            solve.contains("GAP_UP = 0.05") && solve.contains("GAP_DOWN = 0.15"),
+            "gap fade must stay softened (v4.4.5 constants breathed on dropout noise)"
+        );
 
         let chain_v = get("assets/clod/post_effect/lod_terrain.json");
         let chain = String::from_utf8_lossy(&chain_v);
         assert!(
             chain.contains("\"clod_scan\": { \"width\": 5120, \"height\": 1 }"),
             "scan target must be 5120x1 for the group columns"
+        );
+        assert!(
+            chain.contains("\"clod_rot_a\": { \"width\": 262, \"height\": 1, \"persistent\": true }")
+                && chain.contains("\"clod_rot_b\": { \"width\": 262, \"height\": 1, \"persistent\": true }"),
+            "rot targets must hold the 256-frame history ring (px6..px261)"
         );
 
         let terrain_v = get("assets/clod/shaders/post/lod_terrain.fsh");
@@ -629,6 +643,10 @@ mod tests {
         assert!(
             terrain.contains("const float PIXF"),
             "adaptive level constant"
+        );
+        assert!(
+            terrain.contains("ivec2(6 + sx, 0)"),
+            "debug HUD must draw the channel oscilloscope"
         );
         assert!(
             terrain.contains("hitLvl"),

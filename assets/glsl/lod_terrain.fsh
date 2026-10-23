@@ -263,6 +263,27 @@ void main() {
             fragColor = vec4(bar, 1.0);
             return;
         }
+        // v4.4.6 CHANNEL OSCILLOSCOPE: 256x56 trace under the conf bar,
+        // backed by the history ring rot_solve keeps in px6..px261.
+        // red = conf, green = gap (payload occlusion), blue = glide
+        // residual; newest frame at the RIGHT edge. One screenshot of a
+        // bad moment now shows exactly what the camera channel did.
+        float gx = gl_FragCoord.x - 8.0;
+        float gy = gl_FragCoord.y - (OutSize.y - 24.0 - 56.0);
+        if (gx >= 0.0 && gx < 256.0 && gy >= 0.0 && gy < 56.0) {
+            int slotNow = int(texelFetch(RotSampler, ivec2(5, 0), 0).r * 255.0 + 0.5);
+            int sx = int(mod(float(slotNow) - (255.0 - gx), 256.0));
+            vec4 h = texelFetch(RotSampler, ivec2(6 + sx, 0), 0);
+            float v = (gy - 4.0) / 48.0; // 4px padding, 48px span = 0..1
+            vec3 col = vec3(0.02);
+            if (abs(v - h.r) < 0.021) col = vec3(1.0, 0.25, 0.25); // conf
+            if (abs(v - h.a) < 0.021) col = vec3(0.25, 1.0, 0.35); // gap
+            if (abs(v - h.b) < 0.021) col = vec3(0.35, 0.6, 1.0);  // res
+            if (abs(v - 0.5) < 0.011) col = vec3(0.15);            // mid grid
+            if (gy < 2.0 || gy > 53.0) col = vec3(0.15);           // frame
+            fragColor = vec4(col, 1.0);
+            return;
+        }
         forceLod = 1.0;
     }
 
