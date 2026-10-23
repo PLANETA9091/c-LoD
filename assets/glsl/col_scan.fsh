@@ -1,10 +1,10 @@
 #version 330
 #extension GL_ARB_separate_shader_objects : require
 
-// c-LoD pass 1 (v4.4): scan the camera-channel column groups.
+// c-LoD pass 1 (v4.4.2): scan the camera-channel column groups.
 //
-// The sky program writes the BOBBED view basis into the ALPHA of eight
-// column groups spread across the screen width (x % 240 < 19 — see
+// The sky program writes the BOBBED view basis into the ALPHA of column
+// groups spread across the screen width (x % 120 < 19 — see
 // assets/glsl/sky.fsh). Everything else in the frame writes different
 // alpha: terrain is 1.0, translucent passes blend, the GUI comes later. A
 // row is "intact" when its 19 alpha bytes decode to valid magic, a sane fov
@@ -20,8 +20,12 @@
 // v4.4 group spread: with the payload only in the leftmost columns the
 // channel died whenever terrain covered the left screen edge, the
 // confidence decayed and the LOD faded out and popped back (the pan
-// flicker). Scanning all eight groups keeps the channel alive while ANY
-// group sees sky.
+// flicker).
+//
+// v4.4.2: STRIDE 240 -> 120 (16 groups) — and the sky-side byte index is
+// group-local now (sky.fsh used to index pay[] with the raw screen x, which
+// silently broke every group beyond the first). Scanning all groups keeps
+// the channel alive while ANY group sees sky.
 
 uniform sampler2D InSampler; // minecraft:main
 
@@ -34,8 +38,8 @@ layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 
 const int COLS = 19;
-const int GROUPS = 8;
-const int GROUP_STRIDE = 240;
+const int GROUPS = 16;
+const int GROUP_STRIDE = 120;
 const int ROWS_PER_SLICE = 4;
 
 bool row_valid(int gx, int y) {

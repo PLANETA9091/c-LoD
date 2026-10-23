@@ -45,16 +45,21 @@ layout(location = 0) out vec4 fragColor;
 // animations. The fov is corrected for the bob scale: ProjMat[1][1] reads
 // b * Rb_row1.y under bob, so b_true = ProjMat[1][1] / r1.y.
 //
-// v4.4: the block is written into EIGHT column groups spread across the
-// screen width (x % 240 < 19) instead of only the leftmost 19 columns. The
-// camera channel previously died whenever terrain covered the left edge
-// (every pan across a mountainside), the tracker confidence decayed and
-// the whole LOD faded out and popped back — the "flicker when I move the
-// camera" bug. With groups spread over the width, at least one of them
-// shows sky unless the ENTIRE screen is terrain-covered — in which case
-// there are no sky pixels to paint anyway. The additive checksum keeps
-// false positives at ~2^-24 per row per group (magic 2^-16 × checksum
-// 2^-8), so 8 groups × 2000 rows still stay silent for hours.
+// v4.4: the block is written into column groups spread across the screen
+// width instead of only the leftmost 19 columns. The camera channel
+// previously died whenever terrain covered the left edge (every pan across
+// a mountainside), the tracker confidence decayed and the whole LOD faded
+// out and popped back — the "flicker when I move the camera" bug.
+//
+// v4.4.2: STRIDE 240 -> 120 (16 groups up to 1920px, 8 at 854x480) and THE
+// ACTUAL FIX for why the spread never worked: the byte index was the raw
+// screen x, so every group beyond the first read pay[x] out of bounds of
+// the 19-entry array (undefined bytes -> checksum rejects the row). Only
+// group 0 ever carried a payload, i.e. the channel was exactly as fragile
+// as v4.3. The index is now group-local (pay[px.x % 120]); each group
+// writes identical, in-bounds bytes. The additive checksum keeps false
+// positives at ~2^-24 per row per group (magic 2^-16 × checksum 2^-8), so
+// 16 groups × 2000 rows still stay silent for days.
 //
 // Downstream writes (terrain alpha = 1.0, clouds, particles, weather, GUI)
 // fail the magic/checksum checks; the post chain scans the column top-down
@@ -78,7 +83,7 @@ void main() {
         cylindricalVertexDistance, 0.0, FogSkyEnd, FogSkyEnd, FogSkyEnd, FogColor);
 
     ivec2 px = ivec2(gl_FragCoord.xy);
-    if (px.x % 240 < 19) {
+    if (px.x % 120 < 19) {
         // World-space view basis (rotation-only modelview): view space looks
         // down -Z, so transpose(mat3(MV)) maps view axes to world axes.
         mat3 mv = mat3(ModelViewMat);
@@ -134,7 +139,7 @@ void main() {
         }
         pay[18] = chk;
 
-        color.a = float(pay[px.x]) / 255.0;
+        color.a = float(pay[px.x % 120]) / 255.0;
     }
 
     fragColor = color;

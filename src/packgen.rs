@@ -533,10 +533,12 @@ mod tests {
 
     #[test]
     fn v4_4_channel_groups_and_adaptive_march_are_shipped() {
-        // v4.4 pan-flicker fix: the payload must be written into eight column
-        // groups (sky.fsh), scanned group-wise at 5120 slices (col_scan +
-        // rot_solve + the chain target), and the march must carry the fixed
-        // early-out plus the adaptive PIXF level.
+        // v4.4/v4.4.2 pan-flicker fix: the payload must be written into
+        // column groups every 120px (sky.fsh, GROUP-LOCAL byte index — the
+        // v4.4 raw-x index read pay[] out of bounds and silently disabled
+        // every group beyond the first), scanned group-wise at 5120 slices
+        // (col_scan + rot_solve + the chain target), and the march must
+        // carry the fixed early-out plus the adaptive PIXF level.
         let cfg = Config::parse("");
         let atlas = Atlas::new(0, 0, 256, 4, 63);
         let pack = build(&cfg, &atlas);
@@ -553,18 +555,22 @@ mod tests {
         let sky_v = get("assets/minecraft/shaders/core/sky.fsh");
         let sky = String::from_utf8_lossy(&sky_v);
         assert!(
-            sky.contains("px.x % 240 < 19"),
-            "sky payload must use 8 column groups"
+            sky.contains("px.x % 120 < 19"),
+            "sky payload must use 120px column groups"
+        );
+        assert!(
+            sky.contains("pay[px.x % 120]"),
+            "payload byte index must be group-local (v4.4.2 OOB fix)"
         );
 
         let scan_v = get("assets/clod/shaders/post/col_scan.fsh");
         let scan = String::from_utf8_lossy(&scan_v);
         assert!(
-            scan.contains("const int GROUPS = 8;"),
+            scan.contains("const int GROUPS = 16;"),
             "col_scan group count"
         );
         assert!(
-            scan.contains("const int GROUP_STRIDE = 240;"),
+            scan.contains("const int GROUP_STRIDE = 120;"),
             "col_scan group stride must match sky.fsh"
         );
 
@@ -575,15 +581,23 @@ mod tests {
             "solver slice count"
         );
         assert!(
-            solve.contains("min(prev.r + 0.08, 1.0)"),
+            solve.contains("min(pc.r + 0.08, 1.0)"),
             "confidence recovery must ramp, not snap"
+        );
+        assert!(
+            solve.contains("GLIDE_DOT") && solve.contains("GLIDE_K"),
+            "adaptive basis glide missing (v4.4.2)"
+        );
+        assert!(
+            solve.contains("vec4(b[0], b[1], b[2], b[3]) / 255.0"),
+            "bit-exact payload passthrough missing"
         );
 
         let chain_v = get("assets/clod/post_effect/lod_terrain.json");
         let chain = String::from_utf8_lossy(&chain_v);
         assert!(
             chain.contains("\"clod_scan\": { \"width\": 5120, \"height\": 1 }"),
-            "scan target must be 5120x1 for the 8 group columns"
+            "scan target must be 5120x1 for the group columns"
         );
 
         let terrain_v = get("assets/clod/shaders/post/lod_terrain.fsh");
@@ -603,6 +617,17 @@ mod tests {
         assert!(
             terrain.contains("hitLvl"),
             "adaptive level tracking missing"
+        );
+        // v4.4.2: the day grade must come from the live Fog UBO (the 26.3
+        // WorldClock made Globals.GameTime diverge from the sun), with the
+        // clock estimate only as the unbound-UBO fallback.
+        assert!(
+            terrain.contains("dot(FogColor.rgb, vec3(0.299, 0.587, 0.114))"),
+            "day factor must track FogColor (black-in-day fix)"
+        );
+        assert!(
+            terrain.contains("layout(std140) uniform Fog"),
+            "Fog UBO declaration missing"
         );
     }
 }

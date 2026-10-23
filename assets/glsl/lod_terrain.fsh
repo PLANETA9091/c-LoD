@@ -2,6 +2,21 @@
 #extension GL_ARB_separate_shader_objects : require
 #include <minecraft:globals.glsl>
 
+// Vanilla Fog UBO (assets/minecraft/shaders/include/fog.glsl, layout
+// verbatim). RenderSystem.bindDefaultUniforms sets "Fog" on EVERY pass and
+// PostPass calls it for each post pass — verified in the 26.3 client
+// (PostPass.java:150); LevelRenderer sets the terrain fog BEFORE
+// applyPostEffects runs, so the values are the live world fog.
+layout(std140) uniform Fog {
+    vec4 FogColor;
+    float FogEnvironmentalStart;
+    float FogEnvironmentalEnd;
+    float FogRenderDistanceStart;
+    float FogRenderDistanceEnd;
+    float FogSkyEnd;
+    float FogCloudsEnd;
+};
+
 // c-LoD pass 4: the actual level-of-distant-detail renderer.
 //
 // v4.2 — Distant-Horizons-style VOXEL renderer. The atlas cells are sampled
@@ -597,12 +612,26 @@ void main() {
         albedo = mix(albedo, noisy, distF);
     }
 
-    // Day factor from the WORLD CLOCK (GameTime), never from the sky pixels:
-    // stars and the moon are drawn behind the LOD band, and the old per-pixel
-    // sky luminance lit the night LOD in star-shaped speckles (the "night
-    // glow"). Same grading as the atmosphere pass, so both fade in sync.
-    float sunY = sin(fract(GameTime) * 6.28318530718);
-    float dayF = smoothstep(-0.14, 0.22, sunY);
+    // Day factor from the vanilla FOG COLOR — the live, clock-correct sky
+    // grade. 26.3 moved the sun to the WorldClock timeline system
+    // (data/minecraft/timeline/day.json over the minecraft:overworld clock),
+    // while Globals.GameTime still counts RAW level.getGameTime() ticks
+    // (LevelExtractor: levelRenderState.gameTime = level.getGameTime()).
+    // Beds, /time set and doDaylightCycle=false make the two clocks
+    // disagree, which graded the LOD for night while the sky showed day —
+    // the "LOD turns black in daytime, recovers after a while" bug. FogColor
+    // comes from the same environment pass as the sun itself, tracks rain and
+    // sunrise, and is a single per-frame scalar (no star/moon speckle).
+    float fogLum = dot(FogColor.rgb, vec3(0.299, 0.587, 0.114));
+    float dayF;
+    if (all(equal(FogColor, vec4(0.0)))) {
+        // Defensive: Fog UBO never bound (all-zero default) — fall back to
+        // the old clock estimate rather than grading everything as night.
+        float sunY = sin(fract(GameTime) * 6.28318530718);
+        dayF = smoothstep(-0.14, 0.22, sunY);
+    } else {
+        dayF = smoothstep(0.09, 0.30, fogLum);
+    }
 
     // The fog target tracks the actual sky behind the pixel so the far edge
     // of the LOD band dissolves into the horizon — but through a 4-tap min
