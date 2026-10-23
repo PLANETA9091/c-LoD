@@ -228,7 +228,7 @@ impl Config {
             }
         }
         if let Some(v) = get("debug_lod").and_then(|v| v.parse::<u8>().ok()) {
-            cfg.debug_lod = v.min(5);
+            cfg.debug_lod = v.min(6);
         }
         if let Some(v) = get("sea_level").and_then(|v| v.parse::<i32>().ok()) {
             cfg.sea_level = v;

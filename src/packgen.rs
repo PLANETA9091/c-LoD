@@ -648,6 +648,16 @@ mod tests {
             terrain.contains("ivec2(6 + sx, 0)"),
             "debug HUD must draw the channel oscilloscope"
         );
+        // v4.4.7: transparent diag mode 6 — normal rendering + HUD only.
+        assert!(
+            terrain.contains("bool hud6 = DebugParams.x > 5.5"),
+            "transparent diag mode 6 missing (invasive mode 4 hides the real picture)"
+        );
+        assert!(
+            !terrain.contains("forceLod = 1.0;\n        }\n    }\n\n    // Debug view")
+                || terrain.contains("if (hud4) {\n            forceLod = 1.0;"),
+            "forceLod must be mode-4-only so mode 6 renders normally"
+        );
         assert!(
             terrain.contains("hitLvl"),
             "adaptive level tracking missing"

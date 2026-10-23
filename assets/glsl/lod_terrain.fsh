@@ -256,8 +256,18 @@ void main() {
     float minConf = LodParams.w; // v4.4.1: diagnostics only, see the gate below
     float forceLod = 0.0;
 
-    // Debug mode 4: LOD hit mask + tracker confidence bar.
-    if (DebugParams.x > 3.5) {
+    // Debug modes 4 and 6 draw the tracker HUD (confidence bar + v4.4.6
+    // channel oscilloscope). Mode 4 is INVASIVE: it forces the LOD over
+    // every pixel and flat-greens hits (geometry debugging) — the 19:03
+    // screenshots showed why that hides the real picture (the whole sky
+    // becomes debug-orange, far fog-hidden hits become visible green).
+    // Mode 6 is TRANSPARENT: the game renders normally, only the HUD
+    // overlays it — a screenshot of a bad moment pairs the artifact with
+    // the channel trace. The 2px white tick at the scope's top-right
+    // marks "now".
+    bool hud4 = DebugParams.x > 3.5 && DebugParams.x < 4.5;
+    bool hud6 = DebugParams.x > 5.5 && DebugParams.x < 6.5;
+    if (hud4 || hud6) {
         if (gl_FragCoord.x < 240.0 && gl_FragCoord.y > OutSize.y - 24.0) {
             vec3 bar = gl_FragCoord.x < conf * 240.0 ? vec3(1.0, 0.0, 0.0) : vec3(0.0);
             fragColor = vec4(bar, 1.0);
@@ -281,10 +291,13 @@ void main() {
             if (abs(v - h.b) < 0.021) col = vec3(0.35, 0.6, 1.0);  // res
             if (abs(v - 0.5) < 0.011) col = vec3(0.15);            // mid grid
             if (gy < 2.0 || gy > 53.0) col = vec3(0.15);           // frame
+            if (gy < 2.0 && gx > 250.0) col = vec3(1.0);           // "now" tick
             fragColor = vec4(col, 1.0);
             return;
         }
-        forceLod = 1.0;
+        if (hud4) {
+            forceLod = 1.0;
+        }
     }
 
     // Debug view: red channel = tracker confidence over sky pixels.
@@ -395,7 +408,7 @@ void main() {
     // is an eye that is itself above the whole heightfield: such a ray can
     // never descend back into it.
     if (dir.y > 0.0 && cam.y > maxY + 64.0) {
-        fragColor = DebugParams.x > 3.5 ? vec4(0.6, 0.0, 0.9, 1.0) : scene;
+        fragColor = hud4 ? vec4(0.6, 0.0, 0.9, 1.0) : scene;
         return;
     }
     if (dir.y == 0.0) {
@@ -514,7 +527,7 @@ void main() {
     }
 
     if (tHit < 0.0) {
-        fragColor = DebugParams.x > 3.5 ? vec4(1.0, 0.45, 0.0, 1.0) : scene;
+        fragColor = hud4 ? vec4(1.0, 0.45, 0.0, 1.0) : scene;
         return;
     }
     if (DebugParams.x > 4.5 && DebugParams.x < 5.5) {
@@ -524,7 +537,7 @@ void main() {
         fragColor = vec4(c, 1.0);
         return;
     }
-    if (DebugParams.x > 3.5) {
+    if (hud4) {
         fragColor = vec4(0.0, 1.0, 0.1, 1.0);
         return;
     }
