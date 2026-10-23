@@ -234,7 +234,7 @@ void main() {
 
     bool skyPix = depth <= SKY_DEPTH;
     float conf = texelFetch(RotSampler, ivec2(4, 0), 0).r;
-    float minConf = LodParams.w;
+    float minConf = LodParams.w; // v4.4.1: diagnostics only, see the gate below
     float forceLod = 0.0;
 
     // Debug mode 4: LOD hit mask + tracker confidence bar.
@@ -268,7 +268,22 @@ void main() {
         forceLod = 1.0;
     }
 
-    if (conf < minConf && forceLod < 0.5) {
+    // v4.4.1 FLICKER FIX: confidence no longer gates VISIBILITY, only the
+    // very first frame. The old chain (gate at minConf=0.25 + fade
+    // smoothstep) made the LOD alpha pump every time a pan carried terrain
+    // across the eight camera-channel column groups: conf decayed x0.99
+    // while all groups were occluded, crossed the threshold -> the LOD
+    // popped out, then ramped back at +0.08/frame on the next sky row ->
+    // pop-in. That oscillation WAS the "flicker when I move the camera".
+    // Now the gate only protects the never-solved state (rot target starts
+    // zeroed; first valid payload pushes conf to 0.08 on the next frame),
+    // and the blend below is always 1: a stale basis is only ever visible
+    // when NO group column sees sky (overcast clouds / GUI over every
+    // payload column) while sky pixels elsewhere still exist -- and the
+    // moment any group sees sky again the basis resyncs bit-exact in one
+    // frame. Rendering with a held basis beats fading the whole horizon
+    // out and back.
+    if (conf < 0.02 && forceLod < 0.5) {
         fragColor = scene;
         return;
     }
@@ -474,7 +489,8 @@ void main() {
         return;
     }
 
-    float fade = forceLod > 0.5 ? 1.0 : smoothstep(minConf, minConf + 0.15, conf);
+    // v4.4.1: full strength whenever we render at all (see the gate above).
+    float fade = 1.0;
     vec3 hitPos = cam + dir * tHit;
     vec2 xzHit = hitPos.xz;
     float yHit = hitPos.y;
