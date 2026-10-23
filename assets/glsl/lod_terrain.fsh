@@ -35,6 +35,18 @@
 // clod_rot target. Camera position comes from the Globals UBO.
 //
 // Non-sky pixels pass through untouched: real chunks always win.
+//
+// v4.4.4 GLIDE FADE: the camera channel publishes a glide residual (px4.b,
+// rot_solve) — the angle between the blended basis and the fresh payload
+// after the solve, over a 12-degree window. While the solver converges onto
+// a re-acquired payload after an occlusion gap (looked down, clouds over
+// every group column), the blended basis is the WRONG pose for this frame
+// and showing it was the residual flicker: the LOD horizon visibly tilted
+// and swept for up to 8 frames after every look-down/look-up cycle. The LOD
+// is now faded BY that residual: sky pixels show the real sky while the
+// pose is far off, and the LOD materializes as it converges. Bit-exact
+// tracking frames carry residual 0 and render at full strength, exactly as
+// in v4.4.1.
 
 uniform sampler2D InSampler;      // minecraft:main color
 uniform sampler2D InDepthSampler; // minecraft:main depth
@@ -496,8 +508,11 @@ void main() {
         return;
     }
 
-    // v4.4.1: full strength whenever we render at all (see the gate above).
-    float fade = 1.0;
+    // v4.4.4: fade by the camera-channel glide residual (px4.b, rot_solve).
+    // Bit-exact frames: residual 0 -> fade 1 (full strength, as v4.4.1).
+    // Glide frames: fade ramps 0 -> 1 as the pose converges, so the tilted
+    // intermediate basis is never shown (see the header note above).
+    float fade = clamp(1.0 - pc4.b * 1.05, 0.0, 1.0);
     vec3 hitPos = cam + dir * tHit;
     vec2 xzHit = hitPos.xz;
     float yHit = hitPos.y;

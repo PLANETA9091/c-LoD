@@ -1,7 +1,7 @@
 #version 330
 #extension GL_ARB_separate_shader_objects : require
 
-// c-LoD pass 2 (v4.4.3): decode the camera channel into the persistent
+// c-LoD pass 2 (v4.4.4): decode the camera channel into the persistent
 // rotation target.
 //
 // Picks the topmost intact payload row across all col_scan slices and packs
@@ -12,26 +12,41 @@
 //   px1 = (Rz_hi, Rz_lo, Ux_hi, Ux_lo)
 //   px2 = (Uy_hi, Uy_lo, Uz_hi, Uz_lo)   bobbed world-space up
 //   px3 = (fov_hi, fov_lo, tx, ty)       fov 16-bit, eye wobble 8-bit
-//   px4 = (conf, day, 0, 0)              conf 0..1, day = sky grade 0..1
+//   px4 = (conf, day, res, 0)            conf 0..1, day = sky grade 0..1,
+//                                        res = glide residual 0..1
 //
 // The payload is stored ENCODED (not decoded to floats): the persistent
 // target is RGBA8 and 16-bit basis components must survive the round trip
 // bit-exact or the LOD horizon would swim by half a pixel. The LOD pass
 // decodes.
 //
-// v4.4.2 ADAPTIVE GLIDE: while the payload flows frame to frame, the fresh
-// bytes are forwarded BIT-EXACT (no float round trip, zero lag). After an
-// occlusion gap the held basis is stale by however far the camera turned
-// meanwhile; forwarding it verbatim makes the LOD horizon SNAP the moment
-// any group column sees sky again (the residual pan flicker). When the
-// fresh right vector differs from the held one by more than ~3 degrees,
-// blend 35%/frame instead: the horizon glides back over ~5 frames, then
-// hands over to the exact path once the angle drops under the threshold.
-// The 3-degree gate keeps every continuous tracking frame (up to ~180 deg/s
-// pans) on the exact path — the glide only covers genuine gaps.
+// ADAPTIVE GLIDE (v4.4.2, retuned v4.4.4): while the payload flows frame to
+// frame, the fresh bytes are forwarded BIT-EXACT (no float round trip, zero
+// lag). After an occlusion gap the held basis is stale by however far the
+// camera turned meanwhile; forwarding it verbatim makes the LOD horizon SNAP
+// the moment any group column sees sky again. When the fresh right vector
+// differs from the held one by more than ~3 degrees, blend 60%/frame
+// instead: the horizon glides back over ~4 frames, then hands over to the
+// exact path once the angle drops under the threshold. The 3-degree gate
+// keeps every continuous tracking frame (up to ~180 deg/s pans) on the
+// exact path — the glide only covers genuine gaps. v4.4.4 drops the old
+// confidence gate on the glide: the never-solved state (zeroed target) is
+// already excluded by the basis-length checks, and a long (>13 s) occlusion
+// used to fall back to a raw snap.
+//
+// v4.4.4 GLIDE RESIDUAL (px4.b): a gliding basis is by definition the WRONG
+// pose for the current frame — showing it was the residual flicker the
+// adaptive glide never removed (the LOD horizon visibly tilted and swept
+// for up to 8 frames after every look-down/look-up cycle). The solver now
+// measures the angle between the blended basis and the fresh one after the
+// blend and publishes it scaled by the fade window (12 deg full wrong ->
+// 0 deg exact). lod_terrain holds the LOD back by that residual: the sky
+// pixels show the real sky for the first frames of the glide, then the LOD
+// materializes as the pose converges. A tilted world is never shown.
 //
 // Confidence jumps to 1 on the first valid row; while the column is fully
-// occluded the previous payload is kept and confidence decays at 0.99/frame.
+// occluded the previous payload is kept and confidence decays at 0.995/frame
+// (v4.4.4, was 0.99 — the glide+fade path now covers gaps up to ~13 s).
 // Since v4.4.1 confidence is diagnostics + the never-solved init gate only —
 // it no longer fades the LOD.
 //
@@ -57,7 +72,8 @@ layout(location = 0) out vec4 fragColor;
 
 const int SLICES = 5120;
 const float GLIDE_DOT = 0.9986; // cos(~3 deg): below this the held basis is stale
-const float GLIDE_K = 0.35;
+const float GLIDE_K = 0.6;      // v4.4.4: 0.35 -> 0.6, converge in ~4 frames
+const float FADE_WIN = 0.2094;  // radians(12 deg): residual -> LOD fade scale
 
 // Day-grade window (luminance of the sky): night ~0.03-0.06, dawn/dusk ramps
 // through it, day >= 0.45 (deep-blue zenith and rain-gray sky included).
@@ -97,6 +113,34 @@ void main() {
     vec4 prev = texelFetch(PrevSampler, ivec2(j, 0), 0);
     vec4 pc = texelFetch(PrevSampler, ivec2(4, 0), 0);
 
+    // Payload bytes x2..x17 (16 bytes, see assets/glsl/sky.fsh):
+    //   b[0..5]  right xyz (16-bit each)   b[6..11] up xyz (16-bit each)
+    //   b[12..13] fov 16-bit               b[14] tx  b[15] ty (8-bit signed)
+    // Needed by BOTH the diagnostics pixel (residual) and the basis pixels.
+    float b[16];
+    vec3 Rp = vec3(0.0);
+    vec3 Rn = vec3(0.0);
+    float k = 1.0; // blend factor: 1 = bit-exact forward, GLIDE_K = gliding
+    if (best >= 0) {
+        for (int i = 0; i < 16; ++i) {
+            b[i] = texelFetch(InSampler, ivec2(2 + i, best), 0).a * 255.0;
+        }
+        vec4 p0 = texelFetch(PrevSampler, ivec2(0, 0), 0);
+        vec4 p1 = texelFetch(PrevSampler, ivec2(1, 0), 0);
+        Rp = vec3(c16(p0.x, p0.y), c16(p0.z, p0.w), c16(p1.x, p1.y));
+        Rn = vec3(c16(b[0] / 255.0, b[1] / 255.0), c16(b[2] / 255.0, b[3] / 255.0),
+                  c16(b[4] / 255.0, b[5] / 255.0));
+        // Adaptive glide gate (see header). The old pc.r > 0.02 gate is
+        // gone: a zeroed (never-solved) target has length ~0 and is caught
+        // by the length checks, so every re-acquisition after a REAL gap
+        // glides instead of snapping, no matter how long the gap was.
+        float lp = length(Rp);
+        float ln = length(Rn);
+        if (lp > 0.5 && ln > 0.5 && dot(Rp, Rn) / (lp * ln) < GLIDE_DOT) {
+            k = GLIDE_K;
+        }
+    }
+
     if (j == 4) {
         // Confidence pixel: 1.0 while the channel is alive, slow decay when
         // the column is occluded (facing a wall of terrain / GUI overlay).
@@ -104,9 +148,12 @@ void main() {
         // its 19 RGB pixels (pure unblended sky — clouds/stars/moon rows
         // fail the checksum and never win), map through the day window and
         // exponentially smooth against the persistent byte; while occluded,
-        // hold the last grade.
-        float conf = best >= 0 ? min(pc.r + 0.08, 1.0) : pc.r * 0.99;
+        // hold the last grade. px4.b publishes the glide residual for the
+        // LOD fade (held while occluded — the LOD keeps the held basis, so
+        // its residual relative to truth is unknown but inherited).
+        float conf = best >= 0 ? min(pc.r + 0.08, 1.0) : pc.r * 0.995;
         float day = pc.g;
+        float res = pc.b;
         if (best >= 0) {
             vec3 skySum = vec3(0.0);
             for (int i = 0; i < 19; ++i) {
@@ -118,40 +165,25 @@ void main() {
             day = pc.r > 0.02
                 ? floor(mix(pc.g * 255.0, dayByte, DAY_SMOOTH) + 0.5)
                 : dayByte;
+            if (k < 1.0) {
+                // Angle between the blended basis and the fresh one AFTER
+                // this frame's blend, over the fade window: 1 = the pose is
+                // at least 12 degrees off (LOD fully held back by the LOD
+                // pass), 0 = converged.
+                float d = clamp(dot(normalize(mix(Rp, Rn, k)), normalize(Rn)),
+                                -1.0, 1.0);
+                res = clamp(acos(d) / FADE_WIN, 0.0, 1.0);
+            } else {
+                res = 0.0;
+            }
         }
-        fragColor = vec4(conf, day, 0.0, 0.0);
+        fragColor = vec4(conf, day, res, 0.0);
         return;
     }
 
     if (best < 0) {
         fragColor = prev; // keep the last good basis
         return;
-    }
-
-    // Payload bytes x2..x17 (16 bytes, see assets/glsl/sky.fsh):
-    //   b[0..5]  right xyz (16-bit each)   b[6..11] up xyz (16-bit each)
-    //   b[12..13] fov 16-bit               b[14] tx  b[15] ty (8-bit signed)
-    float b[16];
-    for (int i = 0; i < 16; ++i) {
-        b[i] = texelFetch(InSampler, ivec2(2 + i, best), 0).a * 255.0;
-    }
-
-    vec4 p0 = texelFetch(PrevSampler, ivec2(0, 0), 0);
-    vec4 p1 = texelFetch(PrevSampler, ivec2(1, 0), 0);
-    vec4 p2 = texelFetch(PrevSampler, ivec2(2, 0), 0);
-    vec4 p3 = texelFetch(PrevSampler, ivec2(3, 0), 0);
-
-    // Adaptive glide (see header): bit-exact unless the held basis is stale.
-    vec3 Rp = vec3(c16(p0.x, p0.y), c16(p0.z, p0.w), c16(p1.x, p1.y));
-    vec3 Rn = vec3(c16(b[0] / 255.0, b[1] / 255.0), c16(b[2] / 255.0, b[3] / 255.0),
-                   c16(b[4] / 255.0, b[5] / 255.0));
-    float k = 1.0;
-    if (pc.r > 0.02) {
-        float lp = length(Rp);
-        float ln = length(Rn);
-        if (lp > 0.5 && ln > 0.5 && dot(Rp, Rn) / (lp * ln) < GLIDE_DOT) {
-            k = GLIDE_K;
-        }
     }
 
     if (k >= 1.0) {
@@ -169,6 +201,9 @@ void main() {
 
     // Glide path: blend the pair in float space, re-orthonormalize, re-encode.
     vec3 Rb = normalize(mix(Rp, Rn, k));
+    vec4 p1 = texelFetch(PrevSampler, ivec2(1, 0), 0);
+    vec4 p2 = texelFetch(PrevSampler, ivec2(2, 0), 0);
+    vec4 p3 = texelFetch(PrevSampler, ivec2(3, 0), 0);
     vec3 Um = mix(vec3(c16(p1.z, p1.w), c16(p2.x, p2.y), c16(p2.z, p2.w)),
                   vec3(c16(b[6] / 255.0, b[7] / 255.0), c16(b[8] / 255.0, b[9] / 255.0),
                        c16(b[10] / 255.0, b[11] / 255.0)), k);
