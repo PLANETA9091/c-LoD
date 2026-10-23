@@ -618,16 +618,18 @@ mod tests {
             terrain.contains("hitLvl"),
             "adaptive level tracking missing"
         );
-        // v4.4.2: the day grade must come from the live Fog UBO (the 26.3
-        // WorldClock made Globals.GameTime diverge from the sun), with the
-        // clock estimate only as the unbound-UBO fallback.
+        // v4.4.3: the day grade rides the camera channel (px4.g). Post
+        // pipelines CANNOT declare the vanilla Fog UBO — PostChain builds
+        // the bind group layout from inputs + SamplerInfo + JSON uniforms
+        // only, and an undeclared uniform fails the whole pack (the
+        // "doesn't let me join" bug). Guard against regressions:
         assert!(
-            terrain.contains("dot(FogColor.rgb, vec3(0.299, 0.587, 0.114))"),
-            "day factor must track FogColor (black-in-day fix)"
+            !terrain.contains("uniform Fog"),
+            "Fog UBO is illegal in post shaders — the pack gets rejected"
         );
         assert!(
-            terrain.contains("layout(std140) uniform Fog"),
-            "Fog UBO declaration missing"
+            terrain.contains("float dayF = pc4.g;"),
+            "day factor must come from the camera channel day byte"
         );
     }
 }

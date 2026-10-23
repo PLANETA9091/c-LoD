@@ -1,7 +1,7 @@
 #version 330
 #extension GL_ARB_separate_shader_objects : require
 
-// c-LoD pass 2 (v4.4.2): decode the camera channel into the persistent
+// c-LoD pass 2 (v4.4.3): decode the camera channel into the persistent
 // rotation target.
 //
 // Picks the topmost intact payload row across all col_scan slices and packs
@@ -12,7 +12,7 @@
 //   px1 = (Rz_hi, Rz_lo, Ux_hi, Ux_lo)
 //   px2 = (Uy_hi, Uy_lo, Uz_hi, Uz_lo)   bobbed world-space up
 //   px3 = (fov_hi, fov_lo, tx, ty)       fov 16-bit, eye wobble 8-bit
-//   px4 = (conf, 0, 0, 0)
+//   px4 = (conf, day, 0, 0)              conf 0..1, day = sky grade 0..1
 //
 // The payload is stored ENCODED (not decoded to floats): the persistent
 // target is RGBA8 and 16-bit basis components must survive the round trip
@@ -34,8 +34,21 @@
 // occluded the previous payload is kept and confidence decays at 0.99/frame.
 // Since v4.4.1 confidence is diagnostics + the never-solved init gate only —
 // it no longer fades the LOD.
+//
+// v4.4.3 DAY BYTE (px4.g): post pipelines cannot declare the vanilla Fog UBO
+// (PostChain builds the bind group layout from inputs + SamplerInfo + JSON
+// uniforms only — BindGroupLayouts.FOG is world-pipeline-only; declaring Fog
+// in a post shader fails the whole pack with "Unable to find shader defined
+// uniform (Fog)"). The day grade therefore rides the camera channel: the
+// topmost intact payload row is PURE SKY by construction (clouds, stars and
+// the moon break the payload checksum, so those rows never win), and its 19
+// pixels sit at one sky altitude. Average their RGB luminance, map through
+// the day window, exponentially smooth against the persistent byte. This
+// tracks the real sun clock — Globals.GameTime counts raw level ticks while
+// the 26.3 sun runs on the WorldClock timeline, so the two diverge after
+// beds, /time set or a paused daylight cycle.
 
-uniform sampler2D ScanSampler; // clod:clod_scan (640x1 slice report)
+uniform sampler2D ScanSampler; // clod:clod_scan (5120x1 slice report)
 uniform sampler2D InSampler;   // minecraft:main (payload rows)
 uniform sampler2D PrevSampler; // clod:clod_rot_a (1x5 persistent)
 
@@ -45,6 +58,12 @@ layout(location = 0) out vec4 fragColor;
 const int SLICES = 5120;
 const float GLIDE_DOT = 0.9986; // cos(~3 deg): below this the held basis is stale
 const float GLIDE_K = 0.35;
+
+// Day-grade window (luminance of the sky): night ~0.03-0.06, dawn/dusk ramps
+// through it, day >= 0.45 (deep-blue zenith and rain-gray sky included).
+const float DAY_LO = 0.09;
+const float DAY_HI = 0.30;
+const float DAY_SMOOTH = 0.1; // per-frame exponential smoothing of the day byte
 
 // (hi,lo) big-endian 16-bit byte pair from RGBA8 (stored n/255), with the
 // (c+1)/2 * 65535 signed remap used by the camera channel.
@@ -81,8 +100,26 @@ void main() {
     if (j == 4) {
         // Confidence pixel: 1.0 while the channel is alive, slow decay when
         // the column is occluded (facing a wall of terrain / GUI overlay).
-        fragColor = vec4(best >= 0 ? min(pc.r + 0.08, 1.0) : pc.r * 0.99,
-                         0.0, 0.0, 0.0);
+        // The day grade rides the same pixel: while a row is alive, average
+        // its 19 RGB pixels (pure unblended sky — clouds/stars/moon rows
+        // fail the checksum and never win), map through the day window and
+        // exponentially smooth against the persistent byte; while occluded,
+        // hold the last grade.
+        float conf = best >= 0 ? min(pc.r + 0.08, 1.0) : pc.r * 0.99;
+        float day = pc.g;
+        if (best >= 0) {
+            vec3 skySum = vec3(0.0);
+            for (int i = 0; i < 19; ++i) {
+                skySum += texelFetch(InSampler, ivec2(i, best), 0).rgb;
+            }
+            float dayRaw = smoothstep(DAY_LO, DAY_HI,
+                dot(skySum / 19.0, vec3(0.299, 0.587, 0.114)));
+            float dayByte = floor(clamp(dayRaw, 0.0, 1.0) * 255.0 + 0.5);
+            day = pc.r > 0.02
+                ? floor(mix(pc.g * 255.0, dayByte, DAY_SMOOTH) + 0.5)
+                : dayByte;
+        }
+        fragColor = vec4(conf, day, 0.0, 0.0);
         return;
     }
 
