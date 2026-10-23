@@ -617,13 +617,18 @@ mod tests {
             solve.contains("GAP_UP = 0.05") && solve.contains("GAP_DOWN = 0.15"),
             "gap fade must stay softened (v4.4.5 constants breathed on dropout noise)"
         );
-        // v4.4.8: cross-group byte vote — the topmost-row rule trusted any
-        // checksum-valid run, so foreign-matrix impostor rows (another pass
-        // rendering the overridden core/sky) could outvote the true sky rows
-        // exactly when looking up = the tilted-world artifact.
+        // v4.4.9: cell vote — the v4.4.8 per-group topmost vote let a
+        // foreign core/sky pass capture 6-11 groups' topmost slots and win
+        // the election (the 20:12 screenshot set: panel tilt +28..58,
+        // fov 108-110 vs the camera's 90). The frame-global payload fills
+        // every sky cell, an impostor only its own — elect by sampled-cell
+        // count (FNV over the 16 payload bytes), >= 3 cells, tie-break
+        // topmost.
         assert!(
-            solve.contains("s % 16") && solve.contains("bestAgree"),
-            "rot_solve must elect the payload by cross-group byte vote (v4.4.8)"
+            solve.contains("SAMPLES = 512")
+                && solve.contains("2166136261u")
+                && solve.contains("bestAgree"),
+            "rot_solve must elect the payload by sampled-cell vote (v4.4.9)"
         );
         assert!(
             solve.contains("agree / 16.0") && solve.contains("float(cov) / 16.0"),

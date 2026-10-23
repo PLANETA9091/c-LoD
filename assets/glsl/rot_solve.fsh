@@ -93,6 +93,22 @@
 // next to the solved yaw/pitch/tilt/fov so one F3 screenshot proves the
 // basis numerically.
 //
+// v4.4.9 CELL VOTE (the flick fix, take two): the 20:12 screenshot set on
+// v4.4.8 caught the group vote red-handed — the BASIS TRUTH panel showed
+// the elected payload with tilt +28..58 deg, pitch -17..-45, fov 108-110
+// on flick frames (camera: tilt 0, fov 90), agree 6-11/16. A foreign
+// core/sky pass writes payload rows with ITS matrix, and v4.4.8 let those
+// rows win by capturing the per-group TOPMOST slot: one impostor row above
+// the true sky hijacked that group's whole vote, and 6-11 hijacked groups
+// outvoted the rest. The payload is frame-global — the TRUE pattern fills
+// EVERY cell whose band sees sky (hundreds of cells), the impostor only
+// the cells its geometry covers. So the election now tallies sampled cells
+// (512 of 5120, even spread) by FNV-hashed payload bytes and elects the
+// pattern with the most cells (>= 3, tie-break topmost). Honest frames
+// elect the same topmost row as before (unanimous sample); impostor
+// frames elect the corroborated truth no matter how high the foreign pass
+// renders. px5 agree/cov become cell counts normalized to the /16 scale.
+//
 // Confidence jumps to 1 on the first valid row; while the column is fully
 // occluded the previous payload is kept and confidence decays at 0.995/frame
 // (v4.4.4, was 0.99 — the glide+fade path now covers gaps up to ~13 s).
@@ -125,6 +141,8 @@ layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 
 const int SLICES = 5120;
+const int SAMPLES = 512;   // v4.4.9: cells sampled evenly for the election
+const int MIN_CELLS = 3;   // a pattern needs >= 3 cells to be elected
 const float GLIDE_DOT = 0.9986; // cos(~3 deg): below this the held basis is stale
 const float GLIDE_K = 0.8;      // v4.4.5: 0.6 -> 0.8, converge in ~3 frames
 const float FADE_WIN = 0.0873;  // radians(5 deg): residual -> LOD fade scale
@@ -155,63 +173,65 @@ float enc8s(float c) {
 void main() {
     int j = int(gl_FragCoord.x); // 0..4, one output pixel per fragment
 
-    // v4.4.8 GROUP-VOTE: per-group topmost intact rows first...
-    int gBest[16];
-    int cov = 0;
-    for (int g = 0; g < 16; ++g) {
-        gBest[g] = -1;
+    // v4.4.9 CELL VOTE: sample 512 of the 5120 (group, band) cells evenly,
+    // hash each cell's topmost-row payload bytes, elect the hash with the
+    // most cells. The frame-global payload fills every sky cell; an
+    // impostor fills only the cells its pass covers, no matter how high
+    // on screen it renders (the v4.4.8 per-group topmost flaw).
+    uint sHash[SAMPLES];
+    int sRow[SAMPLES];
+    for (int k = 0; k < SAMPLES; ++k) {
+        sHash[k] = 0u;
+        sRow[k] = -1;
     }
-    for (int s = 0; s < SLICES; ++s) {
+    for (int k = 0; k < SAMPLES; ++k) {
+        int s = (k * SLICES) / SAMPLES;
         vec4 sc = texelFetch(ScanSampler, ivec2(s, 0), 0);
-        if (sc.r > 0.5) {
-            int g = s % 16;
-            int y = int(sc.g * 255.0 + 0.5) * 256 + int(sc.b * 255.0 + 0.5);
-            if (y > gBest[g]) {
-                gBest[g] = y;
-            }
+        if (sc.r <= 0.5) {
+            continue;
         }
+        int y = int(sc.g * 255.0 + 0.5) * 256 + int(sc.b * 255.0 + 0.5);
+        uint h = 2166136261u; // FNV-1a over the 16 payload bytes
+        for (int i = 0; i < 16; ++i) {
+            uint b = uint(texelFetch(InSampler, ivec2(2 + i, y), 0).a * 255.0 + 0.5);
+            h = (h ^ b) * 16777619u;
+        }
+        sHash[k] = h;
+        sRow[k] = y;
     }
-    for (int g = 0; g < 16; ++g) {
-        if (gBest[g] >= 0) {
-            ++cov;
+    int covCells = 0;
+    for (int k = 0; k < SAMPLES; ++k) {
+        if (sRow[k] >= 0) {
+            ++covCells;
         }
     }
 
-    // ...then elect the byte pattern the most groups agree on. The payload
-    // is frame-global, so honest rows are byte-identical across groups; a
-    // foreign-matrix impostor is isolated to the groups its pass covers.
-    // Tie-break topmost reproduces the old rule when nothing corroborates.
+    // Elect the pattern the most sampled cells share (self included);
+    // tie-break topmost. The winner's bytes are re-fetched below, so a
+    // hash collision could only mis-rank at ~2^-32 per pair — and the
+    // winner still has to beat the true sky's cell count.
     int best = -1;
     int bestAgree = 0;
-    for (int g = 0; g < 16; ++g) {
-        if (gBest[g] < 0) {
+    for (int k = 0; k < SAMPLES; ++k) {
+        if (sRow[k] < 0) {
             continue;
         }
-        float a0[16];
-        for (int i = 0; i < 16; ++i) {
-            a0[i] = texelFetch(InSampler, ivec2(2 + i, gBest[g]), 0).a * 255.0;
-        }
         int agree = 0;
-        for (int g2 = 0; g2 < 16; ++g2) {
-            if (g2 == g || gBest[g2] < 0) {
-                continue;
-            }
-            bool same = true;
-            for (int i = 0; i < 16; ++i) {
-                float b2 = texelFetch(InSampler, ivec2(2 + i, gBest[g2]), 0).a * 255.0;
-                if (abs(a0[i] - b2) > 0.5) {
-                    same = false;
-                    break;
-                }
-            }
-            if (same) {
+        for (int m = 0; m < SAMPLES; ++m) {
+            if (sRow[m] >= 0 && sHash[m] == sHash[k]) {
                 ++agree;
             }
         }
-        if (agree > bestAgree || (agree == bestAgree && gBest[g] > best)) {
+        if (agree > bestAgree || (agree == bestAgree && sRow[k] > best)) {
             bestAgree = agree;
-            best = gBest[g];
+            best = sRow[k];
         }
+    }
+    // Corroboration floor: a pattern with < MIN_CELLS cells is noise or a
+    // fully occluded sky — the gap path handles both. Honest skies vote
+    // in the hundreds.
+    if (bestAgree < MIN_CELLS) {
+        best = -1;
     }
 
     vec4 prev = texelFetch(PrevSampler, ivec2(j, 0), 0);
@@ -290,10 +310,14 @@ void main() {
     int slot = (int(texelFetch(PrevSampler, ivec2(5, 0), 0).r * 255.0 + 0.5) + 1) % 256;
 
     if (j == 5) {
-        // v4.4.8 election readout: (slot, agree/16, cov/16, rowY/screenH).
-        // agree counts the groups sharing the winning bytes (winner itself
-        // included); cov counts groups with any intact row at all.
-        float agree = float(bestAgree + (best >= 0 ? 1 : 0));
+        // v4.4.9 election readout: (slot, agree, cov, rowY). agree/cov are
+        // cell counts normalized to the /16 panel scale: agree = the
+        // winning pattern's share of the sample x 16 (16/16 = every
+        // sampled cell carries the elected bytes), cov = cells with any
+        // intact row x 16.
+        float agree = clamp(float(bestAgree) / float(SAMPLES) * 16.0,
+                            0.0, 16.0);
+        float cov = clamp(float(covCells) / float(SAMPLES) * 16.0, 0.0, 16.0);
         float rowY = best >= 0 ? float(best) / max(InSize.y, 1.0) : 0.0;
         fragColor = vec4(float(slot) / 255.0, agree / 16.0,
                          float(cov) / 16.0, rowY);
