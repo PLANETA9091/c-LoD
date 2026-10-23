@@ -162,6 +162,11 @@ static BLOCK_IDS: Mutex<Option<BlockIds>> = Mutex::new(None);
 struct MaterialIds {
     m_ordinal: jmethodID,
     m_get_key: jmethodID,
+    // DH avoided-block predicate (FullDataToRenderDataTransformer:
+    // ignoreNonSolidBlock = !isSolid && !isLiquid && opacity != opaque;
+    // Bukkit isOccluding == NMS opacity 15 for a full cube).
+    m_is_solid: jmethodID,
+    m_is_occluding: jmethodID,
 }
 unsafe impl Send for MaterialIds {}
 static MATERIAL_IDS: Mutex<Option<MaterialIds>> = Mutex::new(None);
@@ -231,6 +236,8 @@ fn material_ids(env: Env, mat: jobject) -> Option<MaterialIds> {
             "getKey",
             "()Lorg/bukkit/NamespacedKey;",
         )?,
+        m_is_solid: bind_method(env, cls_local, cls, "isSolid", "()Z")?,
+        m_is_occluding: bind_method(env, cls_local, cls, "isOccluding", "()Z")?,
     };
     *MATERIAL_IDS.lock().unwrap() = Some(ids);
     Some(ids)
@@ -473,7 +480,54 @@ pub fn sample_column(
                                     tex_side = ws;
                                 }
                             }
-                            _ => {}
+                            // DH blocksToIgnore=NON_COLLIDING +
+                            // tintWithAvoidedBlocks=true (both defaults,
+                            // Config.java:895/905): a non-colliding,
+                            // non-liquid, non-opaque block above the surface
+                            // — tall grass, ferns, flowers, torches — is
+                            // SKIPPED by DH and its colour + material REPLACE
+                            // the block below ("a red flower will tint the
+                            // grass below it red"). The height stays at the
+                            // ground level: the avoided block contributes no
+                            // datapoint, only identity. Skipped when the
+                            // ground is liquid (seagrass must not repaint
+                            // the water surface; DH keeps the liquid branch).
+                            _ => {
+                                if !liquid && !env.call_boolean_method(above, aid.m_is_liquid, &[])
+                                {
+                                    let solid = env.call_boolean_method(amat, amid.m_is_solid, &[]);
+                                    clear_if_pending(env);
+                                    let occluding =
+                                        env.call_boolean_method(amat, amid.m_is_occluding, &[]);
+                                    clear_if_pending(env);
+                                    if !solid && !occluding {
+                                        let aordinal =
+                                            env.call_int_method(amat, amid.m_ordinal, &[]);
+                                        clear_if_pending(env);
+                                        // A missing table entry keeps the
+                                        // ground block — never gray a live
+                                        // surface over a lookup miss.
+                                        if let Some(ainfo) = mat_info(env, amat, &amid, aordinal) {
+                                            let a_t_top = match ainfo.tint_top {
+                                                1 => grass,
+                                                2 => foliage,
+                                                3 => water,
+                                                _ => 0xFFFFFF,
+                                            };
+                                            let a_t_side = match ainfo.tint_side {
+                                                1 => grass,
+                                                2 => foliage,
+                                                3 => water,
+                                                _ => 0xFFFFFF,
+                                            };
+                                            top = mul_rgb(ainfo.top, a_t_top);
+                                            side = mul_rgb(ainfo.side, a_t_side);
+                                            tex_top = ainfo.tex_top;
+                                            tex_side = ainfo.tex_side;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
