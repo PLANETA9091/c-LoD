@@ -273,7 +273,13 @@ pub static BLOCK_COLORS: &[(&str, u32, u32, u8, u8)] = &[
     ("cracked_deepslate_bricks", 0x454546, 0x454546, 0, 0),
     ("cracked_deepslate_tiles", 0x373737, 0x373737, 0, 0),
     ("cracked_nether_bricks", 0x2B1519, 0x2B1519, 0, 0),
-    ("cracked_polished_blackstone_bricks", 0x2F2A32, 0x2F2A32, 0, 0),
+    (
+        "cracked_polished_blackstone_bricks",
+        0x2F2A32,
+        0x2F2A32,
+        0,
+        0,
+    ),
     ("cracked_stone_bricks", 0x787778, 0x787778, 0, 0),
     ("crafter", 0x777272, 0x79736D, 0, 0),
     ("crafting_table", 0x865330, 0x947D5D, 0, 0),
@@ -820,7 +826,13 @@ pub static BLOCK_COLORS: &[(&str, u32, u32, u8, u8)] = &[
     ("polished_blackstone_brick_wall", 0x332E37, 0x332E37, 0, 0),
     ("polished_blackstone_bricks", 0x332E37, 0x332E37, 0, 0),
     ("polished_blackstone_button", 0x37333C, 0x37333C, 0, 0),
-    ("polished_blackstone_pressure_plate", 0x37333C, 0x37333C, 0, 0),
+    (
+        "polished_blackstone_pressure_plate",
+        0x37333C,
+        0x37333C,
+        0,
+        0,
+    ),
     ("polished_blackstone_slab", 0x37333C, 0x37333C, 0, 0),
     ("polished_blackstone_stairs", 0x37333C, 0x37333C, 0, 0),
     ("polished_blackstone_wall", 0x37333C, 0x37333C, 0, 0),
@@ -1198,7 +1210,13 @@ pub static BLOCK_COLORS: &[(&str, u32, u32, u8, u8)] = &[
     ("waxed_exposed_copper_chain", 0x816754, 0x816754, 0, 0),
     ("waxed_exposed_copper_chest", 0xA47E69, 0xA47E69, 0, 0),
     ("waxed_exposed_copper_door", 0x9D7866, 0x9D7866, 0, 0),
-    ("waxed_exposed_copper_golem_statue", 0xA47E69, 0xA47E69, 0, 0),
+    (
+        "waxed_exposed_copper_golem_statue",
+        0xA47E69,
+        0xA47E69,
+        0,
+        0,
+    ),
     ("waxed_exposed_copper_grate", 0xA57F6A, 0xA57F6A, 0, 0),
     ("waxed_exposed_copper_lantern", 0x9B8E71, 0x9B8E71, 0, 0),
     ("waxed_exposed_copper_trapdoor", 0xA57E6A, 0xA57E6A, 0, 0),
@@ -1214,7 +1232,13 @@ pub static BLOCK_COLORS: &[(&str, u32, u32, u8, u8)] = &[
     ("waxed_oxidized_copper_chain", 0x3E7764, 0x3E7764, 0, 0),
     ("waxed_oxidized_copper_chest", 0x54A587, 0x54A587, 0, 0),
     ("waxed_oxidized_copper_door", 0x519D82, 0x519D82, 0, 0),
-    ("waxed_oxidized_copper_golem_statue", 0x54A587, 0x54A587, 0, 0),
+    (
+        "waxed_oxidized_copper_golem_statue",
+        0x54A587,
+        0x54A587,
+        0,
+        0,
+    ),
     ("waxed_oxidized_copper_grate", 0x54A486, 0x54A486, 0, 0),
     ("waxed_oxidized_copper_lantern", 0x5C9477, 0x5C9477, 0, 0),
     ("waxed_oxidized_copper_trapdoor", 0x55A487, 0x55A487, 0, 0),
@@ -1229,13 +1253,25 @@ pub static BLOCK_COLORS: &[(&str, u32, u32, u8, u8)] = &[
     ("waxed_weathered_copper_chain", 0x4B6E5C, 0x4B6E5C, 0, 0),
     ("waxed_weathered_copper_chest", 0x6D9B71, 0x6D9B71, 0, 0),
     ("waxed_weathered_copper_door", 0x6D9269, 0x6D9269, 0, 0),
-    ("waxed_weathered_copper_golem_statue", 0x6D9B71, 0x6D9B71, 0, 0),
+    (
+        "waxed_weathered_copper_golem_statue",
+        0x6D9B71,
+        0x6D9B71,
+        0,
+        0,
+    ),
     ("waxed_weathered_copper_grate", 0x6B9B72, 0x6B9B72, 0, 0),
     ("waxed_weathered_copper_lantern", 0x6B906C, 0x6B906C, 0, 0),
     ("waxed_weathered_copper_trapdoor", 0x6E9B72, 0x6E9B72, 0, 0),
     ("waxed_weathered_cut_copper", 0x6F946E, 0x6F946E, 0, 0),
     ("waxed_weathered_cut_copper_slab", 0x6F946E, 0x6F946E, 0, 0),
-    ("waxed_weathered_cut_copper_stairs", 0x6F946E, 0x6F946E, 0, 0),
+    (
+        "waxed_weathered_cut_copper_stairs",
+        0x6F946E,
+        0x6F946E,
+        0,
+        0,
+    ),
     ("waxed_weathered_lightning_rod", 0x64926C, 0x64926C, 0, 0),
     ("weathered_chiseled_copper", 0x6A9A73, 0x6A9A73, 0, 0),
     ("weathered_copper", 0x6D9B71, 0x6D9B71, 0, 0),
@@ -1311,7 +1347,12 @@ pub fn lookup(path: &str) -> Option<(u32, u32, u8, u8)> {
         .binary_search_by(|e| e.0.cmp(path))
         .ok()
         .map(|i| {
-            (BLOCK_COLORS[i].1, BLOCK_COLORS[i].2, BLOCK_COLORS[i].3, BLOCK_COLORS[i].4)
+            (
+                BLOCK_COLORS[i].1,
+                BLOCK_COLORS[i].2,
+                BLOCK_COLORS[i].3,
+                BLOCK_COLORS[i].4,
+            )
         })
 }
 
