@@ -617,6 +617,18 @@ mod tests {
             solve.contains("GAP_UP = 0.05") && solve.contains("GAP_DOWN = 0.15"),
             "gap fade must stay softened (v4.4.5 constants breathed on dropout noise)"
         );
+        // v4.4.8: cross-group byte vote — the topmost-row rule trusted any
+        // checksum-valid run, so foreign-matrix impostor rows (another pass
+        // rendering the overridden core/sky) could outvote the true sky rows
+        // exactly when looking up = the tilted-world artifact.
+        assert!(
+            solve.contains("s % 16") && solve.contains("bestAgree"),
+            "rot_solve must elect the payload by cross-group byte vote (v4.4.8)"
+        );
+        assert!(
+            solve.contains("agree / 16.0") && solve.contains("float(cov) / 16.0"),
+            "px5 must publish the election readout (agree, cov, rowY)"
+        );
 
         let chain_v = get("assets/clod/post_effect/lod_terrain.json");
         let chain = String::from_utf8_lossy(&chain_v);
@@ -680,6 +692,13 @@ mod tests {
         assert!(
             terrain.contains("smoothstep(0.25, 0.8, pc4.a)"),
             "LOD must dissolve by the gap counter during payload loss"
+        );
+        // v4.4.8: the BASIS TRUTH panel — solved yaw/pitch/tilt/fov +
+        // agree/cov/rowY bars, readable against the F3 debug screen.
+        assert!(
+            terrain.contains("BASIS TRUTH") && terrain.contains("yawv")
+                && terrain.contains("pe.g"),
+            "lod_terrain must draw the basis truth panel (v4.4.8)"
         );
     }
 }

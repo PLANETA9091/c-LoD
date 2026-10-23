@@ -47,6 +47,18 @@
 // pose is far off, and the LOD materializes as it converges. Bit-exact
 // tracking frames carry residual 0 and render at full strength, exactly as
 // in v4.4.1.
+//
+// v4.4.8 GROUP VOTE + BASIS TRUTH: the 19:19 screenshot set proved the
+// channel ALIVE (conf=1, gap=0, res=0) while the world rendered tilted
+// ~40 deg, tilt depending on the view direction — liveness is not CONTENT.
+// Any 26.3 pass that runs the overridden core/sky with a foreign matrix
+// emits checksum-valid impostor rows; the old topmost-row rule let a few
+// impostor groups outvote the true sky rows exactly when looking up.
+// rot_solve now elects the payload by cross-group byte vote (the true
+// payload is frame-global and byte-identical in every group) and publishes
+// the election in px5; the BASIS TRUTH panel (hud6, bottom-center) draws
+// the solved yaw/pitch/tilt/fov + agree/cov/rowY bars to be checked against
+// the F3 debug screen.
 
 uniform sampler2D InSampler;      // minecraft:main color
 uniform sampler2D InDepthSampler; // minecraft:main depth
@@ -257,14 +269,15 @@ void main() {
     float forceLod = 0.0;
 
     // Debug modes 4 and 6 draw the tracker HUD (confidence bar + v4.4.6
-    // channel oscilloscope). Mode 4 is INVASIVE: it forces the LOD over
-    // every pixel and flat-greens hits (geometry debugging) — the 19:03
-    // screenshots showed why that hides the real picture (the whole sky
-    // becomes debug-orange, far fog-hidden hits become visible green).
-    // Mode 6 is TRANSPARENT: the game renders normally, only the HUD
-    // overlays it — a screenshot of a bad moment pairs the artifact with
-    // the channel trace. The 2px white tick at the scope's top-right
-    // marks "now".
+    // channel oscilloscope + v4.4.8 BASIS TRUTH panel). Mode 4 is INVASIVE:
+    // it forces the LOD over every pixel and flat-greens hits (geometry
+    // debugging) — the 19:03 screenshots showed why that hides the real
+    // picture (the whole sky becomes debug-orange, far fog-hidden hits
+    // become visible green wedges whose straight boundaries are the
+    // silhouette of the atlas edge, not a bug). Mode 6 is TRANSPARENT: the
+    // game renders normally, only the HUD overlays it — a screenshot of a
+    // bad moment pairs the artifact with the channel trace. The 2px white
+    // tick at the scope's top-right marks "now".
     bool hud4 = DebugParams.x > 3.5 && DebugParams.x < 4.5;
     bool hud6 = DebugParams.x > 5.5 && DebugParams.x < 6.5;
     if (hud4 || hud6) {
@@ -297,6 +310,95 @@ void main() {
         }
         if (hud4) {
             forceLod = 1.0;
+        }
+
+        // v4.4.8 BASIS TRUTH panel (bottom-center, hud6): the 19:19
+        // screenshot set proved the channel ALIVE (conf=1, gap=0, res=0,
+        // 256 straight frames) while the LOD world rendered tilted ~40 deg,
+        // tilt depending on the view direction. Liveness is not CONTENT:
+        // the oscilloscope cannot see whether the elected payload row was
+        // written by the sky dome (true basis) or by another 26.3 pass that
+        // runs the overridden core/sky with a FOREIGN matrix (checksum-valid
+        // impostor rows — the old topmost rule let them win exactly when
+        // looking up). rot_solve now elects the payload by cross-group byte
+        // vote and publishes the election in px5 (slot, agree, cov, rowY);
+        // these bars show the solved basis CONTENT to be read against the
+        // F3 debug screen (Facing yaw/pitch):
+        //   0 yaw   MC yaw of the solved forward, 0..360, 10 notches of 36°
+        //   1 pitch MC pitch, -90 (up) .. +90 (down), mid = level
+        //   2 tilt  horizon tilt (screen-plane roll), -90..90, mid = level
+        //   3 fov   payload fov, 5..120
+        //   4 agree groups sharing the winning payload bytes, 16 cells
+        //   5 cov   groups with any intact payload row, 16 cells
+        //   6 rowY  winning row's y / screen height
+        // yaw/pitch disagreeing with F3 = the elected basis is NOT the
+        // camera's; agree vs cov separates a partial impostor (few groups
+        // carry it) from a full-screen one (all groups agree on a wrong
+        // basis).
+        if (hud6) {
+            float bx0 = floor(OutSize.x * 0.5) - 124.0;
+            float byBase = OutSize.y - 50.0; // bar k=0 bottom edge
+            float dk = (byBase - gl_FragCoord.y) / 12.0;
+            float k = floor(dk);
+            float fx = gl_FragCoord.x - (bx0 + 4.0);
+            if (fx >= -4.0 && fx < 244.0 && k >= 0.0 && k < 7.0
+                && dk - k < 8.0 / 12.0) {
+                vec4 rp0 = texelFetch(RotSampler, ivec2(0, 0), 0);
+                vec4 rp1 = texelFetch(RotSampler, ivec2(1, 0), 0);
+                vec4 rp2 = texelFetch(RotSampler, ivec2(2, 0), 0);
+                vec4 rp3 = texelFetch(RotSampler, ivec2(3, 0), 0);
+                vec4 pe = texelFetch(RotSampler, ivec2(5, 0), 0);
+                vec3 R = vec3(c16(rp0.x, rp0.y), c16(rp0.z, rp0.w), c16(rp1.x, rp1.y));
+                vec3 U = vec3(c16(rp1.z, rp1.w), c16(rp2.x, rp2.y), c16(rp2.z, rp2.w));
+                R = normalize(R);
+                U = normalize(U - R * dot(R, U));
+                vec3 F = cross(U, R);
+                float fovq = rp3.x * 65280.0 + rp3.y * 255.0;
+                float fov = fovq < 65534.5 ? 5.0 + fovq / 65535.0 * 115.0 : FogParams.z;
+                float yawv = mod(degrees(atan(-F.x, F.z)) + 360.0, 360.0);
+                float pitv = degrees(asin(clamp(-F.y, -1.0, 1.0)));
+                float tltv = degrees(atan(dot(vec3(0.0, 1.0, 0.0), R),
+                                          dot(vec3(0.0, 1.0, 0.0), U)));
+                float v;
+                bool seg = false;
+                if (k < 0.5) {
+                    v = yawv / 360.0;
+                } else if (k < 1.5) {
+                    v = (pitv + 90.0) / 180.0;
+                } else if (k < 2.5) {
+                    v = (tltv + 90.0) / 180.0;
+                } else if (k < 3.5) {
+                    v = clamp((fov - 5.0) / 115.0, 0.0, 1.0);
+                } else if (k < 4.5) {
+                    v = pe.g;
+                    seg = true;
+                } else if (k < 5.5) {
+                    v = pe.b;
+                    seg = true;
+                } else {
+                    v = pe.a;
+                }
+                vec3 col = vec3(0.05);
+                if (seg) {
+                    float cell = floor(fx / 15.0);
+                    if (cell >= 0.0 && cell < 16.0
+                        && cell < floor(v * 16.0 + 0.5)) {
+                        col = vec3(0.3, 1.0, 0.5);
+                    }
+                } else {
+                    if (fx >= 0.0 && fx < v * 240.0) {
+                        col = vec3(1.0, 0.7, 0.2);
+                    }
+                }
+                if (abs(fx - v * 240.0) < 1.0) {
+                    col = vec3(1.0); // value tick
+                }
+                if (mod(fx, 24.0) < 1.0 && col.g < 0.5) {
+                    col = vec3(0.18); // 1/10 notches
+                }
+                fragColor = vec4(col, 1.0);
+                return;
+            }
         }
     }
 

@@ -71,6 +71,28 @@
 // frame; lod_terrain's debug HUD (debug_lod=4) draws the trace so a single
 // screenshot shows exactly what the camera channel was doing.
 //
+// v4.4.8 GROUP-VOTE SELECTION (the tilted-world fix): the 19:19 screenshot
+// set proved the channel ALIVE (conf=1, gap=0, res=0 for 256 straight
+// frames) while the LOD world still rendered tilted ~40 deg with the tilt
+// depending on the view direction. Liveness checks cannot see the CONTENT
+// of the basis — and the topmost-row rule trusted ANY checksum-valid run.
+// The overridden core/sky is not the only writer of sky-covered pixels: any
+// 26.3 pass routed through it with a FOREIGN matrix (celestial / sunrise /
+// void layers) emits rows that pass magic+fov+checksum+adjacency but carry
+// that pass's basis. The topmost rule let a few impostor groups outvote the
+// true sky rows of all the others — an impostor high on screen wins exactly
+// when the camera looks up, which is why the tilt "depended on the view
+// direction". The real payload is FRAME-GLOBAL: every group that sees sky
+// at row y writes the SAME 19 bytes. So: take each group's topmost intact
+// row, compare their byte patterns, and ELECT the pattern with the most
+// group agreement (tie-break: topmost). An honest frame elects the same row
+// the old code did (all groups agree); an impostor frame elects the
+// corroborated truth. px5 now publishes the election: (slot, agree/16,
+// cov/16, rowY/screenH) — agree = groups sharing the winning bytes, cov =
+// groups with any intact row. lod_terrain's BASIS TRUTH panel draws these
+// next to the solved yaw/pitch/tilt/fov so one F3 screenshot proves the
+// basis numerically.
+//
 // Confidence jumps to 1 on the first valid row; while the column is fully
 // occluded the previous payload is kept and confidence decays at 0.995/frame
 // (v4.4.4, was 0.99 — the glide+fade path now covers gaps up to ~13 s).
@@ -93,6 +115,11 @@
 uniform sampler2D ScanSampler; // clod:clod_scan (5120x1 slice report)
 uniform sampler2D InSampler;   // minecraft:main (payload rows)
 uniform sampler2D PrevSampler; // clod:clod_rot_a (1x5 persistent)
+
+layout(std140) uniform SamplerInfo {
+    vec2 OutSize;
+    vec2 InSize;
+};
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
@@ -128,14 +155,62 @@ float enc8s(float c) {
 void main() {
     int j = int(gl_FragCoord.x); // 0..4, one output pixel per fragment
 
-    int best = -1;
+    // v4.4.8 GROUP-VOTE: per-group topmost intact rows first...
+    int gBest[16];
+    int cov = 0;
+    for (int g = 0; g < 16; ++g) {
+        gBest[g] = -1;
+    }
     for (int s = 0; s < SLICES; ++s) {
         vec4 sc = texelFetch(ScanSampler, ivec2(s, 0), 0);
         if (sc.r > 0.5) {
+            int g = s % 16;
             int y = int(sc.g * 255.0 + 0.5) * 256 + int(sc.b * 255.0 + 0.5);
-            if (y > best) {
-                best = y;
+            if (y > gBest[g]) {
+                gBest[g] = y;
             }
+        }
+    }
+    for (int g = 0; g < 16; ++g) {
+        if (gBest[g] >= 0) {
+            ++cov;
+        }
+    }
+
+    // ...then elect the byte pattern the most groups agree on. The payload
+    // is frame-global, so honest rows are byte-identical across groups; a
+    // foreign-matrix impostor is isolated to the groups its pass covers.
+    // Tie-break topmost reproduces the old rule when nothing corroborates.
+    int best = -1;
+    int bestAgree = 0;
+    for (int g = 0; g < 16; ++g) {
+        if (gBest[g] < 0) {
+            continue;
+        }
+        float a0[16];
+        for (int i = 0; i < 16; ++i) {
+            a0[i] = texelFetch(InSampler, ivec2(2 + i, gBest[g]), 0).a * 255.0;
+        }
+        int agree = 0;
+        for (int g2 = 0; g2 < 16; ++g2) {
+            if (g2 == g || gBest[g2] < 0) {
+                continue;
+            }
+            bool same = true;
+            for (int i = 0; i < 16; ++i) {
+                float b2 = texelFetch(InSampler, ivec2(2 + i, gBest[g2]), 0).a * 255.0;
+                if (abs(a0[i] - b2) > 0.5) {
+                    same = false;
+                    break;
+                }
+            }
+            if (same) {
+                ++agree;
+            }
+        }
+        if (agree > bestAgree || (agree == bestAgree && gBest[g] > best)) {
+            bestAgree = agree;
+            best = gBest[g];
         }
     }
 
@@ -215,7 +290,13 @@ void main() {
     int slot = (int(texelFetch(PrevSampler, ivec2(5, 0), 0).r * 255.0 + 0.5) + 1) % 256;
 
     if (j == 5) {
-        fragColor = vec4(float(slot) / 255.0, 0.0, 0.0, 0.0);
+        // v4.4.8 election readout: (slot, agree/16, cov/16, rowY/screenH).
+        // agree counts the groups sharing the winning bytes (winner itself
+        // included); cov counts groups with any intact row at all.
+        float agree = float(bestAgree + (best >= 0 ? 1 : 0));
+        float rowY = best >= 0 ? float(best) / max(InSize.y, 1.0) : 0.0;
+        fragColor = vec4(float(slot) / 255.0, agree / 16.0,
+                         float(cov) / 16.0, rowY);
         return;
     }
     if (j >= 6) {
