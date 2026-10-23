@@ -403,9 +403,24 @@ fn ensure_boot(state: &Arc<State>, env: Env) {
                         state.atlas.scanned_cells() * 100 / state.atlas.total_cells().max(1)
                     ));
                 }
-                // NOTE: no heavy work here. The deadline anchor and the core
-                // warm-up moved to probe_ticking()/warm_core(): tasks queued
-                // before the tick loop starts run inside prepareLevel's
+                // Deadline anchor: SYNC mode scans inside startup's
+                // prepareLevel drain (the fast managedBlock path) — there the
+                // tick loop may never start before the scan is done, so the
+                // anchor must stay at world resolution or the deadline can
+                // never fire (live-observed: boot timeout with the scan at
+                // 98% and the retry queue spinning). ASYNC mode anchors at
+                // the first real tick (probe_ticking): its futures only
+                // complete while the chunk system is being ticked.
+                if state.cfg.scan_mode != "async" {
+                    let mut anchor = state.world_seen_at.lock().unwrap();
+                    if anchor.is_none() {
+                        *anchor = Some(std::time::Instant::now());
+                    }
+                }
+                // NOTE: no heavy work here either way. The core warm-up moved
+                // to warm_core() (first tick; skipped for streaming), and in
+                // async mode the scan itself waits for probe_ticking(): tasks
+                // queued before the tick loop runs inside prepareLevel's
                 // executeModerately drain, where a synchronous chunk load can
                 // park forever (live-observed startup wedge).
             }
