@@ -30,7 +30,7 @@ use crate::http::PackServer;
 use crate::jni::{self, PlayerInfo};
 use crate::packgen::{self, Pack};
 use jvmti_bindings::prelude::JniEnv;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -56,6 +56,10 @@ pub struct State {
     pub scan_seq: AtomicU64,
     /// Streaming cursor (index into the centre-out chunk order).
     pub scan_cursor: AtomicU64,
+    /// Chunk indices whose force-load failed transiently (Paper's worldgen
+    /// pool rejects chunks under load); retried round-robin after the main
+    /// sweep drains, so the frozen snapshot carries no scan holes.
+    pub scan_retry: Mutex<VecDeque<u32>>,
     /// Chunk-grid indices in the same centre-out Chebyshev-ring order as the
     /// atlas cells (`crate::atlas::ring_order` over the chunk grid): a scan
     /// cut short by the deadline covers a disc of chunks around the atlas
@@ -168,6 +172,7 @@ impl State {
             world_seen_at: Mutex::new(None),
             scan_seq: AtomicU64::new(0),
             scan_cursor: AtomicU64::new(0),
+            scan_retry: Mutex::new(VecDeque::new()),
             chunk_order,
             world_obj: Mutex::new(0),
             world_name: Mutex::new(String::new()),
@@ -418,17 +423,33 @@ fn scan_stream(state: &Arc<State>, env: Env, world: jvmti_bindings::jni::jobject
     let budget = state.cfg.stream_chunks.max(1);
 
     for _ in 0..budget {
-        let idx = state.scan_cursor.fetch_add(1, Ordering::Relaxed);
-        if idx >= total {
-            break;
-        }
-        CURSOR_HINT.store(idx + 1, Ordering::Relaxed);
-        // Centre-out ring order (see ring_order): a deadline-cut scan leaves
-        // a symmetric fog-covered horizon instead of a west-side wall.
-        let co = state.chunk_order[idx as usize];
+        // Main sweep first (monotonic cursor over the centre-out ring order),
+        // then round-robin retries of the chunks whose force-load failed
+        // transiently. Without the retry pass those chunks never come back:
+        // the holes freeze into the snapshot as void cells and render as
+        // see-through slits in the LOD band.
+        let co: u32 = {
+            let idx = state.scan_cursor.fetch_add(1, Ordering::Relaxed);
+            if idx < total {
+                state.chunk_order[idx as usize]
+            } else {
+                let mut q = state.scan_retry.lock().unwrap();
+                match q.pop_front() {
+                    Some(i) => i,
+                    None => break, // main sweep + retries exhausted
+                }
+            }
+        };
+        CURSOR_HINT.store(
+            state.scan_cursor.load(Ordering::Relaxed).min(total),
+            Ordering::Relaxed,
+        );
         let cx = cx0 + (co % side as u32) as i32;
         let cz = cz0 + (co / side as u32) as i32;
         if !jni::warm_chunk(env, world, cx, cz, true) {
+            // Transient failure (worldgen pool busy): queue for a retry pass
+            // instead of dropping the chunk from the snapshot forever.
+            state.scan_retry.lock().unwrap().push_back(co);
             continue;
         }
         for dz in 0..per {

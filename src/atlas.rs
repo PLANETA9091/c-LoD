@@ -220,7 +220,11 @@ impl Atlas {
     /// Height/flags image:
     ///   R = high byte, G = low byte of `(height + 64) << 6`,
     ///   B = 255 when water, A = index into [`Self::side_lut`].
-    /// Unscanned cells encode height 0 so the shader treats them as void.
+    /// Unscanned cells encode height 0 and side index 255 — the reserved VOID
+    /// marker (valid side indices are 0..=254 because the LUT is truncated at
+    /// 255 entries). The renderer treats void exactly like Distant Horizons
+    /// treats un-generated data: no geometry, no walls, the scene shows
+    /// through (`drawnTo` semantics of DH's fog pass).
     pub fn encode_rgba(&self) -> (u32, u32, Vec<u8>) {
         let snap = self.snapshot();
         let lut = self.side_lut();
@@ -237,7 +241,7 @@ impl Atlas {
                         Self::side_index(&lut, cell.side),
                     )
                 } else {
-                    (0, false, 0)
+                    (0, false, 255)
                 };
                 let o = (z * n + x) * 4;
                 px[o] = (y16 >> 8) as u8;
@@ -420,10 +424,11 @@ mod tests {
         let o2 = 0;
         assert_eq!(px[o2], ((62 + 64) << 6 >> 8) as u8);
         assert_eq!(px[o2 + 2], 255);
-        // invalid -> zero
+        // invalid -> height 0, side byte 255 (the reserved VOID marker)
         let o3 = (7 * 16 + 7) * 4;
         assert_eq!(px[o3], 0);
         assert_eq!(px[o3 + 2], 0);
+        assert_eq!(px[o3 + 3], 255);
     }
 
     #[test]

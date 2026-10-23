@@ -30,11 +30,13 @@ def gate(name: str, ok: bool, detail: str = "") -> None:
         failures.append(name)
 
 
-def stats(path: Path):
+def stats(path: Path, box=None):
     im = Image.open(path).convert("RGB")
     # game window is centered on the Xvfb screen; sample the middle half
     w, h = im.size
-    c = im.crop((w // 4, h // 4, 3 * w // 4, 3 * h // 4))
+    if box is None:
+        box = (w // 4, h // 4, 3 * w // 4, 3 * h // 4)
+    c = im.crop(box)
     px = list(c.getdata())
     n = len(px)
     lum = [0.299 * r + 0.587 * g + 0.114 * b for r, g, b in px]
@@ -81,6 +83,21 @@ def main() -> int:
         mean, std = stats(night)
         gate("V3 night is dark", mean < 60.0, f"luma mean {mean:.1f}")
         gate("V3b night not blank", std > 2.0, f"luma std {std:.1f}")
+
+        # G-V3c: the LOD band must track the celestial light (rot pixel (1,0),
+        # the day channel). A broken channel pins dayF to the camera azimuth:
+        # the distant snow stays at its daylight luminance through the night
+        # while the sky goes black. Sample the far LOD slope right of the
+        # reference view (beyond the vanilla render distance in both shots).
+        if day.exists():
+            box = (820, 320, 820 + 140, 320 + 90)
+            dmean, _ = stats(day, box)
+            nmean, _ = stats(night, box)
+            gate(
+                "V3c night LOD dims with the sky",
+                nmean < dmean * 0.6,
+                f"lod slope day {dmean:.1f} -> night {nmean:.1f}",
+            )
 
     # G-V4 client log
     try:

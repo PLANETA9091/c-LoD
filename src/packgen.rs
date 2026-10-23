@@ -71,11 +71,13 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
     let atmo_start = fmt_f(cfg.lod_near * 0.85);
     let atmo_end = fmt_f(cfg.veil_far);
     let fog_start = cfg.lod_near * 1.05;
-    // Local tweak: the default (size * 0.72) sat past the atlas border for
-    // half-extent <= 0.72*size, so the scanned window's square edge was
-    // only ~65% veiled and showed up as a hard wall on the horizon.
-    // Fade fully before the border instead.
-    let fog_end = (atlas.size as f32 * 0.72).min(atlas.half() as f32 * 0.92);
+    // DH-exact far-fog plane: the LOD draw distance = the configured data
+    // radius (GlDhFogShader: uFogScale = 1 / lodChunkRenderDistanceRadius*16;
+    // farFogStart 0.4, farFogEnd 1.0 are fractions of it). The old local tweak
+    // (size*0.72 / half*0.92) existed to hide the walls that scan holes used
+    // to grow — the renderer now treats void cells as "no geometry" exactly
+    // like DH's drawnTo check, so the fog can sit at the true data edge.
+    let fog_end = atlas.half() as f32;
 
     // Highest scanned height in the atlas: anything above it in the scene can
     // only be the cloud layer (or weather), never LOD terrain.

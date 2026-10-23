@@ -82,8 +82,9 @@ layout(location = 0) out vec4 fragColor;
 const float PI = 3.14159265358979;
 // 26.3 device depth: d = near/eyeZ (infinite far) — sky == 0.0.
 const float SKY_DEPTH = 1.0e-6;
-// A ray crosses at most (cells.x + cells.y) grid boundaries; 256+256 for a
-// 1024-block window at cell 4, plus margin.
+// A ray crosses at most (fogFar/cell in x + fogFar/cell in z) grid boundaries
+// before the fog early-out stops the march: 2 x (1024/4) = 512 for the
+// 2048-block atlas (fogFar = 1024, cell 4), plus margin.
 const int MAX_STEPS = 560;
 
 // DH far-fog defaults (Config.Client.Advanced.Graphics.Fog): EXPONENTIAL_SQUARED,
@@ -113,6 +114,15 @@ float atlas_height(vec2 uv) {
 
 bool atlas_water(vec2 uv) {
     return texture(AtlasSampler, uv).b > 0.5;
+}
+
+// Side index 255 is the reserved VOID marker (packgen writes it for cells the
+// scan never filled). DH semantics for un-generated data: NO geometry — no
+// top faces, no walls against the hole, the scene shows through (the fog
+// pass's `drawnTo` check). This is what kills the white cliff walls that used
+// to rise out of scan holes.
+bool atlas_void(vec2 uv) {
+    return texture(AtlasSampler, uv).a > 0.99;
 }
 
 // Heightfield lookup in world space; clamps to the atlas edge (plateau).
@@ -327,6 +337,13 @@ void main() {
     // column whose top quad sits at the water surface, coloured with the
     // biome-tinted water colour.
     float hCur = world_height(enterXz, origin, size);
+    bool curVoid = atlas_void(atlas_uv(enterXz, origin, size));
+
+    // DH far-fog plane (see the composite below): marching past it is pointless
+    // — the hit would be >= 99.8% fog. The early-out keeps the step count bound
+    // by the FOG RANGE instead of the atlas size, so a 2048-block atlas costs
+    // no more steps than the old 1024 one.
+    float fogFar = max(FogParams.y, 1.0);
 
     float hitT = -1.0;
     bool sideHit = false;
@@ -339,8 +356,8 @@ void main() {
         // TOP face: inside this cell the ray may cross the plane y = hCur from
         // above. DH skips the top quad only when another box covers it — for a
         // heightfield that case is exactly "the ray reaches y=hCur while still
-        // inside the cell's footprint".
-        if (dir.y < 0.0) {
+        // inside the cell's footprint". Void cells have no top face.
+        if (!curVoid && dir.y < 0.0) {
             float tTop = (hCur - cam.y) / dir.y;
             float tExit = min(tMaxX, tMaxZ);
             if (tTop >= tCur && tTop < tExit) {
@@ -362,6 +379,11 @@ void main() {
         }
         tCur = tNext;
 
+        // Beyond the fog end nothing is visible — stop marching.
+        if (tCur > fogFar) {
+            break;
+        }
+
         // Moved out of the atlas? No LOD here (fog is 1.0 at the band edge).
         vec2 nextXz = cam.xz + dir.xz * tCur;
         if (any(lessThan(nextXz, minW)) || any(greaterThan(nextXz, maxW))) {
@@ -382,17 +404,25 @@ void main() {
         // SIDE face: entering a cell whose surface is above the ray. The ray
         // is guaranteed to be above hCur (we never continue below terrain),
         // so this is exactly DH's wall on the exposed span [hCur..hNew].
+        // Walls exist only between two SCANNED cells: a void neighbour is
+        // un-generated data, not a pit — the ray passes through it and the
+        // next scanned cell resets the span (no white cliff walls out of
+        // scan holes, no cross-sections at a deadline-cut scan edge).
         float rayY = cam.y + dir.y * tCur;
-        float hNew = world_height(nextXz, origin, size);
-        if (hNew > rayY) {
-            hitT = tCur;
-            sideHit = true;
-            hitAxisX = axisX;
-            hHitOld = hCur;
-            hHitNew = hNew;
-            break;
+        bool newVoid = atlas_void(atlas_uv(nextXz, origin, size));
+        if (!newVoid) {
+            float hNew = world_height(nextXz, origin, size);
+            if (!curVoid && hNew > rayY) {
+                hitT = tCur;
+                sideHit = true;
+                hitAxisX = axisX;
+                hHitOld = hCur;
+                hHitNew = hNew;
+                break;
+            }
+            hCur = hNew;
         }
-        hCur = hNew;
+        curVoid = newVoid;
     }
 
     if (hitT < 0.0) {
@@ -476,7 +506,6 @@ void main() {
     // target is the vanilla WORLD FOG COLOUR read as the sky behind the pixel
     // (the legal stand-in — see the uniform note above); at the band edge the
     // LOD dissolves into the horizon exactly like DH.
-    float fogFar = max(FogParams.y, 1.0);
     float fogStart = FOG_START_FRAC * fogFar;
     float fogLen = max(fogFar - fogStart, 1.0);
     float fx = max((hitT - fogStart) / fogLen, 0.0) * FOG_DENSITY;
