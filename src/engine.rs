@@ -54,8 +54,13 @@ pub struct State {
     /// When the atlas world was first resolved (scan deadline anchor).
     pub world_seen_at: Mutex<Option<std::time::Instant>>,
     pub scan_seq: AtomicU64,
-    /// Chunk-major streaming cursor (index into the atlas chunk grid).
+    /// Streaming cursor (index into the centre-out chunk order).
     pub scan_cursor: AtomicU64,
+    /// Chunk-grid indices in the same centre-out Chebyshev-ring order as the
+    /// atlas cells (`crate::atlas::ring_order` over the chunk grid): a scan
+    /// cut short by the deadline covers a disc of chunks around the atlas
+    /// centre instead of the west half-plane.
+    pub chunk_order: Vec<u32>,
     pub world_obj: Mutex<usize>, // jobject handle as usize; main-thread only
     pub world_name: Mutex<String>,
     pub keys: Mutex<Option<Keys>>,
@@ -147,6 +152,12 @@ impl State {
             )
         };
         let server = PackServer::new();
+        // Centre-out chunk order for the streamed scan (same metric as the
+        // atlas cell order): computed before the state moves the atlas in.
+        let chunk_order = {
+            let (side, _, _) = chunk_grid(&atlas);
+            crate::atlas::ring_order(side as u32)
+        };
         Arc::new(Self {
             atlas,
             server,
@@ -157,6 +168,7 @@ impl State {
             world_seen_at: Mutex::new(None),
             scan_seq: AtomicU64::new(0),
             scan_cursor: AtomicU64::new(0),
+            chunk_order,
             world_obj: Mutex::new(0),
             world_name: Mutex::new(String::new()),
             keys: Mutex::new(None),
@@ -411,8 +423,11 @@ fn scan_stream(state: &Arc<State>, env: Env, world: jvmti_bindings::jni::jobject
             break;
         }
         CURSOR_HINT.store(idx + 1, Ordering::Relaxed);
-        let cx = cx0 + (idx % side as u64) as i32;
-        let cz = cz0 + (idx / side as u64) as i32;
+        // Centre-out ring order (see ring_order): a deadline-cut scan leaves
+        // a symmetric fog-covered horizon instead of a west-side wall.
+        let co = state.chunk_order[idx as usize];
+        let cx = cx0 + (co % side as u32) as i32;
+        let cz = cz0 + (co / side as u32) as i32;
         if !jni::warm_chunk(env, world, cx, cz, true) {
             continue;
         }

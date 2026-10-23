@@ -11,6 +11,13 @@
 //! `c-LoD-atlas.bin`, encoded into the resource pack exactly once, and never
 //! mutated again. Restarts restore the snapshot so the pack SHA-1 — and the
 //! client download state — stays identical across reboots.
+//!
+//! The scan walks the grid in CENTRE-OUT (Chebyshev-ring) order, so a scan
+//! cut short by the deadline still covers a disc around the atlas centre —
+//! the camera position — instead of a west-side half-plane: the LOD horizon
+//! edge stays symmetric in every direction and sinks into the fog band
+//! (Distant Horizons prioritises LOD generation around the player the same
+//! way; its ungenerated frontier never shows as an asymmetric wall).
 
 use std::io::Write as _;
 use std::path::Path;
@@ -37,6 +44,28 @@ pub struct Atlas {
     version: AtomicU64,
     /// Number of cells scanned at least once (progress tracking).
     scanned: AtomicU64,
+    /// Scan sequence: row-major cell index at position `seq` of the
+    /// centre-out ring order (see [`ring_order`]). Never mutated after
+    /// construction, so partial scans are reproducible byte-for-byte.
+    order: Vec<u32>,
+}
+
+/// Centre-out scan order over a `side x side` grid: row-major indices sorted
+/// by integer Chebyshev ring distance from the grid centre, then by Euclidean
+/// distance, then by the index itself. Integer arithmetic only — the order is
+/// bit-identical on every platform, which keeps partial-scan pack SHA-1s
+/// reproducible.
+pub fn ring_order(side: u32) -> Vec<u32> {
+    let c2 = side as u64 - 1; // doubled centre coordinate (half-cell units)
+    let mut idx: Vec<u32> = (0..side * side).collect();
+    idx.sort_unstable_by_key(|&i| {
+        let ix = (i % side) as u64;
+        let iz = (i / side) as u64;
+        let dx = (2 * ix).abs_diff(c2);
+        let dz = (2 * iz).abs_diff(c2);
+        (dx.max(dz), dx * dx + dz * dz, i as u64)
+    });
+    idx
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -63,6 +92,7 @@ impl Atlas {
             data: RwLock::new(vec![Cell::default(); (cells * cells) as usize]),
             version: AtomicU64::new(1),
             scanned: AtomicU64::new(0),
+            order: ring_order(cells),
         }
     }
 
@@ -132,17 +162,20 @@ impl Atlas {
         self.data.read().map(|d| d.clone()).unwrap_or_default()
     }
 
-    /// Iterate cell world-coords for a scan sweep.
+    /// The next `count` scan targets starting at sequence `seq`, in the
+    /// centre-out ring order. Wraps over the whole atlas exactly like the
+    /// previous row-major cursor did.
     pub fn scan_task(&self, seq: u64, count: u32) -> Vec<(u32, u32)> {
-        let cells = self.cells as u64;
-        let total = cells * cells;
+        let total = self.order.len() as u64;
         if total == 0 {
             return Vec::new();
         }
+        let cells = self.cells;
         let mut out = Vec::with_capacity(count as usize);
         let mut s = seq % total;
         while out.len() < count as usize {
-            out.push(((s % cells) as u32, (s / cells) as u32));
+            let o = self.order[s as usize];
+            out.push((o % cells, o / cells));
             s = (s + 1) % total;
             if out.len() as u64 == total {
                 break;
@@ -407,16 +440,24 @@ mod tests {
 
     #[test]
     fn scan_task_wraps() {
-        let a = Atlas::new(0, 0, 64, 4, 63);
-        // Asking for more than `total` yields exactly `total` unique cells.
+        let a = Atlas::new(0, 0, 64, 4, 63); // 16x16 cells
+                                             // Asking for more than `total` yields exactly `total` unique cells.
         let t = a.scan_task(0, 257);
         assert_eq!(t.len(), 256);
-        assert_eq!(t[0], (0, 0));
-        assert_eq!(t[16], (0, 1));
+        let mut uniq = t.clone();
+        uniq.sort_unstable();
+        uniq.dedup();
+        assert_eq!(uniq.len(), 256, "full sweep covers every cell once");
+        // The ring order decides WHERE the sweep starts; wrap continuity is
+        // what this test pins down: seq=total-1 is followed by seq=0.
+        let expected_last = {
+            let o = ring_order(16);
+            let l = o[255];
+            (l % 16, l / 16)
+        };
         let t2 = a.scan_task(255, 4);
-        assert_eq!(t2[0], (15, 15));
-        assert_eq!(t2[1], (0, 0));
-        assert_eq!(t2[2], (1, 0));
+        assert_eq!(t2[0], expected_last);
+        assert_eq!(t2[1], t[0], "sweep wraps to the first ring cell");
     }
 
     #[test]
@@ -461,5 +502,76 @@ mod tests {
         let mut truncated = bytes.clone();
         truncated.truncate(bytes.len() - 7);
         assert!(Atlas::from_bytes(&truncated, 0, 0, 64, 4, 63).is_none());
+    }
+
+    #[test]
+    fn ring_order_is_a_bijection() {
+        for side in [1u32, 2, 3, 4, 8, 64, 256] {
+            let o = ring_order(side);
+            let n = (side as u64) * (side as u64);
+            assert_eq!(o.len() as u64, n);
+            let mut seen = o.clone();
+            seen.sort_unstable();
+            seen.dedup();
+            assert_eq!(seen.len() as u64, n, "side {side}: duplicates in order");
+            assert_eq!(seen.last().copied(), Some((n - 1) as u32));
+        }
+    }
+
+    #[test]
+    fn ring_order_is_monotone_in_chebyshev_rings() {
+        // Chebyshev distance (half-cell units) must never decrease along the
+        // sequence — that is the whole point of the centre-out order.
+        for side in [2u32, 3, 4, 8, 64] {
+            let o = ring_order(side);
+            let c2 = side as u64 - 1;
+            let mut prev = 0u64;
+            for &i in &o {
+                let dx = (2 * (i % side) as u64).abs_diff(c2);
+                let dz = (2 * (i / side) as u64).abs_diff(c2);
+                let cheb = dx.max(dz);
+                assert!(
+                    cheb >= prev,
+                    "side {side}: cheb {cheb} after {prev} at idx {i}"
+                );
+                prev = cheb;
+            }
+        }
+    }
+
+    #[test]
+    fn ring_order_starts_at_the_centre() {
+        // Odd side: exactly the middle cell first. Even side: the first four
+        // entries are the 2x2 centre block.
+        assert_eq!(ring_order(5)[0], 2 * 5 + 2);
+        let first4: std::collections::BTreeSet<u32> = ring_order(4)[..4].iter().copied().collect();
+        assert_eq!(
+            first4,
+            [4 + 1, 4 + 2, 8 + 1, 8 + 2].into_iter().collect(),
+            "even grid must start with its 2x2 centre"
+        );
+    }
+
+    #[test]
+    fn scan_task_follows_ring_order() {
+        let a = Atlas::new(0, 0, 64, 4, 63); // 16x16 cells
+        let t = a.scan_task(0, 4);
+        assert_eq!(
+            t[0],
+            (7, 7),
+            "scan starts at the 2x2 centre (index tie-break)"
+        );
+        // Ring growth: Chebyshev distance (half-cell units) never decreases.
+        let all = a.scan_task(0, 256);
+        assert_eq!(all.len(), 256);
+        let c2 = 15u64; // doubled centre in half-cells
+        let mut prev = 0u64;
+        for &(ix, iz) in &all {
+            let dx = (2 * ix as u64).abs_diff(c2);
+            let dz = (2 * iz as u64).abs_diff(c2);
+            let cheb = dx.max(dz);
+            assert!(cheb >= prev, "ring shrank at ({ix},{iz})");
+            prev = cheb;
+        }
     }
 }
