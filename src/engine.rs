@@ -854,8 +854,11 @@ fn manage_players(state: &Arc<State>, env: Env) {
         // 1. Resource pack — pushed exactly once per player per session.
         //    The pack is static; its SHA-1 never changes, so once pushed we
         //    never call setResourcePack again (no client reloads, ever).
+        //    pack_push=0 (A/B benches with other LOD clients) skips the push:
+        //    the 26.3 client auto-applies the pack with no decline dialog and
+        //    the pack's terrain-shader override wedges the other mod's load.
         if let Some(pack) = &pack {
-            if st.pushed_sha != pack.sha1_hex {
+            if state.cfg.pack_push && st.pushed_sha != pack.sha1_hex {
                 if let Some(handle) = jni::player_by_uuid(env, &p.uuid) {
                     let pu = *state.pack_uuid.lock().unwrap();
                     if pu != 0 {

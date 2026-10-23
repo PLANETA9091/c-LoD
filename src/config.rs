@@ -23,6 +23,12 @@ pub struct Config {
     /// the confirmation dialog. Handy on a test server so the pack can never
     /// be missed/declined (the dialog is easy to dismiss by accident).
     pub pack_force: bool,
+    /// Push the resource pack at all. A/B benches that run OTHER LOD clients
+    /// (Voxy) on the same server need the pack NOT pushed: the client applies
+    /// it automatically (26.3 shows no decline dialog for this flow), its
+    /// terrain-shader override restarts the other mod's render pipeline mid-
+    /// load and the world load never completes.
+    pub pack_push: bool,
     /// World used for the heightmap atlas (empty = first Bukkit world).
     pub world: String,
     /// Atlas center in block coordinates (default: world spawn).
@@ -118,6 +124,7 @@ impl Default for Config {
             pack_uuid: "6b1f2f7e-9c0d-4a4b-8b0a-b10d1b4ab100".to_string(),
             pack_prompt: String::new(),
             pack_force: false,
+            pack_push: true,
             world: String::new(),
             center_x: 0,
             center_z: 0,
@@ -181,6 +188,9 @@ impl Config {
         }
         if let Some(v) = get("pack_force") {
             cfg.pack_force = matches!(v, "1" | "on" | "true" | "yes");
+        }
+        if let Some(v) = get("pack_push") {
+            cfg.pack_push = !matches!(v, "0" | "off" | "false" | "no");
         }
         if let Some(v) = get("world") {
             cfg.world = v.to_string();
@@ -321,6 +331,17 @@ mod tests {
         assert_eq!(c.cell_size, 2);
         assert_eq!(c.color_low, [0.1, 0.8, 0.2]);
         assert_eq!(c.world, "world_nether");
+    }
+
+    #[test]
+    fn pack_push_off_for_ab_benches() {
+        // Voxy A/B: the pack must not be pushed at all (the 26.3 client
+        // auto-applies it and its terrain-shader override wedges the other
+        // mod's world load).
+        assert!(Config::parse("").pack_push);
+        assert!(!Config::parse("pack_push=0").pack_push);
+        assert!(!Config::parse("pack_push=off").pack_push);
+        assert!(Config::parse("pack_push=1").pack_push);
     }
 
     #[test]
