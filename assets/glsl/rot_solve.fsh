@@ -12,8 +12,9 @@
 //   px1 = (Rz_hi, Rz_lo, Ux_hi, Ux_lo)
 //   px2 = (Uy_hi, Uy_lo, Uz_hi, Uz_lo)   bobbed world-space up
 //   px3 = (fov_hi, fov_lo, tx, ty)       fov 16-bit, eye wobble 8-bit
-//   px4 = (conf, day, res, 0)            conf 0..1, day = sky grade 0..1,
-//                                        res = glide residual 0..1
+//   px4 = (conf, day, res, gap)          conf 0..1, day = sky grade 0..1,
+//                                        res = glide residual 0..1,
+//                                        gap = frames since payload, 0..1
 //
 // The payload is stored ENCODED (not decoded to floats): the persistent
 // target is RGBA8 and 16-bit basis components must survive the round trip
@@ -44,6 +45,22 @@
 // pixels show the real sky for the first frames of the glide, then the LOD
 // materializes as the pose converges. A tilted world is never shown.
 //
+// v4.4.5 GAP COUNTER + LATCHED GLIDE (px4.a): the 3-degree glide gate had a
+// hole — it fired on ANY fresh-vs-held angle above 3 degrees, and during
+// continuous tracking that angle is one FRAME of camera motion. A fast pan
+// (flicks go well past 180 deg/s) therefore glided on live data: the LOD
+// lagged behind the true pose, dimmed by the residual fade and visibly
+// "rotated" while turning — the flicker got WORSE after v4.4.4. The gate is
+// now latched: it only arms when the gap counter (px4.a) says a gap actually
+// happened (or the previous residual is still converging), so tracking
+// frames forward the fresh basis BIT-EXACT at any pan speed. The gap counter
+// itself (ramps 0.12/frame occluded, decays 0.3/frame alive) is published
+// for lod_terrain: while no group column sees sky the held basis is stale by
+// however far the camera turned, and the LOD now DISSOLVES into the sky
+// instead of showing a tilted world. Glide retune: K 0.6 -> 0.8 (converge in
+// ~3 frames), residual fade window 12 -> 5 degrees (the half-faded tail of
+// the old 12-degree window still showed a 3-6 degree tilt).
+//
 // Confidence jumps to 1 on the first valid row; while the column is fully
 // occluded the previous payload is kept and confidence decays at 0.995/frame
 // (v4.4.4, was 0.99 — the glide+fade path now covers gaps up to ~13 s).
@@ -72,8 +89,10 @@ layout(location = 0) out vec4 fragColor;
 
 const int SLICES = 5120;
 const float GLIDE_DOT = 0.9986; // cos(~3 deg): below this the held basis is stale
-const float GLIDE_K = 0.6;      // v4.4.4: 0.35 -> 0.6, converge in ~4 frames
-const float FADE_WIN = 0.2094;  // radians(12 deg): residual -> LOD fade scale
+const float GLIDE_K = 0.8;      // v4.4.5: 0.6 -> 0.8, converge in ~3 frames
+const float FADE_WIN = 0.0873;  // radians(5 deg): residual -> LOD fade scale
+const float GAP_UP = 0.12;      // v4.4.5: gap ramp per occluded frame (grace ~2)
+const float GAP_DOWN = 0.3;     // v4.4.5: gap decay per alive frame (materialize ~3)
 
 // Day-grade window (luminance of the sky): night ~0.03-0.06, dawn/dusk ramps
 // through it, day >= 0.45 (deep-blue zenith and rain-gray sky included).
@@ -113,6 +132,14 @@ void main() {
     vec4 prev = texelFetch(PrevSampler, ivec2(j, 0), 0);
     vec4 pc = texelFetch(PrevSampler, ivec2(4, 0), 0);
 
+    // v4.4.5 gap counter (px4.a): frames since the last intact payload row,
+    // saturating at 1. The grace (gap < 0.25 -> no fade in lod_terrain)
+    // keeps single-frame dropout noise (a cloud pixel crossing a column)
+    // from dimming the LOD.
+    float gapPrev = pc.a;
+    float gap = best >= 0 ? max(gapPrev - GAP_DOWN, 0.0)
+                          : min(gapPrev + GAP_UP, 1.0);
+
     // Payload bytes x2..x17 (16 bytes, see assets/glsl/sky.fsh):
     //   b[0..5]  right xyz (16-bit each)   b[6..11] up xyz (16-bit each)
     //   b[12..13] fov 16-bit               b[14] tx  b[15] ty (8-bit signed)
@@ -136,7 +163,15 @@ void main() {
         // glides instead of snapping, no matter how long the gap was.
         float lp = length(Rp);
         float ln = length(Rn);
-        if (lp > 0.5 && ln > 0.5 && dot(Rp, Rn) / (lp * ln) < GLIDE_DOT) {
+        // v4.4.5 LATCHED GATE: glide only when a gap actually happened
+        // (gapPrev) or one is still converging (prev residual). During
+        // continuous tracking both are zero — the fresh basis is exact and
+        // is forwarded bit-exact at ANY pan speed; the old unconditional
+        // angle gate glided every >180 deg/s pan and faded the LOD while
+        // turning ("LODs rotate strangely when I look around").
+        if (lp > 0.5 && ln > 0.5
+            && (gapPrev > 0.001 || pc.b > 0.002)
+            && dot(Rp, Rn) / (lp * ln) < GLIDE_DOT) {
             k = GLIDE_K;
         }
     }
@@ -177,7 +212,7 @@ void main() {
                 res = 0.0;
             }
         }
-        fragColor = vec4(conf, day, res, 0.0);
+        fragColor = vec4(conf, day, res, gap);
         return;
     }
 

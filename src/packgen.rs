@@ -592,6 +592,22 @@ mod tests {
             solve.contains("vec4(b[0], b[1], b[2], b[3]) / 255.0"),
             "bit-exact payload passthrough missing"
         );
+        // v4.4.5: the gap counter (px4.a) dissolves the LOD during payload
+        // loss and ARMS the glide gate, so fast pans (fresh basis every
+        // frame) never glide — they forward bit-exact at any speed.
+        assert!(
+            solve.contains("max(gapPrev - GAP_DOWN, 0.0)")
+                && solve.contains("min(gapPrev + GAP_UP, 1.0)"),
+            "gap counter must decay while alive and ramp while occluded"
+        );
+        assert!(
+            solve.contains("gapPrev > 0.001 || pc.b > 0.002"),
+            "glide must be latched by gap/residual — fast pans are exact"
+        );
+        assert!(
+            solve.contains("vec4(conf, day, res, gap)"),
+            "px4.a must publish the gap counter"
+        );
 
         let chain_v = get("assets/clod/post_effect/lod_terrain.json");
         let chain = String::from_utf8_lossy(&chain_v);
@@ -630,6 +646,12 @@ mod tests {
         assert!(
             terrain.contains("float dayF = pc4.g;"),
             "day factor must come from the camera channel day byte"
+        );
+        // v4.4.5: the LOD must dissolve by the gap counter while the camera
+        // channel is occluded (held basis is stale -> tilted world).
+        assert!(
+            terrain.contains("smoothstep(0.25, 0.8, pc4.a)"),
+            "LOD must dissolve by the gap counter during payload loss"
         );
     }
 }

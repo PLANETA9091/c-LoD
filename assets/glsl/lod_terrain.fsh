@@ -512,7 +512,15 @@ void main() {
     // Bit-exact frames: residual 0 -> fade 1 (full strength, as v4.4.1).
     // Glide frames: fade ramps 0 -> 1 as the pose converges, so the tilted
     // intermediate basis is never shown (see the header note above).
-    float fade = clamp(1.0 - pc4.b * 1.05, 0.0, 1.0);
+    // v4.4.5: AND by the camera-channel gap counter (px4.a): while no group
+    // column sees sky the held basis is stale by however far the camera
+    // turned during the gap — the LOD dissolves into the sky instead of
+    // showing a tilted world ("LODs rotate depending on where I look").
+    // Grace ~2 frames kills single-frame dropout noise, gone by ~9 frames,
+    // materializes over ~3 frames on re-acquisition while the pose is
+    // already bit-exact.
+    float fade = clamp(1.0 - pc4.b * 1.05, 0.0, 1.0)
+               * (1.0 - smoothstep(0.25, 0.8, pc4.a));
     vec3 hitPos = cam + dir * tHit;
     vec2 xzHit = hitPos.xz;
     float yHit = hitPos.y;
