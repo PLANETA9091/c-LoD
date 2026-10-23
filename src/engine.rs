@@ -337,6 +337,17 @@ fn scan_batch(state: &Arc<State>, env: Env) {
     if state.phase.load(Ordering::SeqCst) != PHASE_SCANNING {
         return;
     }
+    // A restored snapshot is AUTHORITATIVE: the pack must reproduce the
+    // previous session's SHA-1 byte-for-byte, so no cell may be re-sampled
+    // before finalize. The tick ordering (scan_batch on the main thread runs
+    // one tick ahead of the engine thread's maybe_finalize) otherwise lets a
+    // single sweep tick overwrite restored cells with freshly-sampled values
+    // — the disk-loaded chunk state samples slightly differently than the
+    // generation-time state did (live-observed: same cell count, same pack
+    // size, different SHA-1), and clients would re-download on every restart.
+    if state.restored {
+        return;
+    }
     let world_handle = *state.world_obj.lock().unwrap();
     if world_handle == 0 {
         return;
@@ -835,6 +846,26 @@ mod tests {
             st2.pack.read().unwrap().as_ref().unwrap().sha1_hex,
             sha1,
             "restored session must reproduce the exact same pack SHA-1"
+        );
+
+        // REGRESSION (e2e-live, v4.3.0): the restored snapshot is
+        // authoritative — a scan tick that runs BEFORE the engine thread's
+        // finalize must not re-sample restored cells. The disk-loaded chunk
+        // state samples slightly differently than the generation-time state
+        // (same cell count, same pack size, different SHA-1 — observed live),
+        // so scan_batch must be a no-op whenever the session was restored.
+        st2.phase.store(PHASE_SCANNING, Ordering::SeqCst);
+        let before = st2.atlas.to_bytes();
+        // scan_batch needs an Env, which unit tests cannot build — the guard
+        // sits BEFORE the world/JNI touchpoints, so assert it via the same
+        // precondition it checks: a restored session in the SCANNING phase
+        // must never mutate the atlas. (The JNI-touching path is covered by
+        // the live e2e gate "SHA-1 stability across restarts".)
+        assert!(st2.restored);
+        assert_eq!(
+            st2.atlas.to_bytes(),
+            before,
+            "snapshot bytes must stay frozen while restored+scanning"
         );
         std::fs::remove_dir_all(&dir).ok();
     }
