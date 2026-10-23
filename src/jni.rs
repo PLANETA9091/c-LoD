@@ -121,6 +121,21 @@ struct WorldIds {
     m_chunk_loaded: jmethodID,
     m_set_force_loaded: jmethodID,
     m_get_biome: jmethodID,
+    // Full game time (ticks since creation). Unlike the day time it advances
+    // on every real server tick regardless of doDaylightCycle — the engine
+    // uses its growth to detect that the tick loop started (queued tasks run
+    // inside prepareLevel's executeModerately long before that, and heavy
+    // work queued there wedge the whole startup, see engine.rs probe_ticking).
+    m_get_full_time: jmethodID,
+    // Paper's URGENT async chunk request (getChunkAtAsyncUrgently): fires
+    // generation on the chunk system without ever blocking the calling
+    // thread. The streaming scan uses it instead of setChunkForceLoaded — a
+    // SYNCHRONOUS force-load of a cold chunk parks the main thread in a
+    // BLOCKING neighbour wait that on a small box takes tens of seconds
+    // (Paper watchdog kills the server). The plain getChunkAtAsync queues at
+    // background priority (live-observed: 0.5 chunks/s); the urgent variant
+    // is what a boot-time scan needs.
+    m_get_chunk_async: jmethodID,
 }
 // Raw method-ID pointers cached process-lifetime; consumed main-thread-only.
 unsafe impl Send for WorldIds {}
@@ -170,6 +185,31 @@ struct MaterialIds {
 }
 unsafe impl Send for MaterialIds {}
 static MATERIAL_IDS: Mutex<Option<MaterialIds>> = Mutex::new(None);
+
+/// `java.util.concurrent.CompletableFuture` — the engine polls isDone() on
+/// held getChunkAtAsyncUrgently futures (see engine.rs scan_stream).
+#[derive(Clone, Copy)]
+struct FutureIds {
+    m_is_done: jmethodID,
+}
+unsafe impl Send for FutureIds {}
+static FUTURE_IDS: Mutex<Option<FutureIds>> = Mutex::new(None);
+
+fn future_ids(env: Env, fut: jobject) -> Option<FutureIds> {
+    if let Some(f) = FUTURE_IDS.lock().unwrap().as_ref() {
+        return Some(*f);
+    }
+    let cls_local = env.get_object_class(fut);
+    let cls = {
+        let g = env.new_global_ref(cls_local);
+        g as jobject
+    };
+    let ids = FutureIds {
+        m_is_done: bind_method(env, cls_local, cls, "isDone", "()Z")?,
+    };
+    *FUTURE_IDS.lock().unwrap() = Some(ids);
+    Some(ids)
+}
 
 #[derive(Clone, Copy)]
 struct KeyIds {
@@ -480,6 +520,14 @@ pub fn sample_column(
                                     tex_side = ws;
                                 }
                             }
+                            // DH air-gap rule (FullDataToRenderDataTransformer
+                            // "air gap leak fix"): AIR RESETS the avoided
+                            // queue — a bare column keeps its own identity.
+                            // Without this the probe below reads the AIR
+                            // above every bare column, "avoids" it (air is
+                            // non-colliding) and paints the whole surface
+                            // with air's missing-table gray.
+                            "air" | "cave_air" | "void_air" => {}
                             // DH blocksToIgnore=NON_COLLIDING +
                             // tintWithAvoidedBlocks=true (both defaults,
                             // Config.java:895/905): a non-colliding,
@@ -503,29 +551,34 @@ pub fn sample_column(
                                         env.call_boolean_method(amat, amid.m_is_occluding, &[]);
                                     clear_if_pending(env);
                                     if !solid && !occluding {
-                                        let aordinal =
-                                            env.call_int_method(amat, amid.m_ordinal, &[]);
-                                        clear_if_pending(env);
-                                        // A missing table entry keeps the
+                                        // Table lookup DIRECTLY (not via
+                                        // mat_info, whose miss falls back to
+                                        // gray): a missing entry keeps the
                                         // ground block — never gray a live
                                         // surface over a lookup miss.
-                                        if let Some(ainfo) = mat_info(env, amat, &amid, aordinal) {
-                                            let a_t_top = match ainfo.tint_top {
+                                        if let Some((atop, aside, att, ast)) =
+                                            crate::blockcolors::lookup(&name)
+                                        {
+                                            let a_t_top = match att {
                                                 1 => grass,
                                                 2 => foliage,
                                                 3 => water,
                                                 _ => 0xFFFFFF,
                                             };
-                                            let a_t_side = match ainfo.tint_side {
+                                            let a_t_side = match ast {
                                                 1 => grass,
                                                 2 => foliage,
                                                 3 => water,
                                                 _ => 0xFFFFFF,
                                             };
-                                            top = mul_rgb(ainfo.top, a_t_top);
-                                            side = mul_rgb(ainfo.side, a_t_side);
-                                            tex_top = ainfo.tex_top;
-                                            tex_side = ainfo.tex_side;
+                                            top = mul_rgb(atop, a_t_top);
+                                            side = mul_rgb(aside, a_t_side);
+                                            if let Some((st, ss)) =
+                                                crate::blocktextures::lookup(&name)
+                                            {
+                                                tex_top = st;
+                                                tex_side = ss;
+                                            }
                                         }
                                     }
                                 }
@@ -581,6 +634,14 @@ fn world_ids(env: Env, world: jobject) -> Option<WorldIds> {
         m_highest_block: bind_method(env, cls_local, cls, "getHighestBlockYAt", "(II)I")?,
         m_chunk_loaded: bind_method(env, cls_local, cls, "isChunkLoaded", "(II)Z")?,
         m_set_force_loaded: bind_method(env, cls_local, cls, "setChunkForceLoaded", "(IIZ)V")?,
+        m_get_full_time: bind_method(env, cls_local, cls, "getFullTime", "()J")?,
+        m_get_chunk_async: bind_method(
+            env,
+            cls_local,
+            cls,
+            "getChunkAtAsyncUrgently",
+            "(II)Ljava/util/concurrent/CompletableFuture;",
+        )?,
         m_get_block_at: bind_method(
             env,
             cls_local,
@@ -1037,6 +1098,45 @@ pub fn warm_chunk(env: Env, world: jobject, cx: i32, cz: i32, retain: bool) -> b
     let ok = !env.exception_check();
     clear_if_pending(env);
     ok
+}
+
+/// URGENT async chunk request (Paper getChunkAtAsyncUrgently) returning the
+/// future. The caller HOLDS the future (global ref) and polls isDone(): the
+/// chunk system keeps the chunk loaded until the future completes, so the
+/// completion -> sample window cannot be missed between engine ticks, and
+/// the main thread never blocks on a cold-chunk neighbour wait the way a
+/// synchronous setChunkForceLoaded does (live-observed watchdog kill).
+pub fn request_chunk_future(env: Env, world: jobject, cx: i32, cz: i32) -> Option<jobject> {
+    let wid = world_ids(env, world)?;
+    let fut = jobj(env.call_object_method(world, wid.m_get_chunk_async, &[ji(cx), ji(cz)]));
+    clear_if_pending(env);
+    fut
+}
+
+/// True when the held chunk-request future completed (chunk resident or the
+/// request answered).
+pub fn future_done(env: Env, fut: jobject) -> Option<bool> {
+    let ids = future_ids(env, fut)?;
+    let done = env.call_boolean_method(fut, ids.m_is_done, &[]);
+    let pending = env.exception_check();
+    clear_if_pending(env);
+    if pending {
+        return None;
+    }
+    Some(done)
+}
+
+/// Full game time of the world (ticks since creation). Cheap probe; the
+/// engine compares consecutive values to detect a live tick loop.
+pub fn world_game_time(env: Env, world: jobject) -> Option<i64> {
+    let wid = world_ids(env, world)?;
+    let t = env.call_long_method(world, wid.m_get_full_time, &[]);
+    let pending = env.exception_check();
+    clear_if_pending(env);
+    if pending {
+        return None;
+    }
+    Some(t)
 }
 
 /// Diagnostic: direct isChunkLoaded probe.

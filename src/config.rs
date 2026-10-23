@@ -58,6 +58,19 @@ pub struct Config {
     /// stays at a handful of chunks: each chunk is generated, sampled at
     /// `cell_size` resolution, then un-forced immediately.
     pub stream_chunks: i32,
+    /// Streaming scan implementation.
+    /// - "sync" (default): setChunkForceLoaded per chunk — the load parks the
+    ///   main thread in a managedBlock that JOINS worldgen work on the same
+    ///   thread, so on a well-provisioned box this is the fastest mode (the
+    ///   whole scan can even complete inside startup's prepareLevel drain).
+    ///   On a starved box a crashed worldgen task parks the sync load
+    ///   FOREVER (live-observed startup wedge: connections stuck in the
+    ///   accept backlog).
+    /// - "async": getChunkAtAsyncUrgently futures polled per tick; the main
+    ///   thread never blocks, at the cost of the chunk system's own
+    ///   scheduling throughput (slower, but unkillable). Starts only after
+    ///   the tick loop is live.
+    pub scan_mode: String,
     /// Camera FOV (vertical, degrees) the GLSL ray reconstruction assumes.
     /// Must match the client's FOV for pixel-perfect alignment; 70 is vanilla.
     pub fov: f32,
@@ -116,6 +129,7 @@ impl Default for Config {
             atlas_path: "c-LoD-atlas.bin".to_string(),
             warm_chunks: 8,
             stream_chunks: 0,
+            scan_mode: "sync".to_string(),
             fov: 70.0,
             lod_near: 96.0,
             veil_far: 512.0,

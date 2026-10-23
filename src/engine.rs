@@ -31,7 +31,7 @@ use crate::jni::{self, PlayerInfo};
 use crate::packgen::{self, Pack};
 use jvmti_bindings::prelude::JniEnv;
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 pub const PHASE_BOOT: u8 = 0;
@@ -51,11 +51,25 @@ pub struct State {
     pub restored: bool,
     /// Set after the one-time chunk warm-up around the atlas center.
     pub warmed: AtomicU8,
+    /// Last observed world full-game-time (sentinel -1 = nothing yet).
+    pub game_time: AtomicI64,
+    /// 1 once the world game time ADVANCED between two engine ticks — the
+    /// server tick loop is live. Every queued main-thread task before that
+    /// runs inside startup's executeModerately drain (prepareLevel), where a
+    /// sync chunk load can park forever on a worldgen task that will never
+    /// be scheduled (the chunk system needs the tick loop). All heavy work
+    /// (force-load warm-up, scan batches) must wait for this flag.
+    pub ticking: AtomicU8,
     /// When the atlas world was first resolved (scan deadline anchor).
     pub world_seen_at: Mutex<Option<std::time::Instant>>,
     pub scan_seq: AtomicU64,
     /// Streaming cursor (index into the centre-out chunk order).
     pub scan_cursor: AtomicU64,
+    /// Streaming scan: chunks requested via getChunkAtAsyncUrgently whose
+    /// future is still unfinished — (chunk index, future global-ref handle,
+    /// engine tick of the request). Polled each tick; sampled the moment the
+    /// future completes (the chunk system holds the chunk until then).
+    pub scan_inflight: Mutex<VecDeque<(u32, usize, u64)>>,
     /// Chunk indices whose force-load failed transiently (Paper's worldgen
     /// pool rejects chunks under load); retried round-robin after the main
     /// sweep drains, so the frozen snapshot carries no scan holes.
@@ -169,9 +183,12 @@ impl State {
             phase: AtomicU8::new(PHASE_BOOT),
             restored,
             warmed: AtomicU8::new(0),
+            game_time: AtomicI64::new(-1),
+            ticking: AtomicU8::new(0),
             world_seen_at: Mutex::new(None),
             scan_seq: AtomicU64::new(0),
             scan_cursor: AtomicU64::new(0),
+            scan_inflight: Mutex::new(VecDeque::new()),
             scan_retry: Mutex::new(VecDeque::new()),
             chunk_order,
             world_obj: Mutex::new(0),
@@ -194,9 +211,103 @@ static BRIDGE_OK: AtomicU8 = AtomicU8::new(0); // 0 pending, 1 ok, 2 failed-once
 pub fn tick(state: &Arc<State>, env: Env) {
     state.tick_no.fetch_add(1, Ordering::Relaxed);
     ensure_boot(state, env);
+    probe_ticking(state, env);
+    warm_core(state, env);
     scan_batch(state, env);
     release_forceload(state, env);
     manage_players(state, env);
+}
+
+/// Detect a live server tick loop: the world's FULL game time advances every
+/// tick (regardless of doDaylightCycle), while tasks queued during startup
+/// run inside prepareLevel's executeModerately drain with the clock frozen.
+/// Cheap (one JNI call); sets the scan-deadline anchor when it first fires.
+fn probe_ticking(state: &Arc<State>, env: Env) {
+    if state.ticking.load(Ordering::SeqCst) == 1 {
+        return;
+    }
+    let world_handle = *state.world_obj.lock().unwrap();
+    if world_handle == 0 {
+        return;
+    }
+    let Some(t) = jni::world_game_time(env, unsafe { as_obj(world_handle) }) else {
+        return;
+    };
+    let prev = state.game_time.swap(t, Ordering::SeqCst);
+    if prev >= 0 && prev != t {
+        state.ticking.store(1, Ordering::SeqCst);
+        // Anchor the scan deadline at the FIRST REAL TICK: before that the
+        // scan would burn its budget (or finalize empty) while the server is
+        // still preparing levels.
+        let mut anchor = state.world_seen_at.lock().unwrap();
+        if anchor.is_none() {
+            *anchor = Some(std::time::Instant::now());
+        }
+        drop(anchor);
+        crate::log_info(&format!(
+            "c-LoD server tick loop live (game time {prev} -> {t}) — heavy work (warm-up, scan) starts"
+        ));
+    }
+}
+
+/// One-time chunk warm-up around the atlas center, deferred until the server
+/// tick loop is live: setChunkForceLoaded is a SYNCHRONOUS chunk load, and
+/// during startup's prepareLevel drain it can park forever on a worldgen
+/// task the chunk system will only schedule once the tick loop runs
+/// (live-observed wedge: server thread parked in syncLoad for 15+ minutes,
+/// connections stuck in the accept backlog, console unresponsive).
+fn warm_core(state: &Arc<State>, env: Env) {
+    if state.ticking.load(Ordering::SeqCst) != 1 || state.warmed.load(Ordering::SeqCst) != 0 {
+        return;
+    }
+    if state
+        .warmed
+        .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+    let world_handle = *state.world_obj.lock().unwrap();
+    if world_handle == 0 {
+        state.warmed.store(0, Ordering::SeqCst);
+        return;
+    }
+    let world = unsafe { as_obj(world_handle) };
+    // Streaming scan (bench/CI): every scanned chunk force-loads ITSELF for
+    // the duration of its sampling, so a pinned warm core is redundant —
+    // 289 back-to-back synchronous chunk loads in one tick are exactly the
+    // watchdog hazard this deferral was meant to avoid (live-observed: the
+    // main thread stalled 10s+ in a BLOCKING chunk wait, Paper's watchdog
+    // killed the server). The ring only matters for the legacy cell-major
+    // path (stream_chunks == 0), whose sampler touches LOADED chunks only.
+    if state.cfg.stream_chunks > 0 {
+        crate::log_info(
+            "c-LoD streaming scan: no pinned warm core — each scan chunk force-loads itself",
+        );
+        return;
+    }
+    // One-time core warm-up (legacy path): modern vanilla keeps no spawn
+    // chunks loaded and the legacy sampler never forces generation, so
+    // without this the static snapshot could cover nothing.
+    if state.cfg.warm_chunks > 0 {
+        let w = state.cfg.warm_chunks;
+        let mut loaded = 0usize;
+        for cx in -w..=w {
+            for cz in -w..=w {
+                if jni::warm_chunk(env, world, cx, cz, true) {
+                    loaded += 1;
+                }
+            }
+        }
+        let loaded0 = jni::is_chunk_loaded(env, world, 0, 0);
+        let h0 = jni::probe_height(env, world, 0, 0);
+        crate::log_info(&format!(
+            "c-LoD core force-loaded: {}x{} chunks around atlas center ({} ok) — isChunkLoaded(0,0)={loaded0:?}, height(0,0)={h0:?} — released at finalize",
+            2 * w + 1,
+            2 * w + 1,
+            loaded
+        ));
+    }
 }
 
 /// One-time: after finalize, release the temporary force-load on the warm
@@ -292,31 +403,11 @@ fn ensure_boot(state: &Arc<State>, env: Env) {
                         state.atlas.scanned_cells() * 100 / state.atlas.total_cells().max(1)
                     ));
                 }
-                // Anchor the scan deadline at world resolution.
-                *state.world_seen_at.lock().unwrap() = Some(std::time::Instant::now());
-                // One-time core warm-up: modern vanilla keeps no spawn
-                // chunks loaded and the scan never forces generation, so
-                // without this the static snapshot could cover nothing.
-                if state.cfg.warm_chunks > 0 {
-                    let w = state.cfg.warm_chunks;
-                    let mut loaded = 0usize;
-                    for cx in -w..=w {
-                        for cz in -w..=w {
-                            if jni::warm_chunk(env, unsafe { as_obj(g) }, cx, cz, true) {
-                                loaded += 1;
-                            }
-                        }
-                    }
-                    state.warmed.store(1, Ordering::SeqCst);
-                    let loaded0 = jni::is_chunk_loaded(env, unsafe { as_obj(g) }, 0, 0);
-                    let h0 = jni::probe_height(env, unsafe { as_obj(g) }, 0, 0);
-                    crate::log_info(&format!(
-                        "c-LoD core force-loaded: {}x{} chunks around atlas center ({} ok) — isChunkLoaded(0,0)={loaded0:?}, height(0,0)={h0:?} — released at finalize",
-                        2 * w + 1,
-                        2 * w + 1,
-                        loaded
-                    ));
-                }
+                // NOTE: no heavy work here. The deadline anchor and the core
+                // warm-up moved to probe_ticking()/warm_core(): tasks queued
+                // before the tick loop starts run inside prepareLevel's
+                // executeModerately drain, where a synchronous chunk load can
+                // park forever (live-observed startup wedge).
             }
         }
     }
@@ -337,6 +428,38 @@ fn scan_batch(state: &Arc<State>, env: Env) {
     if state.phase.load(Ordering::SeqCst) != PHASE_SCANNING {
         return;
     }
+    if state.cfg.scan_mode == "async" && state.cfg.stream_chunks > 0 {
+        // A restored snapshot is authoritative (same invariant as the sync
+        // path below): the pack must reproduce the previous SHA-1 byte for
+        // byte, so no cell may be re-sampled before finalize.
+        if state.restored {
+            return;
+        }
+        // Async mode never scans before the tick loop is live: the chunk
+        // system only schedules generation while the server ticks, so the
+        // request futures would never complete during startup's drain.
+        if state.ticking.load(Ordering::SeqCst) == 0 {
+            return;
+        }
+        let world_handle = *state.world_obj.lock().unwrap();
+        if world_handle == 0 {
+            return;
+        }
+        let world = unsafe { as_obj(world_handle) };
+        let seq = state.scan_seq.fetch_add(1, Ordering::Relaxed);
+        scan_stream_async(state, env, world);
+        if seq.is_multiple_of(25) {
+            log_scan_progress(state, seq);
+        }
+        return;
+    }
+    // SYNC mode (default): the proven fast path — setChunkForceLoaded per
+    // chunk. Runs as soon as the world resolves, INCLUDING inside startup's
+    // prepareLevel drain: there the sync load's managedBlock joins worldgen
+    // work on the main thread, which is exactly why it is the fastest mode
+    // on a well-provisioned box (CI reaches 98% here). The known hazard — a
+    // crashed worldgen task parking the sync load forever on starved boxes —
+    // is what scan_mode=async exists for.
     // A restored snapshot is AUTHORITATIVE: the pack must reproduce the
     // previous session's SHA-1 byte-for-byte, so no cell may be re-sampled
     // before finalize. The tick ordering (scan_batch on the main thread runs
@@ -358,7 +481,7 @@ fn scan_batch(state: &Arc<State>, env: Env) {
         // Chunk-major streaming: generate -> sample -> release, N chunks/tick.
         // This is what lets the atlas span kilometres: resident chunks stay
         // bounded instead of pinning (2*w+1)^2 force-loaded chunks.
-        scan_stream(state, env, world);
+        scan_stream_sync(state, env, world);
     } else {
         let budget = state.cfg.scan_budget;
         // Advance the sweep by `budget` cells per tick (scan_task wraps the
@@ -426,19 +549,201 @@ fn stream_progress(atlas: &Atlas) -> (u64, u64) {
 /// Last streaming cursor value (progress display only).
 static CURSOR_HINT: AtomicU64 = AtomicU64::new(0);
 
-/// Streamed chunk-major scan pass: exactly `stream_chunks` chunks per tick,
-/// each force-loaded (which generates it), sampled at cell resolution and
-/// un-forced immediately. The cursor is monotonic over the atlas chunk grid,
-/// so the whole atlas is covered exactly once and `scanned >= total` fires
-/// the normal finalize path as soon as the last chunk is written.
-fn scan_stream(state: &Arc<State>, env: Env, world: jvmti_bindings::jni::jobject) {
+/// Geometry of the atlas chunk grid, precomputed once per scan pass.
+struct StreamGeom {
+    cell: i32,
+    side: i32,
+    cx0: i32,
+    cz0: i32,
+    per: i32,
+    half: i32,
+}
+
+impl StreamGeom {
+    fn chunk_xy(&self, co: u32) -> (i32, i32) {
+        (
+            self.cx0 + (co % self.side as u32) as i32,
+            self.cz0 + (co / self.side as u32) as i32,
+        )
+    }
+}
+
+/// Sample every atlas cell of one chunk (resident chunk — cheap reads).
+fn sample_stream_chunk(
+    state: &Arc<State>,
+    env: Env,
+    world: jvmti_bindings::jni::jobject,
+    g: &StreamGeom,
+    co: u32,
+) {
+    let atlas = &state.atlas;
+    let (cx, cz) = g.chunk_xy(co);
+    for dz in 0..g.per {
+        for dx in 0..g.per {
+            let x = cx * 16 + dx * g.cell + g.cell / 2;
+            let z = cz * 16 + dz * g.cell + g.cell / 2;
+            let ix = (x - (atlas.center_x - g.half)) / g.cell;
+            let iz = (z - (atlas.center_z - g.half)) / g.cell;
+            if ix < 0 || iz < 0 || ix as u32 >= atlas.cells || iz as u32 >= atlas.cells {
+                continue;
+            }
+            if let Some((y, liquid, top, side, tex_top, tex_side)) =
+                jni::sample_column(env, world, x, z, state.cfg.sea_level)
+            {
+                atlas.set(
+                    ix as u32,
+                    iz as u32,
+                    (y.clamp(-64, 1023)) as i16,
+                    liquid,
+                    top,
+                    side,
+                    tex_top,
+                    tex_side,
+                );
+            }
+        }
+    }
+}
+
+/// Streamed chunk-major scan pass, ASYNC EDITION.
+///
+/// The previous edition force-loaded every chunk SYNCHRONOUSLY on the main
+/// thread (setChunkForceLoaded parks the caller in a BLOCKING neighbour wait
+/// until the chunk — and enough of its neighbours — have generated). On a
+/// small box a single cold chunk can park the server thread for tens of
+/// seconds: Paper's watchdog kills the process (live-observed), and even
+/// without the watchdog the worldgen serializes behind main-thread stalls.
+///
+/// This edition never blocks the main thread:
+///   1. keep a window of chunks requested via getChunkAtAsync (fire-and-
+///      forget — the chunk system generates them on its own workers);
+///   2. each tick, sample up to `stream_chunks` chunks that ARE resident
+///      (isChunkLoaded poll; pin is instant on a resident chunk);
+///   3. re-request anything still in flight every 200 ticks — the chunk
+///      system dedups by position, and a worldgen crash would otherwise
+///      freeze the chunk in the window forever.
+fn scan_stream_async(state: &Arc<State>, env: Env, world: jvmti_bindings::jni::jobject) {
+    let atlas = &state.atlas;
+    let (side, cx0, cz0) = chunk_grid(atlas);
+    let total = (side as u64) * (side as u64);
+    let g = StreamGeom {
+        cell: atlas.cell.max(1),
+        side,
+        cx0,
+        cz0,
+        per: (16 / atlas.cell.max(1)).max(1), // cells per chunk edge
+        half: atlas.size / 2,
+    };
+    let budget = state.cfg.stream_chunks.max(1);
+    let window = (budget as usize * 4).max(8);
+
+    let mut inflight = state.scan_inflight.lock().unwrap();
+    let tick = state.tick_no.load(Ordering::Relaxed);
+
+    // 1) top up the async request window (monotonic centre-out cursor)
+    let mut req = state.scan_cursor.load(Ordering::Relaxed);
+    while inflight.len() < window && req < total {
+        let co = state.chunk_order[req as usize];
+        req += 1;
+        let (cx, cz) = g.chunk_xy(co);
+        if jni::is_chunk_loaded(env, world, cx, cz) == Some(true) {
+            // Resident already (spawn area / player chunks): sample right
+            // now, no async round-trip, no window slot.
+            sample_stream_chunk(state, env, world, &g, co);
+        } else if let Some(fut) = jni::request_chunk_future(env, world, cx, cz) {
+            let gref = unsafe { new_global(env, fut) };
+            inflight.push_back((co, gref, tick));
+        }
+        // request failure (JNI hiccup): the deadline re-request watchdog
+        // never sees it — track it as a hole via the retry queue instead.
+        else {
+            state.scan_retry.lock().unwrap().push_back(co);
+        }
+        state.scan_cursor.store(req, Ordering::Relaxed);
+    }
+    CURSOR_HINT.store(
+        state.scan_cursor.load(Ordering::Relaxed).min(total),
+        Ordering::Relaxed,
+    );
+
+    // 2) sample up to `budget` chunks whose future completed. The chunk
+    // system holds the chunk loaded until the future completes, and this
+    // task runs at tick start (before the chunk system's unload pass), so a
+    // completed future means the chunk is resident RIGHT NOW.
+    let mut sampled = 0u32;
+    let budget = budget as u32;
+    let mut waiting = VecDeque::new();
+    while let Some((co, gref, at)) = inflight.pop_front() {
+        let done = jni::future_done(env, unsafe { as_obj(gref) }).unwrap_or(false);
+        if !done && tick.saturating_sub(at) < 400 {
+            waiting.push_back((co, gref, at));
+            continue;
+        }
+        // Done, or stale (crashed generation / lost request) — drop the
+        // future ref either way.
+        unsafe { env.delete_global_ref(as_obj(gref)) };
+        let (cx, cz) = g.chunk_xy(co);
+        // PIN ONLY ON A COMPLETED FUTURE. isChunkLoaded alone lies: a chunk
+        // whose generation CRASHED (live-observed: OOM inside the worldgen
+        // task) keeps a half-built ProtoChunk that reads as "loaded" while
+        // its full status never arrives — setChunkForceLoaded on it parks
+        // the main thread forever. A completed future means FULL status.
+        if !done {
+            // Stale: re-request, never pin. The chunk system dedups by
+            // position; a crashing chunk re-requests until the deadline
+            // cuts it (the hole renders as no-geometry, never as a stall).
+            if let Some(fut) = jni::request_chunk_future(env, world, cx, cz) {
+                let gref = unsafe { new_global(env, fut) };
+                waiting.push_back((co, gref, tick));
+            } else {
+                state.scan_retry.lock().unwrap().push_back(co);
+            }
+            continue;
+        }
+        if sampled < budget && jni::is_chunk_loaded(env, world, cx, cz) == Some(true) {
+            // Pin (instant — the chunk is resident AND full), sample,
+            // release. The pin/release brackets the reads against a
+            // between-ticks unload.
+            let _ = jni::warm_chunk(env, world, cx, cz, true);
+            sample_stream_chunk(state, env, world, &g, co);
+            let _ = jni::warm_chunk(env, world, cx, cz, false);
+            sampled += 1;
+        } else {
+            // Completed but not resident (raced an unload) — re-request.
+            if let Some(fut) = jni::request_chunk_future(env, world, cx, cz) {
+                let gref = unsafe { new_global(env, fut) };
+                waiting.push_back((co, gref, tick));
+            } else {
+                state.scan_retry.lock().unwrap().push_back(co);
+            }
+        }
+    }
+    *inflight = waiting;
+}
+
+/// SYNC streaming edition (default): exactly `stream_chunks` chunks per
+/// tick, each synchronously force-loaded (which generates it), sampled at
+/// cell resolution and un-forced immediately. The cursor is monotonic over
+/// the atlas chunk grid, so the whole atlas is covered exactly once and
+/// `scanned >= total` fires the normal finalize path as soon as the last
+/// chunk is written.
+fn scan_stream_sync(state: &Arc<State>, env: Env, world: jvmti_bindings::jni::jobject) {
     let atlas = &state.atlas;
     let cell = atlas.cell.max(1);
     let (side, cx0, cz0) = chunk_grid(atlas);
     let total = (side as u64) * (side as u64);
-    let per = (16 / cell).max(1); // cells per chunk edge
-    let half = atlas.size / 2;
+    let g = StreamGeom {
+        cell,
+        side,
+        cx0,
+        cz0,
+        per: (16 / cell).max(1), // cells per chunk edge
+        half: atlas.size / 2,
+    };
     let budget = state.cfg.stream_chunks.max(1);
+
+    let mut inflight = state.scan_inflight.lock().unwrap();
+    let _ = &mut inflight; // async-only state; unused in this edition
 
     for _ in 0..budget {
         // Main sweep first (monotonic cursor over the centre-out ring order),
@@ -462,41 +767,36 @@ fn scan_stream(state: &Arc<State>, env: Env, world: jvmti_bindings::jni::jobject
             state.scan_cursor.load(Ordering::Relaxed).min(total),
             Ordering::Relaxed,
         );
-        let cx = cx0 + (co % side as u32) as i32;
-        let cz = cz0 + (co / side as u32) as i32;
+        let (cx, cz) = g.chunk_xy(co);
         if !jni::warm_chunk(env, world, cx, cz, true) {
             // Transient failure (worldgen pool busy): queue for a retry pass
             // instead of dropping the chunk from the snapshot forever.
             state.scan_retry.lock().unwrap().push_back(co);
             continue;
         }
-        for dz in 0..per {
-            for dx in 0..per {
-                let x = cx * 16 + dx * cell + cell / 2;
-                let z = cz * 16 + dz * cell + cell / 2;
-                let ix = (x - (atlas.center_x - half)) / cell;
-                let iz = (z - (atlas.center_z - half)) / cell;
-                if ix < 0 || iz < 0 || ix as u32 >= atlas.cells || iz as u32 >= atlas.cells {
-                    continue;
-                }
-                if let Some((y, liquid, top, side, tex_top, tex_side)) =
-                    jni::sample_column(env, world, x, z, state.cfg.sea_level)
-                {
-                    atlas.set(
-                        ix as u32,
-                        iz as u32,
-                        (y.clamp(-64, 1023)) as i16,
-                        liquid,
-                        top,
-                        side,
-                        tex_top,
-                        tex_side,
-                    );
-                }
-            }
-        }
+        sample_stream_chunk(state, env, world, &g, co);
         let _ = jni::warm_chunk(env, world, cx, cz, false);
     }
+}
+
+/// Rate-limited scan progress line (shared by both editions).
+fn log_scan_progress(state: &Arc<State>, seq: u64) {
+    use std::sync::atomic::Ordering as O;
+    let streamed = if state.cfg.stream_chunks > 0 {
+        let (done, total) = stream_progress(&state.atlas);
+        format!(" chunks {done}/{total}")
+    } else {
+        String::new()
+    };
+    crate::log_info(&format!(
+        "scan: tick {seq}, atlas v{} ({}/{} cells{streamed}), ok={} unloaded={} err={}",
+        state.atlas.version(),
+        state.atlas.scanned_cells(),
+        state.atlas.total_cells(),
+        jni::SCAN_OK.load(O::Relaxed),
+        jni::SCAN_UNLOADED.load(O::Relaxed),
+        jni::SCAN_ERR.load(O::Relaxed),
+    ));
 }
 
 /// Tier for one player from world + static window bounds.
