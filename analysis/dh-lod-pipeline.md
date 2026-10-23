@@ -152,3 +152,13 @@
   per-cell tile-id текстура.
 - `lod_terrain.fsh` → DH UV-повторы, `mix(albedo, albedo*tile*2, tile.a)`,
   шум только на плоских.
+- **Avoided blocks (v4.5.0)** → `blocksToIgnore=NON_COLLIDING` +
+  `tintWithAvoidedBlocks=true` (дефолты Config.java:895/905, сверено с
+  исходником 3.3.4): не-коллизионный/не-ликвид/не-опак блок над поверхностью
+  (tall grass, папоротники, цветы, факелы) пропускается, а его цвет +
+  материал + тайл ЗАМЕЩАЮТ блок ниже («a red flower will tint the grass
+  below it red»); высота остаётся на уровне земли (avoided-блок не даёт
+  датапоинта). Над жидким грунтом ветка выключена (seagrass не перекрашивает
+  воду — DH держит liquid-ветку). Реализовано в пробе поверхности `jni.rs`
+  через `Material#isSolid`/`#isOccluding` (прокси NMS isSolid / opacity 15);
+  промах таблицы цветов оставляет цвет грунта — поверхность не сереет.

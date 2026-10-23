@@ -493,8 +493,10 @@ pub fn sample_column(
                             // ground is liquid (seagrass must not repaint
                             // the water surface; DH keeps the liquid branch).
                             _ => {
-                                if !liquid && !env.call_boolean_method(above, aid.m_is_liquid, &[])
-                                {
+                                let above_liquid =
+                                    env.call_boolean_method(above, aid.m_is_liquid, &[]);
+                                clear_if_pending(env);
+                                if !liquid && !above_liquid {
                                     let solid = env.call_boolean_method(amat, amid.m_is_solid, &[]);
                                     clear_if_pending(env);
                                     let occluding =
