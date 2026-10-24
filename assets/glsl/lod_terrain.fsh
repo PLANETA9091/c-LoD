@@ -113,6 +113,20 @@ const float SHADE_EW = 0.6;
 const float TILE_PX = 16.0;
 const float TILES_PER_ROW = 256.0;
 
+// DH zeroes the tile id at MESH BUILD time once the datapoint is coarser
+// than Config.Client.Advanced.Graphics.Texture.maxTexturedLodDetailLevel
+// (default 2): near LODs carry textures, far LODs fall back to the flat
+// colour + noise. Our cells are a fixed-size grid, so the same rule is
+// expressed as a DISTANCE fade: a 16px tile spans one cell, and once a
+// cell covers only a couple of screen pixels the bilinear (mipless) tile
+// sampling shimmers — the snow-field speckle and the water checkerboard
+// in the e2e matrix. The fade is proportional to the cell size so the
+// texel density (16 texels per cell) stays the limiting factor: full
+// texture at the LOD start (the vanilla-overlap band), flat around the
+// point where the DH fog itself reaches ~50% (fog 0.5 at ~0.73 x fogFar).
+const float TILE_FADE_CELL_START = 64.0;
+const float TILE_FADE_CELL_END = 160.0;
+
 // Height (block Y) stored in the atlas: (y + 64) << 6, big-endian RG.
 float atlas_height(vec2 uv) {
     vec4 a = texture(AtlasSampler, uv);
@@ -168,8 +182,9 @@ float tile_id(vec2 uv, bool side) {
 /// DH tile application: albedo = mix(albedo, albedo * (tile.rgb * 2.0), tile.a)
 /// with the tile's 16x16 texels mapped into the fract() UV cell. Half-texel
 /// clamping keeps bilinear sampling inside the tile (no neighbour bleed).
-vec3 apply_dh_tile(vec3 albedo, float tileId, vec2 faceUv, float tileRows) {
-    if (tileId < 0.5) {
+/// w = the DH maxTexturedLodDetailLevel distance weight (1 near, 0 far).
+vec3 apply_dh_tile(vec3 albedo, float tileId, vec2 faceUv, float tileRows, float w) {
+    if (tileId < 0.5 || w < 0.004) {
         return albedo; // tile 0 = the reserved flat tile
     }
     float tx = mod(tileId, TILES_PER_ROW);
@@ -181,7 +196,7 @@ vec3 apply_dh_tile(vec3 albedo, float tileId, vec2 faceUv, float tileRows) {
         (ty + f.y) * TILE_PX / (tileRows * TILE_PX)
     );
     vec4 tile = texture(TilesSampler, uv);
-    return mix(albedo, albedo * (tile.rgb * 2.0), tile.a);
+    return mix(albedo, albedo * (tile.rgb * 2.0), tile.a * w);
 }
 
 // ------------------------------------------------------------------
@@ -523,9 +538,13 @@ void main() {
 
     // DH 3.3.4 textured LODs: the ratio tile of this column's top block.
     // Horizontal repeats = one per CELL (vBlockPos is in data-point units in
-    // DH), vertical repeats on walls = one per BLOCK.
+    // DH), vertical repeats on walls = one per BLOCK. The tile weight
+    // implements DH's maxTexturedLodDetailLevel as a distance fade — far
+    // LODs are flat + noise, exactly like DH's coarse datapoints.
     float tileRows = SkyParams.z;
     float tileId = tile_id(auv, sideHit);
+    float tileW = 1.0 - smoothstep(
+        TILE_FADE_CELL_START * cell, TILE_FADE_CELL_END * cell, hitT);
     vec2 faceUv;
     if (sideHit) {
         float yF = fract(hitPos.y); // walls repeat per block vertically
@@ -556,14 +575,16 @@ void main() {
 
     // DH order: the texture multiplies the ALREADY-LIT flat colour
     // (vertexColor = lightmap * color, then the tile mix in frag).
-    lit = apply_dh_tile(lit, tileId, faceUv, tileRows);
+    lit = apply_dh_tile(lit, tileId, faceUv, tileRows, tileW);
 
     // DH fake-texture grain (terrain pass applies it after lighting, before
     // the fog pass) — ONLY on untextured pixels (vTextureTileId == 0u):
     // textured blocks carry their real grain. The noise cell is anchored to
     // the FACE — tops use the up normal, walls the normal of the crossed grid
-    // line pointing back at the camera side (-stepX / -stepZ).
-    if (tileId < 0.5) {
+    // line pointing back at the camera side (-stepX / -stepZ). Beyond the
+    // tile fade the flat colour takes the grain over, exactly like DH's
+    // coarse-level LODs.
+    if (tileId < 0.5 || tileW < 0.996) {
         vec3 faceN = sideHit
             ? (hitAxisX ? vec3(-stepX, 0.0, 0.0) : vec3(0.0, 0.0, -stepZ))
             : vec3(0.0, 1.0, 0.0);
