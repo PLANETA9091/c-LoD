@@ -85,10 +85,6 @@ layout(location = 0) out vec4 fragColor;
 const float PI = 3.14159265358979;
 // 26.3 device depth: d = near/eyeZ (infinite far) — sky == 0.0.
 const float SKY_DEPTH = 1.0e-6;
-// A ray crosses at most (fogFar/cell in x + fogFar/cell in z) grid boundaries
-// before the fog early-out stops the march: 2 x (1024/4) = 512 for the
-// 2048-block atlas (fogFar = 1024, cell 4), plus margin.
-const int MAX_STEPS = 560;
 
 // DH far-fog defaults (Config.Client.Advanced.Graphics.Fog): EXPONENTIAL_SQUARED,
 // farFogStart 0.4, farFogEnd 1.0 (x lodDrawDistance), density 2.5, spherical
@@ -396,10 +392,16 @@ void main() {
     bool curVoid = atlas_void(atlas_uv(enterXz, origin, size));
 
     // DH far-fog plane (see the composite below): marching past it is pointless
-    // — the hit would be >= 99.8% fog. The early-out keeps the step count bound
-    // by the FOG RANGE instead of the atlas size, so a 2048-block atlas costs
-    // no more steps than the old 1024 one.
+    // — the hit would be >= 99.8% fog. The early-out keeps the AVERAGE step
+    // count bound by the fog range rather than the atlas side.
     float fogFar = max(FogParams.y, 1.0);
+
+    // Step budget: a ray crosses at most (fogFar/cell in x + fogFar/cell in z)
+    // grid boundaries before the fog early-out stops the march. This scales
+    // with the CONFIGURED atlas — the old constant 560 silently truncated the
+    // walk on the 4096-block product default (fogFar 2048 needs up to 1024+
+    // crossings at cell 4, 2048+ at cell 2) and cut the terrain mid-band.
+    int maxSteps = int(2.0 * fogFar / cell) + 64;
 
     float hitT = -1.0;
     bool sideHit = false;
@@ -408,7 +410,7 @@ void main() {
     float hHitOld = 0.0;
     float hHitNew = 0.0;
 
-    for (int i = 0; i < MAX_STEPS; ++i) {
+    for (int i = 0; i < maxSteps; ++i) {
         // TOP face: inside this cell the ray may cross the plane y = hCur from
         // above. DH skips the top quad only when another box covers it — for a
         // heightfield that case is exactly "the ray reaches y=hCur while still
