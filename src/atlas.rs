@@ -360,6 +360,81 @@ impl Atlas {
         (self.cells, strip_h as u32, px)
     }
 
+    /// Side-index strip for the DH detail pyramid (mode aggregation). Level 0
+    /// is the raw per-cell index (the same [`Self::side_index`] mapping the
+    /// RGBA atlas uses), every next level takes the MODE of its 2x2 valid
+    /// children (ties -> lowest index) — the wall colour of a coarse
+    /// datapoint is its most common wall material. Same `n x (2n-1)` strip
+    /// layout as [`Self::encode_colors_pyramid`]; R = index, nearest-filtered
+    /// on the GPU (indices must never blend — a linear mix of two LUT keys is
+    /// a third, wrong colour).
+    pub fn encode_side_pyramid(&self) -> (u32, u32, Vec<u8>) {
+        let snap = self.snapshot();
+        let lut = self.side_lut();
+        let n = self.cells as usize;
+        let mut levels: Vec<Vec<Option<u8>>> = Vec::new();
+        let mut heights: Vec<usize> = Vec::new();
+        let mut cur: Vec<Option<u8>> = snap
+            .iter()
+            .map(|c| {
+                if c.valid {
+                    Some(Self::side_index(&lut, c.side))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        levels.push(cur.clone());
+        heights.push(n);
+        let mut side = n;
+        while side > 1 {
+            let next_side = side.div_ceil(2);
+            let mut next = vec![None; next_side * next_side];
+            for z in 0..next_side {
+                for x in 0..next_side {
+                    let mut counts = [0u16; 255];
+                    for (dz, dx) in [(0usize, 0usize), (0, 1), (1, 0), (1, 1)] {
+                        let (sz, sx) = (z * 2 + dz, x * 2 + dx);
+                        if sz < side && sx < side {
+                            if let Some(i) = cur[sz * side + sx] {
+                                counts[i as usize] += 1;
+                            }
+                        }
+                    }
+                    // mode, ties -> lowest index (deterministic)
+                    let mut best = None;
+                    let mut best_n = 0u16;
+                    for (i, &c) in counts.iter().enumerate() {
+                        if c > best_n {
+                            best_n = c;
+                            best = Some(i as u8);
+                        }
+                    }
+                    next[z * next_side + x] = best;
+                }
+            }
+            levels.push(next.clone());
+            heights.push(next_side);
+            cur = next;
+            side = next_side;
+        }
+        let strip_h: usize = heights.iter().sum();
+        let mut px = vec![0u8; n * strip_h * 4];
+        let mut row = 0usize;
+        for (level, &lh) in levels.iter().zip(&heights) {
+            for (i, c) in level.iter().enumerate() {
+                if let Some(idx) = c {
+                    let (x, z) = (i % lh, i / lh);
+                    let o = ((row + z) * n + x) * 4;
+                    px[o] = *idx;
+                    px[o + 3] = 255;
+                }
+            }
+            row += lh;
+        }
+        (self.cells, strip_h as u32, px)
+    }
+
     /// Per-cell ratio-tile ids (DH 3.3.4 textured LODs): R/G = top tile id
     /// big-endian, B/A = side tile id big-endian. Nearest-filtered on the GPU
     /// so ids never blend between cells. Tile id 0 = the reserved flat tile.
@@ -585,6 +660,29 @@ mod tests {
         // clamps to the tile bounds)
         assert_eq!(px[at(0, 0, 0) + 3], 255);
         assert_eq!(px[at(16, 0, 0) + 3], 255);
+    }
+
+    #[test]
+    fn side_pyramid_takes_the_mode() {
+        let a = Atlas::new(0, 0, 64, 4, 63); // 16x16 cells
+                                             // Cell side colours: the side LUT index of `side` is what gets
+                                             // aggregated. Two cells share a colour, one differs, one invalid.
+        a.set(0, 0, 10, false, 0x00FF00, 0x101010, 0, 0);
+        a.set(1, 0, 10, false, 0x00FF00, 0x101010, 0, 0);
+        a.set(0, 1, 10, false, 0x00FF00, 0x202020, 0, 0);
+        let lut = a.side_lut();
+        let i10 = super::Atlas::side_index(&lut, 0x101010);
+        let _i20 = super::Atlas::side_index(&lut, 0x202020);
+
+        let (w, h, px) = a.encode_side_pyramid();
+        assert_eq!((w, h), (16, 31));
+        let at = |row: usize, z: usize, x: usize| ((row + z) * 16 + x) * 4;
+        // level 0 keeps the raw indices
+        assert_eq!(px[at(0, 0, 0)], i10);
+        // level 1 (row 16): mode of {i10, i10, i20, invalid} = i10
+        assert_eq!(px[at(16, 0, 0)], i10);
+        // unwritten pad texels stay zero (never sampled)
+        assert_eq!(px[at(16, 7, 7)], 0);
     }
 
     #[test]

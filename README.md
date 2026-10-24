@@ -111,7 +111,7 @@ CI runs rustfmt, clippy (`-D warnings`), the full test suite, glslang shader val
 - **The camera channel needs sky in the leftmost screen columns.** Facing a wall of terrain (or being fully indoors) the chain holds its last estimate with a slow decay — the LOD fades out instead of popping, and the atmosphere chain keeps working (it never needs rotation). Any sky row in the leftmost 8 columns re-locks the basis within one frame.
 - Overdraw on those columns (clouds, rain, particles) fails the payload checksum per row and simply redirects the scan lower — self-healing by design; a fully overcast frame may drop the LOD briefly.
 - Atlas generation forces chunk loads — keep `scan_budget` reasonable for your tick budget.
-- Far LOD colour comes from the DH detail pyramid (colour mip strip, 2x2 aggregation per octave) selected by the pixel's world footprint; tiles and the DH grain fade by the same footprint. The DDA itself always marches the finest heightfield, so far silhouettes keep the 2-block stair-steps (world-locked, no shimmer).
+- Far LOD colour comes from the DH detail pyramid (colour mip strip, 2x2 aggregation per octave) selected by the pixel's world footprint; the wall material uses the same strip with mode-aggregated side indices, and tiles + the DH grain fade by the same footprint. The DDA itself always marches the finest heightfield, so far silhouettes keep the 2-block stair-steps (world-locked, no shimmer).
 - The march budget scales with the atlas (`2 × fogFar / cell + 64` steps); a 4096-block atlas at `cell_size=2` walks up to ~4100 crossings on near-horizontal rays. The DH fog early-out keeps the average cost far below that.
 
 ## License

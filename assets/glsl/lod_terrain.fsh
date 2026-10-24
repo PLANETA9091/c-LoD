@@ -28,6 +28,7 @@ uniform sampler2D InDepthSampler; // minecraft:main depth
 uniform sampler2D AtlasSampler;   // RG = height, B = water, A = side colour index
 uniform sampler2D ColorSampler;   // top-face block colour (baked texture average)
 uniform sampler2D SideSampler;    // 256x1 side/cliff colour LUT
+uniform sampler2D SidePyrSampler; // side-index strip (mode-aggregated pyramid)
 uniform sampler2D TilesSampler;   // DH ratio-tile atlas (16px tiles, 256/row)
 uniform sampler2D TexIdsSampler;  // per-cell tile ids: RG top, BA side (big-endian)
 uniform sampler2D RotSampler;     // clod:clod_rot_a (1x1 persistent, camera channel)
@@ -180,6 +181,20 @@ vec3 pyr_color(vec2 uv01, float lvl, float n) {
     vec3 c0 = pyr_level(uv01, L0, n);
     vec3 c1 = pyr_level(uv01, L0 + 1.0, n);
     return mix(c0, c1, lvl - L0);
+}
+
+// Side INDEX from the same strip layout — NEAREST only (a linear mix of two
+// LUT keys is a third, wrong colour), hard octave switch like DH's datapoint
+// selection.
+float pyr_side(vec2 uv01, float lvl, float n) {
+    float L = floor(lvl);
+    float sz = max(floor(n / exp2(L)), 1.0);
+    vec2 t = clamp(floor(uv01 * sz), vec2(0.0), vec2(sz - 1.0));
+    float off = 2.0 * n - 2.0 * sz;
+    return texture(
+        SidePyrSampler,
+        vec2((t.x + 0.5) / n, (off + t.y + 0.5) / (2.0 * n - 1.0))
+    ).r;
 }
 
 /// Index of the side/cliff colour stored in the atlas alpha channel.
@@ -558,7 +573,7 @@ void main() {
     vec3 topCol = pyr_color(atlas_uv(hitPos.xz, origin, size), pyrLvl, cellsN);
     vec3 sideCol = texture(
         SideSampler,
-        vec2((atlas_side(auv) * 255.0 + 0.5) / 256.0, 0.5)
+        vec2((pyr_side(atlas_uv(hitPos.xz, origin, size), pyrLvl, cellsN) * 255.0 + 0.5) / 256.0, 0.5)
     ).rgb;
 
     vec3 albedo;

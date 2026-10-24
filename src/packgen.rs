@@ -107,6 +107,11 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
     // LODs smooth instead of per-cell speckle.
     let (cw, ch, color_rgba) = atlas.encode_colors_pyramid();
     let color_png = png::encode_png(cw, ch, &color_rgba);
+    // Side-index pyramid (v4.7.1): the mode-aggregated wall material per
+    // octave — without it far walls point-sample the per-cell side index and
+    // shimmer between neighbouring materials.
+    let (pw_, ph_, sidepyr_rgba) = atlas.encode_side_pyramid();
+    let sidepyr_png = png::encode_png(pw_, ph_, &sidepyr_rgba);
 
     let map: Vec<(&str, String)> = vec![
         ("__FOV__", fmt_f(cfg.fov)),
@@ -115,6 +120,7 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
         ("__ATLAS_SIZE__", fmt_f(atlas.size as f32)),
         ("__ATLAS_CELLS__", atlas.cells.to_string()),
         ("__COLOR_STRIP_H__", ch.to_string()),
+        ("__SIDE_STRIP_H__", ph_.to_string()),
         ("__CELL__", fmt_f(atlas.cell as f32)),
         ("__TILES_W__", tiles_w.to_string()),
         ("__TILES_H__", tiles_h.to_string()),
@@ -242,6 +248,7 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
     );
     zip.add("assets/clod/textures/effect/atlas.png", &atlas_png);
     zip.add("assets/clod/textures/effect/color.png", &color_png);
+    zip.add("assets/clod/textures/effect/sidepyr.png", &sidepyr_png);
     zip.add("assets/clod/textures/effect/side.png", &side_png);
     zip.add("assets/clod/textures/effect/tiles.png", &tiles_png);
     zip.add("assets/clod/textures/effect/tex.png", &tex_png);
@@ -289,8 +296,8 @@ mod tests {
         // Must contain the essential entries: scan by walking central dir.
         let count = u16::from_le_bytes([pack.zip[n - 12], pack.zip[n - 11]]) as usize;
         assert_eq!(
-            count, 17,
-            "pack.mcmeta + 2 json + 6 fsh + 5 textures + sky.vsh/fsh + terrain.vsh"
+            count, 18,
+            "pack.mcmeta + 2 json + 6 fsh + 6 textures + sky.vsh/fsh + terrain.vsh"
         );
 
         // JSON chains are valid JSON (parenthesis balance + token-free).
