@@ -10,7 +10,7 @@ JAVA="${CLOD_JAVA:-$HOME/mc-test/jdk25/bin/java}"
 # DH farFogEnd 1.0) sits at 1024 blocks, so the scan (~16k chunks, ~6-7 min
 # at ~47 chunks/s) must fit the deadline; the ring order keeps a cut short
 # scan centred on the camera anyway.
-export CLOD_OPTS="scan_mode=async;scan_deadline_secs=500;tick_ms=100;atlas_size=2048;cell_size=4;stream_chunks=64;http_port=8199;center_x=-930;center_z=796"
+export CLOD_OPTS="scan_mode=async;scan_deadline_secs=500;tick_ms=100;atlas_size=1024;cell_size=4;stream_chunks=32;http_port=8199;center_x=-930;center_z=796"
 # Server heap: the launcher relays DIST_JAVA_OPTS verbatim to the Paper JVM
 # (its own CLI flags size only the tiny launcher process). 700M survives the
 # 2-worker local box; CI's 4 worldgen workers need the CLOD_SERVER_XMX bump
