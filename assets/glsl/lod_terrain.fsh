@@ -254,20 +254,6 @@ float dh_rand3(vec3 co) {
 vec3 dh_quantize(vec3 v, float steps) {
     return floor(v * steps) / steps;
 }
-
-// DH terrain/gl/frag.frag:73-91 — verbatim 4x4 Bayer matrix, normalized 0..1.
-float bayer4x4(vec2 st) {
-    int x = int(mod(st.x, 4.0));
-    int y = int(mod(st.y, 4.0));
-    // Flattened 4x4 Bayer matrix
-    float bayer[16] = float[16](
-        0.0,  8.0,  2.0, 10.0,
-        12.0,  4.0, 14.0,  6.0,
-        3.0, 11.0,  1.0,  9.0,
-        15.0,  7.0, 13.0,  5.0
-    );
-    return bayer[y * 4 + x] / 16.0;
-}
 vec3 dh_noise(vec3 col, vec3 worldPos, vec3 faceN, float viewDist, float ampW) {
     float lum = (col.r + col.g + col.b) / 3.0;
     float amp = (1.0 - pow(lum * 2.0 - 1.0, 2.0)) * NOISE_INTENSITY * ampW;
@@ -561,21 +547,16 @@ void main() {
         return;
     }
 
-    // DH near-clip dither (terrain/gl/frag.frag:137-161, uDitherDhRendering):
-    // over the band [clip, 1.5*clip] LOD fragments dissolve through the
-    // screen-space Bayer 4x4 pattern instead of a hard seam — "Dithering is
-    // used since it works for both opaque and transparent rendering".
-    // DH's uClipDistance sits 16 blocks above its overdraw-adjusted vanilla
-    // plane because its LODs already exist UNDER the vanilla chunks; ours
-    // become visible exactly at the vanilla boundary (near), so that
-    // boundary IS the clip and the band is [near, 1.5*near].
-    if (forceLod < 0.5 && near > 0.5) {
-        float fadeStep = smoothstep(near, near * 1.5, hitT);
-        if (fadeStep <= bayer4x4(gl_FragCoord.xy) + 0.001) {
-            fragColor = scene;
-            return;
-        }
-    }
+    // NOTE ON DH's NEAR-CLIP BAYER DITHER (terrain/gl/frag.frag:137-161):
+    // deliberately NOT ported. DH's LODs exist UNDER the vanilla chunks
+    // (overdraw 0.2-0.9 of the vanilla radius), so discarding dithered LOD
+    // fragments there reveals the REAL TERRAIN behind them. Our LOD becomes
+    // visible exactly AT the vanilla boundary — a discarded fragment would
+    // reveal bare SKY, sprinkling bright dither dots over the near band
+    // (verified on the real client, v4.8.0 e2e). The hard cut at `near` IS
+    // the correct DH-equivalent for a posteffect pipeline; the chunk->LOD
+    // seam is clean because vanilla chunk fog is disabled and the LOD band
+    // shares the fog stack (verified e2e v4.6-v4.8).
 
     float fade = forceLod > 0.5 ? 1.0 : smoothstep(minConf, minConf + 0.15, conf);
     vec3 hitPos = cam + dir * hitT;
