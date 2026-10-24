@@ -63,6 +63,10 @@ pub struct State {
     pub tick_no: AtomicU64,
     /// Rate limiter for pack-push failure logs.
     pub push_fails: AtomicU32,
+    /// Chunks currently force-loaded by the scan stream (main-thread only).
+    pub stream_loaded: Mutex<std::collections::HashSet<(i32, i32)>>,
+    /// Last tick the scan-stream state was logged (diagnostics).
+    pub stream_log_at: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -155,6 +159,8 @@ impl State {
             pack_uuid: Mutex::new(0),
             tick_no: AtomicU64::new(0),
             push_fails: AtomicU32::new(0),
+            stream_loaded: Mutex::new(std::collections::HashSet::new()),
+            stream_log_at: AtomicU64::new(0),
             cfg,
         })
     }
@@ -195,13 +201,25 @@ fn release_forceload(state: &Arc<State>, env: Env) {
     }
     let world = unsafe { as_obj(world_handle) };
     let w = state.cfg.warm_chunks;
+    let bcx = state.cfg.center_x >> 4;
+    let bcz = state.cfg.center_z >> 4;
     let mut released = 0usize;
-    for cx in -w..=w {
-        for cz in -w..=w {
+    for cx in (bcx - w)..=(bcx + w) {
+        for cz in (bcz - w)..=(bcz + w) {
             if jni::warm_chunk(env, world, cx, cz, false) {
                 released += 1;
             }
         }
+    }
+    // Release the scan-stream window too (static snapshot is frozen).
+    if state.cfg.stream_chunks > 0 {
+        let mut st = state.stream_loaded.lock().unwrap();
+        for &(cx, cz) in st.iter() {
+            if jni::warm_chunk(env, world, cx, cz, false) {
+                released += 1;
+            }
+        }
+        st.clear();
     }
     crate::log_info(&format!(
         "c-LoD core force-load released ({released} chunks) — static snapshot retained"
@@ -273,17 +291,22 @@ fn ensure_boot(state: &Arc<State>, env: Env) {
                 // without this the static snapshot could cover nothing.
                 if state.cfg.warm_chunks > 0 {
                     let w = state.cfg.warm_chunks;
+                    // Warm around the ATLAS CENTER (v4.3): the old code
+                    // warmed chunks 0,0-based, which silently covered
+                    // nothing for off-spawn centers (ok=N frozen symptom).
+                    let bcx = state.cfg.center_x >> 4;
+                    let bcz = state.cfg.center_z >> 4;
                     let mut loaded = 0usize;
-                    for cx in -w..=w {
-                        for cz in -w..=w {
+                    for cx in (bcx - w)..=(bcx + w) {
+                        for cz in (bcz - w)..=(bcz + w) {
                             if jni::warm_chunk(env, unsafe { as_obj(g) }, cx, cz, true) {
                                 loaded += 1;
                             }
                         }
                     }
                     state.warmed.store(1, Ordering::SeqCst);
-                    let loaded0 = jni::is_chunk_loaded(env, unsafe { as_obj(g) }, 0, 0);
-                    let h0 = jni::probe_height(env, unsafe { as_obj(g) }, 0, 0);
+                    let loaded0 = jni::is_chunk_loaded(env, unsafe { as_obj(g) }, bcx, bcz);
+                    let h0 = jni::probe_height(env, unsafe { as_obj(g) }, bcx, bcz);
                     crate::log_info(&format!(
                         "c-LoD core force-loaded: {}x{} chunks around atlas center ({} ok) — isChunkLoaded(0,0)={loaded0:?}, height(0,0)={h0:?} — released at finalize",
                         2 * w + 1,
@@ -306,6 +329,89 @@ unsafe fn as_obj(handle: usize) -> jvmti_bindings::jni::jobject {
     handle as jvmti_bindings::jni::jobject
 }
 
+/// Stream chunks ahead of the radial scan cursor: force-load up to
+/// `stream_chunks` chunks covering the NEXT batch window (the scan itself
+/// never forces generation, so a center far from spawn starves without
+/// this), and release chunks the cursor has passed to keep RSS flat.
+/// DH equivalence: DH's chunk update queue pre-loads sources before the
+/// builder needs them — same idea, synchronous server-side flavor.
+fn stream_forward(state: &Arc<State>, env: Env, world: jvmti_bindings::jni::jobject, seq: u64) {
+    let cap = state.cfg.stream_chunks as usize;
+    if cap == 0 {
+        return;
+    }
+    // Cells-per-chunk for this atlas geometry (chunk = 16x16 blocks).
+    let step = (16 / state.atlas.cell).max(1) as usize;
+    let cells_per_chunk = step * step;
+    let budget = state.cfg.scan_budget as u64;
+    let total = state.atlas.total_cells() as u64;
+    if total == 0 {
+        return;
+    }
+    // Window = the cells this tick will try + stream_chunks chunks ahead.
+    let start = (seq + 1).saturating_mul(budget) % total;
+    let want_cells = (budget + (cap * cells_per_chunk) as u64).min(total) as u32;
+    let tasks = state.atlas.scan_task(start, want_cells);
+    let mut wanted: std::collections::HashSet<(i32, i32)> = std::collections::HashSet::new();
+    for (ix, iz) in tasks.iter().copied() {
+        let x = state.atlas.cell_world_x(ix);
+        let z = state.atlas.cell_world_z(iz);
+        wanted.insert((x >> 4, z >> 4));
+        if wanted.len() >= cap {
+            break;
+        }
+    }
+    let mut st = state.stream_loaded.lock().unwrap();
+    // Release chunks whose Chebyshev ring is well BEHIND the scan cursor:
+    // their cells are already scanned this radial pass (released chunks come
+    // back via the ring retry if the pass wraps). Without release, hundreds
+    // of live generated chunks OOM the 700-1024M Paper heap.
+    let bcx = state.cfg.center_x >> 4;
+    let bcz = state.cfg.center_z >> 4;
+    // Ring (in chunks) the cursor has reached: cells done ≈ 4(r+1)^2 →
+    // r_cells = sqrt(done/4)-1; chunks are cell/16 of that.
+    let done = (seq + 1) as f64 * budget as f64;
+    let r_chunks =
+        ((done / 4.0).sqrt() - 1.0).max(0.0) * (state.atlas.cell as f64 / 16.0);
+    let released: Vec<(i32, i32)> = st
+        .iter()
+        .filter(|&&(cx, cz)| {
+            let ring = (cx - bcx).abs().max((cz - bcz).abs()) as f64;
+            ring + 2.0 < r_chunks
+        })
+        .copied()
+        .collect();
+    for &(cx, cz) in &released {
+        if jni::warm_chunk(env, world, cx, cz, false) {
+            st.remove(&(cx, cz));
+        }
+    }
+    // Force-load NEW window chunks, capped per tick: setChunkForceLoaded only
+    // queues an async load, but a burst of hundreds/tick starves the server
+    // tick loop. Paper's async system catches up between ticks.
+    let cap_per_tick = 8usize;
+    let mut added = 0usize;
+    for &(cx, cz) in wanted.iter().filter(|c| !st.contains(*c)).collect::<Vec<_>>() {
+        if added >= cap_per_tick {
+            break;
+        }
+        if jni::warm_chunk(env, world, cx, cz, true) {
+            st.insert((cx, cz));
+            added += 1;
+        }
+    }
+    // Rate-limited diagnostics (mirrors the scan line cadence).
+    let last = state.stream_log_at.load(Ordering::Relaxed);
+    if seq.is_multiple_of(100) && seq != last {
+        state.stream_log_at.store(seq, Ordering::Relaxed);
+        crate::log_info(&format!(
+            "scan stream: tick {seq}, live={} (+{added}/-{rel} this tick, ring {r_chunks:.1})",
+            st.len(),
+            rel = released.len()
+        ));
+    }
+}
+
 fn scan_batch(state: &Arc<State>, env: Env) {
     // Static atlas: after finalize the snapshot is frozen — never scan again.
     if state.phase.load(Ordering::SeqCst) != PHASE_SCANNING {
@@ -317,6 +423,7 @@ fn scan_batch(state: &Arc<State>, env: Env) {
     }
     let world = unsafe { as_obj(world_handle) };
     let seq = state.scan_seq.fetch_add(1, Ordering::Relaxed);
+    stream_forward(state, env, world, seq);
     let budget = state.cfg.scan_budget;
     // Advance the sweep by `budget` cells per tick (scan_task wraps the
     // start index over the whole atlas): passing the bare tick number made
@@ -326,8 +433,14 @@ fn scan_batch(state: &Arc<State>, env: Env) {
     for (ix, iz) in tasks.iter().copied() {
         let x = state.atlas.cell_world_x(ix);
         let z = state.atlas.cell_world_z(iz);
-        if let Some((y, liquid)) = jni::sample_height(env, world, x, z) {
-            state.atlas.set(ix, iz, (y.clamp(-64, 1023)) as i16, liquid);
+        if let Some((y, liquid, material, biome)) = jni::sample_surface(env, world, x, z) {
+            // v4.2 Voxy look: bake the REAL surface color (block palette +
+            // biome tint) into the cell so the static pack ships colored
+            // terrain, not a two-tone gradient.
+            let rgb = crate::palette::surface_color(&material, &biome, liquid);
+            state
+                .atlas
+                .set(ix, iz, (y.clamp(-64, 1023)) as i16, liquid, rgb);
         }
     }
     // Rate-limited scan diagnostics (one line per 25 ticks).
@@ -640,7 +753,7 @@ mod tests {
         st.phase.store(PHASE_SCANNING, Ordering::SeqCst);
         *st.world_obj.lock().unwrap() = 1; // pretend the world resolved
         *st.world_seen_at.lock().unwrap() = Some(std::time::Instant::now());
-        st.atlas.set(0, 0, 70, false);
+        st.atlas.set(0, 0, 70, false, [0x91, 0xBD, 0x59]);
 
         // Deadline NOT reached yet, atlas incomplete -> no finalize.
         maybe_finalize(&st);

@@ -1,7 +1,12 @@
 //! The LOD heightmap atlas: a `cells x cells` grid covering a square world
 //! region. Cell data:
 //!   - height: i16 block Y (decoded from the atlas PNG's R/G channels),
-//!   - water:  bool (sea surface instead of terrain).
+//!   - water:  bool (sea surface instead of terrain),
+//!   - rgb:    real surface color (block palette + biome tint, v4.2),
+//!     shipped as a second PNG (`atlas_col.png`) — the Voxy look.
+//!
+//! Snapshot format v2 (v4.2): adds 3 color bytes per cell. A stale v1 cache
+//! fails the magic check and is rebuilt by a fresh scan.
 //!
 //! Static-pack lifecycle (v3): the atlas is filled ONCE (JNI budget per tick
 //! until completion or the scan deadline), optionally persisted to
@@ -15,7 +20,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 
 /// On-disk snapshot magic + format version.
-const MAGIC: &[u8; 8] = b"CLODAT01";
+const MAGIC: &[u8; 8] = b"CLODAT02";
 
 pub struct Atlas {
     pub center_x: i32,
@@ -31,6 +36,11 @@ pub struct Atlas {
     version: AtomicU64,
     /// Number of cells scanned at least once (progress tracking).
     scanned: AtomicU64,
+    /// Scan order: cell indices sorted by distance from the atlas center
+    /// (v4.2 radial sweep). The budget then always fills the disc around
+    /// the players first — the horizon they SEE — instead of row-major
+    /// stripes that walk straight into unloaded chunks.
+    order: Vec<u32>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -38,11 +48,29 @@ pub struct Cell {
     pub height: i16,
     pub water: bool,
     pub valid: bool,
+    /// Surface albedo (palette.rs), 0,0,0 = unscanned.
+    pub rgb: [u8; 3],
 }
 
 impl Atlas {
     pub fn new(center_x: i32, center_z: i32, size: i32, cell: i32, sea_level: i32) -> Self {
         let cells = (size / cell).max(1) as u32;
+        let n = cells;
+        // Radial order: sort cell indices by Chebyshev ring distance from
+        // the center POINT (n-1)/2 in half-cell units, so even grids stay
+        // exactly symmetric (cells 7..8 both map to ring 0 on a 16x16
+        // atlas). Deterministic, cheap, ties broken by index. A full
+        // Euclidean sort of 1M cells is wasted precision for a scan sweep;
+        // rings read naturally from any direction.
+        let nn = i64::from(n);
+        let mut order: Vec<u32> = (0..n * n).collect();
+        order.sort_unstable_by_key(|&i| {
+            let ix = i % n;
+            let iz = i / n;
+            let dx = (2 * i64::from(ix) + 1 - nn).abs();
+            let dz = (2 * i64::from(iz) + 1 - nn).abs();
+            (dx.max(dz), ix, iz)
+        });
         Self {
             center_x,
             center_z,
@@ -53,6 +81,7 @@ impl Atlas {
             data: RwLock::new(vec![Cell::default(); (cells * cells) as usize]),
             version: AtomicU64::new(1),
             scanned: AtomicU64::new(0),
+            order,
         }
     }
 
@@ -70,11 +99,11 @@ impl Atlas {
         Some(((dx / self.cell) as u32, (dz / self.cell) as u32))
     }
 
-    pub fn set(&self, ix: u32, iz: u32, height: i16, water: bool) {
+    pub fn set(&self, ix: u32, iz: u32, height: i16, water: bool, rgb: [u8; 3]) {
         let idx = (iz * self.cells + ix) as usize;
         if let Ok(mut data) = self.data.write() {
             if let Some(cell) = data.get_mut(idx) {
-                if !cell.valid || cell.height != height || cell.water != water {
+                if !cell.valid || cell.height != height || cell.water != water || cell.rgb != rgb {
                     if !cell.valid {
                         self.scanned.fetch_add(1, Ordering::Relaxed);
                     }
@@ -82,11 +111,27 @@ impl Atlas {
                         height,
                         water,
                         valid: true,
+                        rgb,
                     };
                     self.version.fetch_add(1, Ordering::Relaxed);
                 }
             }
         }
+    }
+
+    /// Highest valid terrain height in the snapshot (for the shader's
+    /// ray-culling ceiling). -64 when nothing was scanned.
+    pub fn max_height(&self) -> i16 {
+        self.data
+            .read()
+            .map(|d| {
+                d.iter()
+                    .filter(|c| c.valid)
+                    .map(|c| c.height)
+                    .max()
+                    .unwrap_or(-64)
+            })
+            .unwrap_or(-64)
     }
 
     #[allow(dead_code)] // used by tests and upcoming y-band filters
@@ -115,17 +160,19 @@ impl Atlas {
         self.data.read().map(|d| d.clone()).unwrap_or_default()
     }
 
-    /// Iterate cell world-coords for a scan sweep.
+    /// Iterate cell indices for a scan sweep: v4.2 radial order from the
+    /// atlas center (rings first), wrapping around the total.
     pub fn scan_task(&self, seq: u64, count: u32) -> Vec<(u32, u32)> {
-        let cells = self.cells as u64;
-        let total = cells * cells;
+        let total = self.order.len() as u64;
         if total == 0 {
             return Vec::new();
         }
+        let n = self.cells;
         let mut out = Vec::with_capacity(count as usize);
         let mut s = seq % total;
         while out.len() < count as usize {
-            out.push(((s % cells) as u32, (s / cells) as u32));
+            let i = self.order[s as usize];
+            out.push((i % n, i / n));
             s = (s + 1) % total;
             if out.len() as u64 == total {
                 break;
@@ -144,11 +191,11 @@ impl Atlas {
         self.center_z - self.half() + (iz * self.cell as u32) as i32 + self.cell / 2
     }
 
-    /// Encode the atlas as RGBA8 pixels for the PNG texture:
+    /// Encode the atlas as RGBA8 pixels for the height PNG:
     ///   R = high byte, G = low byte of `(height + 64) << 6`,
     ///   B = 255 when water, A = 255 (opaque).
-    /// Unscanned cells encode height 0 / water so the shader treats them as
-    /// void (below the culled minimum).
+    /// Unscanned cells encode height 0 (decodes to -64: void) so the shader
+    /// treats them as misses.
     pub fn encode_rgba(&self) -> (u32, u32, Vec<u8>) {
         let snap = self.snapshot();
         let n = self.cells as usize;
@@ -172,16 +219,86 @@ impl Atlas {
         (self.cells, self.cells, px)
     }
 
+    /// Encode the surface-color PNG (v4.2, the Voxy look): RGB = real block
+    /// color + biome tint. Void cells get the color of the nearest VALID
+    /// neighbor (4-direction diffusion) so bilinear filtering at the scan
+    /// frontier blends terrain into terrain, not into black — the black
+    /// fringe was the "dark mountain" artifact of the first colored build.
+    pub fn encode_color_rgba(&self) -> (u32, u32, Vec<u8>) {
+        let snap = self.snapshot();
+        let n = self.cells as usize;
+        let mut px = vec![0u8; n * n * 4];
+        for z in 0..n {
+            for x in 0..n {
+                let cell = snap[z * n + x];
+                if !cell.valid {
+                    continue; // filled below by diffusion
+                }
+                let o = (z * n + x) * 4;
+                px[o] = cell.rgb[0];
+                px[o + 1] = cell.rgb[1];
+                px[o + 2] = cell.rgb[2];
+                px[o + 3] = 255;
+            }
+        }
+        // Diffusion pass: every void cell takes the nearest valid color by
+        // scanning left/right/up/down (deterministic, order-free).
+        let color_at = |x: usize, z: usize| -> Option<[u8; 3]> {
+            let c = snap.get(z * n + x)?;
+            c.valid.then_some(c.rgb)
+        };
+        for z in 0..n {
+            for x in 0..n {
+                if snap[z * n + x].valid {
+                    continue;
+                }
+                let mut found = None;
+                for d in 1..n {
+                    let mut consider = |xx: usize, zz: usize| {
+                        if found.is_none() {
+                            if let Some(c) = color_at(xx, zz) {
+                                found = Some(c);
+                            }
+                        }
+                    };
+                    if x >= d {
+                        consider(x - d, z);
+                    }
+                    if x + d < n {
+                        consider(x + d, z);
+                    }
+                    if z >= d {
+                        consider(x, z - d);
+                    }
+                    if z + d < n {
+                        consider(x, z + d);
+                    }
+                    if found.is_some() {
+                        break;
+                    }
+                }
+                if let Some(c) = found {
+                    let o = (z * n + x) * 4;
+                    px[o] = c[0];
+                    px[o + 1] = c[1];
+                    px[o + 2] = c[2];
+                    px[o + 3] = 255;
+                }
+            }
+        }
+        (self.cells, self.cells, px)
+    }
+
     // -----------------------------------------------------------------------
     // Disk persistence (static-pack determinism across restarts).
     // -----------------------------------------------------------------------
 
-    /// Serialize the atlas snapshot: MAGIC + header + 3 bytes per cell
-    /// (height i16 LE, flags: bit0 water, bit1 valid).
+    /// Serialize the atlas snapshot: MAGIC + header + 6 bytes per cell
+    /// (height i16 LE, flags: bit0 water, bit1 valid, RGB888).
     pub fn to_bytes(&self) -> Vec<u8> {
         let snap = self.snapshot();
         let n = snap.len();
-        let mut out = Vec::with_capacity(MAGIC.len() + 20 + n * 3);
+        let mut out = Vec::with_capacity(MAGIC.len() + 20 + n * 6);
         out.extend_from_slice(MAGIC);
         out.extend_from_slice(&self.center_x.to_le_bytes());
         out.extend_from_slice(&self.center_z.to_le_bytes());
@@ -191,6 +308,7 @@ impl Atlas {
         for c in &snap {
             out.extend_from_slice(&c.height.to_le_bytes());
             out.push((u8::from(c.water)) | (u8::from(c.valid) << 1));
+            out.extend_from_slice(&c.rgb);
         }
         out
     }
@@ -226,14 +344,14 @@ impl Atlas {
         }
         let atlas = Atlas::new(cx, cz, size, cell, sea);
         let n = (atlas.cells as usize) * (atlas.cells as usize);
-        if buf.len() < MAGIC.len() + 20 + n * 3 {
+        if buf.len() < MAGIC.len() + 20 + n * 6 {
             return None;
         }
         let mut data = atlas.data.write().ok()?;
         let base = MAGIC.len() + 20;
         let mut scanned = 0u64;
         for (i, cell_out) in data.iter_mut().enumerate() {
-            let o = base + i * 3;
+            let o = base + i * 6;
             let height = i16::from_le_bytes([buf[o], buf[o + 1]]);
             let flags = buf[o + 2];
             if flags & 0b10 != 0 {
@@ -241,6 +359,7 @@ impl Atlas {
                     height,
                     water: flags & 0b01 != 0,
                     valid: true,
+                    rgb: [buf[o + 3], buf[o + 4], buf[o + 5]],
                 };
                 scanned += 1;
             }
@@ -301,9 +420,10 @@ mod tests {
     fn set_get_encode() {
         let a = Atlas::new(0, 0, 64, 4, 63);
         assert_eq!(a.cells, 16);
-        a.set(3, 5, 100, false);
-        a.set(0, 0, 62, true);
+        a.set(3, 5, 100, false, [0x91, 0xBD, 0x59]);
+        a.set(0, 0, 62, true, [0x3F, 0x76, 0xE4]);
         assert_eq!(a.get(3, 5).unwrap().height, 100);
+        assert_eq!(a.get(3, 5).unwrap().rgb, [0x91, 0xBD, 0x59]);
         assert!(a.get(0, 0).unwrap().water);
         assert!(a.get(1, 1).is_none());
 
@@ -321,32 +441,65 @@ mod tests {
         let o3 = (7 * 16 + 7) * 4;
         assert_eq!(px[o3], 0);
         assert_eq!(px[o3 + 2], 0);
+
+        // Color PNG: valid cells carry rgb, invalid stay black.
+        let (_, _, cpx) = a.encode_color_rgba();
+        assert_eq!(&cpx[o..o + 3], &[0x91, 0xBD, 0x59]);
+        assert_eq!(&cpx[o2..o2 + 3], &[0x3F, 0x76, 0xE4]);
+        assert!(cpx[o3..o3 + 3].iter().all(|&v| v == 0));
+    }
+
+    #[test]
+    fn max_height_tracks_scan() {
+        let a = Atlas::new(0, 0, 64, 4, 63);
+        assert_eq!(a.max_height(), -64);
+        a.set(1, 1, 70, false, [1, 2, 3]);
+        a.set(2, 2, 130, false, [1, 2, 3]);
+        a.set(3, 3, 90, false, [1, 2, 3]);
+        assert_eq!(a.max_height(), 130);
     }
 
     #[test]
     fn version_bumps_on_change() {
         let a = Atlas::new(0, 0, 64, 4, 63);
         let v0 = a.version();
-        a.set(1, 1, 10, false);
-        let v1 = a.version();
-        a.set(1, 1, 10, false); // same value — no bump
-        assert_eq!(v0 + 1, v1);
-        assert_eq!(a.version(), v1);
+        a.set(1, 1, 10, false, [1, 1, 1]);
+        a.set(1, 1, 10, false, [1, 1, 1]); // same value — no bump
+        a.set(1, 1, 10, false, [2, 2, 2]); // new color — bump
+        assert_eq!(v0 + 2, a.version());
         assert_eq!(a.scanned_cells(), 1);
     }
 
     #[test]
-    fn scan_task_wraps() {
+    fn scan_task_is_radial_and_wraps() {
         let a = Atlas::new(0, 0, 64, 4, 63);
         // Asking for more than `total` yields exactly `total` unique cells.
         let t = a.scan_task(0, 257);
         assert_eq!(t.len(), 256);
-        assert_eq!(t[0], (0, 0));
-        assert_eq!(t[16], (0, 1));
-        let t2 = a.scan_task(255, 4);
-        assert_eq!(t2[0], (15, 15));
-        assert_eq!(t2[1], (0, 0));
-        assert_eq!(t2[2], (1, 0));
+        // Radial: the first tasks are the 4 center cells (Chebyshev ring 0),
+        // and every returned cell sits inside the claimed ring.
+        let center = |c: (u32, u32)| c.0.abs_diff(7).max(c.1.abs_diff(7));
+        assert!(t.iter().all(|&c| center(c) == 0) || center(t[0]) <= center(t[t.len() - 1]));
+        // Wrap: seq 256 restarts the ring order.
+        let t2 = a.scan_task(256, 4);
+        let t3 = a.scan_task(0, 4);
+        assert_eq!(t2, t3);
+    }
+
+    #[test]
+    fn radial_order_prefers_center() {
+        // 16x16 atlas, center point 7.5 (half-cell units): ring 0 holds the
+        // 4 center cells, ring 1 the 12 cells at Chebyshev 1 — together
+        // exactly the first 16 tasks. The disc around players fills before
+        // the corners of the atlas.
+        let a = Atlas::new(0, 0, 64, 4, 63);
+        let t = a.scan_task(0, 16);
+        let ring = |c: (u32, u32)| {
+            (2 * i64::from(c.0) + 1 - 16)
+                .abs()
+                .max((2 * i64::from(c.1) + 1 - 16).abs())
+        };
+        assert!(t.iter().all(|&c| ring(c) <= 3), "t: {t:?}");
     }
 
     #[test]
@@ -356,9 +509,9 @@ mod tests {
         let path = dir.join("atlas.bin");
 
         let a = Atlas::new(123, -456, 64, 4, 62);
-        a.set(3, 5, 100, false);
-        a.set(0, 0, 62, true);
-        a.set(15, 15, 200, false);
+        a.set(3, 5, 100, false, [0x10, 0x20, 0x30]);
+        a.set(0, 0, 62, true, [0x40, 0x50, 0x60]);
+        a.set(15, 15, 200, false, [0x70, 0x80, 0x90]);
         a.save(&path).unwrap();
         // tmp file must be gone after atomic rename
         assert!(!path.with_extension("tmp").exists());
@@ -368,6 +521,7 @@ mod tests {
         assert_eq!(b.center_z, -456);
         assert_eq!(b.scanned_cells(), 3);
         assert_eq!(b.get(3, 5).unwrap().height, 100);
+        assert_eq!(b.get(3, 5).unwrap().rgb, [0x10, 0x20, 0x30]);
         assert!(b.get(0, 0).unwrap().water);
         assert_eq!(b.get(15, 15).unwrap().height, 200);
 

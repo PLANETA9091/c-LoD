@@ -4,10 +4,10 @@
 set -euo pipefail
 D="$HOME/mc-test/dist"
 JAVA="$HOME/mc-test/jdk25/bin/java"
-export CLOD_OPTS="scan_deadline_secs=45;tick_ms=200;atlas_size=512;cell_size=4;http_port=8199"
+export CLOD_OPTS="stream_chunks=32;scan_budget=1024;scan_deadline_secs=900;tick_ms=200;atlas_size=1024;cell_size=4;http_port=8199;center_x=-930;center_z=796"
 # 4GB container: Paper+module must fit alongside the client later;
 # host OOM-killer targets the fattest RSS — stay small and fast
-export DIST_JAVA_OPTS="-Xms256M -Xmx700M -XX:MaxMetaspaceSize=256M -XX:MaxDirectMemorySize=128M -XX:+UseG1GC"
+export DIST_JAVA_OPTS="-Xms256M -Xmx1024M -XX:MaxMetaspaceSize=256M -XX:MaxDirectMemorySize=128M -XX:+UseG1GC"
 
 pkill -f launcher.jar 2>/dev/null || true
 pkill -f paper-26.3 2>/dev/null || true
@@ -23,7 +23,7 @@ SRV=$!
 exec 9>/tmp/server.in
 echo "launcher pid $SRV"
 
-for i in $(seq 1 150); do
+for i in $(seq 1 300); do
   if grep -q "pack finalized (ONE-TIME, static)" /tmp/server.log 2>/dev/null; then break; fi
   if ! kill -0 $SRV 2>/dev/null; then echo "SERVER DIED"; tail -40 /tmp/server.log; exit 1; fi
   sleep 2

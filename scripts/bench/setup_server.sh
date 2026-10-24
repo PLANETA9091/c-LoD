@@ -32,6 +32,7 @@ printf 'eula=true\n' > "$D/eula.txt"
   echo 'spawn-protection=0'
   echo 'white-list=false'
   echo 'motd=c-LoD bench'
+  echo 'level-seed=4819696040575474753'
 } > "$D/server.properties"
 
 echo "dist root ready at $D"

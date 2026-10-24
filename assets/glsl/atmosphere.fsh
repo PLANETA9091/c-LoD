@@ -56,12 +56,16 @@ void main() {
     // Device depth -> eye-space blocks, then a plain distance veil.
     float eyeZ = DepthParams.x / max(depth, 1.0e-9);
 
-    // Day-graded veil: bright and neutral by day, darker moonlit blue at
-    // night, so the edge never glows against a dark sky.
-    float sunY = sin(fract(GameTime) * 6.28318530718);
-    float dayF = smoothstep(-0.14, 0.22, sunY);
-    vec3 veilCol = VeilColor.rgb * mix(0.42, 1.0, dayF);
-    veilCol = mix(veilCol * vec3(0.85, 0.9, 1.12), veilCol, dayF);
+    // v4.3 FIX — the dark-band root cause: this veil graded itself by
+    // `fract(GameTime)`, but Globals.GameTime is the WORLD AGE (ticks since
+    // world creation, verified by the v4.2 bench: `time set` never moves it),
+    // so the phase is arbitrary and the 0.42 "night" multiplier fired at
+    // noon. The only sky pixels with depth > 0 are vanilla CLOUDS, so the
+    // veil painted a randomly-dark horizontal band across them — the "dark
+    // horizon band" of every 4.2/4.3 screenshot. Day/night grading now lives
+    // ONLY where the live fog color is available (lod_terrain chain,
+    // resolve_day_tick); the veil stays neutral.
+    vec3 veilCol = VeilColor.rgb;
 
     float veil = smoothstep(AtmoParams.x, AtmoParams.y, eyeZ) * AtmoParams.z;
     fragColor = vec4(mix(scene.rgb, veilCol, clamp(veil, 0.0, 1.0)), scene.a);

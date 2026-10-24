@@ -40,6 +40,11 @@ fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
     crc_input.extend_from_slice(kind);
     crc_input.extend_from_slice(data);
     out.extend_from_slice(kind);
+    // v4.2 CRITICAL FIX: the chunk PAYLOAD was never written (length + type
+    // + CRC only) — every atlas PNG ever shipped decoded as garbage on the
+    // client, and the whole v4.0/v4.1 "LOD band" was the missing-texture
+    // checkerboard, not the heightfield. Write the data.
+    out.extend_from_slice(data);
     out.extend_from_slice(&crc32_bytes(&crc_input));
 }
 
@@ -123,5 +128,83 @@ mod tests {
         // zlib wrapper: 2 bytes head + stored blocks overhead + 4 bytes adler
         let overhead = 2 + 4 + (expected_raw / 65535 + 1) * 5;
         assert_eq!(len, expected_raw + overhead);
+    }
+
+    /// Full structural decode: IHDR payload present with the right w/h and
+    /// IDAT payload present and zlib-decodable to the exact raw length.
+    /// Guards against the v4.1-class regression where chunks carried length
+    /// + type + CRC but no payload at all.
+    #[test]
+    fn png_chunks_carry_payload_and_decode() {
+        let (w, h) = (128u32, 128u32);
+        let mut px = vec![0u8; (w * h * 4) as usize];
+        for i in (0..px.len()).step_by(4 * 7) {
+            px[i] = 0x29; // sprinkle distinctive heights
+        }
+        let png = encode_png(w, h, &px);
+
+        let mut pos = 8usize;
+        let mut ihdr_data: Option<Vec<u8>> = None;
+        let mut idat_data: Option<Vec<u8>> = None;
+        while pos + 12 <= png.len() {
+            let len =
+                u32::from_be_bytes([png[pos], png[pos + 1], png[pos + 2], png[pos + 3]]) as usize;
+            let kind = &png[pos + 4..pos + 8];
+            let payload = png[pos + 8..pos + 8 + len].to_vec();
+            match kind {
+                b"IHDR" => ihdr_data = Some(payload),
+                b"IDAT" => idat_data = Some(payload),
+                _ => {}
+            }
+            pos += 12 + len;
+        }
+
+        let ihdr = ihdr_data.expect("IHDR payload present");
+        assert_eq!(ihdr.len(), 13, "IHDR must carry its 13 data bytes");
+        assert_eq!(
+            u32::from_be_bytes([ihdr[0], ihdr[1], ihdr[2], ihdr[3]]),
+            w,
+            "IHDR width"
+        );
+        assert_eq!(
+            u32::from_be_bytes([ihdr[4], ihdr[5], ihdr[6], ihdr[7]]),
+            h,
+            "IHDR height"
+        );
+
+        let idat = idat_data.expect("IDAT payload present");
+        assert!(idat.len() > 1000, "IDAT must carry the image bytes");
+        // The zlib container must decompress to exactly h*(1+w*4) bytes.
+        // Stored-block layout: walk it without external crates.
+        let raw = decode_stored_zlib(&idat);
+        assert_eq!(
+            raw.len(),
+            h as usize * (1 + w as usize * 4),
+            "decoded raw size"
+        );
+        // Filter bytes are all zero (filter type 0 rows).
+        let stride = w as usize * 4 + 1;
+        assert!(raw.chunks_exact(stride).all(|r| r[0] == 0));
+    }
+
+    /// Minimal zlib-stored-block inflater (the encoder only emits stored
+    /// blocks; this decoder accepts exactly that subset).
+    fn decode_stored_zlib(z: &[u8]) -> Vec<u8> {
+        assert_eq!(z[0], 0x78, "zlib CMF");
+        let mut out = Vec::new();
+        let mut p = 2usize; // skip CMF/FLG
+        while p + 5 <= z.len() - 4 {
+            let bfinal = z[p] & 1 == 1;
+            assert_eq!(z[p] & 0b110, 0, "only stored blocks are produced");
+            let len = u16::from_le_bytes([z[p + 1], z[p + 2]]) as usize;
+            let nlen = u16::from_le_bytes([z[p + 3], z[p + 4]]);
+            assert_eq!(!len as u16, nlen, "stored block length check");
+            out.extend_from_slice(&z[p + 5..p + 5 + len]);
+            p += 5 + len;
+            if bfinal {
+                break;
+            }
+        }
+        out
     }
 }

@@ -32,7 +32,7 @@ OPT="$C/options.txt"
 touch "$OPT"; chmod u+w "$OPT"
 grep -q "^preferredGraphicsBackend:" "$OPT" && sed -i 's/^preferredGraphicsBackend:.*/preferredGraphicsBackend:opengl/' "$OPT" || echo "preferredGraphicsBackend:opengl" >> "$OPT"
 grep -q "^pauseOnLostFocus:" "$OPT" && sed -i 's/^pauseOnLostFocus:.*/pauseOnLostFocus:false/' "$OPT" || echo "pauseOnLostFocus:false" >> "$OPT"
-grep -q "^renderDistance:" "$OPT" && sed -i 's/^renderDistance:.*/renderDistance:4/' "$OPT" || echo "renderDistance:4" >> "$OPT"
+grep -q "^renderDistance:" "$OPT" && sed -i 's/^renderDistance:.*/renderDistance:6/' "$OPT" || echo "renderDistance:6" >> "$OPT"
 grep -q "^fullscreen:" "$OPT" && sed -i 's/^fullscreen:.*/fullscreen:false/' "$OPT" || echo "fullscreen:false" >> "$OPT"
 grep -q "^graphicsMode:" "$OPT" && sed -i 's/^graphicsMode:.*/graphicsMode:0/' "$OPT" || echo "graphicsMode:0" >> "$OPT"
 grep -q "^mipmapLevels:" "$OPT" && sed -i 's/^mipmapLevels:.*/mipmapLevels:0/' "$OPT" || echo "mipmapLevels:0" >> "$OPT"
@@ -40,7 +40,7 @@ grep -q "^entityShadows:" "$OPT" && sed -i 's/^entityShadows:.*/entityShadows:fa
 grep -q "^onboardAccessibility:" "$OPT" && sed -i 's/^onboardAccessibility:.*/onboardAccessibility:false/' "$OPT" || echo "onboardAccessibility:false" >> "$OPT"
 grep -q "^tutorialStep:" "$OPT" && sed -i 's/^tutorialStep:.*/tutorialStep:none/' "$OPT" || echo "tutorialStep:none" >> "$OPT"
 grep -q "^biomeBlendRadius:" "$OPT" && sed -i 's/^biomeBlendRadius:.*/biomeBlendRadius:0/' "$OPT" || echo "biomeBlendRadius:0" >> "$OPT"
-grep -q "^simulationDistance:" "$OPT" && sed -i 's/^simulationDistance:.*/simulationDistance:4/' "$OPT" || echo "simulationDistance:4" >> "$OPT"
+grep -q "^simulationDistance:" "$OPT" && sed -i 's/^simulationDistance:.*/simulationDistance:6/' "$OPT" || echo "simulationDistance:6" >> "$OPT"
 
 export LP_NUM_THREADS=$(nproc)
 nohup "$JAVA" -Xmx1200M \
