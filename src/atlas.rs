@@ -273,23 +273,91 @@ impl Atlas {
     }
 
     /// Top-face colour image (RGB, alpha 255), bilinearly filtered on the GPU.
-    pub fn encode_colors(&self) -> (u32, u32, Vec<u8>) {
+    ///
+    /// Colour mip strip (the DH detail pyramid): level 0 is the per-cell
+    /// image above, every next level averages the 2x2 block of the previous
+    /// one over its VALID cells (Distant Horizons aggregates coarse
+    /// datapoints the same way, which is why its far LODs read as smooth
+    /// terrain instead of per-cell speckle). All levels are stacked
+    /// vertically into ONE `n x (2n-1)` image:
+    ///   level L occupies rows `[2n - 2*(n>>L), 2n - (n>>L))`.
+    /// The shader picks the octave from the pixel's world footprint, so the
+    /// far band samples aggregated colours instead of point-sampling the
+    /// 2-block mosaic (that point sample was the "noisy pixels").
+    pub fn encode_colors_pyramid(&self) -> (u32, u32, Vec<u8>) {
         let snap = self.snapshot();
         let n = self.cells as usize;
-        let mut px = vec![0u8; n * n * 4];
-        for z in 0..n {
-            for x in 0..n {
-                let cell = snap[z * n + x];
-                let o = (z * n + x) * 4;
-                if cell.valid {
-                    px[o] = ((cell.top >> 16) & 0xFF) as u8;
-                    px[o + 1] = ((cell.top >> 8) & 0xFF) as u8;
-                    px[o + 2] = (cell.top & 0xFF) as u8;
+        // levels[l] holds the averaged RGB of level l; invalid cells stay None.
+        let mut levels: Vec<Vec<Option<[u16; 3]>>> = Vec::new();
+        let mut heights: Vec<usize> = Vec::new();
+        let mut cur: Vec<Option<[u16; 3]>> = snap
+            .iter()
+            .map(|c| {
+                if c.valid {
+                    Some([
+                        ((c.top >> 16) & 0xFF) as u16,
+                        ((c.top >> 8) & 0xFF) as u16,
+                        (c.top & 0xFF) as u16,
+                    ])
+                } else {
+                    None
                 }
-                px[o + 3] = 255;
+            })
+            .collect();
+        levels.push(cur.clone());
+        heights.push(n);
+        let mut side = n;
+        while side > 1 {
+            let next_side = side.div_ceil(2);
+            let mut next = vec![None; next_side * next_side];
+            for z in 0..next_side {
+                for x in 0..next_side {
+                    let mut acc = [0u32; 3];
+                    let mut cnt = 0u32;
+                    for (dz, dx) in [(0usize, 0usize), (0, 1), (1, 0), (1, 1)] {
+                        let (sz, sx) = (z * 2 + dz, x * 2 + dx);
+                        if sz < side && sx < side {
+                            if let Some(c) = cur[sz * side + sx] {
+                                acc[0] += u32::from(c[0]);
+                                acc[1] += u32::from(c[1]);
+                                acc[2] += u32::from(c[2]);
+                                cnt += 1;
+                            }
+                        }
+                    }
+                    if cnt > 0 {
+                        let avg = [acc[0], acc[1], acc[2]]
+                            .map(|a| a.checked_div(cnt).unwrap_or(0) as u16);
+                        next[z * next_side + x] = Some(avg);
+                    }
+                }
             }
+            levels.push(next.clone());
+            heights.push(next_side);
+            cur = next;
+            side = next_side;
         }
-        (self.cells, self.cells, px)
+        // Stack into the strip: each level keeps its tile layout (stride
+        // `cells`), so its row band is exactly its tile side tall. Odd sizes
+        // round up; the pad columns stay black and are never sampled because
+        // the shader clamps to the tile bounds.
+        let strip_h: usize = heights.iter().sum();
+        let mut px = vec![0u8; n * strip_h * 4];
+        let mut row = 0usize;
+        for (level, &lh) in levels.iter().zip(&heights) {
+            for (i, c) in level.iter().enumerate() {
+                if let Some([r, g, b]) = c {
+                    let (x, z) = (i % lh, i / lh);
+                    let o = ((row + z) * n + x) * 4;
+                    px[o] = *r as u8;
+                    px[o + 1] = *g as u8;
+                    px[o + 2] = *b as u8;
+                    px[o + 3] = 255;
+                }
+            }
+            row += lh;
+        }
+        (self.cells, strip_h as u32, px)
     }
 
     /// Per-cell ratio-tile ids (DH 3.3.4 textured LODs): R/G = top tile id
@@ -489,6 +557,34 @@ mod tests {
         assert_eq!(tpx[t + 3], (281u16 & 0xFF) as u8);
         // invalid cells stay 0/0/0/0 (both tiles flat)
         assert_eq!(&tpx[(7 * 16 + 7) * 4..(7 * 16 + 7) * 4 + 4], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn color_pyramid_averages_valid_cells() {
+        let a = Atlas::new(0, 0, 64, 4, 63); // 16x16 cells
+                                             // One 2x2 corner: red, green, blue and one INVALID cell. The coarse
+                                             // levels must average the valid cells only (never the black void).
+        a.set(0, 0, 10, false, 0xFF0000, 0x707070, 0, 0);
+        a.set(1, 0, 10, false, 0x00FF00, 0x707070, 0, 0);
+        a.set(0, 1, 10, false, 0x0000FF, 0x707070, 0, 0);
+
+        let (w, h, px) = a.encode_colors_pyramid();
+        assert_eq!((w, h), (16, 31)); // 16+8+4+2+1 strip
+                                      // byte offset of the texel at (strip row, tile z, tile x)
+        let at = |row: usize, z: usize, x: usize| ((row + z) * 16 + x) * 4;
+        // level 0 rows [0,16): (0,0) is pure red
+        assert_eq!(&px[at(0, 0, 0)..at(0, 0, 0) + 3], &[255, 0, 0]);
+        // the invalid cell (7,7) stays black in level 0
+        assert_eq!(&px[at(0, 7, 7)..at(0, 7, 7) + 3], &[0, 0, 0]);
+        // level 1 rows [16,24): cell (0,0) averages red+green+blue
+        assert_eq!(&px[at(16, 0, 0)..at(16, 0, 0) + 3], &[85, 85, 85]);
+        // top level row 30 (1x1): average of every valid cell in the atlas
+        assert_eq!(&px[at(30, 0, 0)..at(30, 0, 0) + 3], &[85, 85, 85]);
+        // alpha is opaque padding on every WRITTEN texel (RGB-only strip;
+        // pad columns/rows stay zero and are never sampled — the shader
+        // clamps to the tile bounds)
+        assert_eq!(px[at(0, 0, 0) + 3], 255);
+        assert_eq!(px[at(16, 0, 0) + 3], 255);
     }
 
     #[test]

@@ -40,7 +40,7 @@
                 { "sampler_name": "In", "target": "minecraft:main" },
                 { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
                 { "sampler_name": "Atlas", "location": "clod:atlas", "width": __ATLAS_CELLS__, "height": __ATLAS_CELLS__, "bilinear": false },
-                { "sampler_name": "Color", "location": "clod:color", "width": __ATLAS_CELLS__, "height": __ATLAS_CELLS__, "bilinear": true },
+                { "sampler_name": "Color", "location": "clod:color", "width": __ATLAS_CELLS__, "height": __COLOR_STRIP_H__, "bilinear": true },
                 { "sampler_name": "Side", "location": "clod:side", "width": 256, "height": 1, "bilinear": false },
                 { "sampler_name": "Tiles", "location": "clod:tiles", "width": __TILES_W__, "height": __TILES_H__, "bilinear": true },
                 { "sampler_name": "TexIds", "location": "clod:tex", "width": __ATLAS_CELLS__, "height": __ATLAS_CELLS__, "bilinear": false },

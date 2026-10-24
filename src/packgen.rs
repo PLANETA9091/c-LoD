@@ -101,12 +101,20 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
         cfg.snow_line,
     ];
 
+    // Top-face colours as the DH detail pyramid strip (v4.7): level 0 is the
+    // per-cell image, every next level averages 2x2 — the shader picks the
+    // octave by the pixel's world footprint, which is what makes DH's far
+    // LODs smooth instead of per-cell speckle.
+    let (cw, ch, color_rgba) = atlas.encode_colors_pyramid();
+    let color_png = png::encode_png(cw, ch, &color_rgba);
+
     let map: Vec<(&str, String)> = vec![
         ("__FOV__", fmt_f(cfg.fov)),
         ("__ORIGIN_X__", fmt_f(origin_x as f32)),
         ("__ORIGIN_Z__", fmt_f(origin_z as f32)),
         ("__ATLAS_SIZE__", fmt_f(atlas.size as f32)),
         ("__ATLAS_CELLS__", atlas.cells.to_string()),
+        ("__COLOR_STRIP_H__", ch.to_string()),
         ("__CELL__", fmt_f(atlas.cell as f32)),
         ("__TILES_W__", tiles_w.to_string()),
         ("__TILES_H__", tiles_h.to_string()),
@@ -175,9 +183,6 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
 
     let (aw, ah, atlas_rgba) = atlas.encode_rgba();
     let atlas_png = png::encode_png(aw, ah, &atlas_rgba);
-    // Top-face colours (bilinear, this is what the eye reads as "block colour").
-    let (cw, ch, color_rgba) = atlas.encode_colors();
-    let color_png = png::encode_png(cw, ch, &color_rgba);
     // Side/cliff colours: one 256x1 strip, indexed by the atlas alpha channel.
     let side_lut = atlas.side_lut();
     let mut side_rgba = vec![0u8; 256 * 4];

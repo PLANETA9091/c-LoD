@@ -104,24 +104,18 @@ const float NOISE_DROPOFF = 1024.0;
 const float SHADE_NS = 0.8;
 const float SHADE_EW = 0.6;
 
-// DH 3.3.4 textured LODs (BlockTextureRegistry + terrain/gl/frag.frag):
-// tile pixels are ratios, 128/255 == 1.0, so the sampler value doubles.
-const float TILE_PX = 16.0;
-const float TILES_PER_ROW = 256.0;
-
 // DH zeroes the tile id at MESH BUILD time once the datapoint is coarser
 // than Config.Client.Advanced.Graphics.Texture.maxTexturedLodDetailLevel
 // (default 2): near LODs carry textures, far LODs fall back to the flat
 // colour + noise. Our cells are a fixed-size grid, so the same rule is
-// expressed as a DISTANCE fade: a 16px tile spans one cell, and once a
-// cell covers only a couple of screen pixels the bilinear (mipless) tile
-// sampling shimmers — the snow-field speckle and the water checkerboard
-// in the e2e matrix. The fade is proportional to the cell size so the
-// texel density (16 texels per cell) stays the limiting factor: full
-// texture at the LOD start (the vanilla-overlap band), flat around the
-// point where the DH fog itself reaches ~50% (fog 0.5 at ~0.73 x fogFar).
-const float TILE_FADE_CELL_START = 64.0;
-const float TILE_FADE_CELL_END = 160.0;
+// expressed as a FOOTPRINT fade: a 16px tile spans one cell (texel =
+// cell/16 blocks) and once a texel is smaller than the pixel's world
+// footprint the mipless point sample shimmers — the water checkerboard and
+// the snow speckle of the e2e matrix. The fade runs across the octave
+// where the texel crosses the footprint (2x texel/pixel -> full tile,
+// 0.5x -> flat), which adapts to any zoom/fov/resolution automatically.
+const float TILE_PX = 16.0;
+const float TILES_PER_ROW = 256.0;
 
 // Height (block Y) stored in the atlas: (y + 64) << 6, big-endian RG.
 float atlas_height(vec2 uv) {
@@ -154,6 +148,38 @@ bool world_water(vec2 xz, vec2 origin, float size) {
 
 vec2 atlas_uv(vec2 xz, vec2 origin, float size) {
     return clamp((xz - origin) / size, vec2(0.0015), vec2(0.9985));
+}
+
+// ------------------------------------------------------------------
+// DH detail pyramid (colour strip, packgen: encode_colors_pyramid).
+// Distant Horizons aggregates coarse datapoints 2x2 per detail level,
+// which is why its far LODs read as smooth terrain. A fixed 2-block
+// grid point-sampled per pixel is white noise instead (the far "noisy
+// pixels" of v4.6). The pack therefore stacks the aggregation levels
+// vertically into ONE n x (2n-1) image — level L occupies rows
+// [2n - 2*sz, 2n - sz) with sz = n>>L — and the shader picks the
+// octave from the pixel's world footprint, trilinearly blended
+// between adjacent levels (the same filter DH's GPU sampling gets).
+// ------------------------------------------------------------------
+float pyr_footprint(float hitT, float tanH) {
+    // World size of one screen pixel at the hit distance (vertical fov).
+    return max(hitT * 2.0 * tanH / max(OutSize.y, 1.0), 1.0e-5);
+}
+
+vec3 pyr_level(vec2 uv01, float L, float n) {
+    float sz = max(floor(n / exp2(L)), 1.0);
+    // Half-texel clamp keeps bilinear sampling inside this level's tile
+    // (no bleed into neighbouring strip rows / padding columns).
+    vec2 t = clamp(uv01 * sz, vec2(0.5), vec2(sz - 0.5));
+    float off = 2.0 * n - 2.0 * sz;
+    return texture(ColorSampler, vec2(t.x / n, (off + t.y) / (2.0 * n - 1.0))).rgb;
+}
+
+vec3 pyr_color(vec2 uv01, float lvl, float n) {
+    float L0 = floor(lvl);
+    vec3 c0 = pyr_level(uv01, L0, n);
+    vec3 c1 = pyr_level(uv01, L0 + 1.0, n);
+    return mix(c0, c1, lvl - L0);
 }
 
 /// Index of the side/cliff colour stored in the atlas alpha channel.
@@ -213,9 +239,9 @@ float dh_rand3(vec3 co) {
 vec3 dh_quantize(vec3 v, float steps) {
     return floor(v * steps) / steps;
 }
-vec3 dh_noise(vec3 col, vec3 worldPos, vec3 faceN, float viewDist) {
+vec3 dh_noise(vec3 col, vec3 worldPos, vec3 faceN, float viewDist, float ampW) {
     float lum = (col.r + col.g + col.b) / 3.0;
-    float amp = (1.0 - pow(lum * 2.0 - 1.0, 2.0)) * NOISE_INTENSITY;
+    float amp = (1.0 - pow(lum * 2.0 - 1.0, 2.0)) * NOISE_INTENSITY * ampW;
     vec3 fixedPos = worldPos + faceN * 0.001; // keep the grain on one side of a face
     float r = dh_rand3(dh_quantize(fixedPos, NOISE_STEPS)) * 2.0 * amp - amp;
     vec3 newCol = clamp(col + (1.0 - col) * r, 0.0, 1.0);
@@ -520,7 +546,16 @@ void main() {
     // BOTTOM edge — LodQuadBuilder FADE_TO_DIRT: the bottom vertex row of a
     // grass wall is recoloured to getDirtBlockColor() and the GPU interpolates
     // the span linearly.
-    vec3 topCol = texture(ColorSampler, auv).rgb;
+    //
+    // The top colour is read from the DH detail pyramid at the pixel's world
+    // footprint: near hits stay on the per-cell level 0 (identical to the
+    // v4.6 look), far hits aggregate 2x2 per octave exactly like DH's coarse
+    // datapoints — point-sampling the fine grid out there was per-pixel
+    // white noise (the "noisy pixels").
+    float cellsN = AtlasInfo.z / max(AtlasInfo.w, 1.0);
+    float footprint = pyr_footprint(hitT, tanH);
+    float pyrLvl = clamp(log2(max(footprint / AtlasInfo.w, 1.0)), 0.0, 24.0);
+    vec3 topCol = pyr_color(atlas_uv(hitPos.xz, origin, size), pyrLvl, cellsN);
     vec3 sideCol = texture(
         SideSampler,
         vec2((atlas_side(auv) * 255.0 + 0.5) / 256.0, 0.5)
@@ -541,12 +576,15 @@ void main() {
     // DH 3.3.4 textured LODs: the ratio tile of this column's top block.
     // Horizontal repeats = one per CELL (vBlockPos is in data-point units in
     // DH), vertical repeats on walls = one per BLOCK. The tile weight
-    // implements DH's maxTexturedLodDetailLevel as a distance fade — far
-    // LODs are flat + noise, exactly like DH's coarse datapoints.
+    // implements DH's maxTexturedLodDetailLevel as a FOOTPRINT fade: a texel
+    // is cell/16 blocks, and once it drops under the pixel footprint the
+    // mipless point sample shimmers (water checkerboard, snow speckle) —
+    // fade across that octave; far LODs flatten to colour + noise exactly
+    // like DH's coarse datapoints.
     float tileRows = SkyParams.z;
     float tileId = tile_id(auv, sideHit);
-    float tileW = 1.0 - smoothstep(
-        TILE_FADE_CELL_START * cell, TILE_FADE_CELL_END * cell, hitT);
+    float texelB = AtlasInfo.w / TILE_PX;
+    float tileW = clamp((texelB / footprint - 0.5) / 1.5, 0.0, 1.0);
     vec2 faceUv;
     if (sideHit) {
         float yF = fract(hitPos.y); // walls repeat per block vertically
@@ -583,14 +621,16 @@ void main() {
     // the fog pass) — ONLY on untextured pixels (vTextureTileId == 0u):
     // textured blocks carry their real grain. The noise cell is anchored to
     // the FACE — tops use the up normal, walls the normal of the crossed grid
-    // line pointing back at the camera side (-stepX / -stepZ). Beyond the
-    // tile fade the flat colour takes the grain over, exactly like DH's
-    // coarse-level LODs.
+    // line pointing back at the camera side (-stepX / -stepZ). The grain
+    // cell is 1/NOISE_STEPS blocks; below the pixel footprint a point sample
+    // of it is white noise, so the amplitude fades across that octave (DH's
+    // near-field grain is preserved verbatim, the far "noisy pixels" die).
     if (tileId < 0.5 || tileW < 0.996) {
         vec3 faceN = sideHit
             ? (hitAxisX ? vec3(-stepX, 0.0, 0.0) : vec3(0.0, 0.0, -stepZ))
             : vec3(0.0, 1.0, 0.0);
-        lit = dh_noise(lit, hitPos, faceN, hitT);
+        float noiseW = clamp((1.0 / NOISE_STEPS) / footprint, 0.0, 1.0);
+        lit = dh_noise(lit, hitPos, faceN, hitT, noiseW);
     }
 
     // DH far fog: exponential-squared, 0.4..1.0 x LOD draw distance, density
