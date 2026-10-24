@@ -169,11 +169,16 @@ float pyr_footprint(float hitT, float tanH) {
 
 vec3 pyr_level(vec2 uv01, float L, float n) {
     float sz = max(floor(n / exp2(L)), 1.0);
-    // Half-texel clamp keeps bilinear sampling inside this level's tile
-    // (no bleed into neighbouring strip rows / padding columns).
-    vec2 t = clamp(uv01 * sz, vec2(0.5), vec2(sz - 0.5));
+    // DH datapoint colours are FLAT — each coarse datapoint renders as a
+    // solid quad, so the per-octave sample is NEAREST cell lookup (hard
+    // cell edges like DH). A bilinear mix of two datapoint colours is a
+    // third colour DH never produces: an isolated warm cell (flower field,
+    // lichen) smeared into a soft glowing blob — the v4.8.1 "stains". The
+    // far-distance noise this strip exists to kill is handled by the octave
+    // selection (coarse cells are big), not by interpolation.
+    vec2 t = clamp(floor(uv01 * sz), vec2(0.0), vec2(sz - 1.0));
     float off = 2.0 * n - 2.0 * sz;
-    return texture(ColorSampler, vec2(t.x / n, (off + t.y) / (2.0 * n - 1.0))).rgb;
+    return texture(ColorSampler, vec2((t.x + 0.5) / n, (off + t.y + 0.5) / (2.0 * n - 1.0))).rgb;
 }
 
 vec3 pyr_color(vec2 uv01, float lvl, float n) {
