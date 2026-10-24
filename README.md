@@ -106,12 +106,12 @@ bash scripts/check_glsl.sh    # glslangValidator over all shaders + chain JSONs
 
 CI runs rustfmt, clippy (`-D warnings`), the full test suite, glslang shader validation, release builds on Linux/macOS/Windows, the CRUSSTY module bundle — and an **e2e live-server job**: a real Paper 26.3 kernel on Temurin 25 with the CRUSSTY runtime built from source, two boots asserting gates G1–G7 (single static finalize, zero runtime rebuilds, HTTP pack fetch, `atlas restored` + SHA-1 stability across restarts).
 
-## Honest limitations (v4.7)
+## Honest limitations (v4.8)
 
 - **The camera channel needs sky in the leftmost screen columns.** Facing a wall of terrain (or being fully indoors) the chain holds its last estimate with a slow decay — the LOD fades out instead of popping, and the atmosphere chain keeps working (it never needs rotation). Any sky row in the leftmost 8 columns re-locks the basis within one frame.
 - Overdraw on those columns (clouds, rain, particles) fails the payload checksum per row and simply redirects the scan lower — self-healing by design; a fully overcast frame may drop the LOD briefly.
 - Atlas generation forces chunk loads — keep `scan_budget` reasonable for your tick budget.
-- Far LOD colour comes from the DH detail pyramid (colour mip strip, 2x2 aggregation per octave) selected by the pixel's world footprint; the wall material uses the same strip with mode-aggregated side indices, and tiles + the DH grain fade by the same footprint. The DDA itself always marches the finest heightfield, so far silhouettes keep the 2-block stair-steps (world-locked, no shimmer).
+- Far LOD colour and wall material come from the DH detail pyramid selected by the pixel's world footprint, aggregated with DH 3.3.4's full-data merge rule (top-slice winner: height = max of the 2x2, colour/side = the tallest column's own; ties keep the first column; void only when every child is void). Tiles + the DH grain fade by the same footprint. The LOD entry at the vanilla boundary dissolves through DH's Bayer 4x4 dither band [near, 1.5*near]. The DDA itself still marches the finest heightfield, so far silhouettes keep the 2-block stair-steps (world-locked, no shimmer); the octave-grid march (DH's coarser datapoint geometry at distance) lands together with the 4096-atlas tuning.
 - The march budget scales with the atlas (`2 × fogFar / cell + 64` steps); a 4096-block atlas at `cell_size=2` walks up to ~4100 crossings on near-horizontal rays. The DH fog early-out keeps the average cost far below that.
 
 ## License

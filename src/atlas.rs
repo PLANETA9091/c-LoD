@@ -272,70 +272,127 @@ impl Atlas {
         (self.cells, self.cells, px)
     }
 
+    /// Child visit order for the 2x2 pyramid merge (dz, dx): DH's column
+    /// vote gives tie priority to the first sampled column, so the order is
+    /// fixed and scan-like.
+    const PYR_CHILDREN: [(usize, usize); 4] = [(0, 0), (0, 1), (1, 0), (1, 1)];
+
+    /// DH full-data 2x2 merge winner map (`FullDataSourceV2
+    /// .mergeInputTwoByTwoDataColumn` -> `determineMostCommonValueInColumnSlice`):
+    /// the parent's top slice reaches the TALLEST child's top and the vote at
+    /// its middle is only carried by columns whose datapoint spans that
+    /// middle — the argmax-height children (air/void always loses). Returns
+    /// one layer per level >= 1; per coarse cell: the index into
+    /// [`Self::PYR_CHILDREN`] of the winning child, or None when every child
+    /// is void (un-scanned) — the parent is void too.
+    fn pyramid_winners(snap: &[Cell], n: usize) -> Vec<Vec<Option<u8>>> {
+        let mut valid: Vec<bool> = snap.iter().map(|c| c.valid).collect();
+        let mut height: Vec<i32> = snap
+            .iter()
+            .map(|c| {
+                if c.valid {
+                    i32::from(c.height)
+                } else {
+                    i32::MIN
+                }
+            })
+            .collect();
+        let mut side = n;
+        let mut all: Vec<Vec<Option<u8>>> = Vec::new();
+        while side > 1 {
+            let ns = side.div_ceil(2);
+            let mut win = vec![None; ns * ns];
+            let mut nvalid = vec![false; ns * ns];
+            let mut nheight = vec![i32::MIN; ns * ns];
+            for z in 0..ns {
+                for x in 0..ns {
+                    let mut best_h = i32::MIN;
+                    let mut best_i: u8 = 0;
+                    let mut any = false;
+                    for (di, (dz, dx)) in Self::PYR_CHILDREN.iter().enumerate() {
+                        let (sz, sx) = (z * 2 + dz, x * 2 + dx);
+                        if sz < side && sx < side && valid[sz * side + sx] {
+                            let h = height[sz * side + sx];
+                            // strict >: the FIRST max-height child wins the
+                            // tie, exactly like DH's value0 column priority
+                            if !any || h > best_h {
+                                any = true;
+                                best_h = h;
+                                best_i = di as u8;
+                            }
+                        }
+                    }
+                    if any {
+                        win[z * ns + x] = Some(best_i);
+                        nvalid[z * ns + x] = true;
+                        nheight[z * ns + x] = best_h;
+                    }
+                }
+            }
+            all.push(win);
+            valid = nvalid;
+            height = nheight;
+            side = ns;
+        }
+        all
+    }
+
     /// Top-face colour image (RGB, alpha 255), bilinearly filtered on the GPU.
     ///
-    /// Colour mip strip (the DH detail pyramid): level 0 is the per-cell
-    /// image above, every next level averages the 2x2 block of the previous
-    /// one over its VALID cells (Distant Horizons aggregates coarse
-    /// datapoints the same way, which is why its far LODs read as smooth
-    /// terrain instead of per-cell speckle). All levels are stacked
-    /// vertically into ONE `n x (2n-1)` image:
+    /// Colour mip strip (the DH detail pyramid) with the DH 3.3.4 full-data
+    /// merge semantics (`FullDataSourceV2.mergeInputTwoByTwoDataColumn`): the
+    /// parent's top slice spans up to the TALLEST child's top, and the id
+    /// voted at that slice's middle is carried only by columns whose top
+    /// reaches it — the argmax-height children (air/void always loses the
+    /// vote). So every level: height = max over the valid 2x2, colour = the
+    /// winning column's colour (ties -> first child in scan order). This is
+    /// why DH's far LODs keep pure surface colours (a lone tree on a plain
+    /// stays green-dark instead of muddying the field) — and why far water
+    /// yields to adjacent high land exactly like DH.
+    ///
+    /// All levels are stacked vertically into ONE `n x (2n-1)` image:
     ///   level L occupies rows `[2n - 2*(n>>L), 2n - (n>>L))`.
     /// The shader picks the octave from the pixel's world footprint, so the
-    /// far band samples aggregated colours instead of point-sampling the
+    /// far band samples aggregated datapoints instead of point-sampling the
     /// 2-block mosaic (that point sample was the "noisy pixels").
     pub fn encode_colors_pyramid(&self) -> (u32, u32, Vec<u8>) {
         let snap = self.snapshot();
         let n = self.cells as usize;
-        // levels[l] holds the averaged RGB of level l; invalid cells stay None.
-        let mut levels: Vec<Vec<Option<[u16; 3]>>> = Vec::new();
-        let mut heights: Vec<usize> = Vec::new();
-        let mut cur: Vec<Option<[u16; 3]>> = snap
+        let winners = Self::pyramid_winners(&snap, n);
+        // Level 0 = the per-cell colour; every next level takes the winning
+        // child's colour of the level below (DH's voted datapoint id).
+        let mut cur: Vec<Option<[u8; 3]>> = snap
             .iter()
             .map(|c| {
                 if c.valid {
                     Some([
-                        ((c.top >> 16) & 0xFF) as u16,
-                        ((c.top >> 8) & 0xFF) as u16,
-                        (c.top & 0xFF) as u16,
+                        ((c.top >> 16) & 0xFF) as u8,
+                        ((c.top >> 8) & 0xFF) as u8,
+                        (c.top & 0xFF) as u8,
                     ])
                 } else {
                     None
                 }
             })
             .collect();
-        levels.push(cur.clone());
-        heights.push(n);
+        let mut levels = vec![cur.clone()];
+        let mut heights = vec![n];
         let mut side = n;
-        while side > 1 {
-            let next_side = side.div_ceil(2);
-            let mut next = vec![None; next_side * next_side];
-            for z in 0..next_side {
-                for x in 0..next_side {
-                    let mut acc = [0u32; 3];
-                    let mut cnt = 0u32;
-                    for (dz, dx) in [(0usize, 0usize), (0, 1), (1, 0), (1, 1)] {
-                        let (sz, sx) = (z * 2 + dz, x * 2 + dx);
-                        if sz < side && sx < side {
-                            if let Some(c) = cur[sz * side + sx] {
-                                acc[0] += u32::from(c[0]);
-                                acc[1] += u32::from(c[1]);
-                                acc[2] += u32::from(c[2]);
-                                cnt += 1;
-                            }
-                        }
-                    }
-                    if cnt > 0 {
-                        let avg = [acc[0], acc[1], acc[2]]
-                            .map(|a| a.checked_div(cnt).unwrap_or(0) as u16);
-                        next[z * next_side + x] = Some(avg);
+        for win in &winners {
+            let ns = side.div_ceil(2);
+            let mut next = vec![None; ns * ns];
+            for z in 0..ns {
+                for x in 0..ns {
+                    if let Some(di) = win[z * ns + x] {
+                        let (dz, dx) = Self::PYR_CHILDREN[di as usize];
+                        next[z * ns + x] = cur[(z * 2 + dz) * side + (x * 2 + dx)];
                     }
                 }
             }
             levels.push(next.clone());
-            heights.push(next_side);
+            heights.push(ns);
             cur = next;
-            side = next_side;
+            side = ns;
         }
         // Stack into the strip: each level keeps its tile layout (stride
         // `cells`), so its row band is exactly its tile side tall. Odd sizes
@@ -349,9 +406,9 @@ impl Atlas {
                 if let Some([r, g, b]) = c {
                     let (x, z) = (i % lh, i / lh);
                     let o = ((row + z) * n + x) * 4;
-                    px[o] = *r as u8;
-                    px[o + 1] = *g as u8;
-                    px[o + 2] = *b as u8;
+                    px[o] = *r;
+                    px[o + 1] = *g;
+                    px[o + 2] = *b;
                     px[o + 3] = 255;
                 }
             }
@@ -360,20 +417,18 @@ impl Atlas {
         (self.cells, strip_h as u32, px)
     }
 
-    /// Side-index strip for the DH detail pyramid (mode aggregation). Level 0
-    /// is the raw per-cell index (the same [`Self::side_index`] mapping the
-    /// RGBA atlas uses), every next level takes the MODE of its 2x2 valid
-    /// children (ties -> lowest index) — the wall colour of a coarse
-    /// datapoint is its most common wall material. Same `n x (2n-1)` strip
-    /// layout as [`Self::encode_colors_pyramid`]; R = index, nearest-filtered
-    /// on the GPU (indices must never blend — a linear mix of two LUT keys is
-    /// a third, wrong colour).
+    /// Side-index strip for the DH detail pyramid — the same winner rule as
+    /// [`Self::encode_colors_pyramid`]: every coarse cell carries the SIDE
+    /// INDEX OF THE TALLEST column (DH renders a datapoint's walls in the
+    /// datapoint's own material; the wall colour follows the top-slice
+    /// winner, not a vote across all children). Same `n x (2n-1)` strip
+    /// layout; R = index, nearest-filtered on the GPU (indices must never
+    /// blend — a linear mix of two LUT keys is a third, wrong colour).
     pub fn encode_side_pyramid(&self) -> (u32, u32, Vec<u8>) {
         let snap = self.snapshot();
         let lut = self.side_lut();
         let n = self.cells as usize;
-        let mut levels: Vec<Vec<Option<u8>>> = Vec::new();
-        let mut heights: Vec<usize> = Vec::new();
+        let winners = Self::pyramid_winners(&snap, n);
         let mut cur: Vec<Option<u8>> = snap
             .iter()
             .map(|c| {
@@ -384,39 +439,24 @@ impl Atlas {
                 }
             })
             .collect();
-        levels.push(cur.clone());
-        heights.push(n);
+        let mut levels = vec![cur.clone()];
+        let mut heights = vec![n];
         let mut side = n;
-        while side > 1 {
-            let next_side = side.div_ceil(2);
-            let mut next = vec![None; next_side * next_side];
-            for z in 0..next_side {
-                for x in 0..next_side {
-                    let mut counts = [0u16; 255];
-                    for (dz, dx) in [(0usize, 0usize), (0, 1), (1, 0), (1, 1)] {
-                        let (sz, sx) = (z * 2 + dz, x * 2 + dx);
-                        if sz < side && sx < side {
-                            if let Some(i) = cur[sz * side + sx] {
-                                counts[i as usize] += 1;
-                            }
-                        }
+        for win in &winners {
+            let ns = side.div_ceil(2);
+            let mut next = vec![None; ns * ns];
+            for z in 0..ns {
+                for x in 0..ns {
+                    if let Some(di) = win[z * ns + x] {
+                        let (dz, dx) = Self::PYR_CHILDREN[di as usize];
+                        next[z * ns + x] = cur[(z * 2 + dz) * side + (x * 2 + dx)];
                     }
-                    // mode, ties -> lowest index (deterministic)
-                    let mut best = None;
-                    let mut best_n = 0u16;
-                    for (i, &c) in counts.iter().enumerate() {
-                        if c > best_n {
-                            best_n = c;
-                            best = Some(i as u8);
-                        }
-                    }
-                    next[z * next_side + x] = best;
                 }
             }
             levels.push(next.clone());
-            heights.push(next_side);
+            heights.push(ns);
             cur = next;
-            side = next_side;
+            side = ns;
         }
         let strip_h: usize = heights.iter().sum();
         let mut px = vec![0u8; n * strip_h * 4];
@@ -635,13 +675,16 @@ mod tests {
     }
 
     #[test]
-    fn color_pyramid_averages_valid_cells() {
+    fn color_pyramid_takes_the_tallest_column() {
         let a = Atlas::new(0, 0, 64, 4, 63); // 16x16 cells
-                                             // One 2x2 corner: red, green, blue and one INVALID cell. The coarse
-                                             // levels must average the valid cells only (never the black void).
+                                             // One 2x2 corner: three equal-height fields and one TALLER column.
+                                             // DH's 2x2 merge votes the parent id at the top slice's middle, which
+                                             // only the argmax-height columns reach — the coarse colour is the tall
+                                             // column's own colour, never an average with the lower fields.
         a.set(0, 0, 10, false, 0xFF0000, 0x707070, 0, 0);
         a.set(1, 0, 10, false, 0x00FF00, 0x707070, 0, 0);
         a.set(0, 1, 10, false, 0x0000FF, 0x707070, 0, 0);
+        a.set(1, 1, 20, false, 0x123456, 0x707070, 0, 0);
 
         let (w, h, px) = a.encode_colors_pyramid();
         assert_eq!((w, h), (16, 31)); // 16+8+4+2+1 strip
@@ -651,10 +694,10 @@ mod tests {
         assert_eq!(&px[at(0, 0, 0)..at(0, 0, 0) + 3], &[255, 0, 0]);
         // the invalid cell (7,7) stays black in level 0
         assert_eq!(&px[at(0, 7, 7)..at(0, 7, 7) + 3], &[0, 0, 0]);
-        // level 1 rows [16,24): cell (0,0) averages red+green+blue
-        assert_eq!(&px[at(16, 0, 0)..at(16, 0, 0) + 3], &[85, 85, 85]);
-        // top level row 30 (1x1): average of every valid cell in the atlas
-        assert_eq!(&px[at(30, 0, 0)..at(30, 0, 0) + 3], &[85, 85, 85]);
+        // level 1 rows [16,24): cell (0,0) is the TALL column (h20 beats h10)
+        assert_eq!(&px[at(16, 0, 0)..at(16, 0, 0) + 3], &[0x12, 0x34, 0x56]);
+        // top level row 30 (1x1): the tallest column of the whole atlas
+        assert_eq!(&px[at(30, 0, 0)..at(30, 0, 0) + 3], &[0x12, 0x34, 0x56]);
         // alpha is opaque padding on every WRITTEN texel (RGB-only strip;
         // pad columns/rows stay zero and are never sampled — the shader
         // clamps to the tile bounds)
@@ -663,24 +706,46 @@ mod tests {
     }
 
     #[test]
-    fn side_pyramid_takes_the_mode() {
+    fn pyramid_tie_keeps_the_first_column_and_void_yields() {
         let a = Atlas::new(0, 0, 64, 4, 63); // 16x16 cells
-                                             // Cell side colours: the side LUT index of `side` is what gets
-                                             // aggregated. Two cells share a colour, one differs, one invalid.
+                                             // Tie: three equal-height cells with distinct colours + one invalid;
+                                             // the coarse colour is the FIRST valid child in scan order ((0,0)) —
+                                             // DH's value0 column priority — and a partly-void 2x2 still yields a
+                                             // colour (air never wins the vote).
+        a.set(0, 0, 10, false, 0xFF0000, 0x707070, 0, 0);
+        a.set(1, 0, 10, false, 0x00FF00, 0x707070, 0, 0);
+        a.set(0, 1, 10, false, 0x0000FF, 0x707070, 0, 0);
+
+        let (w, h, px) = a.encode_colors_pyramid();
+        assert_eq!((w, h), (16, 31));
+        let at = |row: usize, z: usize, x: usize| ((row + z) * 16 + x) * 4;
+        assert_eq!(&px[at(16, 0, 0)..at(16, 0, 0) + 3], &[255, 0, 0]);
+        // the whole-atlas top level follows the same winner chain
+        assert_eq!(&px[at(30, 0, 0)..at(30, 0, 0) + 3], &[255, 0, 0]);
+    }
+
+    #[test]
+    fn side_pyramid_follows_the_winner() {
+        let a = Atlas::new(0, 0, 64, 4, 63); // 16x16 cells
+                                             // The coarse side index is the TALLEST column's index (DH renders a
+                                             // datapoint's walls in its own material) — here the tall column is
+                                             // also the index minority, proving winner-over-mode.
         a.set(0, 0, 10, false, 0x00FF00, 0x101010, 0, 0);
         a.set(1, 0, 10, false, 0x00FF00, 0x101010, 0, 0);
-        a.set(0, 1, 10, false, 0x00FF00, 0x202020, 0, 0);
+        a.set(0, 1, 10, false, 0x00FF00, 0x101010, 0, 0);
+        a.set(1, 1, 20, false, 0x00FF00, 0x202020, 0, 0);
         let lut = a.side_lut();
         let i10 = super::Atlas::side_index(&lut, 0x101010);
-        let _i20 = super::Atlas::side_index(&lut, 0x202020);
+        let i20 = super::Atlas::side_index(&lut, 0x202020);
+        assert_ne!(i10, i20);
 
         let (w, h, px) = a.encode_side_pyramid();
         assert_eq!((w, h), (16, 31));
         let at = |row: usize, z: usize, x: usize| ((row + z) * 16 + x) * 4;
         // level 0 keeps the raw indices
         assert_eq!(px[at(0, 0, 0)], i10);
-        // level 1 (row 16): mode of {i10, i10, i20, invalid} = i10
-        assert_eq!(px[at(16, 0, 0)], i10);
+        // level 1 (row 16): winner = the tall (1,1) column -> i20 (not mode i10)
+        assert_eq!(px[at(16, 0, 0)], i20);
         // unwritten pad texels stay zero (never sampled)
         assert_eq!(px[at(16, 7, 7)], 0);
     }
