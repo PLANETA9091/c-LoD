@@ -34,7 +34,7 @@
 //!      adventure Key and PlayerPostEffects come from Class.forName through
 //!      CraftServer's own loader (exact same-loader Class object).
 
-use jvmti_bindings::jni::{jboolean, jint, jmethodID, jobject, jstring, jvalue};
+use jvmti_bindings::jni::{jboolean, jdouble, jint, jmethodID, jobject, jstring, jvalue};
 use jvmti_bindings::prelude::JniEnv;
 use std::sync::{Mutex, OnceLock};
 
@@ -50,6 +50,10 @@ fn jz(v: bool) -> jvalue {
 
 fn ji(v: i32) -> jvalue {
     jvalue { i: v as jint }
+}
+
+fn jd(v: f64) -> jvalue {
+    jvalue { d: v as jdouble }
 }
 
 fn jobj(o: jobject) -> Option<jobject> {
@@ -392,6 +396,248 @@ fn namespaced_key_path(env: Env, key: jobject, ids: KeyIds) -> Option<String> {
     out
 }
 
+// ---------------------------------------------------------------------------
+// DH live biome tint (v4.13.0): Distant Horizons colours a column through the
+// LIVE MC resolvers at the column position — biome.getGrassColor(x, z)
+// (position-dependent: swamp gradient, badlands bands), getFoliageColor(),
+// getWaterColor() (BiomeSpecialEffects constants). The static per-biome table
+// was a "consistent approximation" (audit §4); the port removes it.
+//
+// Server twist: the colormap reload listeners are CLIENT-only, so the NMS
+// GrassColor/FoliageColor matrices are zeroed and the resolvers would return
+// black. The module ships the vanilla matrices (colormaps.rs, baked from the
+// client jar) and pushes them into the JVM once via the public static
+// GrassColor.init(int[]) / FoliageColor.init(int[]) / DryFoliageColor.init(int[])
+// — after that the server-side resolver is pixel-identical to the client's.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy)]
+struct TintBridgeIds {
+    /// CraftBiome.bukkitToMinecraftHolder(Biome) -> NMS Holder<Biome> (static).
+    m_to_holder: jmethodID,
+    /// Holder.value() -> NMS Biome (bound on the holder's concrete class).
+    m_value: jmethodID,
+    /// Biome.getGrassColor(DD)I / getFoliageColor()I / getWaterColor()I.
+    m_grass: jmethodID,
+    m_foliage: jmethodID,
+    m_water: jmethodID,
+    /// Global refs keeping the classes (and the loader) alive. holder_cls /
+    /// nms_biome_cls are not dereferenced after binding (the method IDs are
+    /// process-lifetime pointers) — the refs PIN the classes so the pointers
+    /// stay valid.
+    craft_biome_cls: jobject,
+    #[allow(dead_code)]
+    holder_cls: jobject,
+    #[allow(dead_code)]
+    nms_biome_cls: jobject,
+}
+unsafe impl Send for TintBridgeIds {}
+static TINT_BRIDGE: Mutex<Option<TintBridgeIds>> = Mutex::new(None);
+static COLORMAPS_INI: OnceLock<()> = OnceLock::new();
+/// A failed bridge resolution is permanent (the scan runs with every NMS
+/// class already loaded — there is nothing to wait for). Memoised so the
+/// per-column live path degrades to the static table after ONE attempt.
+static TINT_BRIDGE_DEAD: OnceLock<()> = OnceLock::new();
+
+fn bind_static_method(
+    env: Env,
+    local_cls: jobject,
+    global_cls: jobject,
+    name: &str,
+    sig: &str,
+) -> Option<jmethodID> {
+    let _ = env.get_static_method_id(local_cls, name, sig);
+    env.exception_clear();
+    match env.get_static_method_id(global_cls, name, sig) {
+        Some(id) => {
+            clear_if_pending(env);
+            Some(id)
+        }
+        None => {
+            eprintln!("[c-LoD] static method resolve FAILED: {name} {sig}");
+            if env.exception_check() {
+                env.exception_describe();
+                env.exception_clear();
+            }
+            None
+        }
+    }
+}
+
+fn global_cls(env: Env, local: jobject) -> jobject {
+    let g = env.new_global_ref(local);
+    g as jobject
+}
+
+fn tint_bridge_ids(env: Env, world: jobject, wid: &WorldIds) -> Option<TintBridgeIds> {
+    if TINT_BRIDGE_DEAD.get().is_some() {
+        return None;
+    }
+    if let Some(t) = TINT_BRIDGE.lock().unwrap().as_ref() {
+        return Some(*t);
+    }
+    let resolved = (|| {
+        // The loader for the NMS classes: the world's own classloader.
+        // (bootstrap classes only through the JVMTI scan — see resolve())
+        let class_cls = match cplug_sdk::classes::find_class("java/lang/Class") {
+            Some(c) => {
+                clear_if_pending(env);
+                c.as_jclass()
+            }
+            None => {
+                eprintln!("[c-LoD] class resolve FAILED: java/lang/Class");
+                return None;
+            }
+        };
+        let m_for_name = bind_static_method(
+            env,
+            class_cls,
+            class_cls,
+            "forName",
+            "(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;",
+        )?;
+        let m_get_class = method_or_log(env, class_cls, "getClass", "()Ljava/lang/Class;")?;
+        let m_get_loader = method_or_log(
+            env,
+            class_cls,
+            "getClassLoader",
+            "()Ljava/lang/ClassLoader;",
+        )?;
+        let wcls = jobj(env.call_object_method(world, m_get_class, &[]))?;
+        let loader = jobj(env.call_object_method(wcls, m_get_loader, &[]))?;
+        let force_load = |dotted: &str| -> Option<jobject> {
+            let jn = env.new_string_utf(dotted)?;
+            let k = env.call_static_object_method(
+                class_cls,
+                m_for_name,
+                &[jv(jn), jz(true), jv(loader)],
+            );
+            clear_if_pending(env);
+            jobj(k)
+        };
+
+        // 1. The colormap init (one-shot for the process): zeroed server
+        //    matrices -> black LODs. Feed the baked vanilla maps.
+        if COLORMAPS_INI.get().is_none() {
+            for (cls_name, map) in [
+                (
+                    "net.minecraft.world.level.GrassColor",
+                    crate::colormaps::GRASS,
+                ),
+                (
+                    "net.minecraft.world.level.FoliageColor",
+                    crate::colormaps::FOLIAGE,
+                ),
+                (
+                    "net.minecraft.world.level.DryFoliageColor",
+                    crate::colormaps::DRY_FOLIAGE,
+                ),
+            ] {
+                let cls = force_load(cls_name)?;
+                let m_init = bind_static_method(env, cls, cls, "init", "([I)V")?;
+                let vals = crate::colormaps::as_jints(map);
+                let Some(arr) = env.new_int_array(vals.len() as i32) else {
+                    clear_if_pending(env);
+                    return None;
+                };
+                env.set_int_array_region(arr, 0, vals.len() as i32, &vals);
+                if env.exception_check() {
+                    env.exception_describe();
+                    env.exception_clear();
+                    return None;
+                }
+                env.call_static_void_method(cls, m_init, &[jv(arr)]);
+                clear_if_pending(env);
+            }
+            let _ = COLORMAPS_INI.set(());
+        }
+
+        // 2. Bukkit biome -> NMS Holder bridge (static on CraftBiome).
+        //    Probe with a live biome: world.getBiome(x, y, z) at the world
+        //    spawn column (any loaded position works — biomes are registry
+        //    objects, the value is irrelevant).
+        let probe_biome =
+            jobj(env.call_object_method(world, wid.m_get_biome, &[ji(0), ji(80), ji(0)]))?;
+        let cb_cls_local = env.get_object_class(probe_biome);
+        let cb_cls = global_cls(env, cb_cls_local);
+        let m_to_holder = bind_static_method(
+            env,
+            cb_cls_local,
+            cb_cls,
+            "bukkitToMinecraftHolder",
+            "(Lorg/bukkit/block/Biome;)Lnet/minecraft/core/Holder;",
+        )?;
+
+        // 3. Holder.value() on the holder's concrete class.
+        let holder = jobj(env.call_static_object_method(cb_cls, m_to_holder, &[jv(probe_biome)]))?;
+        let h_cls_local = env.get_object_class(holder);
+        let h_cls = global_cls(env, h_cls_local);
+        let m_value = bind_method(env, h_cls_local, h_cls, "value", "()Ljava/lang/Object;")?;
+
+        // 4. The NMS Biome getters on the concrete class.
+        let nms = jobj(env.call_object_method(holder, m_value, &[]))?;
+        let nb_cls_local = env.get_object_class(nms);
+        let nb_cls = global_cls(env, nb_cls_local);
+        let m_grass = bind_method(env, nb_cls_local, nb_cls, "getGrassColor", "(DD)I")?;
+        let m_foliage = bind_method(env, nb_cls_local, nb_cls, "getFoliageColor", "()I")?;
+        let m_water = bind_method(env, nb_cls_local, nb_cls, "getWaterColor", "()I")?;
+
+        Some(TintBridgeIds {
+            m_to_holder,
+            m_value,
+            m_grass,
+            m_foliage,
+            m_water,
+            craft_biome_cls: cb_cls,
+            holder_cls: h_cls,
+            nms_biome_cls: nb_cls,
+        })
+    })();
+    let out = match resolved {
+        Some(out) => out,
+        None => {
+            let _ = TINT_BRIDGE_DEAD.set(());
+            eprintln!(
+                "[c-LoD] live tint surface unavailable — static biome table holds (degradation)"
+            );
+            return None;
+        }
+    };
+    eprintln!(
+        "[c-LoD] live tint surface ready: colormaps inited, NMS Biome getters bound (v4.13.0)"
+    );
+    *TINT_BRIDGE.lock().unwrap() = Some(out);
+    TINT_BRIDGE.lock().unwrap().as_ref().copied()
+}
+
+/// Live biome tint triple at the column position — the DH resolver path.
+/// `None` = the NMS surface is unavailable (degrade to the static table).
+fn live_biome_tint(
+    env: Env,
+    world: jobject,
+    wid: &WorldIds,
+    x: i32,
+    y: i32,
+    z: i32,
+) -> Option<(u32, u32, u32)> {
+    let tid = tint_bridge_ids(env, world, wid)?;
+    // the column's real height: 26.3 biomes are 3D (mountain/underground
+    // bands) — DH tints by the biome AT the datapoint, not at a fixed level
+    let biome = jobj(env.call_object_method(world, wid.m_get_biome, &[ji(x), ji(y), ji(z)]))?;
+    let holder =
+        jobj(env.call_static_object_method(tid.craft_biome_cls, tid.m_to_holder, &[jv(biome)]))?;
+    let nms = jobj(env.call_object_method(holder, tid.m_value, &[]))?;
+    let grass = env.call_int_method(nms, tid.m_grass, &[jd(x as f64), jd(z as f64)]) as u32;
+    let foliage = env.call_int_method(nms, tid.m_foliage, &[]) as u32;
+    let water = env.call_int_method(nms, tid.m_water, &[]) as u32;
+    if env.exception_check() {
+        env.exception_describe();
+        env.exception_clear();
+        return None;
+    }
+    Some((grass, foliage, water))
+}
+
 fn mul_rgb(c: u32, t: u32) -> u32 {
     let r = ((c >> 16) & 0xFF) * ((t >> 16) & 0xFF) / 255;
     let g = ((c >> 8) & 0xFF) * ((t >> 8) & 0xFF) / 255;
@@ -452,8 +698,16 @@ fn mat_info(env: Env, mat: jobject, ids: &MaterialIds, ordinal: i32) -> Option<M
     Some(info)
 }
 
-/// Biome grass/foliage/water tint for a column (cached per chunk).
+/// Biome grass/foliage/water tint for a column. DH 1:1: the LIVE NMS
+/// resolvers at the column position (getGrassColor(x, z) carries the
+/// position-dependent modifiers — swamp gradient, badlands bands). The
+/// static baked table remains only as the degradation path when the NMS
+/// surface is unavailable (it also caches per chunk — the live path is
+/// cheap enough per column).
 fn biome_tint(env: Env, world: jobject, wid: &WorldIds, x: i32, y: i32, z: i32) -> (u32, u32, u32) {
+    if let Some(t) = live_biome_tint(env, world, wid, x, y, z) {
+        return t;
+    }
     let key = (x >> 4, z >> 4);
     if let Some((k, v)) = *BIOME_CACHE.lock().unwrap() {
         if k == key {

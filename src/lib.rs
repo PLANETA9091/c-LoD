@@ -22,6 +22,7 @@
 mod atlas;
 mod blockcolors;
 mod blocktextures;
+mod colormaps;
 mod config;
 mod engine;
 mod http;
