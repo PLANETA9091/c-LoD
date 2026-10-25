@@ -6,3 +6,4 @@ Cargo.lock
 /dist/
 clod.conf
 __pycache__/
+coreSubProjects/
