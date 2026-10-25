@@ -182,3 +182,40 @@ The sandbox resets `~/mc-test` between long gaps. Rebuild order that worked:
 7. `deep_zoom.py <shot> <out> <x0> <y0> <x1> <y1> [scale]` — NEAREST deep-zoom of
    any screenshot region (the letterboxed 1280x720 client frame uses fractions of
    the FULL frame, bars included).
+
+## DH reference A/B on the 4 GB box — 2026-10-25 findings (fresh sandbox)
+
+The 10-24 reference matrix (`docs/e2e-2026-10-24-v43-dh/`) remains the DH
+evidence record; reproducing it on a fresh 4 GB sandbox hit five walls,
+all diagnosed:
+
+1. **`libXtst.so.6`** — the DH client touches java.awt (icon path) and dies
+   with UnsatisfiedLinkError without it. Extracted into `~/mc-test/shim/`
+   (see the rebuild checklist above: `apt-get download libxtst6`, unpack the
+   deb, copy `libXtst.so.6*` into the shim dir).
+2. **The y=240 spawn trap** — the client respawns at the previous logout
+   position. The aerial shot's logout leaves the player at y=240 looking at
+   bare sky; every frame until the next `tp` is pure sky. A sky-colored frame
+   with a moving sun = camera in the air, not a renderer bug.
+3. **Post-tp settle** — after ANY `tp`, llvmpipe needs 60-75 s before vanilla
+   chunks mesh AND DH rebuilds its LOD ring. The 8 s waits in the shot loop
+   are only enough when the client is already parked at the camera for
+   minutes.
+4. **Client-side distant generation does not run against a DH server** —
+   DH 3.3.4 routes ALL gen through the server when the server mod is present:
+   the client spawns no `DH-World Gen Queue Thread` at all (jcmd-verified),
+   regardless of `generationMaxChunkRadius`. The data path is: server
+   `DistantHorizons.sqlite` (world/dimensions/.../data/) grows via
+   `DH-World Gen Queue Thread`, then `DH-FullDataPayloadSender` syncs into
+   the client's `Distant_Horizons_server_data/` sqlite (visible FullData
+   rows at DetailLevel 0, PosX/PosZ = 64-block section coords, e.g. camera
+   (-929, 796) → section (-15, 12)).
+5. **Memory** — fabric server 600M + DH client 700M + LP_NUM_THREADS=2
+   survives; the old 1500M/900M pair OOM-kills the client at ~1.9 GB RSS.
+
+Even with server gen complete and synced, the 4 GB box did not reproduce the
+10-24 band in the shot window (the box that produced that evidence was less
+memory-pressured). If a future attempt is needed: boot the stack, park the
+client at the camera for 5+ minutes with `vanillaFadeMode = "NONE"`,
+then shoot with 10-15 s waits — and verify the band in a probe frame BEFORE
+burning the shot budget.

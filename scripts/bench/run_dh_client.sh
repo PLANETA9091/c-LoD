@@ -47,8 +47,8 @@ grep -q "^simulationDistance:" "$OPT" && sed -i 's/^simulationDistance:.*/simula
 # Fabric classpath = loader + mixin + asm, in front of the vanilla cp.
 FAB_CP="$(ls "$C"/libraries/net/fabricmc/fabric-loader/*/fabric-loader-*.jar):$(ls "$C"/libraries/net/fabricmc/sponge-mixin/*/sponge-mixin-*.jar):$(ls "$C"/libraries/org/ow2/asm/asm/*/asm-*.jar):$(ls "$C"/libraries/org/ow2/asm/asm-analysis/*/asm-analysis-*.jar):$(ls "$C"/libraries/org/ow2/asm/asm-commons/*/asm-commons-*.jar):$(ls "$C"/libraries/org/ow2/asm/asm-tree/*/asm-tree-*.jar):$(ls "$C"/libraries/org/ow2/asm/asm-util/*/asm-util-*.jar)"
 
-export LP_NUM_THREADS=4
-nohup "$JAVA" -Xmx900M \
+export LP_NUM_THREADS=2
+nohup "$JAVA" -Xmx700M \
   -Djava.library.path="$C/natives" \
   -Dorg.lwjgl.librarypath="$C/natives" \
   -Dorg.lwjgl.opengl.libname=libGL.so.1 \

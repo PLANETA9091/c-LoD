@@ -26,7 +26,7 @@ cleanup; sleep 2
 rm -f /tmp/dhserver.log /tmp/fabcin
 mkfifo /tmp/fabcin
 cd "$D"
-tail -f /tmp/fabcin 2>/dev/null | "$JAVA" -Xmx1500M -jar fabric-server.jar nogui > /tmp/dhserver.log 2>&1 &
+tail -f /tmp/fabcin 2>/dev/null | "$JAVA" -Xmx600M -jar fabric-server.jar nogui > /tmp/dhserver.log 2>&1 &
 SRV=$!
 for i in $(seq 1 150); do
   grep -qE 'Done \(' /tmp/dhserver.log 2>/dev/null && break
@@ -42,8 +42,8 @@ echo "fabric DH server up"
 # disabled), no move-pause, generation area pinned to the camera chunks.
 TOML="$HOME/mc-test/client/config/DistantHorizons.toml"
 if [ -f "$TOML" ]; then
-  sed -i 's/^[[:space:]]*lodChunkRenderDistanceRadius = .*/\t\t\t\tlodChunkRenderDistanceRadius = 128/' "$TOML"
-  sed -i 's/^[[:space:]]*generationMaxChunkRadius = .*/\t\tgenerationMaxChunkRadius = 128/' "$TOML"
+  sed -i 's/^[[:space:]]*lodChunkRenderDistanceRadius = .*/\t\t\t\tlodChunkRenderDistanceRadius = 32/' "$TOML"
+  sed -i 's/^[[:space:]]*generationMaxChunkRadius = .*/\t\tgenerationMaxChunkRadius = 32/' "$TOML"
   sed -i 's/^[[:space:]]*pauseIfMovingQuickly = .*/\t\tpauseIfMovingQuickly = false/' "$TOML"
   sed -i 's/^[[:space:]]*generationCenterChunkX = .*/\t\tgenerationCenterChunkX = -58/' "$TOML"
   sed -i 's/^[[:space:]]*generationCenterChunkZ = .*/\t\tgenerationCenterChunkZ = 49/' "$TOML"
