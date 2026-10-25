@@ -162,3 +162,23 @@ readback — on llvmpipe the readback/cull chain plausibly rejects every node
 render on this build) or DEBUG-level voxy logs (the 26.3 logconfig.xml did
 not pick up a `me.cortex.voxy` logger). Until then the voxy baseline shots
 show vanilla + the void beyond RD — documented honestly rather than faked.
+
+## Fresh-sandbox rebuild checklist (2026-10-25)
+
+The sandbox resets `~/mc-test` between long gaps. Rebuild order that worked:
+1. `scripts/rustup-init.sh -y --profile minimal` + JDK25 (`~/tools/jdk25`, symlink `~/mc-test/jdk25`).
+2. `cp <paper.jar> ~/mc-test/dl/`, copy the crussty tree to `~/mc-test/crussty`, build runtime, `setup_server.sh`.
+3. `setup_client.py` is resumable (66 libs + 5147 assets, ~3 min on the 2-core box).
+4. Build the shim: `gcc -shared -fPIC -O2 -o ~/mc-test/shim/libGL.so.1 scripts/bench/libclodgl.c -ldl`.
+5. **`pip3 install python-xlib`** — the fresh venv lacks it, and `click.py` then dies
+   with ModuleNotFoundError while the harness keeps going: both "Yes" clicks miss,
+   the pack is never accepted, and the client log ends with
+   `Requested post effect does not exist: clod:lod_terrain` (the signature of a
+   pack-less run — 2026-10-24-2045 evidence is the last good matrix, the next
+   local run failed exactly this way until xlib was installed).
+6. Fresh world needs `CLOD_SERVER_XMX=2800M` for the first scan (~13 min boot+scan
+   on this box); afterwards reboot at the default 900M — the atlas snapshot
+   restores and finalizes instantly.
+7. `deep_zoom.py <shot> <out> <x0> <y0> <x1> <y1> [scale]` — NEAREST deep-zoom of
+   any screenshot region (the letterboxed 1280x720 client frame uses fractions of
+   the FULL frame, bars included).
