@@ -108,10 +108,32 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
     let (cw, ch, color_rgba) = atlas.encode_colors_pyramid();
     let color_png = png::encode_png(cw, ch, &color_rgba);
     // Side-index pyramid (v4.7.1): the mode-aggregated wall material per
-    // octave — without it far walls point-sample the per-cell side index and
-    // shimmer between neighbouring materials.
+    // octave — the FALLBACK wall path for octaves the DH slice strip cannot
+    // cover (big-atlas configs only; see encode_slices).
     let (pw_, ph_, sidepyr_rgba) = atlas.encode_side_pyramid();
     let sidepyr_png = png::encode_png(pw_, ph_, &sidepyr_rgba);
+    // DH vertical slices (v4.9): the banded cliff walls. Width 2n (texel
+    // pairs A|B per cell), height = sum of K(detail)*(n>>L) per octave.
+    let (sw, sh, slice_rgba, slice_max_oct) = atlas.encode_slices();
+    let slice_png = png::encode_png(sw, sh, &slice_rgba);
+
+    // DH LodQuadBuilder FADE_TO_DIRT target: getDirtBlockColor() — the baked
+    // dirt block colour. ColLow was a v1 palette remnant (unused since the
+    // scan baked per-cell colours); it now carries the dirt colour.
+    let dirt_rgb = crate::blockcolors::lookup("dirt").map_or(0x86_64_46u32, |(t, _, _, _)| t);
+    let dirt_rgba = [
+        ((dirt_rgb >> 16) & 0xFF) as f32 / 255.0,
+        ((dirt_rgb >> 8) & 0xFF) as f32 / 255.0,
+        (dirt_rgb & 0xFF) as f32 / 255.0,
+    ];
+
+    // DH earth curvature (GlDhTerrainShaderProgram): uEarthRadius =
+    // 6371000.0 / curveRatio when |ratio| > 1, else 0 (disabled).
+    let earth_radius = if cfg.earth_curve_ratio.abs() > 1 {
+        6_371_000.0_f32 / cfg.earth_curve_ratio as f32
+    } else {
+        0.0
+    };
 
     let map: Vec<(&str, String)> = vec![
         ("__FOV__", fmt_f(cfg.fov)),
@@ -121,6 +143,10 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
         ("__ATLAS_CELLS__", atlas.cells.to_string()),
         ("__COLOR_STRIP_H__", ch.to_string()),
         ("__SIDE_STRIP_H__", ph_.to_string()),
+        ("__SLICE_STRIP_H__", sh.to_string()),
+        ("__SLICE_W__", (sw as usize).to_string()),
+        ("__SLICE_MAX_LVL__", format!("{slice_max_oct}.0")),
+        ("__EARTH_RADIUS__", fmt_f(earth_radius)),
         ("__CELL__", fmt_f(atlas.cell as f32)),
         ("__TILES_W__", tiles_w.to_string()),
         ("__TILES_H__", tiles_h.to_string()),
@@ -132,8 +158,9 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
         ("__FOG_END__", fmt_f(fog_end)),
         // 26.3 post-chain codec: a vec4 uniform value MUST be a 4-element
         // list (client error: "Input is not a list of 4 elements") — pad the
-        // RGB palette colors with alpha 1.0.
-        ("__COL_LOW__", rgba(cfg.color_low)),
+        // RGB palette colors with alpha 1.0. ColLow now carries the DH
+        // FADE_TO_DIRT dirt colour (the v1 low-palette is long gone).
+        ("__COL_LOW__", rgba(dirt_rgba)),
         ("__COL_HIGH__", rgba(cfg.color_high)),
         ("__COL_WATER__", rgba(cfg.color_water)),
         ("__VEIL_RGBA__", vec4(veil_rgba)),
@@ -249,6 +276,7 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
     zip.add("assets/clod/textures/effect/atlas.png", &atlas_png);
     zip.add("assets/clod/textures/effect/color.png", &color_png);
     zip.add("assets/clod/textures/effect/sidepyr.png", &sidepyr_png);
+    zip.add("assets/clod/textures/effect/slices.png", &slice_png);
     zip.add("assets/clod/textures/effect/side.png", &side_png);
     zip.add("assets/clod/textures/effect/tiles.png", &tiles_png);
     zip.add("assets/clod/textures/effect/tex.png", &tex_png);
@@ -296,8 +324,8 @@ mod tests {
         // Must contain the essential entries: scan by walking central dir.
         let count = u16::from_le_bytes([pack.zip[n - 12], pack.zip[n - 11]]) as usize;
         assert_eq!(
-            count, 18,
-            "pack.mcmeta + 2 json + 6 fsh + 6 textures + sky.vsh/fsh + terrain.vsh"
+            count, 19,
+            "pack.mcmeta + 2 json + 6 fsh + 7 textures + sky.vsh/fsh + terrain.vsh"
         );
 
         // JSON chains are valid JSON (parenthesis balance + token-free).

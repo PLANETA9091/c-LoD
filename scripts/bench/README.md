@@ -163,6 +163,21 @@ render on this build) or DEBUG-level voxy logs (the 26.3 logconfig.xml did
 not pick up a `me.cortex.voxy` logger). Until then the voxy baseline shots
 show vanilla + the void beyond RD — documented honestly rather than faked.
 
+## Module options added in v4.9.0 (bench-relevant)
+
+- `slice_depth=24` — how many blocks below the surface the slice walk reads
+  (ChunkSnapshot, JNI-cheap: the whole 1024-atlas rescan with slices took
+  ~8.5 min on the 2-worker box vs ~6.5 min without, ok=64262 err=0).
+  0 disables the DH banded walls (single-band fallback).
+- `earth_curve_ratio=0` — DH earthCurveRatio (0 = off, DH default). The
+  bench verified 400 (subtle, ~1 block at the vanilla horizon) and
+  5000 (DH max, dramatic: docs/e2e-2026-10-25-v49-slices/zoom/
+  curvature_ratio5000_south.png). The pack SHA-1 changes with the value
+  (the uniform rides the chain JSON) — determinism per config holds.
+- Atlas snapshot format: CLODAT04 (blocked [cells][slice table] layout).
+  A CLODAT03 snapshot is stale — the scan re-runs once after an upgrade.
+- Pack size: 1.88 MB (was ~1.5 MB) — the slice strip PNG compresses well.
+
 ## Fresh-sandbox rebuild checklist (2026-10-25)
 
 The sandbox resets `~/mc-test` between long gaps. Rebuild order that worked:

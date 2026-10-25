@@ -29,6 +29,7 @@ mod jni;
 mod packgen;
 mod png;
 mod sha1;
+mod slices;
 mod zipw;
 
 use cplug_abi::{CPluginApi, JavaVmPtr};

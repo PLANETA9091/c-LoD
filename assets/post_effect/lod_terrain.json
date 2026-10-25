@@ -43,6 +43,7 @@
                 { "sampler_name": "Color", "location": "clod:color", "width": __ATLAS_CELLS__, "height": __COLOR_STRIP_H__, "bilinear": false },
                 { "sampler_name": "Side", "location": "clod:side", "width": 256, "height": 1, "bilinear": false },
                 { "sampler_name": "SidePyr", "location": "clod:sidepyr", "width": __ATLAS_CELLS__, "height": __SIDE_STRIP_H__, "bilinear": false },
+                { "sampler_name": "Slices", "location": "clod:slices", "width": __SLICE_W__, "height": __SLICE_STRIP_H__, "bilinear": false },
                 { "sampler_name": "Tiles", "location": "clod:tiles", "width": __TILES_W__, "height": __TILES_H__, "bilinear": true },
                 { "sampler_name": "TexIds", "location": "clod:tex", "width": __ATLAS_CELLS__, "height": __ATLAS_CELLS__, "bilinear": false },
                 { "sampler_name": "Rot", "target": "clod_rot_a" }
@@ -59,10 +60,10 @@
                     { "name": "DebugParams", "type": "vec4", "value": [__DEBUG__, 0.0, 0.0, 0.0] }
                 ],
                 "ClodSky": [
-                    { "name": "SkyParams", "type": "vec4", "value": [__DEPTH_NEAR__, __ATLAS_MAX_H__, __TILE_ROWS__, 0.0] }
+                    { "name": "SkyParams", "type": "vec4", "value": [__DEPTH_NEAR__, __ATLAS_MAX_H__, __TILE_ROWS__, __SLICE_MAX_LVL__] }
                 ],
                 "ClodFog": [
-                    { "name": "FogParams", "type": "vec4", "value": [__FOG_START__, __FOG_END__, __FOV__, 0.0] }
+                    { "name": "FogParams", "type": "vec4", "value": [__FOG_START__, __FOG_END__, __FOV__, __EARTH_RADIUS__] }
                 ],
                 "ClodColors": [
                     { "name": "ColLow", "type": "vec4", "value": __COL_LOW__ },

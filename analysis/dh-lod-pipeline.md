@@ -142,7 +142,7 @@
   оставлено намеренно: у нас дыры бывают внутри радиуса, где тумана нет;
   отклонение задокументировано в шейдере.
 
-## 7. Что портировано в c-LoD (v4.4.0)
+## 7. Что портировано в c-LoD
 - `bake_block_colors.py` → точная цветовая математика §4 (линейное усреднение,
   Leaves/Flower/Glass, брёвна→кора, слэбы→DOUBLE, ликвиды→particle).
 - `bake_block_textures.py` → ratio-тайлы §5 (16×16, простое видимое среднее,
@@ -162,6 +162,46 @@
   воду — DH держит liquid-ветку). Реализовано в пробе поверхности `jni.rs`
   через `Material#isSolid`/`#isOccluding` (прокси NMS isSolid / opacity 15);
   промах таблицы цветов оставляет цвет грунта — поверхность не сереет.
+- **Multi-slice вертикальные данные (v4.9.0)** — полный порт §1/§2/§9.1
+  (редьюсер-гэп из §9.1 закрыт):
+  - `slices.rs`: 1:1 `RenderDataPointReducingList.reduce(target)` (шаги 0+1
+    малый-к-соседу/меньший-сосед/выше при равенстве, 2 стирание между
+    равными, 3 форс-мерж дна) + `merge_two_by_two` =
+    `FullDataSourceV2.mergeInputTwoByTwoDataColumn` (yTransitions детей,
+    голос серединой слайса, air всегда проигрывает, ничья → value0,
+    соседние равные сливаются) + таблица MEDIUM из
+    `EDhApiVerticalQuality` ({6,6,6,4,4,4,4,4,4,4,1} по detail =
+    log2(cell_size)+октава). Последний ран тянется «до дна мира» как
+    full-data колонка DH.
+  - `jni.rs` скан: колонка проходится ВНИЗ через ChunkSnapshot
+    (getChunkAt → getChunkSnapshot → getBlockType), раны режутся по смене
+    Material (identity через IsSameObject — Material-enum синглтоны),
+    band 0 = примирённая поверхность (снег/вода/avoided как в §2),
+    air ран не создаёт (шейдер продлевает верхнюю полосу — эквивалент
+    cave-culled обрыва DH), unbaked-материал останавливает проход
+    (глубина walk_depth, default 24, конфиг `slice_depth`).
+  - `atlas.rs`: SliceCell-таблица (8 raw-ран на ячейку) в CLODAT04-снапшоте
+    (блочная компоновка [cells][slices]); `encode_slices` — пирамида
+    2×2-голосований + редьюс до MEDIUM[detail] на каждую октаву; стрип
+    2n×ΣK·(n>>L), тексель-пары A (RGB цвета + hiY)/B (loY + side-tile id +
+    флаги present/liquid/grass), октавы сверх бюджета высоты 8192 падают
+    на старый side-pyr путь.
+  - `lod_terrain.fsh`: стена банду по hit-Y (`texelFetch`, глубочайшая
+    полоса с top ≥ floor(rayY)); FADE_TO_DIRT (грасс-полосы тают в
+    getDirtBlockColor() — ColLow — по собственному спану полосы, DH default
+    EDhApiGrassSideRendering.FADE_TO_DIRT); side-тайл полосы в текстурном
+    пути (useBottomTextureForSides внутри bake).
+  - Визуально: стены каньонов = серый камень + dirt-пояса + травяная кромка
+    (docs/e2e-2026-10-25-v49-slices/zoom/north_cliff_slices.png против
+    north_cliff_v48.png), A/B 4–6.5% кадра — стены, ночь 0.3%.
+- **Earth curvature (v4.9.0)** — DH `earthCurveRatio` (Experimental,
+  default 0): `uEarthRadius = 6371000/ratio` при |ratio|>1 (иначе выкл),
+  в марше каждый ground-тест оценивает вершинный трансформ vert.vert
+  `y' = y + (cos(phi)-1)(R+y), phi = d/(R+y)` (два фиксированных шага для
+  top-плоскости; xz-сжатие sin(phi)/phi — второй порядок, пропущено);
+  конфиг `earth_curve_ratio`, DH-семантика валидации (|r|<50 → ±50).
+  Проверено вживую: ratio 5000 (DH max) — земля падает за ванильной зоной
+  (docs/e2e-2026-10-25-v49-slices/zoom/curvature_ratio5000_south.png).
 
 ## 8. Voxy 0.2.20 A/B — наблюдения по исходникам и живому стенду (v4.5.2)
 
@@ -255,3 +295,13 @@ Voxy (me.cortex.voxy) — второй эталон LOD-рендера, изуч
 цветам (§4), тайлам (§5), шейдингу (§3), туману (§6), фейду (§6). Расхождения —
 только те, что вытекают из posteffect-вместо-меша (micro-offset, TAA, кривизна,
 multi-slice стены) и задокументированы в шейдерах. Аудит закрыт.
+
+### 9.4 Статус после v4.9.0 (2026-10-25)
+Из перечисленных в §9.3 расхождений два перенесены 1:1 (см. §7):
+multi-slice вертикальные данные (редьюсер + 2×2 голос-мердж + MEDIUM-бюджет)
+и earth curvature (вершинный трансформ в марше). Остающиеся осознанные
+непортируемые: micro-offset (марш точен — эквивалент не нужен), TAA-джиттер
+(временной аккумулятор вне скоупа posteffect-пайплайна), multi-slice стены
+на октавах сверх стрип-бюджета 8192 (big-atlas конфиги — side-pyr fallback),
+воздушные раны в стенах (высотное поле не рисует пещеры — продление верхней
+полосы, эквивалент cave-culled куллера DH).

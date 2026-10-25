@@ -507,9 +507,14 @@ fn scan_batch(state: &Arc<State>, env: Env) {
         for (ix, iz) in tasks.iter().copied() {
             let x = state.atlas.cell_world_x(ix);
             let z = state.atlas.cell_world_z(iz);
-            if let Some((y, liquid, top, side, tex_top, tex_side)) =
-                jni::sample_column(env, world, x, z, state.cfg.sea_level)
-            {
+            if let Some((y, liquid, top, side, tex_top, tex_side, runs)) = jni::sample_column_slices(
+                env,
+                world,
+                x,
+                z,
+                state.cfg.sea_level,
+                state.cfg.slice_depth,
+            ) {
                 state.atlas.set(
                     ix,
                     iz,
@@ -520,6 +525,7 @@ fn scan_batch(state: &Arc<State>, env: Env) {
                     tex_top,
                     tex_side,
                 );
+                state.atlas.set_slices(ix, iz, &runs);
             }
         }
     }
@@ -602,9 +608,14 @@ fn sample_stream_chunk(
             if ix < 0 || iz < 0 || ix as u32 >= atlas.cells || iz as u32 >= atlas.cells {
                 continue;
             }
-            if let Some((y, liquid, top, side, tex_top, tex_side)) =
-                jni::sample_column(env, world, x, z, state.cfg.sea_level)
-            {
+            if let Some((y, liquid, top, side, tex_top, tex_side, runs)) = jni::sample_column_slices(
+                env,
+                world,
+                x,
+                z,
+                state.cfg.sea_level,
+                state.cfg.slice_depth,
+            ) {
                 atlas.set(
                     ix as u32,
                     iz as u32,
@@ -615,6 +626,7 @@ fn sample_stream_chunk(
                     tex_top,
                     tex_side,
                 );
+                atlas.set_slices(ix as u32, iz as u32, &runs);
             }
         }
     }

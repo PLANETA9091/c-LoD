@@ -24,11 +24,90 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 
-/// On-disk snapshot magic + format version.
-const MAGIC: &[u8; 8] = b"CLODAT03";
+/// On-disk snapshot magic + format version. CLODAT04 adds the DH vertical
+/// slice table (see [`SliceCell`]); a v03 snapshot is stale by definition
+/// (the scan re-runs, restoring the pack SHA-1 determinism for new bytes).
+const MAGIC: &[u8; 8] = b"CLODAT04";
 /// Bytes per cell in the on-disk snapshot: i16 height, u32 top, u32 side,
 /// u8 flags, u16 top tile id, u16 side tile id.
 const CELL_BYTES: usize = 15;
+/// Bytes per cell for the DH vertical slice table (see [`SliceCell::BYTES`]).
+const SLICE_BYTES: usize = crate::slices::SliceRun::BYTES * SLICE_RAW + 1;
+
+/// Raw runs kept per cell before the DH reducer trims them for encoding.
+/// The scan cuts runs on Material change from the surface DOWN, so the first
+/// SLICE_RAW bands are the visually relevant ones; deeper terrain merges into
+/// the last run (the reducer's force-bottom step does the same).
+pub const SLICE_RAW: usize = 8;
+
+/// The DH vertical slice table of one atlas cell: up to [`SLICE_RAW`] raw
+/// runs, top-down (slice 0 = the surface band). Persisted byte-exact so the
+/// static pack stays SHA-1-stable across restarts.
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub struct SliceCell {
+    pub n: u8,
+    pub top: [i16; SLICE_RAW],
+    pub color: [u32; SLICE_RAW],
+    pub tex_top: [u16; SLICE_RAW],
+    pub tex_side: [u16; SLICE_RAW],
+    /// Per-run flags: bit0 liquid, bit1 grass (DH FADE_TO_DIRT material).
+    pub flags: [u8; SLICE_RAW],
+}
+
+impl SliceCell {
+    fn runs(&self) -> Vec<crate::slices::SliceRun> {
+        (0..usize::from(self.n).min(SLICE_RAW))
+            .map(|i| crate::slices::SliceRun {
+                top: self.top[i],
+                color: self.color[i] & 0xFF_FF_FF,
+                tex_top: self.tex_top[i],
+                tex_side: self.tex_side[i],
+                liquid: self.flags[i] & 0b01 != 0,
+                grass: self.flags[i] & 0b10 != 0,
+            })
+            .collect()
+    }
+
+    fn from_runs(runs: &[crate::slices::SliceRun]) -> Self {
+        let mut c = Self {
+            n: runs.len().min(SLICE_RAW) as u8,
+            ..Self::default()
+        };
+        for (i, r) in runs.iter().take(SLICE_RAW).enumerate() {
+            c.top[i] = r.top;
+            c.color[i] = r.color & 0xFF_FF_FF;
+            c.tex_top[i] = r.tex_top;
+            c.tex_side[i] = r.tex_side;
+            c.flags[i] = u8::from(r.liquid) | (u8::from(r.grass) << 1);
+        }
+        c
+    }
+}
+
+impl crate::slices::SliceRun {
+    /// Serialized size: i16 top + u24 colour + u16 top tile + u16 side tile
+    /// + u8 flags.
+    pub const BYTES: usize = 2 + 3 + 2 + 2 + 1;
+
+    fn to_bytes(self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.top.to_le_bytes());
+        out.extend_from_slice(&(self.color & 0xFF_FF_FF).to_le_bytes()[..3]);
+        out.extend_from_slice(&self.tex_top.to_le_bytes());
+        out.extend_from_slice(&self.tex_side.to_le_bytes());
+        out.push(u8::from(self.liquid) | (u8::from(self.grass) << 1));
+    }
+
+    fn from_bytes(buf: &[u8], o: usize) -> Self {
+        Self {
+            top: i16::from_le_bytes([buf[o], buf[o + 1]]),
+            color: u32::from_le_bytes([buf[o + 2], buf[o + 3], buf[o + 4], 0]) & 0xFF_FF_FF,
+            tex_top: u16::from_le_bytes([buf[o + 5], buf[o + 6]]),
+            tex_side: u16::from_le_bytes([buf[o + 7], buf[o + 8]]),
+            liquid: buf[o + 9] & 0b01 != 0,
+            grass: buf[o + 9] & 0b10 != 0,
+        }
+    }
+}
 
 pub struct Atlas {
     pub center_x: i32,
@@ -40,6 +119,10 @@ pub struct Atlas {
     #[allow(dead_code)]
     pub sea_level: i32,
     data: RwLock<Vec<Cell>>,
+    /// DH vertical slice table (parallel to `data`; every cell has an entry,
+    /// defaulting to n = 0 = "no bands" — the shader falls back to the side
+    /// pyramid for those cells).
+    slices: RwLock<Vec<SliceCell>>,
     /// Monotonic geometry version: bumped whenever any cell changes.
     version: AtomicU64,
     /// Number of cells scanned at least once (progress tracking).
@@ -94,6 +177,7 @@ impl Atlas {
             cells,
             sea_level,
             data: RwLock::new(vec![Cell::default(); (cells * cells) as usize]),
+            slices: RwLock::new(vec![SliceCell::default(); (cells * cells) as usize]),
             version: AtomicU64::new(1),
             scanned: AtomicU64::new(0),
             order: ring_order(cells),
@@ -162,6 +246,27 @@ impl Atlas {
             return d.get(idx).copied().filter(|c| c.valid);
         }
         None
+    }
+
+    /// Store the DH vertical run list of one cell (top-down, slice 0 =
+    /// surface band). Only meaningful together with [`Self::set`] for the
+    /// same cell; the version counter bumps when the table changes.
+    pub fn set_slices(&self, ix: u32, iz: u32, runs: &[crate::slices::SliceRun]) {
+        let idx = (iz * self.cells + ix) as usize;
+        let cell = SliceCell::from_runs(runs);
+        if let Ok(mut data) = self.slices.write() {
+            if let Some(slot) = data.get_mut(idx) {
+                if *slot != cell {
+                    *slot = cell;
+                    self.version.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+    }
+
+    /// Copy of the raw slice table (row-major, z outer).
+    pub fn slice_snapshot(&self) -> Vec<SliceCell> {
+        self.slices.read().map(|d| d.clone()).unwrap_or_default()
     }
 
     pub fn version(&self) -> u64 {
@@ -475,6 +580,160 @@ impl Atlas {
         (self.cells, strip_h as u32, px)
     }
 
+    // ---------------------------------------------------------------------
+    // DH vertical slices (analysis/dh-lod-pipeline.md §1/§2/§9.1, ported in
+    // slices.rs): the banded cliff walls of Distant Horizons. Raw level-0
+    // run lists live in the SliceCell table; every octave up merges 2x2
+    // with the full-data vote rule; each octave encodes the list reduced to
+    // EDhApiVerticalQuality.MEDIUM[detail] (detail = log2(cell) + L).
+    //
+    // Strip layout (width 2n, slices' texel A|B pairs side by side):
+    //   octave L occupies rows [rowBase(L), rowBase(L) + K(L) * (n>>L)),
+    //   cell (x,z) slice j: texel A at column 2x, texel B at column 2x+1,
+    //   row = rowBase(L) + z*K(L) + j.
+    //   texel A: RGB = run colour, A = high byte of (top+64)<<6.
+    //   texel B: R = low byte, G/B = side tile id big-endian,
+    //            A = flags (bit0 present, bit1 liquid, bit2 grass).
+    // The shader recomputes rowBase from the same MEDIUM table, so the
+    // layout must stay in sync with lod_terrain.fsh.
+    // ---------------------------------------------------------------------
+
+    /// GL-safe strip height budget: llvmpipe reports max texture sizes well
+    /// above this, but 8192 is the portable floor (GLES-class GPUs); octaves
+    /// that would exceed it keep the single-side-colour wall path (the
+    /// SidePyr fallback), exactly like the old renderer.
+    pub const SLICE_STRIP_MAX_H: usize = 8192;
+
+    /// (octaves, max_octave_encoded, K per octave, rowBase per octave, H)
+    fn slice_layout(&self) -> (usize, usize, Vec<usize>, Vec<usize>, usize) {
+        let n = self.cells as usize;
+        let levels = if n > 0 { n.ilog2() as usize + 1 } else { 1 };
+        let detail0 = self.cell.trailing_zeros() as i64; // log2(cell_size)
+        let mut k = Vec::with_capacity(levels);
+        let mut row_base = Vec::with_capacity(levels);
+        let mut base = 0usize;
+        for (l, _i) in (0..levels).enumerate() {
+            let kl = crate::slices::slices_at_detail(detail0 + l as i64);
+            k.push(kl);
+            row_base.push(base);
+            base += kl * (n >> l);
+        }
+        // Largest octave whose cumulative height fits the strip budget.
+        let mut max_oct = 0usize;
+        let mut cum = 0usize;
+        for (l, kl) in k.iter().enumerate() {
+            cum += kl * (n >> l);
+            if cum <= Self::SLICE_STRIP_MAX_H {
+                max_oct = l;
+            } else {
+                break;
+            }
+        }
+        let h = row_base[max_oct] + k[max_oct] * (n >> max_oct);
+        (levels, max_oct, k, row_base, h)
+    }
+
+    /// Encode the DH slice strip: (width 2n, height, pixels, max octave).
+    /// Octaves above `max octave` are left unwritten — the shader falls back
+    /// to the side pyramid there (big-atlas configs only; the default 1024
+    /// atlas fits every octave).
+    pub fn encode_slices(&self) -> (u32, u32, Vec<u8>, u32) {
+        let slice_snap = self.slice_snapshot();
+        let n = self.cells as usize;
+        let (levels, max_oct, k, row_base, h) = self.slice_layout();
+        let mut px = vec![0u8; 2 * n * h * 4];
+
+        if n == 0 || h == 0 {
+            return (self.cells, h as u32, px, max_oct as u32);
+        }
+
+        // Level-0 raw lists (top-down; cells without a slice table are
+        // empty — DH's un-generated columns).
+        let mut cur: Vec<Vec<crate::slices::SliceRun>> =
+            slice_snap.iter().map(|sc| sc.runs()).collect();
+
+        let put = |px: &mut [u8], col: usize, row: usize, rgba: [u8; 4]| {
+            let o = (row * 2 * n + col) * 4;
+            if o + 3 < px.len() {
+                px[o..o + 4].copy_from_slice(&rgba);
+            }
+        };
+
+        for level in 0..levels {
+            if level > 0 {
+                // 2x2 vote merge (FullDataSourceV2) + bound the raw list.
+                let side = n >> (level - 1);
+                let ns = side.div_ceil(2);
+                let mut next = vec![Vec::new(); ns * ns];
+                for z in 0..ns {
+                    for x in 0..ns {
+                        let g = |dz: usize, dx: usize| -> &[crate::slices::SliceRun] {
+                            let (sz, sx) = (z * 2 + dz, x * 2 + dx);
+                            if sz < side && sx < side {
+                                &cur[sz * side + sx]
+                            } else {
+                                &[]
+                            }
+                        };
+                        let merged =
+                            crate::slices::merge_two_by_two([g(0, 0), g(0, 1), g(1, 0), g(1, 1)]);
+                        next[z * ns + x] = crate::slices::reduce(&merged, crate::slices::RAW_CAP);
+                    }
+                }
+                cur = next;
+            }
+
+            if level > max_oct {
+                // Data still merged (a parent needs merged children), but no
+                // strip space: stop writing, keep merging.
+                continue;
+            }
+
+            let kl = k[level];
+            for (i, list) in cur.iter().enumerate() {
+                if list.is_empty() {
+                    continue;
+                }
+                let enc = crate::slices::reduce(list, kl);
+                let x = i % (n >> level);
+                let z = i / (n >> level);
+                for (j, r) in enc.iter().enumerate() {
+                    if j >= kl {
+                        break;
+                    }
+                    let row = row_base[level] + z * kl + j;
+                    let y16 = ((i32::from(r.top) + 64).max(0) << 6).min(0xFFFF) as u16;
+                    let a = (y16 >> 8) as u8;
+                    let flags = 0b001 | (u8::from(r.liquid) << 1) | (u8::from(r.grass) << 2);
+                    put(
+                        &mut px,
+                        2 * x,
+                        row,
+                        [
+                            ((r.color >> 16) & 0xFF) as u8,
+                            ((r.color >> 8) & 0xFF) as u8,
+                            (r.color & 0xFF) as u8,
+                            a,
+                        ],
+                    );
+                    put(
+                        &mut px,
+                        2 * x + 1,
+                        row,
+                        [
+                            (y16 & 0xFF) as u8,
+                            (r.tex_side >> 8) as u8,
+                            (r.tex_side & 0xFF) as u8,
+                            flags,
+                        ],
+                    );
+                }
+            }
+        }
+
+        (2 * self.cells, h as u32, px, max_oct as u32)
+    }
+
     /// Per-cell ratio-tile ids (DH 3.3.4 textured LODs): R/G = top tile id
     /// big-endian, B/A = side tile id big-endian. Nearest-filtered on the GPU
     /// so ids never blend between cells. Tile id 0 = the reserved flat tile.
@@ -501,18 +760,21 @@ impl Atlas {
     // Disk persistence (static-pack determinism across restarts).
     // -----------------------------------------------------------------------
 
-    /// Serialize the atlas snapshot: MAGIC + header + 11 bytes per cell
-    /// (height i16 LE, top u32, side u32, flags: bit0 water, bit1 valid).
+    /// Serialize the atlas snapshot: MAGIC + header + 15 bytes per cell
+    /// (height i16 LE, top u32, side u32, flags: bit0 water, bit1 valid),
+    /// then the DH slice table: 1 + 8*10 bytes per cell.
     pub fn to_bytes(&self) -> Vec<u8> {
         let snap = self.snapshot();
+        let slice_snap = self.slice_snapshot();
         let n = snap.len();
-        let mut out = Vec::with_capacity(MAGIC.len() + 20 + n * CELL_BYTES);
+        let mut out = Vec::with_capacity(MAGIC.len() + 20 + n * (CELL_BYTES + SLICE_BYTES));
         out.extend_from_slice(MAGIC);
         out.extend_from_slice(&self.center_x.to_le_bytes());
         out.extend_from_slice(&self.center_z.to_le_bytes());
         out.extend_from_slice(&self.size.to_le_bytes());
         out.extend_from_slice(&self.cell.to_le_bytes());
         out.extend_from_slice(&self.sea_level.to_le_bytes());
+        // Blocked layout (what from_bytes reads): [all cells][all slices].
         for c in &snap {
             out.extend_from_slice(&c.height.to_le_bytes());
             out.extend_from_slice(&(c.top & 0xFFFFFF).to_le_bytes());
@@ -520,6 +782,20 @@ impl Atlas {
             out.push((u8::from(c.water)) | (u8::from(c.valid) << 1));
             out.extend_from_slice(&c.tex_top.to_le_bytes());
             out.extend_from_slice(&c.tex_side.to_le_bytes());
+        }
+        for sc in &slice_snap {
+            out.push(sc.n);
+            for i in 0..SLICE_RAW {
+                crate::slices::SliceRun {
+                    top: sc.top[i],
+                    color: sc.color[i],
+                    tex_top: sc.tex_top[i],
+                    tex_side: sc.tex_side[i],
+                    liquid: sc.flags[i] & 0b01 != 0,
+                    grass: sc.flags[i] & 0b10 != 0,
+                }
+                .to_bytes(&mut out);
+            }
         }
         out
     }
@@ -555,10 +831,11 @@ impl Atlas {
         }
         let atlas = Atlas::new(cx, cz, size, cell, sea);
         let n = (atlas.cells as usize) * (atlas.cells as usize);
-        if buf.len() < MAGIC.len() + 20 + n * CELL_BYTES {
+        if buf.len() < MAGIC.len() + 20 + n * (CELL_BYTES + SLICE_BYTES) {
             return None;
         }
         let mut data = atlas.data.write().ok()?;
+        let mut slices = atlas.slices.write().ok()?;
         let base = MAGIC.len() + 20;
         let mut scanned = 0u64;
         for (i, cell_out) in data.iter_mut().enumerate() {
@@ -569,6 +846,24 @@ impl Atlas {
             let flags = buf[o + 10];
             let tex_top = u16::from_le_bytes([buf[o + 11], buf[o + 12]]);
             let tex_side = u16::from_le_bytes([buf[o + 13], buf[o + 14]]);
+            let so = base + n * CELL_BYTES + i * SLICE_BYTES;
+            let sc = SliceCell {
+                n: buf[so].min(SLICE_RAW as u8),
+                ..SliceCell::default()
+            };
+            let mut sc = sc;
+            for j in 0..SLICE_RAW {
+                let r = crate::slices::SliceRun::from_bytes(
+                    buf,
+                    so + 1 + j * crate::slices::SliceRun::BYTES,
+                );
+                sc.top[j] = r.top;
+                sc.color[j] = r.color;
+                sc.tex_top[j] = r.tex_top;
+                sc.tex_side[j] = r.tex_side;
+                sc.flags[j] = u8::from(r.liquid) | (u8::from(r.grass) << 1);
+            }
+            slices[i] = sc;
             if flags & 0b10 != 0 {
                 *cell_out = Cell {
                     height,
@@ -583,6 +878,7 @@ impl Atlas {
             }
         }
         drop(data);
+        drop(slices);
         atlas.scanned.store(scanned, Ordering::Relaxed);
         Some(atlas)
     }
@@ -748,6 +1044,114 @@ mod tests {
         assert_eq!(px[at(16, 0, 0)], i20);
         // unwritten pad texels stay zero (never sampled)
         assert_eq!(px[at(16, 7, 7)], 0);
+    }
+
+    #[test]
+    fn slice_strip_layout_and_pyramid() {
+        let a = Atlas::new(0, 0, 64, 4, 63); // 16x16 cells, cell 4 (detail0=2)
+        let grass = crate::slices::SliceRun {
+            top: 10,
+            color: 0x00FF00,
+            tex_top: 7,
+            tex_side: 9,
+            liquid: false,
+            grass: true,
+        };
+        let dirt = crate::slices::SliceRun {
+            top: 8,
+            color: 0x8B4513,
+            ..grass
+        };
+        let stone = crate::slices::SliceRun {
+            top: 0,
+            color: 0x808080,
+            ..grass
+        };
+        a.set(3, 5, 11, false, 0x00FF00, 0x707070, 7, 9);
+        a.set_slices(3, 5, &[grass, dirt, stone]);
+
+        let (w, h, px, max_oct) = a.encode_slices();
+        assert_eq!(w, 32, "two texels per cell column");
+        // cell=4 -> detail0 = 2 -> K = MEDIUM[2] = 6; n=16 -> 5 octaves:
+        // 6*16 + 4*8 + 4*4 + 4*2 + 4*1 = 156 rows, all under the 8192 cap.
+        assert_eq!(h, 156);
+        assert_eq!(max_oct, 4);
+        let at = |col: usize, row: usize| (row * 32 + col) * 4;
+        // Octave 0, cell (3,5), slice 0 (grass): row = 0 + 5*6 + 0 = 30.
+        assert_eq!(&px[at(6, 30)..at(6, 30) + 3], &[0, 255, 0]);
+        assert_eq!(px[at(6, 30) + 3], ((10 + 64) << 6 >> 8) as u8, "top hi");
+        assert_eq!(px[at(7, 30)], ((10 + 64) << 6 & 0xFF) as u8, "top lo");
+        assert_eq!(px[at(7, 30) + 1], 0, "side tile hi");
+        assert_eq!(px[at(7, 30) + 2], 9, "side tile lo");
+        assert_eq!(px[at(7, 30) + 3] & 0b001, 1, "present");
+        assert_eq!(px[at(7, 30) + 3] >> 2, 1, "grass flag");
+        // slice 1 (dirt): row 31.
+        assert_eq!(&px[at(6, 31)..at(6, 31) + 3], &[0x8B, 0x45, 0x13]);
+        // slice 2 (stone): row 32.
+        assert_eq!(&px[at(6, 32)..at(6, 32) + 3], &[0x80, 0x80, 0x80]);
+        // absent slices stay zero (never sampled).
+        assert_eq!(px[at(7, 33) + 3] & 1, 0);
+        // a cell without slices stays absent.
+        assert_eq!(px[at(2 * 8, 0) + 3] & 1, 0);
+
+        // Octave 1 (rowBase 96): cell (1,2) covers children (2..4, 4..6);
+        // only (3,5) has data -> merged list = that list; encoded at
+        // row 96 + 2*4 + 0 with K1 = MEDIUM[3] = 4.
+        assert_eq!(&px[at(2, 104)..at(2, 104) + 3], &[0, 255, 0]);
+        assert_eq!(&px[at(2, 105)..at(2, 105) + 3], &[0x8B, 0x45, 0x13]);
+        assert_eq!(&px[at(2, 106)..at(2, 106) + 3], &[0x80, 0x80, 0x80]);
+    }
+
+    #[test]
+    fn slice_snapshot_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("clod-slc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("atlas.bin");
+        let a = Atlas::new(11, -22, 64, 4, 63);
+        let grass = crate::slices::SliceRun {
+            top: 40,
+            color: 0x12_34_56,
+            tex_top: 300,
+            tex_side: 301,
+            liquid: false,
+            grass: true,
+        };
+        let water = crate::slices::SliceRun {
+            top: 62,
+            color: 0x3F76E4,
+            liquid: true,
+            ..grass
+        };
+        a.set(2, 3, 41, false, 0x123456, 0x654321, 300, 301);
+        a.set_slices(2, 3, &[water, grass]);
+        a.save(&path).unwrap();
+        let b = Atlas::try_restore(&path, 11, -22, 64, 4, 63).expect("restore");
+        assert_eq!(b.slice_snapshot(), a.slice_snapshot());
+        // determinism: encoding matches after restore
+        let (_, _, pa, ma) = a.encode_slices();
+        let (_, _, pb, mb) = b.encode_slices();
+        assert_eq!(pa, pb);
+        assert_eq!(ma, mb);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn version_bumps_on_slice_change() {
+        let a = Atlas::new(0, 0, 64, 4, 63);
+        let v0 = a.version();
+        let r = crate::slices::SliceRun {
+            top: 10,
+            color: 1,
+            tex_top: 0,
+            tex_side: 0,
+            liquid: false,
+            grass: false,
+        };
+        a.set_slices(1, 1, &[r]);
+        let v1 = a.version();
+        a.set_slices(1, 1, &[r]); // same value — no bump
+        assert_eq!(v0 + 1, v1);
+        assert_eq!(a.version(), v1);
     }
 
     #[test]

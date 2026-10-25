@@ -114,6 +114,18 @@ pub struct Config {
     pub color_veil: [f32; 3],
     /// Upper bound on terrain height used to cull rays early.
     pub max_height: i32,
+    /// DH vertical slices: how many blocks BELOW the surface the scan walks
+    /// (per column, through a ChunkSnapshot) cutting bands on Material
+    /// change. 0 disables the slice walk (single-band walls); 24 covers
+    /// every band DH's MEDIUM quality can store (6) in all realistic
+    /// terrain at the cost of ~6x more JNI block reads per column.
+    pub slice_depth: i32,
+    /// DH earthCurveRatio (Config.Client.Advanced.Graphics.Experimental):
+    /// 0 = flat (DH default); otherwise the earth size ratio — the march
+    /// evaluates the DH vertex curvature `y += (cos(phi)-1)*(R+y)`,
+    /// `phi = dist/(R+y)`, `R = 6_371_000 / ratio`, at every ground test.
+    /// |ratio| >= 50 is the DH-valid range (smaller magnitudes snap to 0).
+    pub earth_curve_ratio: i32,
 }
 
 impl Default for Config {
@@ -156,6 +168,8 @@ impl Default for Config {
             snow_line: 0.78,
             color_veil: [0.62, 0.74, 0.86],
             max_height: 320,
+            slice_depth: 24,
+            earth_curve_ratio: 0,
         }
     }
 }
@@ -287,6 +301,20 @@ impl Config {
         }
         if let Some(v) = get("max_height").and_then(|v| v.parse::<i32>().ok()) {
             cfg.max_height = v.clamp(64, 1024);
+        }
+        if let Some(v) = get("slice_depth").and_then(|v| v.parse::<i32>().ok()) {
+            cfg.slice_depth = v.clamp(0, 96);
+        }
+        if let Some(v) = get("earth_curve_ratio").and_then(|v| v.parse::<i32>().ok()) {
+            // DH WorldCurvatureConfigEventHandler: |ratio| in (0, 50) snaps
+            // to the nearest valid bound; keep the DH sign semantics.
+            cfg.earth_curve_ratio = if v == 0 {
+                0
+            } else if v.abs() < 50 {
+                50 * v.signum()
+            } else {
+                v.clamp(-5000, 5000)
+            };
         }
         cfg
     }

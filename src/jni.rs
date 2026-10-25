@@ -121,6 +121,10 @@ struct WorldIds {
     m_chunk_loaded: jmethodID,
     m_set_force_loaded: jmethodID,
     m_get_biome: jmethodID,
+    /// World.getChunkAt(int,int) -> Chunk — the DH slice walk reads the
+    /// column through a ChunkSnapshot (one JNI object per chunk instead of
+    /// one getBlockAt call chain per block).
+    m_get_chunk_at: jmethodID,
     // Full game time (ticks since creation). Unlike the day time it advances
     // on every real server tick regardless of doDaylightCycle — the engine
     // uses its growth to detect that the tick loop started (queued tasks run
@@ -182,9 +186,71 @@ struct MaterialIds {
     // Bukkit isOccluding == NMS opacity 15 for a full cube).
     m_is_solid: jmethodID,
     m_is_occluding: jmethodID,
+    // The slice walk cuts bands on Material change and never bands air.
+    m_is_air: jmethodID,
 }
 unsafe impl Send for MaterialIds {}
 static MATERIAL_IDS: Mutex<Option<MaterialIds>> = Mutex::new(None);
+
+/// `org.bukkit.Chunk` — only getChunkSnapshot is needed.
+#[derive(Clone, Copy)]
+struct ChunkIds {
+    m_get_snapshot: jmethodID,
+}
+unsafe impl Send for ChunkIds {}
+static CHUNK_IDS: Mutex<Option<ChunkIds>> = Mutex::new(None);
+
+fn chunk_ids(env: Env, chunk: jobject) -> Option<ChunkIds> {
+    if let Some(c) = CHUNK_IDS.lock().unwrap().as_ref() {
+        return Some(*c);
+    }
+    let cls_local = env.get_object_class(chunk);
+    let cls = {
+        let g = env.new_global_ref(cls_local);
+        g as jobject
+    };
+    let ids = ChunkIds {
+        m_get_snapshot: bind_method(
+            env,
+            cls_local,
+            cls,
+            "getChunkSnapshot",
+            "(ZZZ)Lorg/bukkit/ChunkSnapshot;",
+        )?,
+    };
+    *CHUNK_IDS.lock().unwrap() = Some(ids);
+    Some(ids)
+}
+
+/// `org.bukkit.ChunkSnapshot` — the slice walk's block reader.
+#[derive(Clone, Copy)]
+struct SnapshotIds {
+    m_get_block_type: jmethodID,
+}
+unsafe impl Send for SnapshotIds {}
+static SNAPSHOT_IDS: Mutex<Option<SnapshotIds>> = Mutex::new(None);
+
+fn snapshot_ids(env: Env, snap: jobject) -> Option<SnapshotIds> {
+    if let Some(s) = SNAPSHOT_IDS.lock().unwrap().as_ref() {
+        return Some(*s);
+    }
+    let cls_local = env.get_object_class(snap);
+    let cls = {
+        let g = env.new_global_ref(cls_local);
+        g as jobject
+    };
+    let ids = SnapshotIds {
+        m_get_block_type: bind_method(
+            env,
+            cls_local,
+            cls,
+            "getBlockType",
+            "(III)Lorg/bukkit/Material;",
+        )?,
+    };
+    *SNAPSHOT_IDS.lock().unwrap() = Some(ids);
+    Some(ids)
+}
 
 /// `java.util.concurrent.CompletableFuture` — the engine polls isDone() on
 /// held getChunkAtAsyncUrgently futures (see engine.rs scan_stream).
@@ -235,6 +301,12 @@ struct MatInfo {
     tint_side: u8,
     tex_top: u16,
     tex_side: u16,
+    /// blockcolors::lookup hit (a miss keeps the previous band's colour —
+    /// the slice walk STOPS at unbaked materials instead of banding gray).
+    baked: bool,
+    /// DH EDhApiBlockMaterial.GRASS (grass_block) — LodQuadBuilder
+    /// FADE_TO_DIRT recolours the wall bottom of grass datapoints.
+    grass: bool,
 }
 static MAT_CACHE: Mutex<Vec<Option<MatInfo>>> = Mutex::new(Vec::new());
 /// One-entry biome tint cache: the scan walks chunk-major, so consecutive
@@ -278,6 +350,7 @@ fn material_ids(env: Env, mat: jobject) -> Option<MaterialIds> {
         )?,
         m_is_solid: bind_method(env, cls_local, cls, "isSolid", "()Z")?,
         m_is_occluding: bind_method(env, cls_local, cls, "isOccluding", "()Z")?,
+        m_is_air: bind_method(env, cls_local, cls, "isAir", "()Z")?,
     };
     *MATERIAL_IDS.lock().unwrap() = Some(ids);
     Some(ids)
@@ -350,6 +423,8 @@ fn mat_info(env: Env, mat: jobject, ids: &MaterialIds, ordinal: i32) -> Option<M
             tint_side,
             tex_top: crate::blocktextures::lookup(&name).map_or(0, |(t, _)| t),
             tex_side: crate::blocktextures::lookup(&name).map_or(0, |(_, s)| s),
+            baked: true,
+            grass: name == "grass_block",
         },
         None => MatInfo {
             top: 0x7F7F7F,
@@ -358,6 +433,8 @@ fn mat_info(env: Env, mat: jobject, ids: &MaterialIds, ordinal: i32) -> Option<M
             tint_side: 0,
             tex_top: 0,
             tex_side: 0,
+            baked: false,
+            grass: false,
         },
     };
     let mut cache = MAT_CACHE.lock().unwrap();
@@ -389,18 +466,37 @@ fn biome_tint(env: Env, world: jobject, wid: &WorldIds, x: i32, y: i32, z: i32) 
     resolved
 }
 
-/// Sample one column: (blockY, isLiquid, top rgb, side rgb, top tile, side tile).
+/// Sample one column: (blockY, isLiquid, top rgb, side rgb, top tile, side tile)
+/// plus the DH vertical slice table (top-down runs cut on Material change).
 ///
 /// The colours come from the baked block table (average texture colour) times
 /// the biome tint — Distant Horizons' flat LOD colour. The tile ids point into
-/// the ratio-tile atlas (DH 3.3.4 textured LODs); 0 = flat.
-pub fn sample_column(
+/// the ratio-tile atlas (DH 3.3.4 textured LODs); 0 = flat. The slice walk
+/// reads the column through a ChunkSnapshot and stops at `walk_depth` blocks
+/// or `SLICE_RAW` bands; unbaked materials end the walk (the last band
+/// extends to the world floor, exactly like a DH full-data column).
+/// (surface tuple..., DH vertical runs) — clippy type_complexity alias.
+pub type ColumnTuple = (i32, bool, u32, u32, u16, u16, Vec<crate::slices::SliceRun>);
+
+pub fn sample_column_slices(
     env: Env,
     world: jobject,
     x: i32,
     z: i32,
     sea: i32,
-) -> Option<(i32, bool, u32, u32, u16, u16)> {
+    walk_depth: i32,
+) -> Option<ColumnTuple> {
+    sample_column_impl(env, world, x, z, sea, walk_depth)
+}
+
+fn sample_column_impl(
+    env: Env,
+    world: jobject,
+    x: i32,
+    z: i32,
+    sea: i32,
+    walk_depth: i32,
+) -> Option<ColumnTuple> {
     use std::sync::atomic::Ordering;
     let wid = world_ids(env, world)?;
     if env.exception_check() {
@@ -424,28 +520,28 @@ pub fn sample_column(
         return None;
     }
     if y < -64 {
-        return Some((y, false, 0x808080, 0x808080, 0, 0));
+        return Some((y, false, 0x808080, 0x808080, 0, 0, Vec::new()));
     }
     let gray = 0x808080u32;
     let Some(block) =
         jobj(env.call_object_method(world, wid.m_get_block_at, &[ji(x), ji(y), ji(z)]))
     else {
         clear_if_pending(env);
-        return Some((y, false, gray, gray, 0, 0));
+        return Some((y, false, gray, gray, 0, 0, Vec::new()));
     };
     let Some(bid) = block_ids(env, block) else {
         clear_if_pending(env);
-        return Some((y, false, gray, gray, 0, 0));
+        return Some((y, false, gray, gray, 0, 0, Vec::new()));
     };
     let liquid = env.call_boolean_method(block, bid.m_is_liquid, &[]);
     let mat = jobj(env.call_object_method(block, bid.m_get_type, &[]));
     clear_if_pending(env);
     let Some(mat) = mat else {
         SCAN_OK.fetch_add(1, Ordering::Relaxed);
-        return Some((y, liquid, gray, gray, 0, 0));
+        return Some((y, liquid, gray, gray, 0, 0, Vec::new()));
     };
     let Some(mid) = material_ids(env, mat) else {
-        return Some((y, liquid, gray, gray, 0, 0));
+        return Some((y, liquid, gray, gray, 0, 0, Vec::new()));
     };
     let ordinal = env.call_int_method(mat, mid.m_ordinal, &[]);
     clear_if_pending(env);
@@ -456,6 +552,8 @@ pub fn sample_column(
         tint_side: 0,
         tex_top: 0,
         tex_side: 0,
+        baked: false,
+        grass: false,
     });
     let (grass, foliage, water) = biome_tint(env, world, &wid, x, y, z);
     let t_top = match info.tint_top {
@@ -476,6 +574,10 @@ pub fn sample_column(
     let mut tex_side = info.tex_side;
     let mut height = y;
     let mut is_liquid = liquid;
+    // Band 0's material flags: the surface block's own material, overridden
+    // by the reconciliation branches below (a snow/water band never fades
+    // to dirt; an avoided-block recolour keeps the GROUND material).
+    let mut band0_grass = info.grass;
 
     // DH surface-layer semantics (FullDataToRenderDataTransformer):
     // whatever sits ON TOP of the heightmap block recolours the column —
@@ -500,6 +602,7 @@ pub fn sample_column(
                             // resolution); snow's own ratio tile rides along
                             "snow" => {
                                 top = 0xF9FEFE;
+                                band0_grass = false; // a snow band never fades to dirt
                                 if let Some((st, _ss)) = crate::blocktextures::lookup("snow") {
                                     tex_top = st;
                                 }
@@ -591,7 +694,157 @@ pub fn sample_column(
     }
 
     SCAN_OK.fetch_add(1, Ordering::Relaxed);
-    Some((height, is_liquid, top, side, tex_top, tex_side))
+
+    // ------------------------------------------------------------------
+    // DH vertical slices (slices.rs): walk the column DOWN from the surface
+    // through a ChunkSnapshot, cutting a band on every Material change
+    // (LodDataBuilder cuts on blockstate change; Material is the same
+    // identity at LOD resolution). Air starts no band — the shader extends
+    // the band above over the gap, which reproduces DH's cave-culled cliff
+    // look on a heightfield. Unbaked materials end the walk (the last band
+    // reaches the world floor like a DH full-data column).
+    // ------------------------------------------------------------------
+    let mut runs: Vec<crate::slices::SliceRun> = Vec::new();
+    if walk_depth > 0 && height >= -64 {
+        let frame_ok = env.push_local_frame(96).is_ok();
+        let walked = (|| -> Option<Vec<crate::slices::SliceRun>> {
+            const RAW: usize = crate::atlas::SLICE_RAW;
+            let chunk =
+                jobj(env.call_object_method(world, wid.m_get_chunk_at, &[ji(x >> 4), ji(z >> 4)]))?;
+            clear_if_pending(env);
+            let cid = chunk_ids(env, chunk)?;
+            let snap = jobj(env.call_object_method(
+                chunk,
+                cid.m_get_snapshot,
+                &[jz(false), jz(false), jz(false)],
+            ))?;
+            clear_if_pending(env);
+            let sid = snapshot_ids(env, snap)?;
+
+            let block_at = |y: i32| -> Option<jobject> {
+                let m = jobj(env.call_object_method(
+                    snap,
+                    sid.m_get_block_type,
+                    &[ji(x & 15), ji(y), ji(z & 15)],
+                ));
+                let pending = env.exception_check();
+                clear_if_pending(env);
+                if pending {
+                    None
+                } else {
+                    m
+                }
+            };
+            let mid = material_ids(env, {
+                // resolve MaterialIds once from the surface material
+                block_at(height.max(-64))?
+            })?;
+
+            let resolve = |m: jobject| -> Option<crate::slices::SliceRun> {
+                let ordinal = env.call_int_method(m, mid.m_ordinal, &[]);
+                clear_if_pending(env);
+                let info = mat_info(env, m, &mid, ordinal)?;
+                if !info.baked {
+                    return None; // unbaked: stop, the last band reaches down
+                }
+                let t_top = match info.tint_top {
+                    1 => grass,
+                    2 => foliage,
+                    3 => water,
+                    _ => 0xFFFFFF,
+                };
+                // Sub-band liquid stays false: the water SURFACE band is
+                // band 0 (the reconciled surface), and DH never bands water
+                // below terrain. Only the liquid flag of band 0 reaches the
+                // shader.
+                Some(crate::slices::SliceRun {
+                    top: 0, // set when the band closes
+                    color: mul_rgb(info.top, t_top),
+                    tex_top: info.tex_top,
+                    tex_side: info.tex_side,
+                    liquid: false,
+                    grass: info.grass,
+                })
+            };
+
+            // Band 0 = the reconciled surface band (its material is the
+            // heightmap block; the reconciliation may have recoloured it).
+            let mut bands: Vec<crate::slices::SliceRun> = Vec::with_capacity(RAW);
+            bands.push(crate::slices::SliceRun {
+                top: height as i16,
+                color: top,
+                tex_top,
+                tex_side,
+                liquid: is_liquid,
+                grass: band0_grass,
+            });
+            if bands.len() >= RAW {
+                return Some(bands);
+            }
+
+            // The walk's identity anchor: the block AT the surface plane.
+            let mut cur_mat = block_at(height.max(-64))?;
+            let mut cur_is_air = env.call_boolean_method(cur_mat, mid.m_is_air, &[]);
+            clear_if_pending(env);
+            // cur holds the OPEN band's appearance (None over air gaps).
+            let mut cur: Option<crate::slices::SliceRun> =
+                if cur_is_air { None } else { Some(bands[0]) };
+            let mut cur_start = height;
+            let floor = (height - walk_depth).max(-65);
+
+            let mut yy = height - 1;
+            while yy >= floor {
+                let Some(m) = block_at(yy) else { break };
+                if !env.is_same_object(m, cur_mat) {
+                    // Material change: close the open band (its top block is
+                    // where it started), open the next one at yy.
+                    if !cur_is_air {
+                        if let Some(mut band) = cur {
+                            band.top = cur_start as i16;
+                            if bands.len() >= RAW {
+                                break;
+                            }
+                            bands.push(band);
+                        }
+                    }
+                    cur_mat = m;
+                    cur_start = yy;
+                    cur_is_air = env.call_boolean_method(m, mid.m_is_air, &[]);
+                    clear_if_pending(env);
+                    cur = if cur_is_air { None } else { resolve(m) };
+                    if cur.is_none() && !cur_is_air {
+                        break; // unbaked material: the last band reaches down
+                    }
+                }
+                yy -= 1;
+            }
+            // Close the final open band (it reaches the world floor).
+            if !cur_is_air {
+                if let Some(mut band) = cur {
+                    band.top = cur_start as i16;
+                    if bands.len() < RAW {
+                        bands.push(band);
+                    }
+                }
+            }
+            // Tops must strictly descend (surface band vs the first cut).
+            for w in 1..bands.len() {
+                if bands[w - 1].top <= bands[w].top {
+                    bands[w].top = bands[w - 1].top.saturating_sub(1);
+                }
+            }
+            Some(bands)
+        })();
+
+        if frame_ok {
+            env.pop_local_frame(std::ptr::null_mut());
+        }
+        if let Some(w) = walked {
+            runs = w;
+        }
+    }
+
+    Some((height, is_liquid, top, side, tex_top, tex_side, runs))
 }
 
 fn method_or_log(env: Env, cls: jobject, name: &str, sig: &str) -> Option<jmethodID> {
@@ -649,6 +902,7 @@ fn world_ids(env: Env, world: jobject) -> Option<WorldIds> {
             "getBlockAt",
             "(III)Lorg/bukkit/block/Block;",
         )?,
+        m_get_chunk_at: bind_method(env, cls_local, cls, "getChunkAt", "(II)Lorg/bukkit/Chunk;")?,
         m_get_biome: bind_method(
             env,
             cls_local,

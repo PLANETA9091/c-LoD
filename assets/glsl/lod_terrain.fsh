@@ -28,7 +28,8 @@ uniform sampler2D InDepthSampler; // minecraft:main depth
 uniform sampler2D AtlasSampler;   // RG = height, B = water, A = side colour index
 uniform sampler2D ColorSampler;   // top-face block colour (baked texture average)
 uniform sampler2D SideSampler;    // 256x1 side/cliff colour LUT
-uniform sampler2D SidePyrSampler; // side-index strip (mode-aggregated pyramid)
+uniform sampler2D SidePyrSampler; // side-index strip (fallback wall path)
+uniform sampler2D SlicesSampler;  // DH vertical slices (texel pairs A|B)
 uniform sampler2D TilesSampler;   // DH ratio-tile atlas (16px tiles, 256/row)
 uniform sampler2D TexIdsSampler;  // per-cell tile ids: RG top, BA side (big-endian)
 uniform sampler2D RotSampler;     // clod:clod_rot_a (1x1 persistent, camera channel)
@@ -56,7 +57,8 @@ layout(std140) uniform ClodParams {
     vec4 LodParams;
 };
 
-// x = fog start (legacy), y = fog end (blocks) == LOD draw distance, z = static fov fallback
+// x = fog start (legacy), y = fog end (blocks) == LOD draw distance,
+// z = static fov fallback, w = DH earth curvature radius (0 = off)
 layout(std140) uniform ClodFog {
     vec4 FogParams;
 };
@@ -68,7 +70,7 @@ layout(std140) uniform ClodDebug {
 };
 
 // x = device depth near plane (blocks), y = cloud ceiling (atlas max + margin),
-// z = ratio-tile atlas rows (DH textured LODs)
+// z = ratio-tile atlas rows (DH textured LODs), w = max octave with slices
 layout(std140) uniform ClodSky {
     vec4 SkyParams;
 };
@@ -202,6 +204,86 @@ float pyr_side(vec2 uv01, float lvl, float n) {
     ).r;
 }
 
+// ------------------------------------------------------------------
+// DH vertical slices (v4.9, slices.rs + atlas.encode_slices): the banded
+// cliff walls of Distant Horizons. Every datapoint column stores up to
+// EDhApiVerticalQuality.MEDIUM[detail] vertical runs (detail = log2(cell)
+// + octave); each wall pixel samples the band containing its hit Y. The
+// strip layout: octave L rows [rowBase, rowBase + K*(n>>L)), cell (x,z)
+// slice j -> texel A at column 2x (RGB colour, A = (top+64)<<6 hi byte),
+// texel B at 2x+1 (R = lo byte, GB = side tile id, A = flags).
+// ------------------------------------------------------------------
+const int SLICE_MEDIUM[11] = int[11](6, 6, 6, 4, 4, 4, 4, 4, 4, 4, 1);
+
+int slice_k(float detail) {
+    return SLICE_MEDIUM[int(clamp(detail, 0.0, 10.0))];
+}
+
+float slice_row_base(float detail0, float L, int n) {
+    int base = 0;
+    int li = int(L);
+    for (int l = 0; l < 12; ++l) {
+        if (l >= li) break;
+        base += slice_k(detail0 + float(l)) * (n >> l);
+    }
+    return float(base);
+}
+
+/// Band of cell cellId (octave-L indices) containing block yHit.
+/// Outputs: band colour (0..1), side tile id, liquid/grass flags and the
+/// band's block-Y bounds (for the grass fade). Returns false when the cell
+/// carries no slice data (fallback path).
+bool slice_band(ivec2 cellId, float L, float n, float yHit,
+                out vec3 col, out float tile, out float liquid,
+                out float grass, out float bandTop, out float bandBot) {
+    col = vec3(0.0); tile = 0.0; liquid = 0.0; grass = 0.0;
+    bandTop = 0.0; bandBot = -1.0e4;
+    float detail0 = log2(max(AtlasInfo.w, 2.0));
+    int K = slice_k(detail0 + L);
+    int nI = int(n);
+    int sz = nI >> int(L);
+    if (cellId.x < 0 || cellId.y < 0 || cellId.x >= sz || cellId.y >= sz) {
+        return false;
+    }
+    int base = int(slice_row_base(detail0, L, nI));
+    int match = -1;
+    float topY = 0.0;
+    for (int j = 0; j < K; ++j) {
+        int row = base + cellId.y * K + j;
+        vec4 b = texelFetch(SlicesSampler, ivec2(2 * cellId.x + 1, row), 0);
+        if ((int(b.a * 255.0 + 0.5) & 1) == 0) break; // absent (packed top-down)
+        vec4 a = texelFetch(SlicesSampler, ivec2(2 * cellId.x, row), 0);
+        float ty = (a.a * 65280.0 + b.r * 255.0) / 64.0 - 64.0;
+        if (ty >= yHit) {
+            // deepest band whose top is still above the hit
+            match = j;
+            topY = ty;
+            col = a.rgb;
+            tile = floor(b.g * 255.0 + 0.5) * 256.0 + floor(b.b * 255.0 + 0.5);
+            int fl = int(b.a * 255.0 + 0.5);
+            liquid = float((fl >> 1) & 1);
+            grass = float((fl >> 2) & 1);
+        } else {
+            break; // tops strictly descend
+        }
+    }
+    if (match < 0) {
+        return false;
+    }
+    bandTop = topY;
+    // bottom boundary: the next band's top, else the walk floor
+    bandBot = topY - 96.0;
+    if (match + 1 < K) {
+        int row2 = base + cellId.y * K + match + 1;
+        vec4 b2 = texelFetch(SlicesSampler, ivec2(2 * cellId.x + 1, row2), 0);
+        if ((int(b2.a * 255.0 + 0.5) & 1) != 0) {
+            vec4 a2 = texelFetch(SlicesSampler, ivec2(2 * cellId.x, row2), 0);
+            bandBot = (a2.a * 65280.0 + b2.r * 255.0) / 64.0 - 64.0;
+        }
+    }
+    return true;
+}
+
 /// Index of the side/cliff colour stored in the atlas alpha channel.
 float atlas_side(vec2 uv) {
     return texture(AtlasSampler, uv).a;
@@ -267,6 +349,24 @@ vec3 dh_noise(vec3 col, vec3 worldPos, vec3 faceN, float viewDist, float ampW) {
     vec3 newCol = clamp(col + (1.0 - col) * r, 0.0, 1.0);
     float distF = min(viewDist / NOISE_DROPOFF, 1.0);
     return mix(newCol, col, distF);
+}
+
+float gEarthR = 0.0;
+
+/// DH earth curvature (terrain/gl/vert.vert, stduhpf): a ground vertex at
+/// horizontal distance d and height y renders at
+///   y' = y + (cos(phi)-1) * (R + y),  phi = d / (R + y)
+/// (the xz sin(phi)/phi compression is second-order and skipped). The march
+/// evaluates the same transform at every ground test: the surface visible
+/// along a straight ray at distance d has dropped by curve_drop(d, ground).
+/// uEarthRadius = 6371000/ratio; |R| <= 1 disables (DH semantic).
+float curve_drop(float dist, float groundY) {
+    if (gEarthR < 1.0 && gEarthR > -1.0) {
+        return 0.0;
+    }
+    float lr = gEarthR + groundY;
+    float phi = dist / lr;
+    return (cos(phi) - 1.0) * lr;
 }
 
 void main() {
@@ -369,6 +469,8 @@ void main() {
 
     vec2 minW = origin;
     vec2 maxW = origin + vec2(size);
+    gEarthR = FogParams.w;
+    float hlen = length(dir.xz);
 
     // Rays that leave the heightfield from above can never hit: early-out.
     if (dir.y > 0.0) {
@@ -463,6 +565,14 @@ void main() {
         // inside the cell's footprint". Void cells have no top face.
         if (!curVoid && dir.y < 0.0) {
             float tTop = (hCur - cam.y) / dir.y;
+            // Curvature: the top plane drops with distance; two fixed-point
+            // refinements converge far below cell precision.
+            if (gEarthR > 1.0 || gEarthR < -1.0) {
+                float y1 = hCur + curve_drop(tTop * hlen, hCur);
+                tTop = (y1 - cam.y) / dir.y;
+                float y2 = hCur + curve_drop(tTop * hlen, hCur);
+                tTop = (y2 - cam.y) / dir.y;
+            }
             float tExit = min(tMaxX, tMaxZ);
             if (tTop >= tCur && tTop < tExit) {
                 hitT = tTop;
@@ -516,7 +626,10 @@ void main() {
         bool newVoid = atlas_void(atlas_uv(nextXz, origin, size));
         if (!newVoid) {
             float hNew = world_height(nextXz, origin, size);
-            if (!curVoid && hNew > rayY) {
+            // Curvature: the wall's top edge renders at the curved height of
+            // the neighbour's ground vertex at this distance.
+            float hNewR = hNew + curve_drop(tCur * hlen, hNew);
+            if (!curVoid && hNewR > rayY) {
                 hitT = tCur;
                 sideHit = true;
                 hitAxisX = axisX;
@@ -592,19 +705,57 @@ void main() {
         vec2((pyr_side(atlas_uv(hitPos.xz, origin, size), pyrLvl, cellsN) * 255.0 + 0.5) / 256.0, 0.5)
     ).rgb;
 
+    // Wall colour resolution. DH renders each datapoint box in ITS OWN flat
+    // colour (the block's first-face average): the band containing the hit Y
+    // wins. Grass bands fade to the dirt colour across their own span
+    // (LodQuadBuilder FADE_TO_DIRT, default EDhApiGrassSideRendering). Cells
+    // without slice data (un-scanned, or octaves above the strip budget on
+    // oversized atlases) fall back to the v4.8 top->side gradient.
+    float rayHitY = cam.y + dir.y * hitT;
+    float shade = 1.0;
+    float spanT = 0.0;
+    float tileId = 0.0;
     vec3 albedo;
     if (sideHit) {
         // Directional shade from the crossed grid line: X boundary -> E/W wall.
-        float shade = hitAxisX ? SHADE_EW : SHADE_NS;
+        shade = hitAxisX ? SHADE_EW : SHADE_NS;
         float span = max(hHitNew - hHitOld, 1.0e-3);
-        float spanT = clamp((hHitNew - (cam.y + dir.y * hitT)) / span, 0.0, 1.0);
-        // wall top edge -> column colour, wall bottom edge -> side (dirt) colour
-        albedo = mix(topCol, sideCol, spanT) * shade;
+        spanT = clamp((hHitNew - rayHitY) / span, 0.0, 1.0);
+        int Ls = int(floor(pyrLvl));
+        vec2 bandUv = atlas_uv(hitPos.xz, origin, size);
+        int szL = int(cellsN) >> Ls;
+        ivec2 cellId = ivec2(floor(bandUv * float(szL)));
+        vec3 bandCol;
+        float bandTile, bandLiq, bandGrass, bandTop, bandBot;
+        bool hasBand = float(Ls) <= SkyParams.w + 0.5
+            && slice_band(cellId, float(Ls), cellsN, floor(rayHitY),
+                          bandCol, bandTile, bandLiq, bandGrass, bandTop, bandBot);
+        if (hasBand) {
+            vec3 base = bandCol;
+            if (bandGrass > 0.5) {
+                // DH: the bottom vertex row of a grass wall is recoloured to
+                // getDirtBlockColor() and the GPU interpolates across the
+                // datapoint's own wall span.
+                float bt = clamp(
+                    (bandTop + 1.0 - rayHitY) / max(bandTop + 1.0 - bandBot, 1.0),
+                    0.0, 1.0);
+                base = mix(base, ColLow.rgb, bt);
+            }
+            albedo = base * shade;
+            tileId = bandTile;
+        } else {
+            // fallback: v4.8 top->side (dirt) wall gradient
+            albedo = mix(topCol, sideCol, spanT) * shade;
+            tileId = tile_id(auv, true);
+        }
     } else {
         albedo = topCol; // top faces: shade 1.0
+        tileId = tile_id(auv, false);
     }
 
-    // DH 3.3.4 textured LODs: the ratio tile of this column's top block.
+    // DH 3.3.4 textured LODs: the ratio tile of THIS datapoint (the band's
+    // side tile on walls, the cell's top tile on top faces — tileId came out
+    // of the albedo resolution above).
     // Horizontal repeats = one per CELL (vBlockPos is in data-point units in
     // DH), vertical repeats on walls = one per BLOCK. The tile weight
     // implements DH's maxTexturedLodDetailLevel as a FOOTPRINT fade: a texel
@@ -613,7 +764,6 @@ void main() {
     // fade across that octave; far LODs flatten to colour + noise exactly
     // like DH's coarse datapoints.
     float tileRows = SkyParams.z;
-    float tileId = tile_id(auv, sideHit);
     float texelB = AtlasInfo.w / TILE_PX;
     float tileW = clamp((texelB / footprint - 0.5) / 1.5, 0.0, 1.0);
     vec2 faceUv;
