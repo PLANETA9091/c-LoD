@@ -112,8 +112,9 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
     // cover (big-atlas configs only; see encode_slices).
     let (pw_, ph_, sidepyr_rgba) = atlas.encode_side_pyramid();
     let sidepyr_png = png::encode_png(pw_, ph_, &sidepyr_rgba);
-    // DH vertical slices (v4.9): the banded cliff walls. Width 2n (texel
-    // pairs A|B per cell), height = sum of K(detail)*(n>>L) per octave.
+    // DH vertical slices (v4.9/v4.10): the banded cliff walls. Width 3n
+    // (texel triples A|B|C per cell — C carries the run's real solid
+    // bottom), height = sum of K(detail)*(n>>L) per octave.
     let (sw, sh, slice_rgba, slice_max_oct) = atlas.encode_slices();
     let slice_png = png::encode_png(sw, sh, &slice_rgba);
 

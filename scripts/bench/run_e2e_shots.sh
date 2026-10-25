@@ -40,6 +40,18 @@ echo "join-state shot taken (pack prompt expected)"
 python3 "$S/click.py" 562 385
 sleep 12
 python3 "$S/click.py" 562 385
+sleep 6
+
+# Fresh-sandbox quirk (2026-10-25): the client dies client-side within the
+# first second of the world join (spawn-chunk race, no server death message;
+# the server keeps it a spectator with Health 0). A click on the death
+# screen's Respawn button (window-relative 320,172 -> screen 640,352)
+# revives it; the pack is already auto-accepted via servers.dat, so this
+# click cannot hit the pack prompt.
+python3 "$S/click.py" 640 352
+sleep 8
+python3 "$S/click.py" 640 352
+sleep 4
 sleep 12
 ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -frames:v 1 "$SHOTS/00_pack_applied.png"
 echo "pack-accept clicked"
@@ -51,13 +63,13 @@ echo "pack-accept clicked"
 srv "gamerule doDaylightCycle false"
 srv "time set 6000"
 srv "weather clear"
-srv "gamemode spectator Stepan"
+srv "gamemode spectator @a"
 sleep 2
 
 UX=-929.67; UY=173.38; UZ=796.37; UYAW=-856.27; UPITCH=15.40
 
 shot() { # name yaw pitch x y z
-  srv "tp Stepan $4 $5 $6 $2 $3"
+  srv "tp @a $4 $5 $6 $2 $3"
   sleep 3
   ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -frames:v 1 "$SHOTS/$1.png"
   echo "shot $1 (yaw=$2 pitch=$3 at $4,$5,$6)"

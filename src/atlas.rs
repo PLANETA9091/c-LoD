@@ -24,10 +24,11 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 
-/// On-disk snapshot magic + format version. CLODAT04 adds the DH vertical
-/// slice table (see [`SliceCell`]); a v03 snapshot is stale by definition
-/// (the scan re-runs, restoring the pack SHA-1 determinism for new bytes).
-const MAGIC: &[u8; 8] = b"CLODAT04";
+/// On-disk snapshot magic + format version. CLODAT05 stores the DH slice
+/// runs' real bottoms (the cave-gap spans — see [`SliceCell`]); a v04
+/// snapshot is stale by definition (the scan re-runs, restoring the pack
+/// SHA-1 determinism for new bytes).
+const MAGIC: &[u8; 8] = b"CLODAT05";
 /// Bytes per cell in the on-disk snapshot: i16 height, u32 top, u32 side,
 /// u8 flags, u16 top tile id, u16 side tile id.
 const CELL_BYTES: usize = 15;
@@ -47,6 +48,9 @@ pub const SLICE_RAW: usize = 8;
 pub struct SliceCell {
     pub n: u8,
     pub top: [i16; SLICE_RAW],
+    /// Per-run real solid bottom (the cave-gap span — DH's air datapoint
+    /// lives between `bottom` and the next run's top).
+    pub bottom: [i16; SLICE_RAW],
     pub color: [u32; SLICE_RAW],
     pub tex_top: [u16; SLICE_RAW],
     pub tex_side: [u16; SLICE_RAW],
@@ -59,6 +63,7 @@ impl SliceCell {
         (0..usize::from(self.n).min(SLICE_RAW))
             .map(|i| crate::slices::SliceRun {
                 top: self.top[i],
+                bottom: self.bottom[i],
                 color: self.color[i] & 0xFF_FF_FF,
                 tex_top: self.tex_top[i],
                 tex_side: self.tex_side[i],
@@ -75,6 +80,7 @@ impl SliceCell {
         };
         for (i, r) in runs.iter().take(SLICE_RAW).enumerate() {
             c.top[i] = r.top;
+            c.bottom[i] = r.bottom;
             c.color[i] = r.color & 0xFF_FF_FF;
             c.tex_top[i] = r.tex_top;
             c.tex_side[i] = r.tex_side;
@@ -85,12 +91,13 @@ impl SliceCell {
 }
 
 impl crate::slices::SliceRun {
-    /// Serialized size: i16 top + u24 colour + u16 top tile + u16 side tile
-    /// + u8 flags.
-    pub const BYTES: usize = 2 + 3 + 2 + 2 + 1;
+    /// Serialized size: i16 top + i16 bottom + u24 colour + u16 top tile
+    /// + u16 side tile + u8 flags.
+    pub const BYTES: usize = 2 + 2 + 3 + 2 + 2 + 1;
 
     fn to_bytes(self, out: &mut Vec<u8>) {
         out.extend_from_slice(&self.top.to_le_bytes());
+        out.extend_from_slice(&self.bottom.to_le_bytes());
         out.extend_from_slice(&(self.color & 0xFF_FF_FF).to_le_bytes()[..3]);
         out.extend_from_slice(&self.tex_top.to_le_bytes());
         out.extend_from_slice(&self.tex_side.to_le_bytes());
@@ -100,11 +107,12 @@ impl crate::slices::SliceRun {
     fn from_bytes(buf: &[u8], o: usize) -> Self {
         Self {
             top: i16::from_le_bytes([buf[o], buf[o + 1]]),
-            color: u32::from_le_bytes([buf[o + 2], buf[o + 3], buf[o + 4], 0]) & 0xFF_FF_FF,
-            tex_top: u16::from_le_bytes([buf[o + 5], buf[o + 6]]),
-            tex_side: u16::from_le_bytes([buf[o + 7], buf[o + 8]]),
-            liquid: buf[o + 9] & 0b01 != 0,
-            grass: buf[o + 9] & 0b10 != 0,
+            bottom: i16::from_le_bytes([buf[o + 2], buf[o + 3]]),
+            color: u32::from_le_bytes([buf[o + 4], buf[o + 5], buf[o + 6], 0]) & 0xFF_FF_FF,
+            tex_top: u16::from_le_bytes([buf[o + 7], buf[o + 8]]),
+            tex_side: u16::from_le_bytes([buf[o + 9], buf[o + 10]]),
+            liquid: buf[o + 11] & 0b01 != 0,
+            grass: buf[o + 11] & 0b10 != 0,
         }
     }
 }
@@ -587,22 +595,27 @@ impl Atlas {
     // with the full-data vote rule; each octave encodes the list reduced to
     // EDhApiVerticalQuality.MEDIUM[detail] (detail = log2(cell) + L).
     //
-    // Strip layout (width 2n, slices' texel A|B pairs side by side):
+    // Strip layout (width 3n, slices' texel A|B|C triples side by side):
     //   octave L occupies rows [rowBase(L), rowBase(L) + K(L) * (n>>L)),
-    //   cell (x,z) slice j: texel A at column 2x, texel B at column 2x+1,
+    //   cell (x,z) slice j: texel A at column 3x, B at 3x+1, C at 3x+2,
     //   row = rowBase(L) + z*K(L) + j.
     //   texel A: RGB = run colour, A = high byte of (top+64)<<6.
     //   texel B: R = low byte, G/B = side tile id big-endian,
     //            A = flags (bit0 present, bit1 liquid, bit2 grass).
+    //   texel C: R/G = low/high byte of (bottom+64)<<6 — the run's REAL
+    //            solid floor; the air between bottom and the next run's top
+    //            is DH's cave air datapoint (the march flies through it).
     // The shader recomputes rowBase from the same MEDIUM table, so the
     // layout must stay in sync with lod_terrain.fsh.
     // ---------------------------------------------------------------------
 
     /// GL-safe strip height budget: llvmpipe reports max texture sizes well
-    /// above this, but 8192 is the portable floor (GLES-class GPUs); octaves
-    /// that would exceed it keep the single-side-colour wall path (the
-    /// SidePyr fallback), exactly like the old renderer.
-    pub const SLICE_STRIP_MAX_H: usize = 8192;
+    /// above this, and every desktop GL 3.2-class GPU (the only clients that
+    /// can run a 26.3 posteffect chain) exposes >= 16384 — 16384 covers the
+    /// full product default (atlas 4096 / cell 4: 11776 rows, every octave
+    /// banded). Octaves that would exceed it keep the single-side-colour
+    /// wall path (the SidePyr fallback), exactly like the old renderer.
+    pub const SLICE_STRIP_MAX_H: usize = 16384;
 
     /// (octaves, max_octave_encoded, K per octave, rowBase per octave, H)
     fn slice_layout(&self) -> (usize, usize, Vec<usize>, Vec<usize>, usize) {
@@ -633,15 +646,16 @@ impl Atlas {
         (levels, max_oct, k, row_base, h)
     }
 
-    /// Encode the DH slice strip: (width 2n, height, pixels, max octave).
+    /// Encode the DH slice strip: (width 3n, height, pixels, max octave).
     /// Octaves above `max octave` are left unwritten — the shader falls back
-    /// to the side pyramid there (big-atlas configs only; the default 1024
-    /// atlas fits every octave).
+    /// to the side pyramid there (only configs beyond the 16384-row budget;
+    /// the default 1024 atlas and the 4096 product default fit every
+    /// octave).
     pub fn encode_slices(&self) -> (u32, u32, Vec<u8>, u32) {
         let slice_snap = self.slice_snapshot();
         let n = self.cells as usize;
         let (levels, max_oct, k, row_base, h) = self.slice_layout();
-        let mut px = vec![0u8; 2 * n * h * 4];
+        let mut px = vec![0u8; 3 * n * h * 4];
 
         if n == 0 || h == 0 {
             return (self.cells, h as u32, px, max_oct as u32);
@@ -653,7 +667,7 @@ impl Atlas {
             slice_snap.iter().map(|sc| sc.runs()).collect();
 
         let put = |px: &mut [u8], col: usize, row: usize, rgba: [u8; 4]| {
-            let o = (row * 2 * n + col) * 4;
+            let o = (row * 3 * n + col) * 4;
             if o + 3 < px.len() {
                 px[o..o + 4].copy_from_slice(&rgba);
             }
@@ -705,9 +719,21 @@ impl Atlas {
                     let y16 = ((i32::from(r.top) + 64).max(0) << 6).min(0xFFFF) as u16;
                     let a = (y16 >> 8) as u8;
                     let flags = 0b001 | (u8::from(r.liquid) << 1) | (u8::from(r.grass) << 2);
+                    // Resolve the "unset" bottom sentinel: the next run's top
+                    // +1 (the old tiling); the DEEPEST band maps to the world
+                    // floor — the shader hardcodes that anyway, so any
+                    // placeholder works; -65 keeps dumps readable.
+                    let bot = if r.bottom != i16::MIN {
+                        r.bottom
+                    } else if j + 1 < enc.len() {
+                        enc[j + 1].top + 1
+                    } else {
+                        -65
+                    };
+                    let b16 = ((i32::from(bot) + 64).max(0) << 6).min(0xFFFF) as u16;
                     put(
                         &mut px,
-                        2 * x,
+                        3 * x,
                         row,
                         [
                             ((r.color >> 16) & 0xFF) as u8,
@@ -718,7 +744,7 @@ impl Atlas {
                     );
                     put(
                         &mut px,
-                        2 * x + 1,
+                        3 * x + 1,
                         row,
                         [
                             (y16 & 0xFF) as u8,
@@ -727,11 +753,17 @@ impl Atlas {
                             flags,
                         ],
                     );
+                    put(
+                        &mut px,
+                        3 * x + 2,
+                        row,
+                        [(b16 & 0xFF) as u8, (b16 >> 8) as u8, 0, 0],
+                    );
                 }
             }
         }
 
-        (2 * self.cells, h as u32, px, max_oct as u32)
+        (3 * self.cells, h as u32, px, max_oct as u32)
     }
 
     /// Per-cell ratio-tile ids (DH 3.3.4 textured LODs): R/G = top tile id
@@ -788,6 +820,7 @@ impl Atlas {
             for i in 0..SLICE_RAW {
                 crate::slices::SliceRun {
                     top: sc.top[i],
+                    bottom: sc.bottom[i],
                     color: sc.color[i],
                     tex_top: sc.tex_top[i],
                     tex_side: sc.tex_side[i],
@@ -858,6 +891,7 @@ impl Atlas {
                     so + 1 + j * crate::slices::SliceRun::BYTES,
                 );
                 sc.top[j] = r.top;
+                sc.bottom[j] = r.bottom;
                 sc.color[j] = r.color;
                 sc.tex_top[j] = r.tex_top;
                 sc.tex_side[j] = r.tex_side;
@@ -1051,6 +1085,7 @@ mod tests {
         let a = Atlas::new(0, 0, 64, 4, 63); // 16x16 cells, cell 4 (detail0=2)
         let grass = crate::slices::SliceRun {
             top: 10,
+            bottom: 9,
             color: 0x00FF00,
             tex_top: 7,
             tex_side: 9,
@@ -1059,11 +1094,13 @@ mod tests {
         };
         let dirt = crate::slices::SliceRun {
             top: 8,
+            bottom: 1,
             color: 0x8B4513,
             ..grass
         };
         let stone = crate::slices::SliceRun {
             top: 0,
+            bottom: -65,
             color: 0x808080,
             ..grass
         };
@@ -1071,35 +1108,41 @@ mod tests {
         a.set_slices(3, 5, &[grass, dirt, stone]);
 
         let (w, h, px, max_oct) = a.encode_slices();
-        assert_eq!(w, 32, "two texels per cell column");
+        assert_eq!(w, 48, "three texels per cell column");
         // cell=4 -> detail0 = 2 -> K = MEDIUM[2] = 6; n=16 -> 5 octaves:
-        // 6*16 + 4*8 + 4*4 + 4*2 + 4*1 = 156 rows, all under the 8192 cap.
+        // 6*16 + 4*8 + 4*4 + 4*2 + 4*1 = 156 rows, all under the 16384 cap.
         assert_eq!(h, 156);
         assert_eq!(max_oct, 4);
-        let at = |col: usize, row: usize| (row * 32 + col) * 4;
+        let at = |col: usize, row: usize| (row * 48 + col) * 4;
         // Octave 0, cell (3,5), slice 0 (grass): row = 0 + 5*6 + 0 = 30.
-        assert_eq!(&px[at(6, 30)..at(6, 30) + 3], &[0, 255, 0]);
-        assert_eq!(px[at(6, 30) + 3], ((10 + 64) << 6 >> 8) as u8, "top hi");
-        assert_eq!(px[at(7, 30)], ((10 + 64) << 6 & 0xFF) as u8, "top lo");
-        assert_eq!(px[at(7, 30) + 1], 0, "side tile hi");
-        assert_eq!(px[at(7, 30) + 2], 9, "side tile lo");
-        assert_eq!(px[at(7, 30) + 3] & 0b001, 1, "present");
-        assert_eq!(px[at(7, 30) + 3] >> 2, 1, "grass flag");
-        // slice 1 (dirt): row 31.
-        assert_eq!(&px[at(6, 31)..at(6, 31) + 3], &[0x8B, 0x45, 0x13]);
-        // slice 2 (stone): row 32.
-        assert_eq!(&px[at(6, 32)..at(6, 32) + 3], &[0x80, 0x80, 0x80]);
+        assert_eq!(&px[at(9, 30)..at(9, 30) + 3], &[0, 255, 0]);
+        assert_eq!(px[at(9, 30) + 3], ((10 + 64) << 6 >> 8) as u8, "top hi");
+        assert_eq!(px[at(10, 30)], ((10 + 64) << 6 & 0xFF) as u8, "top lo");
+        assert_eq!(px[at(10, 30) + 1], 0, "side tile hi");
+        assert_eq!(px[at(10, 30) + 2], 9, "side tile lo");
+        assert_eq!(px[at(10, 30) + 3] & 0b001, 1, "present");
+        assert_eq!(px[at(10, 30) + 3] >> 2, 1, "grass flag");
+        // texel C: the real solid bottom (9): ((9+64)<<6) = 4672.
+        assert_eq!(px[at(11, 30)], (4672 & 0xFF) as u8, "bottom lo");
+        assert_eq!(px[at(11, 30) + 1], (4672 >> 8) as u8, "bottom hi");
+        // slice 1 (dirt): row 31; bottom 1 -> ((1+64)<<6) = 4160.
+        assert_eq!(&px[at(9, 31)..at(9, 31) + 3], &[0x8B, 0x45, 0x13]);
+        assert_eq!(px[at(11, 31)], (4160 & 0xFF) as u8, "dirt bottom lo");
+        assert_eq!(px[at(11, 31) + 1], (4160 >> 8) as u8, "dirt bottom hi");
+        // slice 2 (stone): row 32; the deepest band's placeholder is -65 -> 0.
+        assert_eq!(&px[at(9, 32)..at(9, 32) + 3], &[0x80, 0x80, 0x80]);
+        assert_eq!(px[at(11, 32)], 0, "floor placeholder encodes to 0");
         // absent slices stay zero (never sampled).
-        assert_eq!(px[at(7, 33) + 3] & 1, 0);
+        assert_eq!(px[at(10, 33) + 3] & 1, 0);
         // a cell without slices stays absent.
-        assert_eq!(px[at(2 * 8, 0) + 3] & 1, 0);
+        assert_eq!(px[at(3 * 8, 0) + 3] & 1, 0);
 
         // Octave 1 (rowBase 96): cell (1,2) covers children (2..4, 4..6);
         // only (3,5) has data -> merged list = that list; encoded at
         // row 96 + 2*4 + 0 with K1 = MEDIUM[3] = 4.
-        assert_eq!(&px[at(2, 104)..at(2, 104) + 3], &[0, 255, 0]);
-        assert_eq!(&px[at(2, 105)..at(2, 105) + 3], &[0x8B, 0x45, 0x13]);
-        assert_eq!(&px[at(2, 106)..at(2, 106) + 3], &[0x80, 0x80, 0x80]);
+        assert_eq!(&px[at(3, 104)..at(3, 104) + 3], &[0, 255, 0]);
+        assert_eq!(&px[at(3, 105)..at(3, 105) + 3], &[0x8B, 0x45, 0x13]);
+        assert_eq!(&px[at(3, 106)..at(3, 106) + 3], &[0x80, 0x80, 0x80]);
     }
 
     #[test]
@@ -1110,6 +1153,7 @@ mod tests {
         let a = Atlas::new(11, -22, 64, 4, 63);
         let grass = crate::slices::SliceRun {
             top: 40,
+            bottom: 39,
             color: 0x12_34_56,
             tex_top: 300,
             tex_side: 301,
@@ -1118,6 +1162,7 @@ mod tests {
         };
         let water = crate::slices::SliceRun {
             top: 62,
+            bottom: 41,
             color: 0x3F76E4,
             liquid: true,
             ..grass
@@ -1141,6 +1186,7 @@ mod tests {
         let v0 = a.version();
         let r = crate::slices::SliceRun {
             top: 10,
+            bottom: 9,
             color: 1,
             tex_top: 0,
             tex_side: 0,

@@ -9,49 +9,63 @@
 //!     covers the span's MIDDLE (`sampleY = minY + height/2`); air always
 //!     loses ("always overwrite air to prevent holes in hollow structures");
 //!     ties resolve to value0 (the first column); adjacent spans with equal
-//!     winners merge into one datapoint.
+//!     winners merge into one datapoint whose TOP and BOTTOM come from the
+//!     ACCUMULATED SPANS (not from the winning child's own datapoint — a
+//!     child can keep covering spans it loses above, so its private
+//!     top/bottom would overlap the neighbours).
 //!   - `util/RenderDataPointReducingList.java`: the render-time reducer.
-//!     `reduce(target)` runs step 0+1 (merge the smallest segment into an
-//!     equal-alpha neighbour — both match -> the SMALLER neighbour, equal
-//!     size -> the higher one; the survivor keeps its own colour and extends
-//!     over the removed node), step 2 (erase a segment between equal-alpha
-//!     neighbours), step 3 (force the lowest segment to merge upward) until
-//!     `sizeWithoutAir <= target`.
+//!     `populate` collects the visible datapoints (alpha >= 16), sorts them
+//!     by Y and inserts an AIR NODE (alpha 0) between every pair of
+//!     non-touching neighbours — cave gaps are first-class nodes. `reduce`
+//!     then runs step 0+1 (merge the smallest segment into a SAME-ALPHA
+//!     neighbour — both match -> the SMALLER neighbour, equal size -> the
+//!     higher one; the survivor keeps its own colour and extends over the
+//!     removed node; air nodes never merge in this step), with a fast path
+//!     for segments of size <= SPECIAL_CASES = 2 that walks the size chain
+//!     in reverse without re-sorting, then step 2 (erase a segment entirely
+//!     when its lower and higher neighbours are equal-alpha to EACH OTHER —
+//!     this is how cave air between two solids gets filled, by the UPPER
+//!     node's data), then step 3 (force the lowest segment to merge upward
+//!     through invisible nodes — `lowY` is kept while invisible nodes are
+//!     removed) until `sizeWithoutAir <= target`. `copyTo` emits only the
+//!     VISIBLE nodes: a surviving air node is a hole in the column.
 //!   - `api/enums/config/EDhApiVerticalQuality.java`: MEDIUM (DH default)
 //!     = {6,6,6,4,4,4,4,4,4,4,1} indexed by the datapoint detail level.
 //!
 //! c-LoD mapping: one atlas cell at octave L is a datapoint of width
 //! `cell_size * 2^L` blocks, so its detail level is `log2(cell_size) + L`
 //! and the slice target is `MEDIUM[detail]`. The scan produces the level-0
-//! run list (top-down, cut on Material change — DH cuts on blockstate
-//! change; Material granularity is the same at LOD resolution); every octave
-//! up merges 2x2 with the vote rule and encodes `reduce(list, MEDIUM[d])`.
+//! run list (top-down, cut on Material change AND on air — DH cuts on
+//! blockstate change; Material granularity is the same at LOD resolution);
+//! every octave up merges 2x2 with the vote rule and encodes `reduce(list,
+//! MEDIUM[d])`.
 //!
 //! The LAST run of every column reaches the world bottom in DH (full-data
-//! columns span to min_y); our scan walk stops at a depth floor, so the same
-//! "extends to -infinity" bottom is applied to the last run — wall hits
-//! below the walk floor then pick the deepest band, exactly like DH's
-//! bottom datapoint covers the deep wall.
+//! columns span to min_y); `span` always maps the last run to the world
+//! floor regardless of its stored bottom, and the shader does the same for
+//! the deepest band present in the strip.
 //!
-//! Documented deviations (posteffect heightfield, not a DH mesh):
-//!   - DH stores cave air datapoints (invisible, walls get holes); we merge
-//!     solid runs ACROSS air in the scan, so a wall renders the upper band
-//!     extended over the gap. That matches DH's cave-CULLED look (the culler
-//!     removes enclosed air; open cave mouths in DH show overdraw, which a
-//!     heightfield cannot represent at all).
-//!   - DH keeps unreduced full data per level and reduces only at render
-//!     time; we reduce the merged parent to [`RAW_CAP`] runs before the next
-//!     merge to bound memory (the reducer itself is the DH-blessed shrinker).
+//! Air gaps between runs are REAL here: the scan cuts bands on air, the
+//! runs carry explicit `bottom`s, and the renderer treats a wall hit inside
+//! a gap as no-hit (the ray flies through the cave mouth exactly like DH's
+//! missing wall face). Documented deviation: DH lights datapoints from the
+//! stored light data; we have no light column, so a ray that passed a gap
+//! (caveDepth) darkens the hit — the unlit-cave stand-in.
 
-/// One vertical run of a column: blocks (next_run.top, top] (the top block's
-/// Y; the atlas surface plane convention keeps the top face at `height`),
-/// rendered flat in `color` (DH: ONE colour per datapoint — the block's
-/// first non-empty face average, biome tinted), textured near-field by
-/// `tex_top`/`tex_side` ratio tiles.
+/// One vertical run of a column: solid blocks `[bottom, top]` (the top
+/// block's Y; the atlas surface plane convention keeps the top face at
+/// `height`), rendered flat in `color` (DH: ONE colour per datapoint — the
+/// block's first non-empty face average, biome tinted), textured near-field
+/// by `tex_top`/`tex_side` ratio tiles. Air between this run's `bottom` and
+/// the next run's top is a cave gap (DH's air datapoint).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SliceRun {
     /// Block Y of the run's topmost block.
     pub top: i16,
+    /// Block Y of the run's lowest solid block. The sentinel `i16::MIN`
+    /// means "unset — derive from the next run's top" (scan lists before
+    /// the reducer; the encoder resolves it before packing).
+    pub bottom: i16,
     /// Flat datapoint colour (0xRRGGBB).
     pub color: u32,
     pub tex_top: u16,
@@ -86,20 +100,42 @@ fn same_run(a: &SliceRun, b: &SliceRun) -> bool {
         && a.grass == b.grass
 }
 
-/// DH datapoint span of a run inside a top-down list: (bottom, top_exclusive)
-/// with the LAST run extending to the world floor (`-inf` semantics: half
-/// i32::MIN to keep every subtraction in i64 range without overflow).
+/// DH datapoint span of a run inside a top-down list: (bottom, top_exclusive).
+/// An explicit `bottom` carries the AIR GAP below the run (bottom greater
+/// than the next run's top + 1); the sentinel derives the old tiling; the
+/// LAST run always reaches the world floor (`-inf` semantics: half
+/// `i32::MIN` keeps every subtraction in i64 range without overflow).
 fn span(col: &[SliceRun], i: usize) -> (i64, i64) {
     let top = i64::from(col[i].top) + 1;
-    let bottom = col
-        .get(i + 1)
-        .map_or(i64::from(i32::MIN) / 2, |below| i64::from(below.top) + 1);
+    let bottom = if i + 1 == col.len() {
+        i64::from(i32::MIN) / 2
+    } else if col[i].bottom != i16::MIN {
+        i64::from(col[i].bottom)
+    } else {
+        i64::from(col[i + 1].top) + 1
+    };
     (bottom, top)
+}
+
+/// Block-Y clamps for span coordinates coming out of the merge/reduce.
+/// Tops live in `[-64, i16::MAX]`; bottoms below the world floor become the
+/// "unset" sentinel (`span` re-derives the floor for the last run).
+fn clamp_top(v: i64) -> i16 {
+    v.clamp(-64, i64::from(i16::MAX)) as i16
+}
+
+fn clamp_bottom(v: i64) -> i16 {
+    if v < -65 {
+        i16::MIN
+    } else {
+        v.clamp(-65, i64::from(i16::MAX)) as i16
+    }
 }
 
 /// DH `FullDataSourceV2.mergeInputTwoByTwoDataColumn`, on top-down lists.
 /// Any child may be empty (void/un-scanned — DH's null column votes nothing,
-/// i.e. air). Returns the merged list top-down.
+/// i.e. air); a span that falls into a child's AIR GAP also votes nothing.
+/// Returns the merged list top-down.
 #[must_use]
 pub fn merge_two_by_two(cols: [&[SliceRun]; 4]) -> Vec<SliceRun> {
     // yTransitions: every child datapoint boundary, sorted bottom-up (DH).
@@ -127,6 +163,11 @@ pub fn merge_two_by_two(cols: [&[SliceRun]; 4]) -> Vec<SliceRun> {
 
     let mut out: Vec<SliceRun> = Vec::new();
     let mut acc: Option<SliceRun> = None;
+    // The accumulated datapoint's block-Y bounds (DH: accumulatedHeight +=
+    // sliceHeight; minY/maxY come from the SPANS, not from the winning
+    // child's own datapoint, which may extend over spans it lost).
+    let mut acc_top = 0i64;
+    let mut acc_bottom = 0i64;
 
     for w in 0..transitions.len().saturating_sub(1) {
         let slice_min = transitions[w];
@@ -149,7 +190,7 @@ pub fn merge_two_by_two(cols: [&[SliceRun]; 4]) -> Vec<SliceRun> {
                     votes[i] = Some(&col[idx[i] as usize]);
                     break;
                 } else {
-                    // sample below this datapoint
+                    // sample below this datapoint (inside its air gap)
                     break;
                 }
             }
@@ -176,25 +217,48 @@ pub fn merge_two_by_two(cols: [&[SliceRun]; 4]) -> Vec<SliceRun> {
             // a tie keeps the earlier winner (best stays)
         }
         let Some(win) = best else {
-            acc = None; // an all-air span breaks any accumulated run
+            // an all-air span CLOSES the accumulated datapoint (it still
+            // ships — DH's accumulator keeps its data until a different
+            // winner replaces it) and breaks the run.
+            if let Some(a) = acc {
+                out.push(SliceRun {
+                    top: clamp_top(acc_top),
+                    bottom: clamp_bottom(acc_bottom),
+                    ..a
+                });
+            }
+            acc = None;
             continue;
         };
 
-        // Adjacent spans with equal data extend the accumulated datapoint
-        // (DH: accumulatedHeight += sliceHeight); the run's top boundary is
-        // where the datapoint started.
+        // Adjacent spans with equal data extend the accumulated datapoint;
+        // its bounds ride the SPANS (see the module docs for why the child's
+        // own top/bottom would be wrong here).
+        let span_top_block = slice_max - 1;
         match acc {
-            Some(ref a) if same_run(a, win) => {}
+            Some(ref a) if same_run(a, win) => {
+                acc_top = span_top_block;
+            }
             _ => {
                 if let Some(a) = acc {
-                    out.push(a);
+                    out.push(SliceRun {
+                        top: clamp_top(acc_top),
+                        bottom: clamp_bottom(acc_bottom),
+                        ..a
+                    });
                 }
                 acc = Some(*win);
+                acc_top = span_top_block;
+                acc_bottom = slice_min;
             }
         }
     }
     if let Some(a) = acc {
-        out.push(a);
+        out.push(SliceRun {
+            top: clamp_top(acc_top),
+            bottom: clamp_bottom(acc_bottom),
+            ..a
+        });
     }
     // Spans were processed bottom-up; DH's ensureDataColumnOrder keeps the
     // same bottom->top order internally, but our lists are TOP-DOWN.
@@ -206,113 +270,260 @@ pub fn merge_two_by_two(cols: [&[SliceRun]; 4]) -> Vec<SliceRun> {
 /// DH keeps unreduced full data; we shrink with the DH reducer itself).
 pub const RAW_CAP: usize = 24;
 
-/// DH `RenderDataPointReducingList.reduce(target)` on a top-down list.
-/// All our runs are visible (alpha 255) — air nodes never exist in our lists
-/// (the scan merges across air), so the populate/air machinery collapses
-/// away and `sizeWithoutAir == sizeWithAir`.
+/// One reducer node: a span plus its datapoint (`None` = DH's inserted air
+/// node, alpha 0). Nodes stay disjoint and bottom-sorted; `dead` marks
+/// removed nodes until compaction (the fast path's size-order snapshot
+/// references positions across removals, like DH's linked lists).
+struct RNode {
+    bot: i64,
+    top: i64,
+    run: Option<SliceRun>,
+    dead: bool,
+}
+
+/// DH's `SPECIAL_CASES`: segments this small go through the reverse-walk
+/// fast path (`mergeVerySmallConnectedSegments`) before the general loop.
+const SPECIAL_CASES: usize = 2;
+
+/// DH `RenderDataPointReducingList.reduce(target)` on a top-down list,
+/// including the air nodes `populate` inserts between non-touching
+/// datapoints (cave gaps): step 0+1 merges same-alpha neighbours only, so
+/// solid runs never merge ACROSS a gap in this step; step 2 may erase a gap
+/// (filling it with the UPPER node's data) when the neighbours are
+/// equal-alpha to each other; step 3 forces the bottom-most node upward
+/// through invisible nodes.
 #[must_use]
 pub fn reduce(list: &[SliceRun], target: usize) -> Vec<SliceRun> {
     if list.len() <= target {
         return list.to_vec();
     }
-    // Nodes as (bottom, top_exclusive, run), lowest->highest (DH populate's
-    // position order). Bottoms: the next run's top+1; the LAST run's bottom
-    // is the world floor (half i32::MIN — see `span`).
-    let mut nodes: Vec<(i64, i64, SliceRun)> = list
-        .iter()
-        .enumerate()
-        .map(|(i, r)| {
-            let top = i64::from(r.top) + 1;
-            let bottom = list
-                .get(i + 1)
-                .map_or(i64::from(i32::MIN) / 2, |below| i64::from(below.top) + 1);
-            (bottom, top, *r)
+
+    // -- populate: visible nodes sorted by position, air nodes inserted --
+    let mut solid: Vec<RNode> = Vec::with_capacity(list.len());
+    for (i, r) in list.iter().enumerate() {
+        let (bot, top) = span(list, i);
+        if top > bot {
+            solid.push(RNode {
+                bot,
+                top,
+                run: Some(*r),
+                dead: false,
+            });
+        }
+    }
+    solid.sort_unstable_by_key(|n| n.bot);
+    let mut nodes: Vec<RNode> = Vec::with_capacity(solid.len() * 2);
+    for (w, n) in solid.iter().enumerate() {
+        if w > 0 {
+            let prev = &solid[w - 1];
+            if prev.top < n.bot {
+                // populate's air node: [lowerMaxY, higherMinY], alpha 0
+                nodes.push(RNode {
+                    bot: prev.top,
+                    top: n.bot,
+                    run: None,
+                    dead: false,
+                });
+            }
+        }
+        nodes.push(RNode {
+            bot: n.bot,
+            top: n.top,
+            run: n.run,
+            dead: false,
+        });
+    }
+    drop(solid);
+
+    let visible = |nodes: &[RNode]| nodes.iter().filter(|n| !n.dead && n.run.is_some()).count();
+    let size = |n: &RNode| n.top - n.bot;
+    // Size order of the alive nodes; ties keep the LOWEST-Y node (the
+    // documented deterministic projection of DH's size sort).
+    let order = |nodes: &[RNode]| -> Vec<usize> {
+        let mut idx: Vec<usize> = (0..nodes.len()).filter(|&i| !nodes[i].dead).collect();
+        idx.sort_unstable_by(|&a, &b| {
+            size(&nodes[a])
+                .cmp(&size(&nodes[b]))
+                .then(nodes[a].bot.cmp(&nodes[b].bot))
+        });
+        idx
+    };
+
+    // tryMergeStep1: merge the node at alive-position `p` into a same-alpha
+    // Y-neighbour; the survivor keeps its own data and extends DOWN over the
+    // removed node. Returns false when neither neighbour shares the alpha
+    // (air blocks the merge — DH 1c).
+    fn step1_merge(nodes: &mut [RNode], alive: &[usize], ci: usize) -> bool {
+        let node_size = |i: usize| nodes[i].top - nodes[i].bot;
+        let Some(p) = alive.iter().position(|&i| i == ci) else {
+            return false;
+        };
+        let lower = if p > 0 { Some(alive[p - 1]) } else { None };
+        let higher = alive.get(p + 1).copied();
+        let cur_solid = nodes[ci].run.is_some();
+        // 1b: both match -> the SMALLER neighbour, equal size -> the higher.
+        // 1a/1c: the single matching side wins; none -> no merge.
+        let (survivor, removed) = if higher.is_some_and(|i| nodes[i].run.is_some() == cur_solid)
+            && lower.is_some_and(|i| nodes[i].run.is_some() == cur_solid)
+        {
+            if node_size(higher.unwrap()) <= node_size(lower.unwrap()) {
+                (higher.unwrap(), ci)
+            } else {
+                (ci, lower.unwrap())
+            }
+        } else if higher.is_some_and(|i| nodes[i].run.is_some() == cur_solid) {
+            (higher.unwrap(), ci)
+        } else if lower.is_some_and(|i| nodes[i].run.is_some() == cur_solid) {
+            (ci, lower.unwrap())
+        } else {
+            return false;
+        };
+        nodes[survivor].bot = nodes[removed].bot;
+        nodes[removed].dead = true;
+        true
+    }
+
+    // -- step 0+1, fast path: sizes 1..=SPECIAL_CASES, reverse walk, no
+    //    re-sort inside a round (DH mergeVerySmallConnectedSegments) --
+    'fast: for special_case in 1..=SPECIAL_CASES {
+        // Snapshot in DESCENDING size order; ties walk lowest-Y first (the
+        // reverse of an ascending build whose ties order bot DESCENDING).
+        let mut visit: Vec<usize> = (0..nodes.len())
+            .filter(|&i| !nodes[i].dead && size(&nodes[i]) <= special_case as i64)
+            .collect();
+        visit.sort_unstable_by(|&a, &b| {
+            size(&nodes[b])
+                .cmp(&size(&nodes[a]))
+                .then(nodes[a].bot.cmp(&nodes[b].bot))
+        });
+        for &ci in &visit {
+            if nodes[ci].dead {
+                continue; // removed earlier in this round
+            }
+            if visible(&nodes) <= target {
+                break 'fast; // done — DH returns before steps 2/3
+            }
+            let alive: Vec<usize> = (0..nodes.len()).filter(|&i| !nodes[i].dead).collect();
+            step1_merge(&mut nodes, &alive, ci);
+        }
+    }
+    nodes.retain(|n| !n.dead);
+
+    // -- step 0+1, general path: smallest-first, restart after every merge --
+    while visible(&nodes) > target {
+        let ord = order(&nodes);
+        // Y-neighbours come from the BOTTOM-SORTED alive list (nodes stays
+        // bottom-sorted), never from the size order.
+        let alive: Vec<usize> = (0..nodes.len()).filter(|&i| !nodes[i].dead).collect();
+        let mut merged = false;
+        for &ci in &ord {
+            if nodes[ci].dead {
+                continue;
+            }
+            if step1_merge(&mut nodes, &alive, ci) {
+                merged = true;
+                break; // DH: restart from the smallest
+            }
+        }
+        if !merged {
+            break; // nothing mergeable -> step 2
+        }
+        nodes.retain(|n| !n.dead);
+    }
+    if visible(&nodes) <= target {
+        return finish(nodes);
+    }
+
+    // -- step 2 (removeLeastImportantSegments): erase the smallest segment
+    //    whose lower and higher neighbours are equal-alpha to EACH OTHER
+    //    (any data); the HIGHER neighbour extends over both and keeps its
+    //    own data. For our lists this is the step that fills cave air with
+    //    the upper band's material when the target forces it. --
+    while visible(&nodes) > target {
+        let ord = order(&nodes);
+        let alive: Vec<usize> = (0..nodes.len()).filter(|&i| !nodes[i].dead).collect();
+        let mut erased = false;
+        for &ci in &ord {
+            if nodes[ci].dead {
+                continue;
+            }
+            let Some(p) = alive.iter().position(|&i| i == ci) else {
+                continue;
+            };
+            let (Some(lo), Some(hi)) = (
+                p.checked_sub(1).map(|q| alive[q]),
+                alive.get(p + 1).copied(),
+            ) else {
+                continue; // needs both neighbours
+            };
+            if nodes[lo].run.is_some() == nodes[hi].run.is_some() {
+                nodes[hi].bot = nodes[lo].bot;
+                nodes[lo].dead = true;
+                nodes[ci].dead = true;
+                erased = true;
+                break; // DH: restart from the smallest
+            }
+        }
+        if !erased {
+            break; // -> step 3
+        }
+        nodes.retain(|n| !n.dead);
+    }
+    if visible(&nodes) <= target {
+        return finish(nodes);
+    }
+
+    // -- step 3 (forceBottomToMerge): the bottom-most node merges upward
+    //    through invisible nodes (lowY is kept); the first visible node
+    //    above extends down and keeps its own data. Our lists never end on
+    //    a gap (the floor run reaches down), so the invisible-walk arm is a
+    //    defensive port; the no-higher arm clears the column (target 0). --
+    while visible(&nodes) > target {
+        let alive: Vec<usize> = (0..nodes.len()).filter(|&i| !nodes[i].dead).collect();
+        let Some(&lowest) = alive.first() else { break };
+        let low_y = nodes[lowest].bot;
+        let mut cur = lowest;
+        while let Some(p) = alive.iter().position(|&i| i == cur) {
+            let Some(&hi) = alive.get(p + 1) else {
+                // no node above: target is 0 — clear the column (DH)
+                for n in nodes.iter_mut() {
+                    n.dead = true;
+                }
+                break;
+            };
+            if nodes[hi].run.is_some() {
+                nodes[hi].bot = low_y;
+                nodes[cur].dead = true;
+                break;
+            }
+            // invisible: eliminate it too, keep walking up (lowY unchanged)
+            nodes[cur].dead = true;
+            cur = hi;
+        }
+        nodes.retain(|n| !n.dead);
+    }
+
+    finish(nodes)
+}
+
+/// The reduced list: visible nodes only, top-down (DH `copyTo` — surviving
+/// air nodes are simply dropped, their span stays a hole between runs).
+fn finish(nodes: Vec<RNode>) -> Vec<SliceRun> {
+    let mut out: Vec<SliceRun> = nodes
+        .into_iter()
+        .filter(|n| !n.dead)
+        .filter_map(|n| {
+            let r = n.run?;
+            Some(SliceRun {
+                top: clamp_top(n.top - 1),
+                bottom: clamp_bottom(n.bot),
+                ..r
+            })
         })
         .collect();
-    // DH populate sorts by position (lowest->highest); our input lists are
-    // top-down, so sort before the reduction walks the size order.
-    nodes.sort_by_key(|&(bottom, _, _)| bottom);
-
-    let size = |n: &(i64, i64, SliceRun)| n.1 - n.0;
-
-    // Step 0+1: repeatedly merge the smallest segment into a neighbour.
-    while nodes.len() > target {
-        // smallest node; ties keep the LOWEST one (DH's stable size order
-        // sees lower-Y nodes first — they were inserted first in populate).
-        let mut si = 0usize;
-        for i in 1..nodes.len() {
-            if size(&nodes[i]) < size(&nodes[si]) {
-                si = i;
-            }
-        }
-        let can_lower = si > 0;
-        let can_higher = si + 1 < nodes.len();
-        if can_lower && can_higher {
-            // both neighbours are equal-alpha (all visible) -> merge with
-            // the SMALLER one (1b); equal size -> the higher one (1b1).
-            let s_lower = size(&nodes[si - 1]);
-            let s_higher = size(&nodes[si + 1]);
-            if s_higher <= s_lower {
-                // survivor = the higher neighbour, extended DOWN over si
-                let bottom = nodes[si].0;
-                nodes[si + 1].0 = bottom;
-                nodes.remove(si);
-            } else {
-                // survivor = si, extended DOWN over the lower neighbour
-                let bottom = nodes[si - 1].0;
-                nodes[si].0 = bottom;
-                nodes.remove(si - 1);
-            }
-        } else if can_lower {
-            let bottom = nodes[si - 1].0;
-            nodes[si].0 = bottom;
-            nodes.remove(si - 1);
-        } else if can_higher {
-            let bottom = nodes[si].0;
-            nodes[si + 1].0 = bottom;
-            nodes.remove(si);
-        } else {
-            break; // single node left
-        }
-    }
-
-    // Step 2 (removeLeastImportantSegments): erase a segment whose lower and
-    // higher neighbours are equal to EACH OTHER (the outer pair extends).
-    while nodes.len() > target {
-        let mut si = 0usize;
-        for i in 1..nodes.len() {
-            if size(&nodes[i]) < size(&nodes[si]) {
-                si = i;
-            }
-        }
-        if si > 0 && si + 1 < nodes.len() && same_run(&nodes[si - 1].2, &nodes[si + 1].2) {
-            let bottom = nodes[si - 1].0;
-            nodes[si + 1].0 = bottom;
-            nodes.remove(si + 1);
-            nodes.remove(si);
-        } else {
-            break;
-        }
-    }
-
-    // Step 3 (forceBottomToMerge): the lowest node merges upward, no
-    // restrictions, until the target is met.
-    while nodes.len() > target && nodes.len() > 1 {
-        let bottom = nodes[0].0;
-        nodes[1].0 = bottom;
-        nodes.remove(0);
-    }
-
-    // Back to top-down runs: top = maxY - 1 (block Y of the top block).
-    // Spans are disjoint, so the tops strictly descend by construction.
-    nodes
-        .into_iter()
-        .rev()
-        .map(|(_, max_y, r)| SliceRun {
-            top: (max_y - 1) as i16,
-            ..r
-        })
-        .collect()
+    // nodes are bottom-sorted; our lists are top-down
+    out.reverse();
+    out
 }
 
 /// DH `RenderDataPointReducingList.reduceToOne`: one datapoint with the
@@ -340,6 +551,7 @@ mod tests {
     fn run(top: i16, color: u32) -> SliceRun {
         SliceRun {
             top,
+            bottom: i16::MIN,
             color,
             tex_top: 0,
             tex_side: 0,
@@ -353,6 +565,20 @@ mod tests {
         vec![run(5, 0x00FF00), run(3, 0x8B4513), run(1, 0x808080)]
     }
 
+    /// Overhang column: grass cap [4..5], air gap [1..4), stone [..1].
+    fn overhang() -> Vec<SliceRun> {
+        vec![
+            SliceRun {
+                bottom: 4,
+                ..run(5, 0x00FF00)
+            },
+            SliceRun {
+                bottom: -65,
+                ..run(1, 0x808080)
+            },
+        ]
+    }
+
     #[test]
     fn medium_table_matches_dh() {
         assert_eq!(MEDIUM, [6, 6, 6, 4, 4, 4, 4, 4, 4, 4, 1]);
@@ -362,6 +588,20 @@ mod tests {
         assert_eq!(slices_at_detail(10), 1);
         assert_eq!(slices_at_detail(99), 1, "clamped to the last entry");
         assert_eq!(slices_at_detail(-3), 6, "clamped to the first entry");
+    }
+
+    #[test]
+    fn span_honours_explicit_bottoms_and_floor() {
+        let col = overhang();
+        // cap: explicit bottom 4 (the air gap [1..4) below it)
+        assert_eq!(span(&col, 0), (4, 6));
+        // last run reaches the world floor regardless of its stored bottom
+        assert_eq!(span(&col, 1), (i64::from(i32::MIN) / 2, 2));
+        // unset bottoms derive from the next run's top (old tiling)
+        let c = classic();
+        assert_eq!(span(&c, 0), (4, 6));
+        assert_eq!(span(&c, 1), (2, 4));
+        assert_eq!(span(&c, 2), (i64::from(i32::MIN) / 2, 2));
     }
 
     #[test]
@@ -389,7 +629,20 @@ mod tests {
     fn merge_equal_children_reproduce_the_runs() {
         let c = classic();
         let merged = merge_two_by_two([&c, &c, &c, &c]);
-        assert_eq!(merged, classic());
+        // The merged datapoints carry the SPAN-derived bottoms (the old
+        // tiling: bottom = next top + 1; the deepest reaches the floor).
+        let expected = vec![
+            SliceRun {
+                bottom: 4,
+                ..run(5, 0x00FF00)
+            },
+            SliceRun {
+                bottom: 2,
+                ..run(3, 0x8B4513)
+            },
+            run(1, 0x808080),
+        ];
+        assert_eq!(merged, expected);
     }
 
     #[test]
@@ -409,50 +662,120 @@ mod tests {
     }
 
     #[test]
-    fn merge_deep_spans_follow_the_deepest_band() {
-        // The last run reaches the world floor: deep spans below the other
-        // children's tops vote too — and the MAJORITY rule sends every span
-        // under the field tops to grass (3 columns vs the tower's deep run),
-        // which is exactly DH's air/field vote behaviour.
-        let a = vec![run(5, 0x00FF00)];
-        let b = vec![run(9, 0x808080), run(1, 0x404040)];
-        let merged = merge_two_by_two([&a, &a, &a, &b]);
+    fn merge_accumulated_bounds_come_from_the_spans() {
+        // The DH rule the naive port misses: a merged datapoint's top rides
+        // the ACCUMULATED SPANS, not the winning child's own datapoint.
+        //   col0: grass top 9 (tall — also covers the span it loses above)
+        //   col1/2: stone top 11
+        //   col3: grass top 5
+        // Span [-inf..6): grass 2:2 tie -> value0 grass (the TALL child).
+        // Span [6..10): stone 2:1. The grass datapoint must end at the
+        // span top (5) even though its child's private top is 9 — otherwise
+        // it overlaps the stone band and corrupts the next merge's spans.
+        let a = vec![run(9, 0x00FF00)];
+        let b = vec![run(11, 0x808080)];
+        let c = vec![run(11, 0x808080)];
+        let d = vec![run(5, 0x00FF00)];
+        let merged = merge_two_by_two([&a, &b, &c, &d]);
         assert_eq!(merged.len(), 2);
-        assert_eq!(merged[0].color, 0x808080, "tower's own span [6..10]");
+        assert_eq!(merged[0].color, 0x808080);
+        assert_eq!(merged[0].top, 11);
+        assert_eq!(merged[1].color, 0x00FF00);
+        assert_eq!(merged[1].top, 5, "accumulated top, not the child's 9");
+    }
+
+    #[test]
+    fn merge_air_gap_span_breaks_the_accumulator_and_abstains() {
+        // Two bands with a cave gap, all four children identical: the gap
+        // span votes nothing (every column abstains) and breaks the
+        // accumulator — the merged column keeps both bands with the
+        // explicit gap bottom intact.
+        let c = vec![
+            SliceRun {
+                bottom: 8,
+                ..run(9, 0x00FF00)
+            },
+            SliceRun {
+                bottom: -65,
+                ..run(1, 0x808080)
+            },
+        ];
+        let merged = merge_two_by_two([&c, &c, &c, &c]);
+        assert_eq!(merged.len(), 2, "the gap survives the merge (all-air span)");
         assert_eq!(merged[0].top, 9);
-        assert_eq!(
-            merged[1].color, 0x00FF00,
-            "everything below votes grass 3:1"
-        );
-        assert_eq!(merged[1].top, 5);
+        assert_eq!(merged[0].bottom, 8, "explicit gap bottom rides along");
+        assert_eq!(merged[1].top, 1);
+        assert_eq!(merged[1].bottom, i16::MIN, "floor bottom -> sentinel");
     }
 
     #[test]
     fn reduce_step1_keeps_survivor_colour() {
-        // classic(): smallest = grass (1 tall) with no higher neighbour ->
-        // extends DOWN over dirt (2 tall): grass [2..6]; the list is now at
-        // the target (2) and reduce STOPS (DH: stop as soon as the size fits).
+        // classic() at target 2: smallest = grass (1 tall), no higher
+        // neighbour -> extends DOWN over dirt (2 tall): grass [2..6]; the
+        // target is met and reduce STOPS (DH: stop as soon as the size fits).
         let out = reduce(&classic(), 2);
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].color, 0x00FF00, "grass survived, kept its colour");
         assert_eq!(out[0].top, 5);
+        assert_eq!(out[0].bottom, 2, "grass extended down over dirt");
         assert_eq!(out[1].color, 0x808080, "stone untouched below");
         assert_eq!(out[1].top, 1);
     }
 
     #[test]
-    fn reduce_step1_prefers_the_smaller_neighbour() {
-        // grass(3 tall), dirt(1 tall), stone(1 tall), target 2:
-        // smallest tie dirt/stone -> dirt (lower first): neighbours grass(3)
-        // and stone(1) -> the SMALLER neighbour is stone -> survivor stone
-        // extends down over dirt: stone [3..4]. Then grass(3) vs stone(1):
-        // stone merges up into grass -> grass [..6]. 2 nodes: grass top 5 +
-        // stone top 1.
-        let list = vec![run(5, 0x00FF00), run(3, 0x8B4513), run(1, 0x808080)];
+    fn reduce_step1_never_merges_across_a_gap() {
+        // overhang() at target 2: the list is already at the target and
+        // steps 0+1 must not fill the gap even implicitly (air nodes block
+        // same-alpha merges).
+        let out = reduce(&overhang(), 2);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].color, 0x00FF00);
+        assert_eq!(out[0].bottom, 4, "the cave gap stays open");
+        assert_eq!(out[1].color, 0x808080);
+        assert_eq!(out[1].top, 1);
+    }
+
+    #[test]
+    fn reduce_step2_fills_a_gap_with_the_upper_band() {
+        // overhang() at target 1: steps 0+1 can't merge (air blocks both
+        // ends); step 2 walks the size order — the AIR node ([2..4), tied
+        // with the cap but lower) comes first, its lower/higher are both
+        // solid (equal alpha to EACH OTHER) -> erased, and the UPPER band
+        // extends over the stone's span. DH fills caves from the top.
+        let out = reduce(&overhang(), 1);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].color, 0x00FF00, "the UPPER band fills the gap");
+        assert_eq!(out[0].top, 5);
+        assert_eq!(
+            out[0].bottom,
+            i16::MIN,
+            "stone's floor span rides up (last run -> world floor)"
+        );
+    }
+
+    #[test]
+    fn reduce_step1b_prefers_the_smaller_neighbour() {
+        // X (2 tall [6..8)) is smallest-tied with M (2 tall [4..6)); the
+        // reverse fast-path walk visits the LOWEST-Y tie first (M): both of
+        // M's neighbours are solid; the HIGHER (X, 2 tall) <= the LOWER
+        // (stone, floor-tall) -> the higher survives and extends down.
+        let list = vec![
+            SliceRun {
+                bottom: 6,
+                ..run(7, 0x0000FF)
+            },
+            SliceRun {
+                bottom: 4,
+                ..run(5, 0x00FF00)
+            },
+            run(3, 0x808080),
+        ];
         let out = reduce(&list, 2);
         assert_eq!(out.len(), 2);
-        assert_eq!(out[0].color, 0x00FF00, "top band = grass");
-        assert_eq!(out[1].color, 0x808080, "deep band = stone");
+        assert_eq!(out[0].color, 0x0000FF, "the higher neighbour survived");
+        assert_eq!(out[0].top, 7);
+        assert_eq!(out[0].bottom, 4, "extended down over M's span");
+        assert_eq!(out[1].color, 0x808080, "stone untouched");
     }
 
     #[test]
@@ -485,12 +808,27 @@ mod tests {
 
     #[test]
     fn reduce_single_band_bottom_reaches_floor() {
-        // One deep band + a thin cap, target 1: the cap wins (higher), the
-        // deep bottom merges up into it (forceBottom).
+        // One deep band + a thin cap, target 1: the cap's lower neighbour is
+        // the only same-alpha match -> the survivor is the HIGHER node (the
+        // cap), which extends down over the deep band's span — and the deep
+        // band IS the floor run, so the survivor reaches the world floor.
         let list = vec![run(9, 0x00FF00), run(1, 0x808080)];
         let out = reduce(&list, 1);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].color, 0x00FF00);
+        assert_eq!(
+            out[0].bottom,
+            i16::MIN,
+            "the merged floor span rides up (last run -> world floor)"
+        );
+    }
+
+    #[test]
+    fn reduce_target_zero_clears_the_column() {
+        // DH forceBottomToMerge: no node above the lowest -> target is 0 ->
+        // the whole column clears (copyTo then emits a void datapoint).
+        let out = reduce(&classic(), 0);
+        assert!(out.is_empty());
     }
 
     #[test]

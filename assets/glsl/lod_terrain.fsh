@@ -29,7 +29,7 @@ uniform sampler2D AtlasSampler;   // RG = height, B = water, A = side colour ind
 uniform sampler2D ColorSampler;   // top-face block colour (baked texture average)
 uniform sampler2D SideSampler;    // 256x1 side/cliff colour LUT
 uniform sampler2D SidePyrSampler; // side-index strip (fallback wall path)
-uniform sampler2D SlicesSampler;  // DH vertical slices (texel pairs A|B)
+uniform sampler2D SlicesSampler;  // DH vertical slices (texel triples A|B|C)
 uniform sampler2D TilesSampler;   // DH ratio-tile atlas (16px tiles, 256/row)
 uniform sampler2D TexIdsSampler;  // per-cell tile ids: RG top, BA side (big-endian)
 uniform sampler2D RotSampler;     // clod:clod_rot_a (1x1 persistent, camera channel)
@@ -205,13 +205,17 @@ float pyr_side(vec2 uv01, float lvl, float n) {
 }
 
 // ------------------------------------------------------------------
-// DH vertical slices (v4.9, slices.rs + atlas.encode_slices): the banded
-// cliff walls of Distant Horizons. Every datapoint column stores up to
-// EDhApiVerticalQuality.MEDIUM[detail] vertical runs (detail = log2(cell)
+// DH vertical slices (v4.9/v4.10, slices.rs + atlas.encode_slices): the
+// banded cliff walls of Distant Horizons. Every datapoint column stores up
+// to EDhApiVerticalQuality.MEDIUM[detail] vertical runs (detail = log2(cell)
 // + octave); each wall pixel samples the band containing its hit Y. The
 // strip layout: octave L rows [rowBase, rowBase + K*(n>>L)), cell (x,z)
-// slice j -> texel A at column 2x (RGB colour, A = (top+64)<<6 hi byte),
-// texel B at 2x+1 (R = lo byte, GB = side tile id, A = flags).
+// slice j -> texel A at column 3x (RGB colour, A = (top+64)<<6 hi byte),
+// texel B at 3x+1 (R = lo byte, GB = side tile id, A = flags), texel C at
+// 3x+2 (R/G = (bottom+64)<<6 — the run's REAL solid floor; the air between
+// bottom and the next band's top is DH's cave air datapoint: no wall face,
+// the ray flies through). The DEEPEST present band always reaches the
+// world floor (DH full-data columns span to min_y).
 // ------------------------------------------------------------------
 const int SLICE_MEDIUM[11] = int[11](6, 6, 6, 4, 4, 4, 4, 4, 4, 4, 1);
 
@@ -231,13 +235,21 @@ float slice_row_base(float detail0, float L, int n) {
 
 /// Band of cell cellId (octave-L indices) containing block yHit.
 /// Outputs: band colour (0..1), side tile id, liquid/grass flags and the
-/// band's block-Y bounds (for the grass fade). Returns false when the cell
-/// carries no slice data (fallback path).
+/// band's block-Y bounds (for the grass fade). gapBelow = the hit Y falls
+/// into the CAVE AIR under the matched band (DH: no wall face there);
+/// floorTop = the next band's top (the cave floor plane); the gap* outputs
+/// carry the deeper band's appearance for the cave-floor top face.
+/// Returns false when the cell carries no slice data (fallback path) or
+/// yHit is above every band top.
 bool slice_band(ivec2 cellId, float L, float n, float yHit,
                 out vec3 col, out float tile, out float liquid,
-                out float grass, out float bandTop, out float bandBot) {
+                out float grass, out float bandTop, out float bandBot,
+                out float gapBelow, out float floorTop,
+                out vec3 gapCol, out float gapTile) {
     col = vec3(0.0); tile = 0.0; liquid = 0.0; grass = 0.0;
     bandTop = 0.0; bandBot = -1.0e4;
+    gapBelow = 0.0; floorTop = -1.0e4;
+    gapCol = vec3(0.0); gapTile = 0.0;
     float detail0 = log2(max(AtlasInfo.w, 2.0));
     int K = slice_k(detail0 + L);
     int nI = int(n);
@@ -248,22 +260,32 @@ bool slice_band(ivec2 cellId, float L, float n, float yHit,
     int base = int(slice_row_base(detail0, L, nI));
     int match = -1;
     float topY = 0.0;
+    float botY = 0.0;
+    bool deeper = false;
     for (int j = 0; j < K; ++j) {
         int row = base + cellId.y * K + j;
-        vec4 b = texelFetch(SlicesSampler, ivec2(2 * cellId.x + 1, row), 0);
+        vec4 b = texelFetch(SlicesSampler, ivec2(3 * cellId.x + 1, row), 0);
         if ((int(b.a * 255.0 + 0.5) & 1) == 0) break; // absent (packed top-down)
-        vec4 a = texelFetch(SlicesSampler, ivec2(2 * cellId.x, row), 0);
+        vec4 a = texelFetch(SlicesSampler, ivec2(3 * cellId.x, row), 0);
+        vec4 c = texelFetch(SlicesSampler, ivec2(3 * cellId.x + 2, row), 0);
         float ty = (a.a * 65280.0 + b.r * 255.0) / 64.0 - 64.0;
+        float by = (c.g * 65280.0 + c.r * 255.0) / 64.0 - 64.0;
         if (ty >= yHit) {
             // deepest band whose top is still above the hit
             match = j;
             topY = ty;
+            botY = by;
             col = a.rgb;
             tile = floor(b.g * 255.0 + 0.5) * 256.0 + floor(b.b * 255.0 + 0.5);
             int fl = int(b.a * 255.0 + 0.5);
             liquid = float((fl >> 1) & 1);
             grass = float((fl >> 2) & 1);
         } else {
+            // the first band BELOW the hit: its top is the cave floor plane
+            deeper = true;
+            floorTop = ty;
+            gapCol = a.rgb;
+            gapTile = floor(b.g * 255.0 + 0.5) * 256.0 + floor(b.b * 255.0 + 0.5);
             break; // tops strictly descend
         }
     }
@@ -271,15 +293,16 @@ bool slice_band(ivec2 cellId, float L, float n, float yHit,
         return false;
     }
     bandTop = topY;
-    // bottom boundary: the next band's top, else the walk floor
-    bandBot = topY - 96.0;
-    if (match + 1 < K) {
-        int row2 = base + cellId.y * K + match + 1;
-        vec4 b2 = texelFetch(SlicesSampler, ivec2(2 * cellId.x + 1, row2), 0);
-        if ((int(b2.a * 255.0 + 0.5) & 1) != 0) {
-            vec4 a2 = texelFetch(SlicesSampler, ivec2(2 * cellId.x, row2), 0);
-            bandBot = (a2.a * 65280.0 + b2.r * 255.0) / 64.0 - 64.0;
-        }
+    if (deeper) {
+        // a band exists below: the stored bottom is the REAL solid floor;
+        // the hit inside (top, bottom) air of the matched band is cave air.
+        bandBot = botY;
+        gapBelow = yHit < botY ? 1.0 : 0.0;
+    } else {
+        // deepest present band reaches the world floor (DH full-data
+        // columns span to min_y) — always solid.
+        bandBot = -1.0e4;
+        gapBelow = 0.0;
     }
     return true;
 }
@@ -513,6 +536,10 @@ void main() {
     vec2 cellF = floor((enterXz - origin) / cell);
     float cellsSide = size / cell;
 
+    // Atlas cell grid (level-0 slice queries in the march + the pyramid
+    // colour reads after the hit share it).
+    float cellsN = AtlasInfo.z / max(AtlasInfo.w, 1.0);
+
     // Classic DDA setup: tMax = t to the first x/z grid line, tDelta = t per cell.
     float tMaxX = 1.0e9;
     float tMaxZ = 1.0e9;
@@ -557,6 +584,11 @@ void main() {
     // DH FADE_TO_DIRT state: the wall's exposed span [hHitOld..hHitNew].
     float hHitOld = 0.0;
     float hHitNew = 0.0;
+    // DH cave air: set once the ray passed through a slice air gap (a cave
+    // mouth). Hits after that are CAVE walls/floors — DH lights them from
+    // the stored light data (sky 0), we apply the unlit stand-in; cleared
+    // when the ray re-emerges above a column's surface (open sky again).
+    bool caveDepth = false;
 
     for (int i = 0; i < maxSteps; ++i) {
         // TOP face: inside this cell the ray may cross the plane y = hCur from
@@ -578,6 +610,33 @@ void main() {
                 hitT = tTop;
                 sideHit = false;
                 break;
+            }
+        }
+
+        // CAVE FLOOR: inside a cave (the ray passed a gap) the descending ray
+        // can land on the top face of a DEEPER band — DH renders every
+        // datapoint's top quad. The floor plane is the first band top under
+        // the ray; the crossing must still happen inside this cell.
+        if (caveDepth && dir.y < 0.0 && !curVoid) {
+            float rayYc = cam.y + dir.y * tCur;
+            vec3 fq; float ft_, fl_, fg_, fTop_, fBot_, fGap, fFloor;
+            vec3 fgc; float fgt_;
+            if (slice_band(ivec2(cellF), 0.0, cellsN, floor(rayYc),
+                           fq, ft_, fl_, fg_, fTop_, fBot_, fGap, fFloor, fgc, fgt_)
+                && fGap > 0.5 && fFloor > -9.0e3) {
+                float tFloor = (fFloor - cam.y) / dir.y;
+                if (gEarthR > 1.0 || gEarthR < -1.0) {
+                    float y1 = fFloor + curve_drop(tFloor * hlen, fFloor);
+                    tFloor = (y1 - cam.y) / dir.y;
+                    float y2 = fFloor + curve_drop(tFloor * hlen, fFloor);
+                    tFloor = (y2 - cam.y) / dir.y;
+                }
+                float tExitC = min(tMaxX, tMaxZ);
+                if (tFloor >= tCur && tFloor < tExitC) {
+                    hitT = tFloor;
+                    sideHit = false;
+                    break;
+                }
             }
         }
 
@@ -615,9 +674,11 @@ void main() {
             break;
         }
 
-        // SIDE face: entering a cell whose surface is above the ray. The ray
-        // is guaranteed to be above hCur (we never continue below terrain),
-        // so this is exactly DH's wall on the exposed span [hCur..hNew].
+        // SIDE face: entering a cell whose surface is above the ray. With
+        // the DH slice table the wall face exists only where the ENTERED
+        // column is SOLID at this Y — a cave air gap has NO face: the ray
+        // flies through the mouth (caveDepth = the unlit-cave state). Cells
+        // without slice data keep the v4.9 heightfield behaviour.
         // Walls exist only between two SCANNED cells: a void neighbour is
         // un-generated data, not a pit — the ray passes through it and the
         // next scanned cell resets the span (no white cliff walls out of
@@ -630,19 +691,46 @@ void main() {
             // the neighbour's ground vertex at this distance.
             float hNewR = hNew + curve_drop(tCur * hlen, hNew);
             if (!curVoid && hNewR > rayY) {
-                hitT = tCur;
-                sideHit = true;
-                hitAxisX = axisX;
-                hHitOld = hCur;
-                hHitNew = hNew;
-                break;
+                vec3 sq; float st_, sl_, sg_, sTop_, sBot_, sGap, sFloor;
+                vec3 sgc; float sgt_;
+                if (slice_band(ivec2(cellF), 0.0, cellsN, floor(rayY),
+                               sq, st_, sl_, sg_, sTop_, sBot_, sGap, sFloor, sgc, sgt_)
+                    && sGap > 0.5) {
+                    // DH: no wall face inside the air gap — keep marching.
+                    caveDepth = true;
+                } else {
+                    hitT = tCur;
+                    sideHit = true;
+                    hitAxisX = axisX;
+                    hHitOld = hCur;
+                    hHitNew = hNew;
+                    break;
+                }
+            } else if (hNewR <= rayY) {
+                // the ray passed above the neighbour's surface: open sky
+                // again (a cave mouth opening onto lower ground).
+                caveDepth = false;
             }
             hCur = hNew;
+        } else {
+            caveDepth = false; // unscanned data — no cave state past it
         }
         curVoid = newVoid;
     }
 
     if (hitT < 0.0) {
+        if (caveDepth && DebugParams.x <= 3.5) {
+            // DH: looking deeper into a cave shows unlit datapoints (light 0).
+            // Flat unlit stand-in, then the same distance fog as real hits
+            // (tCur = where the march gave up).
+            float fogStart = FOG_START_FRAC * fogFar;
+            float fogLen = max(fogFar - fogStart, 1.0);
+            float fx = max((tCur - fogStart) / fogLen, 0.0) * FOG_DENSITY;
+            float fog = clamp(1.0 - exp(-fx * fx), 0.0, 1.0);
+            vec3 caveDark = vec3(0.045, 0.048, 0.058);
+            fragColor = vec4(mix(caveDark, scene.rgb, fog), 1.0);
+            return;
+        }
         fragColor = DebugParams.x > 3.5 ? vec4(1.0, 0.45, 0.0, 1.0) : scene;
         return;
     }
@@ -696,7 +784,6 @@ void main() {
     // v4.6 look), far hits aggregate 2x2 per octave exactly like DH's coarse
     // datapoints — point-sampling the fine grid out there was per-pixel
     // white noise (the "noisy pixels").
-    float cellsN = AtlasInfo.z / max(AtlasInfo.w, 1.0);
     float footprint = pyr_footprint(hitT, tanH);
     float pyrLvl = clamp(log2(max(footprint / AtlasInfo.w, 1.0)), 0.0, 24.0);
     vec3 topCol = pyr_color(atlas_uv(hitPos.xz, origin, size), pyrLvl, cellsN);
@@ -707,10 +794,12 @@ void main() {
 
     // Wall colour resolution. DH renders each datapoint box in ITS OWN flat
     // colour (the block's first-face average): the band containing the hit Y
-    // wins. Grass bands fade to the dirt colour across their own span
-    // (LodQuadBuilder FADE_TO_DIRT, default EDhApiGrassSideRendering). Cells
-    // without slice data (un-scanned, or octaves above the strip budget on
-    // oversized atlases) fall back to the v4.8 top->side gradient.
+    // wins. Grass bands fade to the dirt colour across their own REAL span
+    // (LodQuadBuilder FADE_TO_DIRT, default EDhApiGrassSideRendering). A
+    // hit inside a band's cave-air span (gapBelow — far octaves only: the
+    // near march never lands there) and cells without slice data (un-scanned,
+    // or octaves above the strip budget) fall back to the v4.8 top->side
+    // gradient.
     float rayHitY = cam.y + dir.y * hitT;
     float shade = 1.0;
     float spanT = 0.0;
@@ -726,11 +815,14 @@ void main() {
         int szL = int(cellsN) >> Ls;
         ivec2 cellId = ivec2(floor(bandUv * float(szL)));
         vec3 bandCol;
-        float bandTile, bandLiq, bandGrass, bandTop, bandBot;
+        float bandTile, bandLiq, bandGrass, bandTop, bandBot, bandGap, bandFloor;
+        vec3 bandGapCol;
+        float bandGapTile;
         bool hasBand = float(Ls) <= SkyParams.w + 0.5
             && slice_band(cellId, float(Ls), cellsN, floor(rayHitY),
-                          bandCol, bandTile, bandLiq, bandGrass, bandTop, bandBot);
-        if (hasBand) {
+                          bandCol, bandTile, bandLiq, bandGrass, bandTop, bandBot,
+                          bandGap, bandFloor, bandGapCol, bandGapTile);
+        if (hasBand && bandGap < 0.5) {
             vec3 base = bandCol;
             if (bandGrass > 0.5) {
                 // DH: the bottom vertex row of a grass wall is recoloured to
@@ -747,6 +839,25 @@ void main() {
             // fallback: v4.8 top->side (dirt) wall gradient
             albedo = mix(topCol, sideCol, spanT) * shade;
             tileId = tile_id(auv, true);
+        }
+    } else if (caveDepth) {
+        // CAVE FLOOR (the march landed on a deeper band's top quad): its
+        // colour is that band's flat datapoint colour — level 0, the same
+        // query the march used to find the plane.
+        vec2 fUv = atlas_uv(hitPos.xz, origin, size);
+        ivec2 fCell = ivec2(clamp(floor(fUv * cellsN), vec2(0.0), vec2(cellsN - 1.0)));
+        vec3 fCol;
+        float fTile, fLiq, fGrass, fTop, fBot, fGap, fFloor2;
+        vec3 fGapCol;
+        float fGapTile;
+        if (slice_band(fCell, 0.0, cellsN, floor(rayHitY),
+                       fCol, fTile, fLiq, fGrass, fTop, fBot, fGap, fFloor2,
+                       fGapCol, fGapTile)
+            && fGap < 0.5) {
+            albedo = fCol; // top face: shade 1.0
+            tileId = fTile;
+        } else {
+            albedo = vec3(0.05); // degenerate: unlit fallback
         }
     } else {
         albedo = topCol; // top faces: shade 1.0
@@ -793,6 +904,14 @@ void main() {
     float lightMul = mix(0.22, 1.0, dayF);
     vec3 nightTint = vec3(0.84, 0.89, 1.08);
     vec3 lit = albedo * lightMul * mix(vec3(1.0), nightTint, 1.0 - dayF);
+
+    // DH cave light: datapoints carry light coords — enclosed caves read
+    // lightmap(0,0), day-INDEPENDENT dark. The ray passed a cave gap
+    // (caveDepth) => this wall/floor is unlit: the flat stand-in replaces
+    // the day/night modulation entirely.
+    if (caveDepth) {
+        lit = albedo * 0.15;
+    }
 
     // DH order: the texture multiplies the ALREADY-LIT flat colour
     // (vertexColor = lightmap * color, then the tile mix in frag).

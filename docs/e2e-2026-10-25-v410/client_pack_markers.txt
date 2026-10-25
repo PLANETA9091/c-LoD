@@ -1,0 +1,8 @@
+	at net.minecraft.server.packs.resources.SimplePreparableReloadListener.lambda$reload$1(SimplePreparableReloadListener.java:15)
+	at net.minecraft.server.packs.resources.SimpleReloadInstance.lambda$prepareTasks$3(SimpleReloadInstance.java:59)
+[15:21:46] [Render thread/WARN]: Requested post effect does not exist: minecraft:end_of_frame
+[15:21:46] [Render thread/WARN]: Requested post effect does not exist: clod:lod_terrain
+[15:21:46] [Render thread/WARN]: Requested post effect does not exist: clod:atmosphere
+	at net.minecraft.server.packs.resources.SimplePreparableReloadListener.lambda$reload$1(SimplePreparableReloadListener.java:15)
+	at net.minecraft.server.packs.resources.SimpleReloadInstance.lambda$prepareTasks$3(SimpleReloadInstance.java:59)
+[15:21:55] [Render thread/WARN]: Requested post effect does not exist: minecraft:end_of_frame

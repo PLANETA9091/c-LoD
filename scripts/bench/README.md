@@ -234,3 +234,42 @@ memory-pressured). If a future attempt is needed: boot the stack, park the
 client at the camera for 5+ minutes with `vanillaFadeMode = "NONE"`,
 then shoot with 10-15 s waits — and verify the band in a probe frame BEFORE
 burning the shot budget.
+
+### Fresh-sandbox rebuild notes (2026-10-25 v4.10.0 cycle)
+
+Found while rebuilding the bench from scratch a second time (the sandbox
+reset reverted c-LoD to the v4.1-era clone; the toolchain and ~/mc-test were
+wiped):
+
+- **Recovery order**: `rustup-init.sh -y --profile minimal` (watch for an
+  interrupted install — `rustup component add rust-std` then fails with
+  "missing manifest"; fix = `rustup toolchain uninstall stable` + reinstall),
+  Temurin 25 via the adoptium API → `~/tools/jdk25` (run_client.sh honours
+  `CLOD_JAVA`), glslang 16.6.0 from the Khronos release (the same URL the CI
+  uses) → `/tmp/bin`, `setup_client.py` (66 libs + 5147 assets, ~5 min),
+  `setup_server.sh` with `CLOD_CRUSSTY=/home/z/my-project/analysis/crussty`,
+  shim rebuild, `pip3 install python-xlib` (click.py dies silently without
+  it — the pack is never accepted).
+- **Background processes do NOT survive the tool-call boundary** in this
+  sandbox (the reaper kills the process group; `setsid nohup` does not save
+  them — `oom_kill 0` proves it is not the OOM killer). Everything long runs
+  in the FOREGROUND within one ≤590 s call: boot+scan+finalize fits
+  (~9 min at `CLOD_SERVER_XMX=1800M`; the fresh-world scan at 700 M dies).
+- **26.3 console syntax changed**: `gamerule doDaylightCycle false` now
+  answers `Incorrect argument ... <--[HERE]` (the rule name is rejected) —
+  cosmetic for the bench (the daylight drifts slowly); `gamemode <mode>
+  <player>` also fails from the console → use `defaultgamemode spectator`
+  (works) + `gamemode=spectator`/`force-gamemode=true` in
+  server.properties (Paper honours them at boot).
+- **The client dies client-side within the first second of the world join**
+  on the fresh sandbox (spawn-chunk race; no server death message — the
+  server keeps it a spectator with Health 0). A click on the death screen's
+  Respawn button (screen 640,352) revives it; the run_e2e_shots.sh does it
+  automatically now.
+- **The pack prompt clicks never register** on this Xvfb/SDL3 build (the
+  XTest cursor moves, the buttons ignore the clicks). Auto-accept instead:
+  patch `acceptTextures=1b` into the client's `servers.dat` (nbtlib one-
+  liner, documented in the v4.10 work) — the pack applies at join with no
+  dialog. Caveat: the pack reload races the world load once; the client may
+  show the death screen — the Respawn click above covers it, and the second
+  join reuses the cached pack (`client/downloads/`).

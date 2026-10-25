@@ -697,12 +697,11 @@ fn sample_column_impl(
 
     // ------------------------------------------------------------------
     // DH vertical slices (slices.rs): walk the column DOWN from the surface
-    // through a ChunkSnapshot, cutting a band on every Material change
-    // (LodDataBuilder cuts on blockstate change; Material is the same
-    // identity at LOD resolution). Air starts no band — the shader extends
-    // the band above over the gap, which reproduces DH's cave-culled cliff
-    // look on a heightfield. Unbaked materials end the walk (the last band
-    // reaches the world floor like a DH full-data column).
+    // through a ChunkSnapshot, cutting a band on every Material change AND
+    // on air (LodDataBuilder cuts on blockstate change — air is a blockstate;
+    // the run's `bottom` records the real solid floor so cave gaps stay
+    // gaps). Unbaked materials end the walk (the last band reaches the world
+    // floor like a DH full-data column).
     // ------------------------------------------------------------------
     let mut runs: Vec<crate::slices::SliceRun> = Vec::new();
     if walk_depth > 0 && height >= -64 {
@@ -758,7 +757,8 @@ fn sample_column_impl(
                 // below terrain. Only the liquid flag of band 0 reaches the
                 // shader.
                 Some(crate::slices::SliceRun {
-                    top: 0, // set when the band closes
+                    top: 0,           // set when the band closes
+                    bottom: i16::MIN, // set when the band closes
                     color: mul_rgb(info.top, t_top),
                     tex_top: info.tex_top,
                     tex_side: info.tex_side,
@@ -769,9 +769,13 @@ fn sample_column_impl(
 
             // Band 0 = the reconciled surface band (its material is the
             // heightmap block; the reconciliation may have recoloured it).
+            // Its bottom is set when the walk's first cut closes it; an
+            // immediately-broken walk leaves the sentinel (the shader maps
+            // the deepest band to the world floor).
             let mut bands: Vec<crate::slices::SliceRun> = Vec::with_capacity(RAW);
             bands.push(crate::slices::SliceRun {
                 top: height as i16,
+                bottom: i16::MIN,
                 color: top,
                 tex_top,
                 tex_side,
@@ -796,11 +800,14 @@ fn sample_column_impl(
             while yy >= floor {
                 let Some(m) = block_at(yy) else { break };
                 if !env.is_same_object(m, cur_mat) {
-                    // Material change: close the open band (its top block is
-                    // where it started), open the next one at yy.
+                    // Material change: close the open band — its top block is
+                    // where it started, its bottom is the block ABOVE the new
+                    // material (the air gap below a band is DH's air
+                    // datapoint and rides in the run's `bottom`).
                     if !cur_is_air {
                         if let Some(mut band) = cur {
                             band.top = cur_start as i16;
+                            band.bottom = (yy + 1) as i16;
                             if bands.len() >= RAW {
                                 break;
                             }
@@ -818,19 +825,22 @@ fn sample_column_impl(
                 }
                 yy -= 1;
             }
-            // Close the final open band (it reaches the world floor).
+            // Close the final open band (it reaches the world floor: yy sits
+            // at floor-1 after a natural exit, or at the read-failure Y).
             if !cur_is_air {
                 if let Some(mut band) = cur {
                     band.top = cur_start as i16;
+                    band.bottom = (yy + 1).max(-65) as i16;
                     if bands.len() < RAW {
                         bands.push(band);
                     }
                 }
             }
             // Tops must strictly descend (surface band vs the first cut).
+            // The defensive clamp keeps [bottom, top] non-inverted.
             for w in 1..bands.len() {
                 if bands[w - 1].top <= bands[w].top {
-                    bands[w].top = bands[w - 1].top.saturating_sub(1);
+                    bands[w].top = bands[w - 1].top.saturating_sub(1).max(bands[w].bottom);
                 }
             }
             Some(bands)
