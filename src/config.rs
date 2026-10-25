@@ -126,6 +126,15 @@ pub struct Config {
     /// `phi = dist/(R+y)`, `R = 6_371_000 / ratio`, at every ground test.
     /// |ratio| >= 50 is the DH-valid range (smaller magnitudes snap to 0).
     pub earth_curve_ratio: i32,
+    /// DH 3.3.4 TAA (terrain/gl/vert.vert): the LOD geometry is jitters across
+    /// 8 sub-pixel offsets (`jitterOffsets[8]`, applied as
+    /// `gl_Position.xy += taps[frame%%8] * w / viewport`, frame 0 = identity)
+    /// and the CLIENT temporal anti-aliaser blends the frames. Our march
+    /// jitters the RAY by the same pixel-space offsets and accumulates the
+    /// composite through a persistent post-effect target; camera/time moves
+    /// invalidate the history (no ghosting), so a static view converges to
+    /// the full 8-tap average within a second. `taa=0` restores v4.11.
+    pub taa: bool,
 }
 
 impl Default for Config {
@@ -170,6 +179,7 @@ impl Default for Config {
             max_height: 320,
             slice_depth: 24,
             earth_curve_ratio: 0,
+            taa: true,
         }
     }
 }
@@ -304,6 +314,9 @@ impl Config {
         }
         if let Some(v) = get("slice_depth").and_then(|v| v.parse::<i32>().ok()) {
             cfg.slice_depth = v.clamp(0, 96);
+        }
+        if let Some(v) = get("taa").and_then(|v| v.parse::<u8>().ok()) {
+            cfg.taa = v != 0;
         }
         if let Some(v) = get("earth_curve_ratio").and_then(|v| v.parse::<i32>().ok()) {
             // DH WorldCurvatureConfigEventHandler: |ratio| in (0, 50) snaps

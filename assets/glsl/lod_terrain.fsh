@@ -32,7 +32,8 @@ uniform sampler2D SidePyrSampler; // side-index strip (fallback wall path)
 uniform sampler2D SlicesSampler;  // DH vertical slices (texel triples A|B|C)
 uniform sampler2D TilesSampler;   // DH ratio-tile atlas (16px tiles, 256/row)
 uniform sampler2D TexIdsSampler;  // per-cell tile ids: RG top, BA side (big-endian)
-uniform sampler2D RotSampler;     // clod:clod_rot_a (1x1 persistent, camera channel)
+uniform sampler2D RotSampler;     // clod:clod_rot_a (4x1 persistent: camera, day, fp, prev-fp)
+uniform sampler2D PrevSampler;    // clod:clod_hist_a (persistent TAA history)
 // NOTE: the vanilla `Fog` UBO (FogColor) is NOT declared here on purpose —
 // renderpearl rejects any shader UBO that is not registered in the pipeline's
 // bind group layout, and post chains can only register the Globals snippet +
@@ -82,6 +83,11 @@ layout(std140) uniform ClodColors {
     vec4 VeilColor; // a = snow whiteness threshold
 };
 
+// x = TAA enable, y = history weight (the DH client-TAA blend stand-in)
+layout(std140) uniform ClodTaa {
+    vec4 TaaParams;
+};
+
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 
@@ -106,6 +112,31 @@ const float NOISE_DROPOFF = 1024.0;
 // up 1.0, down 0.5, north/south 0.8, west/east 0.6.
 const float SHADE_NS = 0.8;
 const float SHADE_EW = 0.6;
+
+// ------------------------------------------------------------------
+// DH 3.3.4 TAA (terrain/gl/vert.vert, verbatim taps): the LOD geometry
+// shifts by `taps[frame % 8] * w / viewport` in clip space — an image-space
+// shift of taps/2 pixels — and the client temporal anti-aliaser averages the
+// frames ("-1 if TAA is disabled" -> gate `uFrameMod8 > 0`, frame 0 = the
+// identity tap). Our march shifts the RAY by the same pixel-space offsets
+// (taps / OutSize in NDC) and accumulates the composite into a persistent
+// post-effect target: every frame the fingerprint pass (clod:post/fp_solve)
+// hashes the solved camera + day factor into 24 bits; while the fingerprint
+// matches the previous frame the march blends 1/8 of the new sample over the
+// history — the full 8-tap average after < 1 s. Any camera/time move breaks
+// the match: the raw frame passes through (no jitter, no ghosting), exactly
+// the no-TAA mode DH ships when the client cannot accumulate.
+// ------------------------------------------------------------------
+const vec2 TAA_JITTER_OFFSETS[8] = vec2[8](
+    vec2( 0.125, -0.375),
+    vec2(-0.125,  0.375),
+    vec2( 0.625,  0.125),
+    vec2( 0.375, -0.625),
+    vec2(-0.625,  0.625),
+    vec2(-0.875, -0.125),
+    vec2( 0.375, -0.875),
+    vec2( 0.875,  0.875)
+);
 
 // DH zeroes the tile id at MESH BUILD time once the datapoint is coarser
 // than Config.Client.Advanced.Graphics.Texture.maxTexturedLodDetailLevel
@@ -419,7 +450,7 @@ void main() {
         if (uv.x > 0.93 && uv.y > 0.93) c = vec3(0.0, 1.0, 0.0); // top-right green
         if (uv.x < 0.07 && uv.y < 0.07) c = vec3(0.0, 0.0, 1.0); // bottom-left  blue
         if (uv.x > 0.93 && uv.y < 0.07) c = vec3(1.0, 1.0, 0.0); // bottom-right yellow
-        fragColor = vec4(c, 1.0);
+        fragColor = vec4(c, 0.0);
         return;
     }
 
@@ -429,18 +460,42 @@ void main() {
     float minConf = LodParams.w;
     float forceLod = 0.0;
 
+    // -----------------------------------------------------------------
+    // TAA history state (DH client-TAA stand-in — see the taps note).
+    // fps: rot pixel 2 = this frame's 3-byte camera fingerprint, pixel 3 =
+    // the previous frame's (rot_solve). A mismatch (camera / day-factor /
+    // fov move) invalidates BOTH the jitter and the blend for this frame.
+    // The history alpha marks which pixels were march-written last frame
+    // (pass-through pixels carry 0 — vanilla content is live, accumulating
+    // it would smear chunk fade-ins).
+    // -----------------------------------------------------------------
+    vec4 fpCur = texelFetch(RotSampler, ivec2(2, 0), 0);
+    vec4 fpPrev = texelFetch(RotSampler, ivec2(3, 0), 0);
+    bool fpMatch = all(lessThan(abs(fpCur.rgb - fpPrev.rgb), vec3(0.002)));
+    int taaPhase = int(fpCur.a * 255.0 + 0.5);
+    vec4 hist = texelFetch(PrevSampler, ivec2(gl_FragCoord.xy), 0);
+    bool taaOk = TaaParams.x > 0.5
+        && fpMatch
+        && hist.a > 0.5
+        && DebugParams.x < 0.5;
+    // DH: `gl_Position.xy = TAAJitter(...)` gated by `uFrameMod8 > 0` —
+    // frame 0 of the cycle and the disabled mode both stay identity.
+    vec2 taaJit = (taaOk && taaPhase > 0)
+        ? TAA_JITTER_OFFSETS[taaPhase] / OutSize
+        : vec2(0.0);
+
     // Debug mode 4: LOD hit mask + tracker confidence bar.
     if (DebugParams.x > 3.5) {
         if (gl_FragCoord.x < 240.0 && gl_FragCoord.y > OutSize.y - 24.0) {
             vec3 bar = gl_FragCoord.x < conf * 240.0 ? vec3(1.0, 0.0, 0.0) : vec3(0.0);
-            fragColor = vec4(bar, 1.0);
+            fragColor = vec4(bar, 0.0);
             return;
         }
         forceLod = 1.0;
     }
 
     if (DebugParams.x > 0.5 && DebugParams.x < 1.5) {
-        fragColor = vec4(conf, 0.0, 0.0, 1.0);
+        fragColor = vec4(conf, 0.0, 0.0, 0.0);
         return;
     }
 
@@ -452,14 +507,14 @@ void main() {
             if (atlas_water(texCoord)) {
                 mc = mix(mc, vec3(0.3, 0.5, 1.0), 0.6);
             }
-            fragColor = vec4(mc, 1.0);
+            fragColor = vec4(mc, 0.0);
             return;
         }
         forceLod = 1.0;
     }
 
     if (conf < minConf && forceLod < 0.5) {
-        fragColor = scene;
+        fragColor = vec4(scene.rgb, 0.0);
         return;
     }
 
@@ -476,7 +531,7 @@ void main() {
     float tanH = tan(radians(fov) * 0.5);
     float aspect = OutSize.x / max(OutSize.y, 1.0);
 
-    vec2 ndc = texCoord * 2.0 - 1.0;
+    vec2 ndc = texCoord * 2.0 - 1.0 + taaJit;
     vec3 dir = normalize(F + R * (ndc.x * tanH * aspect) + U * (ndc.y * tanH));
 
     // 26.3 Globals: CameraBlockPos = floor(camPos), CameraOffset = floor - camPos.
@@ -490,7 +545,7 @@ void main() {
         skyPix = wp.y > SkyParams.y;
     }
     if (!skyPix) {
-        fragColor = scene;
+        fragColor = vec4(scene.rgb, 0.0);
         return;
     }
 
@@ -514,7 +569,7 @@ void main() {
         if (dir.z > 0.0) toEdge = min(toEdge, (maxW.y - cam.z) / dir.z);
         if (dir.z < 0.0) toEdge = min(toEdge, (minW.y - cam.z) / dir.z);
         if (toCeil < toEdge) {
-            fragColor = DebugParams.x > 3.5 ? vec4(0.6, 0.0, 0.9, 1.0) : scene;
+            fragColor = DebugParams.x > 3.5 ? vec4(0.6, 0.0, 0.9, 0.0) : vec4(scene.rgb, 0.0);
             return;
         }
     }
@@ -536,7 +591,7 @@ void main() {
         if (dir.z > 0.0) tEnter = max(tEnter, (minW.y - cam.z) / dir.z);
         if (dir.z < 0.0) tEnter = max(tEnter, (maxW.y - cam.z) / dir.z);
         if (tEnter < 0.0) {
-            fragColor = DebugParams.x > 3.5 ? vec4(1.0, 0.45, 0.0, 1.0) : scene;
+            fragColor = DebugParams.x > 3.5 ? vec4(1.0, 0.45, 0.0, 0.0) : vec4(scene.rgb, 0.0);
             return;
         }
         tCur = tEnter;
@@ -1002,5 +1057,15 @@ void main() {
     float fog = clamp(1.0 - exp(-fx * fx), 0.0, 1.0);
     lit = mix(lit, scene.rgb, fog);
 
-    fragColor = vec4(mix(scene.rgb, lit, fade), scene.a);
+    // DH TAA: the march result joins the temporal accumulator (alpha = 1
+    // marks the pixel as march-written for the next frame's validity test;
+    // clod_blit forces alpha back to 1.0 for minecraft:main). History weight
+    // 7/8 converges to the 8-tap average in ~40 frames, fast enough for the
+    // static reference shots and slow camera pans, while any move re-anchors
+    // on the raw frame within one step.
+    vec3 outRgb = mix(scene.rgb, lit, fade);
+    if (taaOk) {
+        outRgb = mix(outRgb, hist.rgb, TaaParams.y);
+    }
+    fragColor = vec4(outRgb, 1.0);
 }

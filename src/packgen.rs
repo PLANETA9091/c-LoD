@@ -177,6 +177,18 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
         ("__ATMO_STRENGTH__", fmt_f(0.0)),
         // 26.3 device depth: d = depth_near / eyeZ (infinite far, sky == 0.0).
         ("__DEPTH_NEAR__", fmt_f(cfg.depth_near)),
+        // DH 3.3.4 TAA (terrain/gl/vert.vert): sub-pixel jitter + temporal
+        // accumulation in the persistent clod_hist targets. `taa=0` ships the
+        // v4.11 raw march (both taps and blending gated off in the shader).
+        (
+            "__TAA_ENABLE__",
+            if cfg.taa {
+                "1.0".to_string()
+            } else {
+                "0.0".to_string()
+            },
+        ),
+        ("__TAA_HISTW__", "0.875".to_string()),
     ];
 
     let lod_terrain_json = substitute(lod_terrain_tpl, &map);
@@ -208,7 +220,7 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
     // the pack and every `clod:*` post effect stays "does not exist".
     let mcmeta = concat!(
         "{\"pack\":{",
-        "\"description\":\"c-LoD v3 static LOD terrain (posteffect + heightfield raymarch)\",",
+        "\"description\":\"c-LoD v4.12 static LOD terrain (posteffect + heightfield raymarch + DH TAA)\",",
         "\"min_format\":[97,0],",
         "\"max_format\":[97,1]",
         "}}"
@@ -455,5 +467,58 @@ mod tests {
             !chain.contains("sun_"),
             "sun passes must be gone from the chain"
         );
+    }
+
+    #[test]
+    fn taa_chain_is_wired() {
+        // v4.12.0: the DH TAA stand-in — the march accumulates into the
+        // persistent clod_hist pair, rot_solve fingerprints the solved
+        // camera into rot pixels 2/3 (the 26.3 posteffect pass caps at 12
+        // samplers — a separate fp pass would push lod_terrain to 14), and
+        // ClodTaa carries the toggle.
+        let cfg = Config::parse("");
+        let atlas = Atlas::new(0, 0, 256, 4, 63);
+        let pack = build(&cfg, &atlas);
+        let entries = zip_entries(&pack.zip);
+
+        let chain = &entries
+            .iter()
+            .find(|(n, _)| n == "assets/clod/post_effect/lod_terrain.json")
+            .unwrap()
+            .1;
+        let chain = String::from_utf8_lossy(chain);
+        assert!(
+            chain.contains("clod:post/lod_terrain"),
+            "lod_terrain pass missing"
+        );
+        assert!(chain.contains("clod_hist_a"), "hist target missing");
+        assert!(
+            chain.contains("\"clod_rot_a\": { \"width\": 4"),
+            "rot must be 4 wide"
+        );
+        assert!(chain.contains("ClodTaa"), "TaaParams uniform group missing");
+        assert!(
+            chain.contains("\"persistent\": true"),
+            "persistent targets missing"
+        );
+        assert!(!chain.contains("clod_swap"), "dead clod_swap target left");
+        assert!(!chain.contains("clod_fp"), "dead fp targets left");
+        // renderpearl hard limit: 12 texture bindings per posteffect pass —
+        // lod_terrain must stay under it (In, InDepth, 8 clod textures, Rot,
+        // Prev = 11).
+        let terrain_pass = &chain[chain.find("clod:post/lod_terrain").unwrap()..];
+        let terrain_pass = &terrain_pass[..terrain_pass.find("clod:post/rot_copy").unwrap()];
+        assert_eq!(terrain_pass.matches("\"sampler_name\"").count(), 11);
+
+        // taa=0 must flip the enable uniform off (the shader gates both the
+        // jitter and the blend on it).
+        let cfg_off = Config::parse("taa=0");
+        assert!(!cfg_off.taa, "taa=0 must disable");
+        let atlas2 = Atlas::new(0, 0, 256, 4, 63);
+        let pack_off = build(&cfg_off, &atlas2);
+        let chain_off = String::from_utf8_lossy(&pack_off.zip);
+        let on = chain.contains("[1.0, 0.875");
+        let off = chain_off.contains("[0.0, 0.875");
+        assert!(on && off, "TAA enable token must follow the config");
     }
 }

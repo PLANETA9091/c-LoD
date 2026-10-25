@@ -1,15 +1,16 @@
 #version 330
 #extension GL_ARB_separate_shader_objects : require
 
-// c-LoD pass 4: ping-pong copy for the persistent rotation target
-// (clod_rot_b -> clod_rot_a) so the next frame seeds from the newest solve
+// c-LoD pass: ping-pong copy for the persistent post-effect targets
+// (clod_rot_b -> clod_rot_a and, since v4.12.0, clod_fp_b -> clod_fp_a and
+// clod_hist_b -> clod_hist_a) so the next frame seeds from the newest solve
 // without ever reading and writing the same target in one pass.
 //
-// PER-PIXEL copy: the rot targets are 2x1 — pixel x=0 carries the camera
-// basis, pixel x=1 the day-light factor. This pass used to fetch texel (0,0)
-// for BOTH fragments, which overwrote the day pixel with the camera azimuth
-// every frame: the LOD was lit with a constant bogus dayF (stuck at its
-// daylight look through dusk and night) while the camera channel kept working.
+// PER-PIXEL copy — the pass is target-agnostic (2x1 rot, 1x1 fp, full-screen
+// hist). It used to fetch texel (0,0) for BOTH fragments, which overwrote the
+// day pixel with the camera azimuth every frame: the LOD was lit with a
+// constant bogus dayF (stuck at its daylight look through dusk and night)
+// while the camera channel kept working.
 
 uniform sampler2D InSampler;
 

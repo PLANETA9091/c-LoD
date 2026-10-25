@@ -37,6 +37,10 @@ echo "join-state shot taken (pack prompt expected)"
 # 1280x720 Xvfb: Yes button spans x 489..635, y 376..394 -> center ~562,385).
 # Click twice: the second click is a no-op once the dialog is gone, and it
 # covers flaky first clicks (Xlib warm-up, dropped XTest events).
+# Fresh-sandbox quirk (2026-10-26): python-xlib dies on a missing
+# ~/.Xauthority (XauthError) BEFORE clicking, the e2e script has no -e, so
+# every click silently no-ops and the pack prompt survives the whole matrix.
+touch "$HOME/.Xauthority"
 python3 "$S/click.py" 562 385
 sleep 12
 python3 "$S/click.py" 562 385
