@@ -222,10 +222,15 @@ fn chunk_ids(env: Env, chunk: jobject) -> Option<ChunkIds> {
     Some(ids)
 }
 
-/// `org.bukkit.ChunkSnapshot` — the slice walk's block reader.
+/// `org.bukkit.ChunkSnapshot` — the slice walk's block reader. The light
+/// getters are OPTIONAL: 26.3's API kept the classic `getBlockSkyLight`/
+/// `getBlockEmittedLight` names, but a future rename must only degrade to
+/// the pre-v4.11 visuals (surface light everywhere), never kill the walk.
 #[derive(Clone, Copy)]
 struct SnapshotIds {
     m_get_block_type: jmethodID,
+    m_sky_light: Option<jmethodID>,
+    m_block_light: Option<jmethodID>,
 }
 unsafe impl Send for SnapshotIds {}
 static SNAPSHOT_IDS: Mutex<Option<SnapshotIds>> = Mutex::new(None);
@@ -247,6 +252,8 @@ fn snapshot_ids(env: Env, snap: jobject) -> Option<SnapshotIds> {
             "getBlockType",
             "(III)Lorg/bukkit/Material;",
         )?,
+        m_sky_light: method_or_log(env, cls, "getBlockSkyLight", "(III)I"),
+        m_block_light: method_or_log(env, cls, "getBlockEmittedLight", "(III)I"),
     };
     *SNAPSHOT_IDS.lock().unwrap() = Some(ids);
     Some(ids)
@@ -739,6 +746,29 @@ fn sample_column_impl(
                 block_at(height.max(-64))?
             })?;
 
+            // DH datapoint light (LodDataBuilder lines 200-201): the light at
+            // the block ABOVE the run's top, `getDhBlockLight/getDhSkyLight(x,
+            // y+1, z)`. None (missing light getters) degrades per-band: the
+            // surface band keeps open-sky (0xF0), deeper bands read enclosed
+            // (0x00) — the pre-v4.11 visuals on both sides.
+            let light_at = |y: i32| -> Option<u8> {
+                let sky_m = sid.m_sky_light?;
+                let blk_m = sid.m_block_light?;
+                let lx = x & 15;
+                let lz = z & 15;
+                let sky = env.call_int_method(snap, sky_m, &[ji(lx), ji(y), ji(lz)]);
+                if env.exception_check() {
+                    env.exception_clear();
+                    return None;
+                }
+                let blk = env.call_int_method(snap, blk_m, &[ji(lx), ji(y), ji(lz)]);
+                if env.exception_check() {
+                    env.exception_clear();
+                    return None;
+                }
+                Some((((sky.clamp(0, 15)) << 4) | blk.clamp(0, 15)) as u8)
+            };
+
             let resolve = |m: jobject| -> Option<crate::slices::SliceRun> {
                 let ordinal = env.call_int_method(m, mid.m_ordinal, &[]);
                 clear_if_pending(env);
@@ -764,6 +794,7 @@ fn sample_column_impl(
                     tex_side: info.tex_side,
                     liquid: false,
                     grass: info.grass,
+                    light: 0x00, // set when the band closes
                 })
             };
 
@@ -781,6 +812,7 @@ fn sample_column_impl(
                 tex_side,
                 liquid: is_liquid,
                 grass: band0_grass,
+                light: light_at(height + 1).unwrap_or(0xF0),
             });
             if bands.len() >= RAW {
                 return Some(bands);
@@ -808,6 +840,7 @@ fn sample_column_impl(
                         if let Some(mut band) = cur {
                             band.top = cur_start as i16;
                             band.bottom = (yy + 1) as i16;
+                            band.light = light_at(cur_start + 1).unwrap_or(0x00);
                             if bands.len() >= RAW {
                                 break;
                             }
@@ -831,6 +864,7 @@ fn sample_column_impl(
                 if let Some(mut band) = cur {
                     band.top = cur_start as i16;
                     band.bottom = (yy + 1).max(-65) as i16;
+                    band.light = light_at(cur_start + 1).unwrap_or(0x00);
                     if bands.len() < RAW {
                         bands.push(band);
                     }

@@ -239,17 +239,23 @@ float slice_row_base(float detail0, float L, int n) {
 /// into the CAVE AIR under the matched band (DH: no wall face there);
 /// floorTop = the next band's top (the cave floor plane); the gap* outputs
 /// carry the deeper band's appearance for the cave-floor top face.
+/// bandLight / floorLight (v4.11.0) = the DH datapoint LIGHT bytes
+/// (sky<<4|block, 0-255) of the matched band and of the first band BELOW
+/// the hit (the cave-gap floor — the wall light source). Defaults 240
+/// (open sky) when the query fails or no deeper band exists.
 /// Returns false when the cell carries no slice data (fallback path) or
 /// yHit is above every band top.
 bool slice_band(ivec2 cellId, float L, float n, float yHit,
                 out vec3 col, out float tile, out float liquid,
                 out float grass, out float bandTop, out float bandBot,
                 out float gapBelow, out float floorTop,
-                out vec3 gapCol, out float gapTile) {
+                out vec3 gapCol, out float gapTile,
+                out float bandLight, out float floorLight) {
     col = vec3(0.0); tile = 0.0; liquid = 0.0; grass = 0.0;
     bandTop = 0.0; bandBot = -1.0e4;
     gapBelow = 0.0; floorTop = -1.0e4;
     gapCol = vec3(0.0); gapTile = 0.0;
+    bandLight = 240.0; floorLight = 240.0;
     float detail0 = log2(max(AtlasInfo.w, 2.0));
     int K = slice_k(detail0 + L);
     int nI = int(n);
@@ -280,12 +286,16 @@ bool slice_band(ivec2 cellId, float L, float n, float yHit,
             int fl = int(b.a * 255.0 + 0.5);
             liquid = float((fl >> 1) & 1);
             grass = float((fl >> 2) & 1);
+            bandLight = floor(c.b * 255.0 + 0.5); // DH datapoint light
         } else {
-            // the first band BELOW the hit: its top is the cave floor plane
+            // the first band BELOW the hit: its top is the cave floor plane;
+            // its light is the CAVE-GAP light (DH: a wall against a
+            // transparent neighbour is lit from the point below it)
             deeper = true;
             floorTop = ty;
             gapCol = a.rgb;
             gapTile = floor(b.g * 255.0 + 0.5) * 256.0 + floor(b.b * 255.0 + 0.5);
+            floorLight = floor(c.b * 255.0 + 0.5);
             break; // tops strictly descend
         }
     }
@@ -586,8 +596,9 @@ void main() {
     float hHitNew = 0.0;
     // DH cave air: set once the ray passed through a slice air gap (a cave
     // mouth). Hits after that are CAVE walls/floors — DH lights them from
-    // the stored light data (sky 0), we apply the unlit stand-in; cleared
-    // when the ray re-emerges above a column's surface (open sky again).
+    // the stored light data (v4.11.0: the real per-band sky/block light);
+    // cleared when the ray re-emerges above a column's surface (open sky
+    // again).
     bool caveDepth = false;
 
     for (int i = 0; i < maxSteps; ++i) {
@@ -619,10 +630,11 @@ void main() {
         // the ray; the crossing must still happen inside this cell.
         if (caveDepth && dir.y < 0.0 && !curVoid) {
             float rayYc = cam.y + dir.y * tCur;
-            vec3 fq; float ft_, fl_, fg_, fTop_, fBot_, fGap, fFloor;
+            vec3 fq; float ft_, fl_, fg_, fTop_, fBot_, fGap, fFloor, fBL_, fFL_;
             vec3 fgc; float fgt_;
             if (slice_band(ivec2(cellF), 0.0, cellsN, floor(rayYc),
-                           fq, ft_, fl_, fg_, fTop_, fBot_, fGap, fFloor, fgc, fgt_)
+                           fq, ft_, fl_, fg_, fTop_, fBot_, fGap, fFloor, fgc, fgt_,
+                           fBL_, fFL_)
                 && fGap > 0.5 && fFloor > -9.0e3) {
                 float tFloor = (fFloor - cam.y) / dir.y;
                 if (gEarthR > 1.0 || gEarthR < -1.0) {
@@ -691,10 +703,11 @@ void main() {
             // the neighbour's ground vertex at this distance.
             float hNewR = hNew + curve_drop(tCur * hlen, hNew);
             if (!curVoid && hNewR > rayY) {
-                vec3 sq; float st_, sl_, sg_, sTop_, sBot_, sGap, sFloor;
+                vec3 sq; float st_, sl_, sg_, sTop_, sBot_, sGap, sFloor, sBL_, sFL_;
                 vec3 sgc; float sgt_;
                 if (slice_band(ivec2(cellF), 0.0, cellsN, floor(rayY),
-                               sq, st_, sl_, sg_, sTop_, sBot_, sGap, sFloor, sgc, sgt_)
+                               sq, st_, sl_, sg_, sTop_, sBot_, sGap, sFloor, sgc, sgt_,
+                               sBL_, sFL_)
                     && sGap > 0.5) {
                     // DH: no wall face inside the air gap — keep marching.
                     caveDepth = true;
@@ -805,6 +818,11 @@ void main() {
     float spanT = 0.0;
     float tileId = 0.0;
     vec3 albedo;
+    // DH datapoint light at the hit (sky/block, 0..15). Surface hits keep
+    // open-sky (15, 0) — the existing day/night stand-in; cave hits carry
+    // the REAL light the scan captured (v4.11.0).
+    float lightSky = 15.0;
+    float lightBlk = 0.0;
     if (sideHit) {
         // Directional shade from the crossed grid line: X boundary -> E/W wall.
         shade = hitAxisX ? SHADE_EW : SHADE_NS;
@@ -816,13 +834,36 @@ void main() {
         ivec2 cellId = ivec2(floor(bandUv * float(szL)));
         vec3 bandCol;
         float bandTile, bandLiq, bandGrass, bandTop, bandBot, bandGap, bandFloor;
+        float bandLight, bandFloorLight;
         vec3 bandGapCol;
         float bandGapTile;
         bool hasBand = float(Ls) <= SkyParams.w + 0.5
             && slice_band(cellId, float(Ls), cellsN, floor(rayHitY),
                           bandCol, bandTile, bandLiq, bandGrass, bandTop, bandBot,
-                          bandGap, bandFloor, bandGapCol, bandGapTile);
+                          bandGap, bandFloor, bandGapCol, bandGapTile,
+                          bandLight, bandFloorLight);
         if (hasBand && bandGap < 0.5) {
+            // DH wall light (makeAdjVerticalQuad): sky = the NEIGHBOUR's
+            // light at the wall (the air the ray flew through — the incoming
+            // cell's gap-floor band), block = the wall datapoint's OWN block
+            // light. A missing neighbour column lights the wall sky-MAX (the
+            // slice_band default 240 = 0xF0).
+            float wSky = 240.0;
+            {
+                ivec2 adjId = cellId - ivec2(hitAxisX ? int(stepX) : 0,
+                                             hitAxisX ? 0 : int(stepZ));
+                vec3 aCol; float aTile, aLiq, aGrass, aTop, aBot, aGap, aFloor;
+                float aBL, aFL;
+                vec3 aGapCol; float aGapTile;
+                if (slice_band(adjId, float(Ls), cellsN, floor(rayHitY),
+                               aCol, aTile, aLiq, aGrass, aTop, aBot, aGap, aFloor,
+                               aGapCol, aGapTile, aBL, aFL)
+                    && aGap > 0.5) {
+                    wSky = aFL; // the light of the air gap the ray is in
+                }
+            }
+            lightSky = floor(wSky / 16.0);
+            lightBlk = mod(bandLight, 16.0);
             vec3 base = bandCol;
             if (bandGrass > 0.5) {
                 // DH: the bottom vertex row of a grass wall is recoloured to
@@ -847,17 +888,22 @@ void main() {
         vec2 fUv = atlas_uv(hitPos.xz, origin, size);
         ivec2 fCell = ivec2(clamp(floor(fUv * cellsN), vec2(0.0), vec2(cellsN - 1.0)));
         vec3 fCol;
-        float fTile, fLiq, fGrass, fTop, fBot, fGap, fFloor2;
+        float fTile, fLiq, fGrass, fTop, fBot, fGap, fFloor2, fBandL, fFloorL;
         vec3 fGapCol;
         float fGapTile;
         if (slice_band(fCell, 0.0, cellsN, floor(rayHitY),
                        fCol, fTile, fLiq, fGrass, fTop, fBot, fGap, fFloor2,
-                       fGapCol, fGapTile)
+                       fGapCol, fGapTile, fBandL, fFloorL)
             && fGap < 0.5) {
             albedo = fCol; // top face: shade 1.0
             tileId = fTile;
+            // DH top face: the datapoint's OWN sky/block light (addQuadUp).
+            lightSky = floor(fBandL / 16.0);
+            lightBlk = mod(fBandL, 16.0);
         } else {
             albedo = vec3(0.05); // degenerate: unlit fallback
+            lightSky = 0.0;
+            lightBlk = 0.0;
         }
     } else {
         albedo = topCol; // top faces: shade 1.0
@@ -905,12 +951,24 @@ void main() {
     vec3 nightTint = vec3(0.84, 0.89, 1.08);
     vec3 lit = albedo * lightMul * mix(vec3(1.0), nightTint, 1.0 - dayF);
 
-    // DH cave light: datapoints carry light coords — enclosed caves read
-    // lightmap(0,0), day-INDEPENDENT dark. The ray passed a cave gap
-    // (caveDepth) => this wall/floor is unlit: the flat stand-in replaces
-    // the day/night modulation entirely.
+    // DH cave light (v4.11.0 — the light column is ported): datapoints
+    // carry (sky, block) light — the light at the block above the run's top
+    // (LodDataBuilder lines 200-201). Enclosed caves read (0,0): the vanilla
+    // lightmap curve at the origin, day-INDEPENDENT dark; a torch-lit cave
+    // band carries its block light and glows warm. The curve is the classic
+    // x/(4-3x) lightmap ramp: sky scaled by the reconstructed celestial
+    // brightness (dayF — the surface stand-in above), block carries the
+    // vanilla torch tint. The 0.10 floor keeps unlit caves visible exactly
+    // like the old stand-in (lightmap 0.05-0.25 by brightness setting).
     if (caveDepth) {
-        lit = albedo * 0.15;
+        float sN = lightSky / 15.0;
+        float bN = lightBlk / 15.0;
+        float sCurve = sN / (4.0 - 3.0 * sN);
+        float bCurve = bN / (4.0 - 3.0 * bN);
+        vec3 skyLit = vec3(sCurve * dayF) * mix(vec3(1.0), nightTint, 1.0 - dayF);
+        vec3 blockLit = vec3(bCurve) * vec3(1.0, 0.90, 0.70);
+        vec3 lm = max(max(skyLit, blockLit), vec3(0.10));
+        lit = albedo * lm;
     }
 
     // DH order: the texture multiplies the ALREADY-LIT flat colour

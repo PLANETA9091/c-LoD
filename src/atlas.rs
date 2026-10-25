@@ -24,11 +24,12 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 
-/// On-disk snapshot magic + format version. CLODAT05 stores the DH slice
-/// runs' real bottoms (the cave-gap spans — see [`SliceCell`]); a v04
-/// snapshot is stale by definition (the scan re-runs, restoring the pack
-/// SHA-1 determinism for new bytes).
-const MAGIC: &[u8; 8] = b"CLODAT05";
+/// On-disk snapshot magic + format version. CLODAT06 stores the DH slice
+/// runs' real bottoms (the cave-gap spans — see [`SliceCell`]) PLUS the per-
+/// run light byte (v4.11.0 — the DH datapoint light, `sky << 4 | block`);
+/// a v05 snapshot is stale by definition (the scan re-runs, restoring the
+/// pack SHA-1 determinism for new bytes).
+const MAGIC: &[u8; 8] = b"CLODAT06";
 /// Bytes per cell in the on-disk snapshot: i16 height, u32 top, u32 side,
 /// u8 flags, u16 top tile id, u16 side tile id.
 const CELL_BYTES: usize = 15;
@@ -56,6 +57,9 @@ pub struct SliceCell {
     pub tex_side: [u16; SLICE_RAW],
     /// Per-run flags: bit0 liquid, bit1 grass (DH FADE_TO_DIRT material).
     pub flags: [u8; SLICE_RAW],
+    /// Per-run light byte (`sky << 4 | block`) — the DH datapoint light:
+    /// the light at the block ABOVE the run's top.
+    pub light: [u8; SLICE_RAW],
 }
 
 impl SliceCell {
@@ -69,6 +73,7 @@ impl SliceCell {
                 tex_side: self.tex_side[i],
                 liquid: self.flags[i] & 0b01 != 0,
                 grass: self.flags[i] & 0b10 != 0,
+                light: self.light[i],
             })
             .collect()
     }
@@ -85,6 +90,7 @@ impl SliceCell {
             c.tex_top[i] = r.tex_top;
             c.tex_side[i] = r.tex_side;
             c.flags[i] = u8::from(r.liquid) | (u8::from(r.grass) << 1);
+            c.light[i] = r.light;
         }
         c
     }
@@ -92,8 +98,8 @@ impl SliceCell {
 
 impl crate::slices::SliceRun {
     /// Serialized size: i16 top + i16 bottom + u24 colour + u16 top tile
-    /// + u16 side tile + u8 flags.
-    pub const BYTES: usize = 2 + 2 + 3 + 2 + 2 + 1;
+    /// + u16 side tile + u8 flags + u8 light.
+    pub const BYTES: usize = 2 + 2 + 3 + 2 + 2 + 1 + 1;
 
     fn to_bytes(self, out: &mut Vec<u8>) {
         out.extend_from_slice(&self.top.to_le_bytes());
@@ -102,6 +108,7 @@ impl crate::slices::SliceRun {
         out.extend_from_slice(&self.tex_top.to_le_bytes());
         out.extend_from_slice(&self.tex_side.to_le_bytes());
         out.push(u8::from(self.liquid) | (u8::from(self.grass) << 1));
+        out.push(self.light);
     }
 
     fn from_bytes(buf: &[u8], o: usize) -> Self {
@@ -113,6 +120,7 @@ impl crate::slices::SliceRun {
             tex_side: u16::from_le_bytes([buf[o + 9], buf[o + 10]]),
             liquid: buf[o + 11] & 0b01 != 0,
             grass: buf[o + 11] & 0b10 != 0,
+            light: buf[o + 12],
         }
     }
 }
@@ -605,6 +613,9 @@ impl Atlas {
     //   texel C: R/G = low/high byte of (bottom+64)<<6 — the run's REAL
     //            solid floor; the air between bottom and the next run's top
     //            is DH's cave air datapoint (the march flies through it).
+    //            B = the run's LIGHT byte (v4.11.0: DH datapoint light,
+    //            sky<<4|block — the light at the block ABOVE the run's top;
+    //            A is spare).
     // The shader recomputes rowBase from the same MEDIUM table, so the
     // layout must stay in sync with lod_terrain.fsh.
     // ---------------------------------------------------------------------
@@ -757,7 +768,7 @@ impl Atlas {
                         &mut px,
                         3 * x + 2,
                         row,
-                        [(b16 & 0xFF) as u8, (b16 >> 8) as u8, 0, 0],
+                        [(b16 & 0xFF) as u8, (b16 >> 8) as u8, r.light, 0],
                     );
                 }
             }
@@ -826,6 +837,7 @@ impl Atlas {
                     tex_side: sc.tex_side[i],
                     liquid: sc.flags[i] & 0b01 != 0,
                     grass: sc.flags[i] & 0b10 != 0,
+                    light: sc.light[i],
                 }
                 .to_bytes(&mut out);
             }
@@ -896,6 +908,7 @@ impl Atlas {
                 sc.tex_top[j] = r.tex_top;
                 sc.tex_side[j] = r.tex_side;
                 sc.flags[j] = u8::from(r.liquid) | (u8::from(r.grass) << 1);
+                sc.light[j] = r.light;
             }
             slices[i] = sc;
             if flags & 0b10 != 0 {
@@ -1091,6 +1104,7 @@ mod tests {
             tex_side: 9,
             liquid: false,
             grass: true,
+            light: 0xF0,
         };
         let dirt = crate::slices::SliceRun {
             top: 8,
@@ -1102,6 +1116,7 @@ mod tests {
             top: 0,
             bottom: -65,
             color: 0x808080,
+            light: 0x00, // enclosed cave band
             ..grass
         };
         a.set(3, 5, 11, false, 0x00FF00, 0x707070, 7, 9);
@@ -1125,6 +1140,7 @@ mod tests {
         // texel C: the real solid bottom (9): ((9+64)<<6) = 4672.
         assert_eq!(px[at(11, 30)], (4672 & 0xFF) as u8, "bottom lo");
         assert_eq!(px[at(11, 30) + 1], (4672 >> 8) as u8, "bottom hi");
+        assert_eq!(px[at(11, 30) + 2], 0xF0, "band light byte (texel C.b)");
         // slice 1 (dirt): row 31; bottom 1 -> ((1+64)<<6) = 4160.
         assert_eq!(&px[at(9, 31)..at(9, 31) + 3], &[0x8B, 0x45, 0x13]);
         assert_eq!(px[at(11, 31)], (4160 & 0xFF) as u8, "dirt bottom lo");
@@ -1132,6 +1148,11 @@ mod tests {
         // slice 2 (stone): row 32; the deepest band's placeholder is -65 -> 0.
         assert_eq!(&px[at(9, 32)..at(9, 32) + 3], &[0x80, 0x80, 0x80]);
         assert_eq!(px[at(11, 32)], 0, "floor placeholder encodes to 0");
+        assert_eq!(
+            px[at(11, 32) + 2],
+            0x00,
+            "enclosed cave band carries light 0"
+        );
         // absent slices stay zero (never sampled).
         assert_eq!(px[at(10, 33) + 3] & 1, 0);
         // a cell without slices stays absent.
@@ -1159,6 +1180,7 @@ mod tests {
             tex_side: 301,
             liquid: false,
             grass: true,
+            light: 0xF0,
         };
         let water = crate::slices::SliceRun {
             top: 62,
@@ -1192,6 +1214,7 @@ mod tests {
             tex_side: 0,
             liquid: false,
             grass: false,
+            light: 0xF0,
         };
         a.set_slices(1, 1, &[r]);
         let v1 = a.version();

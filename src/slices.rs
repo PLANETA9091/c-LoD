@@ -48,9 +48,20 @@
 //! Air gaps between runs are REAL here: the scan cuts bands on air, the
 //! runs carry explicit `bottom`s, and the renderer treats a wall hit inside
 //! a gap as no-hit (the ray flies through the cave mouth exactly like DH's
-//! missing wall face). Documented deviation: DH lights datapoints from the
-//! stored light data; we have no light column, so a ray that passed a gap
-//! (caveDepth) darkens the hit — the unlit-cave stand-in.
+//! missing wall face).
+//!
+//! LIGHT (v4.11.0, `LodDataBuilder.createFromChunk` lines 157-260):
+//! every datapoint carries `(blockLight, skyLight)` = the light AT the block
+//! ABOVE its top (`getDhBlockLight/getDhSkyLight(x, y+1, z)`); the air column
+//! above the surface is hardcoded (0, 15). The 2x2 merge averages the light
+//! of the sub-columns that voted FOR the winner
+//! (`determineAverageValueInColumnSliceWithId` — light from an outvoted
+//! block must not bleed in) and SPLITS the accumulated datapoint when the
+//! averaged light changes (`id != lastId || blockLight != last || skyLight
+//! != last`). The reducer's light travels with the node untouched. The
+//! byte packs `sky << 4 | block` (the terrain vertex convention: sky =
+//! meta/16, block = meta%16). The shader samples the vanilla lightmap
+//! curve at (sky, block) — enclosed caves read (0,0), day-independent.
 
 /// One vertical run of a column: solid blocks `[bottom, top]` (the top
 /// block's Y; the atlas surface plane convention keeps the top face at
@@ -75,6 +86,9 @@ pub struct SliceRun {
     /// DH LodQuadBuilder FADE_TO_DIRT: grass-material walls fade to the dirt
     /// colour across the band (EDhApiBlockMaterial.GRASS).
     pub grass: bool,
+    /// DH datapoint light: the light at the block ABOVE the run's top —
+    /// packed `sky << 4 | block` (0xF0 = open sky, 0x00 = enclosed cave).
+    pub light: u8,
 }
 
 /// EDhApiVerticalQuality.MEDIUM.maxVerticalData — DH default quality,
@@ -168,6 +182,9 @@ pub fn merge_two_by_two(cols: [&[SliceRun]; 4]) -> Vec<SliceRun> {
     // child's own datapoint, which may extend over spans it lost).
     let mut acc_top = 0i64;
     let mut acc_bottom = 0i64;
+    // The accumulated datapoint's AVERAGED light (DH carries lastBlockLight
+    // / lastSkyLight through the same loop).
+    let mut acc_light = 0u8;
 
     for w in 0..transitions.len().saturating_sub(1) {
         let slice_min = transitions[w];
@@ -224,6 +241,7 @@ pub fn merge_two_by_two(cols: [&[SliceRun]; 4]) -> Vec<SliceRun> {
                 out.push(SliceRun {
                     top: clamp_top(acc_top),
                     bottom: clamp_bottom(acc_bottom),
+                    light: acc_light,
                     ..a
                 });
             }
@@ -231,12 +249,39 @@ pub fn merge_two_by_two(cols: [&[SliceRun]; 4]) -> Vec<SliceRun> {
             continue;
         };
 
+        // determineAverageValueInColumnSliceWithId: average the light of the
+        // sub-columns that voted FOR the winning id (outvoted light must not
+        // bleed — "surface water" brightening the sand below); when no voter
+        // matches (all four different) DH falls back to averaging all four.
+        // Integer floor division per channel, exactly like DH's int math.
+        let mut sky_sum = 0u32;
+        let mut block_sum = 0u32;
+        let mut n = 0u32;
+        for v in votes.iter().flatten() {
+            if same_run(v, win) {
+                sky_sum += u32::from(v.light >> 4);
+                block_sum += u32::from(v.light & 0xF);
+                n += 1;
+            }
+        }
+        if n == 0 {
+            for v in votes.iter().flatten() {
+                sky_sum += u32::from(v.light >> 4);
+                block_sum += u32::from(v.light & 0xF);
+                n += 1;
+            }
+        }
+        let win_light = (((sky_sum / n) << 4) | (block_sum / n)) as u8;
+
         // Adjacent spans with equal data extend the accumulated datapoint;
         // its bounds ride the SPANS (see the module docs for why the child's
-        // own top/bottom would be wrong here).
+        // own top/bottom would be wrong here). A light change CLOSES the
+        // accumulated datapoint (DH: id != lastId || blockLight != last ||
+        // skyLight != last -> new datapoint) — cave light transitions stay
+        // banded after the merge.
         let span_top_block = slice_max - 1;
         match acc {
-            Some(ref a) if same_run(a, win) => {
+            Some(ref a) if same_run(a, win) && a.light == win_light => {
                 acc_top = span_top_block;
             }
             _ => {
@@ -244,10 +289,15 @@ pub fn merge_two_by_two(cols: [&[SliceRun]; 4]) -> Vec<SliceRun> {
                     out.push(SliceRun {
                         top: clamp_top(acc_top),
                         bottom: clamp_bottom(acc_bottom),
+                        light: acc_light,
                         ..a
                     });
                 }
-                acc = Some(*win);
+                acc = Some(SliceRun {
+                    light: win_light,
+                    ..*win
+                });
+                acc_light = win_light;
                 acc_top = span_top_block;
                 acc_bottom = slice_min;
             }
@@ -257,6 +307,7 @@ pub fn merge_two_by_two(cols: [&[SliceRun]; 4]) -> Vec<SliceRun> {
         out.push(SliceRun {
             top: clamp_top(acc_top),
             bottom: clamp_bottom(acc_bottom),
+            light: acc_light,
             ..a
         });
     }
@@ -557,6 +608,7 @@ mod tests {
             tex_side: 0,
             liquid: false,
             grass: false,
+            light: 0xF0, // open sky
         }
     }
 
@@ -837,5 +889,51 @@ mod tests {
         let one = reduce_to_one(&c).unwrap();
         assert_eq!(one.color, 0x00FF00, "highest datapoint's colour");
         assert_eq!(one.top, 5);
+    }
+
+    // ------------------------------------------------------------------
+    // LIGHT (v4.11.0): FullDataSourceV2 lines 887-918 + lines 901-903.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn merge_averages_light_from_winners_only() {
+        // Surface water (dark column) next to sand (lit column): the shared
+        // span votes 2 vs 1 (stone wins over dirt below) — light must come
+        // from the two STONE columns only, not from the outvoted dirt.
+        let mut a = run(9, 0x808080);
+        a.light = 0xA5; // sky 10, block 5
+        let mut b = run(9, 0x808080);
+        b.light = 0x51; // sky 5, block 1
+        let mut c = run(3, 0x8B4513); // dirt: outvoted, light must not bleed
+        c.light = 0x0F;
+        let merged = merge_two_by_two([&[a], &[b], &[c], &[]]);
+        assert_eq!(merged.len(), 1);
+        // sky (10+5)/2 = 7, block (5+1)/2 = 3 -> 0x73
+        assert_eq!(merged[0].light, 0x73);
+    }
+
+    #[test]
+    fn merge_splits_datapoints_on_light_change() {
+        // Same colour both spans, different averaged light: DH keeps TWO
+        // datapoints (id != lastId || light != last -> new datapoint).
+        let mut lo = run(1, 0x808080);
+        lo.light = 0x00; // enclosed
+        let mut hi = run(9, 0x808080);
+        hi.light = 0xF0; // open sky
+        let merged = merge_two_by_two([&[hi, lo], &[hi, lo], &[hi, lo], &[hi, lo]]);
+        assert_eq!(merged.len(), 2, "light change closes the accumulator");
+        assert_eq!(merged[0].light, 0xF0);
+        assert_eq!(merged[0].top, 9);
+        assert_eq!(merged[1].light, 0x00);
+    }
+
+    #[test]
+    fn merge_same_light_extends_the_datapoint() {
+        let mut a = run(9, 0x808080);
+        a.light = 0x80;
+        let merged = merge_two_by_two([&[a], &[a], &[a], &[a]]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].light, 0x80);
+        assert_eq!(merged[0].top, 9);
     }
 }
