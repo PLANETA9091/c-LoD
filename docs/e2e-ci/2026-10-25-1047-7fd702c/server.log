@@ -1,0 +1,530 @@
+[launcher] kernel:  /home/runner/mc-test/dist/versions/paper-26.3.jar
+[launcher] agent:   /home/runner/mc-test/dist/libcrussty_runtime.so
+[launcher] modules: /home/runner/mc-test/dist/modules (recursive)
+[launcher] exec: /usr/lib/jvm/temurin-25-jdk-amd64/bin/java -agentpath:/home/runner/mc-test/dist/libcrussty_runtime.so=modules=/home/runner/mc-test/dist/modules;versions=/home/runner/mc-test/dist/versions;kernel=paper-26.3.jar -Xms256M -Xmx3G -XX:MaxMetaspaceSize=256M -XX:MaxDirectMemorySize=128M -XX:+UseG1GC -Ddist.root=/home/runner/mc-test/dist -jar /home/runner/mc-test/dist/versions/paper-26.3.jar --nogui
+[crussty-runtime] v2.0.0 loaded (options: modules=/home/runner/mc-test/dist/modules;versions=/home/runner/mc-test/dist/versions;kernel=paper-26.3.jar)
+[c-LoD] booting: atlas 1024x1024 blocks (cell 4), http :8199, fov 70, static pack (scan deadline 500s, cache on)
+[cplug-sdk] log dropped (kernel not ready): [c-LoD] booting: atlas 1024x1024 blocks (cell 4), http :8199, fov 70, static pack (scan deadline 500s, cache on)
+[c-LoD] c-LoD v3.0: static pack mode — one finalize per session, zero rebuilds, zero re-pushes
+[cplug-sdk] log dropped (kernel not ready): [c-LoD] c-LoD v3.0: static pack mode — one finalize per session, zero rebuilds, zero re-pushes
+[crussty-runtime] module lod -> init rc=0
+[crussty-runtime] pipeline ready: 1 module hook(s)
+[c-LoD] c-LoD pack server listening on 0.0.0.0:8199 (GET /clod-pack.zip)
+[crussty-rcon] RCON-WATCH installed (2s cadence)
+[crussty-runtime] transform engine: 23 rule(s) registered
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/SchedulerHooks" }
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/StorageHooks" }
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/NetHooks" }
+[cplug-sdk] log dropped (kernel not ready): [c-LoD] c-LoD pack server listening on 0.0.0.0:8199 (GET /clod-pack.zip)
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/TickHook" }
+[crussty-runtime] transform hook classes installed (4); transform engine armed
+[crussty:hot-reload] SIGUSR1 reload trigger armed (1 module(s) reloadable)
+Downloading mojang_26.3.jar
+Applying patches
+Starting org.bukkit.craftbukkit.Main
+2026-10-25T10:36:49.865924080Z ServerMain WARN Advanced terminal features are not available in this environment
+[10:36:50 INFO]: [bootstrap] Running Java 25 (OpenJDK 64-Bit Server VM 25.0.4.1+1-LTS; Eclipse Adoptium Temurin-25.0.4.1+1) on Linux 6.17.0-1022-azure (amd64)
+[10:36:50 INFO]: [bootstrap] Loading Paper 26.3-222-main@e3ba7b1 (2026-10-24T13:18:21Z) for Minecraft 26.3
+[10:36:50 INFO]: [PluginInitializerManager] Initializing plugins...
+[10:36:51 INFO]: [PluginInitializerManager] Initialized 0 plugins
+[c-LoD] kernel ready — starting engine loop
+[cplug-sdk] log emit failed: [c-LoD] kernel ready — starting engine loop
+[10:36:55 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Initialising converters for DataConverter...
+[10:36:55 INFO]: [com.destroystokyo.paper.profile.PaperServicesDiscoveryService] Environment: Environment[discoveryUrl=https://discovery.minecraftservices.com/minecraft/client, name=PROD]
+[10:36:56 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Finished initialising converters for DataConverter in 705.9ms
+[10:36:56 INFO]: Found new data pack paper, loading it automatically
+[10:36:57 INFO]: No existing world data, creating new world
+[10:36:58 INFO]: Loaded 1866 advancements
+[10:36:58 INFO]: Starting minecraft server version 26.3
+[10:36:58 INFO]: Loading properties
+[10:36:58 INFO]: This server is running Paper version 26.3-222-main@e3ba7b1 (2026-10-24T13:18:21Z) (Implementing API version 26.3.build.222-stable)
+[10:36:58 INFO]: [spark] This server bundles the spark profiler. For more information please visit https://docs.papermc.io/paper/profiling
+[10:36:59 INFO]: Server Ping Player Sample Count: 12
+[10:36:59 INFO]: Using 4 threads for Netty based IO
+[10:36:59 INFO]: [MoonriseCommon] Paper is using 1 worker threads, 1 I/O threads
+[10:36:59 INFO]: Default game type: SURVIVAL
+[10:36:59 INFO]: Generating keypair
+[10:36:59 INFO]: Starting Minecraft server on *:25565
+[10:36:59 INFO]: Paper: Using libdeflate (Linux x86_64) compression from Velocity.
+[10:36:59 INFO]: Paper: Using OpenSSL 3.x.x (Linux x86_64) cipher from Velocity.
+[10:36:59 WARN]: **** SERVER IS RUNNING IN OFFLINE/INSECURE MODE!
+[10:36:59 WARN]: The server will make no attempt to authenticate usernames. Beware.
+[10:36:59 WARN]: While this makes the game possible to play without internet access, it also opens up the ability for hackers to connect with any username they choose.
+[10:36:59 WARN]: To change this, set "online-mode" to "true" in the server.properties file.
+[10:36:59 INFO]: Preparing level "world"
+[10:37:00 INFO]: Selecting spawn point for level 'minecraft:overworld'...
+[10:37:03 INFO]: Selecting spawn point for level 'minecraft:the_nether'...
+[10:37:04 INFO]: Selecting spawn point for level 'minecraft:the_end'...
+[10:37:05 INFO]: Loading 0 persistent chunks for level 'minecraft:overworld'...
+[10:37:05 INFO]: Preparing spawn area: 100%
+[c-LoD] c-LoD JNI bridge resolved: true
+[c-LoD] c-LoD atlas world: world
+[10:37:05 INFO]: [c-LoD] c-LoD JNI bridge resolved: true
+[10:37:05 INFO]: [c-LoD] c-LoD atlas world: world
+[10:37:09 INFO]: [c-LoD] scan: tick 0, atlas v513 (512/65536 cells chunks 32/4096), ok=512 unloaded=0 err=0
+[c-LoD] scan: tick 0, atlas v513 (512/65536 cells chunks 32/4096), ok=512 unloaded=0 err=0
+[c-LoD] scan: tick 25, atlas v13313 (13312/65536 cells chunks 832/4096), ok=13312 unloaded=0 err=0
+[10:37:32 INFO]: [c-LoD] scan: tick 25, atlas v13313 (13312/65536 cells chunks 832/4096), ok=13312 unloaded=0 err=0
+[c-LoD] scan: tick 50, atlas v26113 (26112/65536 cells chunks 1632/4096), ok=26112 unloaded=0 err=0
+[10:37:50 INFO]: [c-LoD] scan: tick 50, atlas v26113 (26112/65536 cells chunks 1632/4096), ok=26112 unloaded=0 err=0
+[c-LoD] scan: tick 75, atlas v38913 (38912/65536 cells chunks 2432/4096), ok=38912 unloaded=0 err=0
+[10:38:08 INFO]: [c-LoD] scan: tick 75, atlas v38913 (38912/65536 cells chunks 2432/4096), ok=38912 unloaded=0 err=0
+[c-LoD] scan: tick 100, atlas v51713 (51712/65536 cells chunks 3232/4096), ok=51712 unloaded=0 err=0
+[10:38:25 INFO]: [c-LoD] scan: tick 100, atlas v51713 (51712/65536 cells chunks 3232/4096), ok=51712 unloaded=0 err=0
+[c-LoD] scan: tick 125, atlas v63532 (63372/65536 cells chunks 4032/4096), ok=63564 unloaded=0 err=0
+[10:38:41 INFO]: [c-LoD] scan: tick 125, atlas v63532 (63372/65536 cells chunks 4032/4096), ok=63564 unloaded=0 err=0
+[c-LoD] scan: tick 150, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 150, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 175, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 200, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 175, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 225, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 250, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 275, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 300, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 325, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 350, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 200, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 225, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 250, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 275, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 300, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 325, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 350, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 375, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 375, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 400, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 425, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 400, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 425, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 450, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 475, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 500, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 450, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 475, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 500, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 525, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 550, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 525, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 550, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 575, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 600, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 625, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 650, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 675, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 700, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 725, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 575, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 600, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 625, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 650, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 675, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 700, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 725, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 750, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 750, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 775, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 775, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 800, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 800, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 825, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 825, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 850, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 850, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 875, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 875, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 900, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 900, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 925, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 925, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 950, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 975, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1000, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1025, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1050, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1075, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1100, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 950, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 975, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 1000, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 1025, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 1050, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 1075, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: [c-LoD] scan: tick 1100, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:38:43 INFO]: Prepared spawn area in 102931 ms
+[10:38:43 INFO]: Loading 0 persistent chunks for level 'minecraft:the_nether'...
+[10:38:43 INFO]: Preparing spawn area: 100%
+[10:38:43 INFO]: Prepared spawn area in 99066 ms
+[10:38:43 INFO]: Loading 0 persistent chunks for level 'minecraft:the_end'...
+[10:38:43 INFO]: Preparing spawn area: 100%
+[10:38:43 INFO]: Prepared spawn area in 98228 ms
+[10:38:43 INFO]: Done preparing level "world" (103.265s)
+[10:38:43 INFO]: [spark] Starting background profiler...
+[10:38:45 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:overworld
+[10:38:55 WARN]: [spark] Timed out waiting for world statistics
+[10:39:02 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_nether
+[10:39:02 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_end
+[10:39:02 INFO]: Running delayed init tasks
+[10:39:02 INFO]: Done (134.692s)! For help, type "help"
+[10:39:02 INFO]: *************************************************************************************
+[10:39:02 INFO]: This is the first time you're starting this server.
+[10:39:02 INFO]: It's recommended you read our 'Getting Started' documentation for guidance.
+[10:39:02 INFO]: View this and more helpful information here: https://docs.papermc.io/paper/next-steps
+[10:39:02 INFO]: *************************************************************************************
+[c-LoD] scan: tick 1125, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:02 INFO]: [c-LoD] scan: tick 1125, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1150, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:02 INFO]: [c-LoD] scan: tick 1150, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1175, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1200, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:02 INFO]: [c-LoD] scan: tick 1175, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:02 INFO]: [c-LoD] scan: tick 1200, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1225, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:02 INFO]: [c-LoD] scan: tick 1225, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1250, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:02 INFO]: [c-LoD] scan: tick 1250, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1275, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1300, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:02 INFO]: [c-LoD] scan: tick 1275, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:02 INFO]: [c-LoD] scan: tick 1300, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:03 INFO]: [c-LoD] c-LoD server tick loop live (game time 0 -> 1) — heavy work (warm-up, scan) starts
+[10:39:03 INFO]: [c-LoD] c-LoD streaming scan: no pinned warm core — each scan chunk force-loads itself
+[c-LoD] c-LoD server tick loop live (game time 0 -> 1) — heavy work (warm-up, scan) starts
+[c-LoD] c-LoD streaming scan: no pinned warm core — each scan chunk force-loads itself
+[c-LoD] scan: tick 1325, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:04 INFO]: [c-LoD] scan: tick 1325, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:06 INFO]: [c-LoD] scan: tick 1350, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1350, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1375, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:09 INFO]: [c-LoD] scan: tick 1375, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1400, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:11 INFO]: [c-LoD] scan: tick 1400, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1425, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:14 INFO]: [c-LoD] scan: tick 1425, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1450, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:16 INFO]: [c-LoD] scan: tick 1450, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1475, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:19 INFO]: [c-LoD] scan: tick 1475, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1500, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:21 INFO]: [c-LoD] scan: tick 1500, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1525, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:24 INFO]: [c-LoD] scan: tick 1525, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1550, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:26 INFO]: [c-LoD] scan: tick 1550, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1575, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:29 INFO]: [c-LoD] scan: tick 1575, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1600, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:32 INFO]: [c-LoD] scan: tick 1600, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1625, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:34 INFO]: [c-LoD] scan: tick 1625, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1650, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:37 INFO]: [c-LoD] scan: tick 1650, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1675, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:39 INFO]: [c-LoD] scan: tick 1675, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1700, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:42 INFO]: [c-LoD] scan: tick 1700, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1725, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:44 INFO]: [c-LoD] scan: tick 1725, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1750, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:47 INFO]: [c-LoD] scan: tick 1750, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1775, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:49 INFO]: [c-LoD] scan: tick 1775, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1800, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:52 INFO]: [c-LoD] scan: tick 1800, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1825, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:54 INFO]: [c-LoD] scan: tick 1825, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1850, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:57 INFO]: [c-LoD] scan: tick 1850, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1875, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:39:59 INFO]: [c-LoD] scan: tick 1875, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1900, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:02 INFO]: [c-LoD] scan: tick 1900, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1925, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:04 INFO]: [c-LoD] scan: tick 1925, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1950, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:07 INFO]: [c-LoD] scan: tick 1950, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 1975, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:09 INFO]: [c-LoD] scan: tick 1975, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2000, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:12 INFO]: [c-LoD] scan: tick 2000, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2025, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:14 INFO]: [c-LoD] scan: tick 2025, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2050, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:17 INFO]: [c-LoD] scan: tick 2050, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2075, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:19 INFO]: [c-LoD] scan: tick 2075, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2100, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:22 INFO]: [c-LoD] scan: tick 2100, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2125, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:24 INFO]: [c-LoD] scan: tick 2125, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2150, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:27 INFO]: [c-LoD] scan: tick 2150, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2175, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:29 INFO]: [c-LoD] scan: tick 2175, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2200, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:32 INFO]: [c-LoD] scan: tick 2200, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2225, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:34 INFO]: [c-LoD] scan: tick 2225, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2250, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:37 INFO]: [c-LoD] scan: tick 2250, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2275, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:39 INFO]: [c-LoD] scan: tick 2275, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2300, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:42 INFO]: [c-LoD] scan: tick 2300, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2325, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:44 INFO]: [c-LoD] scan: tick 2325, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2350, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:47 INFO]: [c-LoD] scan: tick 2350, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2375, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:49 INFO]: [c-LoD] scan: tick 2375, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2400, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:52 INFO]: [c-LoD] scan: tick 2400, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2425, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:54 INFO]: [c-LoD] scan: tick 2425, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2450, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:57 INFO]: [c-LoD] scan: tick 2450, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2475, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:40:59 INFO]: [c-LoD] scan: tick 2475, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2500, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:02 INFO]: [c-LoD] scan: tick 2500, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2525, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:04 INFO]: [c-LoD] scan: tick 2525, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2550, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:07 INFO]: [c-LoD] scan: tick 2550, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2575, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:09 INFO]: [c-LoD] scan: tick 2575, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2600, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:12 INFO]: [c-LoD] scan: tick 2600, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2625, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:14 INFO]: [c-LoD] scan: tick 2625, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2650, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:17 INFO]: [c-LoD] scan: tick 2650, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2675, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:19 INFO]: [c-LoD] scan: tick 2675, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2700, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:22 INFO]: [c-LoD] scan: tick 2700, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2725, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:24 INFO]: [c-LoD] scan: tick 2725, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2750, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:27 INFO]: [c-LoD] scan: tick 2750, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2775, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:29 INFO]: [c-LoD] scan: tick 2775, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2800, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:32 INFO]: [c-LoD] scan: tick 2800, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2825, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:34 INFO]: [c-LoD] scan: tick 2825, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2850, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:37 INFO]: [c-LoD] scan: tick 2850, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2875, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:39 INFO]: [c-LoD] scan: tick 2875, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2900, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:42 INFO]: [c-LoD] scan: tick 2900, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2925, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:44 INFO]: [c-LoD] scan: tick 2925, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2950, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:47 INFO]: [c-LoD] scan: tick 2950, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 2975, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:49 INFO]: [c-LoD] scan: tick 2975, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3000, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:52 INFO]: [c-LoD] scan: tick 3000, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3025, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:54 INFO]: [c-LoD] scan: tick 3025, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3050, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:57 INFO]: [c-LoD] scan: tick 3050, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3075, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:41:59 INFO]: [c-LoD] scan: tick 3075, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3100, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:02 INFO]: [c-LoD] scan: tick 3100, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3125, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:04 INFO]: [c-LoD] scan: tick 3125, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3150, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:07 INFO]: [c-LoD] scan: tick 3150, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3175, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:09 INFO]: [c-LoD] scan: tick 3175, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3200, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:12 INFO]: [c-LoD] scan: tick 3200, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3225, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:14 INFO]: [c-LoD] scan: tick 3225, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3250, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:17 INFO]: [c-LoD] scan: tick 3250, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3275, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:19 INFO]: [c-LoD] scan: tick 3275, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3300, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:22 INFO]: [c-LoD] scan: tick 3300, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3325, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:24 INFO]: [c-LoD] scan: tick 3325, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3350, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:27 INFO]: [c-LoD] scan: tick 3350, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3375, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:29 INFO]: [c-LoD] scan: tick 3375, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3400, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:32 INFO]: [c-LoD] scan: tick 3400, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3425, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:34 INFO]: [c-LoD] scan: tick 3425, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3450, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:37 INFO]: [c-LoD] scan: tick 3450, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3475, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:39 INFO]: [c-LoD] scan: tick 3475, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3500, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:42 INFO]: [c-LoD] scan: tick 3500, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3525, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:44 INFO]: [c-LoD] scan: tick 3525, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3550, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:47 INFO]: [c-LoD] scan: tick 3550, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3575, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:49 INFO]: [c-LoD] scan: tick 3575, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3600, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:52 INFO]: [c-LoD] scan: tick 3600, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3625, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:54 INFO]: [c-LoD] scan: tick 3625, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3650, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:57 INFO]: [c-LoD] scan: tick 3650, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3675, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:42:59 INFO]: [c-LoD] scan: tick 3675, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3700, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:02 INFO]: [c-LoD] scan: tick 3700, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3725, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:04 INFO]: [c-LoD] scan: tick 3725, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3750, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:07 INFO]: [c-LoD] scan: tick 3750, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3775, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:09 INFO]: [c-LoD] scan: tick 3775, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3800, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:12 INFO]: [c-LoD] scan: tick 3800, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3825, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:14 INFO]: [c-LoD] scan: tick 3825, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3850, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:17 INFO]: [c-LoD] scan: tick 3850, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3875, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:19 INFO]: [c-LoD] scan: tick 3875, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3900, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:22 INFO]: [c-LoD] scan: tick 3900, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3925, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:24 INFO]: [c-LoD] scan: tick 3925, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3950, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:27 INFO]: [c-LoD] scan: tick 3950, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 3975, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:29 INFO]: [c-LoD] scan: tick 3975, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4000, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:32 INFO]: [c-LoD] scan: tick 4000, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4025, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:34 INFO]: [c-LoD] scan: tick 4025, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4050, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:37 INFO]: [c-LoD] scan: tick 4050, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4075, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:39 INFO]: [c-LoD] scan: tick 4075, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4100, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:42 INFO]: [c-LoD] scan: tick 4100, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4125, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:44 INFO]: [c-LoD] scan: tick 4125, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4150, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:47 INFO]: [c-LoD] scan: tick 4150, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4175, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:49 INFO]: [c-LoD] scan: tick 4175, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4200, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:52 INFO]: [c-LoD] scan: tick 4200, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4225, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:54 INFO]: [c-LoD] scan: tick 4225, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4250, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:57 INFO]: [c-LoD] scan: tick 4250, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4275, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:43:59 INFO]: [c-LoD] scan: tick 4275, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4300, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:02 INFO]: [c-LoD] scan: tick 4300, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4325, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:04 INFO]: [c-LoD] scan: tick 4325, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4350, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:07 INFO]: [c-LoD] scan: tick 4350, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4375, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:09 INFO]: [c-LoD] scan: tick 4375, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4400, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:12 INFO]: [c-LoD] scan: tick 4400, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4425, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:14 INFO]: [c-LoD] scan: tick 4425, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4450, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:17 INFO]: [c-LoD] scan: tick 4450, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4475, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:19 INFO]: [c-LoD] scan: tick 4475, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4500, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:22 INFO]: [c-LoD] scan: tick 4500, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4525, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:25 INFO]: [c-LoD] scan: tick 4525, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4550, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:27 INFO]: [c-LoD] scan: tick 4550, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4575, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:30 INFO]: [c-LoD] scan: tick 4575, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4600, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:32 INFO]: [c-LoD] scan: tick 4600, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4625, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:35 INFO]: [c-LoD] scan: tick 4625, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4650, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:37 INFO]: [c-LoD] scan: tick 4650, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4675, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:40 INFO]: [c-LoD] scan: tick 4675, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4700, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:42 INFO]: [c-LoD] scan: tick 4700, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4725, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:45 INFO]: [c-LoD] scan: tick 4725, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4750, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:47 INFO]: [c-LoD] scan: tick 4750, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4775, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:50 INFO]: [c-LoD] scan: tick 4775, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4800, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:52 INFO]: [c-LoD] scan: tick 4800, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4825, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:55 INFO]: [c-LoD] scan: tick 4825, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4850, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:44:57 INFO]: [c-LoD] scan: tick 4850, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4875, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:45:00 INFO]: [c-LoD] scan: tick 4875, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4900, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:45:02 INFO]: [c-LoD] scan: tick 4900, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4925, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:45:05 INFO]: [c-LoD] scan: tick 4925, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4950, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:45:07 INFO]: [c-LoD] scan: tick 4950, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 4975, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:45:10 INFO]: [c-LoD] scan: tick 4975, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 5000, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:45:12 INFO]: [c-LoD] scan: tick 5000, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 5025, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:45:15 INFO]: [c-LoD] scan: tick 5025, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 5050, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:45:17 INFO]: [c-LoD] scan: tick 5050, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 5075, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:45:20 INFO]: [c-LoD] scan: tick 5075, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 5100, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:45:22 INFO]: [c-LoD] scan: tick 5100, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] scan: tick 5125, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[10:45:25 INFO]: [c-LoD] scan: tick 5125, atlas v64201 (64009/65536 cells chunks 4096/4096), ok=64262 unloaded=0 err=0
+[c-LoD] c-LoD atlas snapshot saved: c-LoD-atlas.bin (65536 cells, 983068 bytes)
+[10:45:25 INFO]: [c-LoD] c-LoD atlas snapshot saved: c-LoD-atlas.bin (65536 cells, 983068 bytes)
+[c-LoD] c-LoD pack finalized (ONE-TIME, static): 64009/65536 cells (97%), 550817 bytes, sha1 d60bd6aa5d5fdfff1018dc9eacabbfc65e1f8ed6
+[10:45:25 INFO]: [c-LoD] c-LoD pack finalized (ONE-TIME, static): 64009/65536 cells (97%), 550817 bytes, sha1 d60bd6aa5d5fdfff1018dc9eacabbfc65e1f8ed6
+[c-LoD] c-LoD core force-load released (289 chunks) — static snapshot retained
+[10:45:25 INFO]: [c-LoD] c-LoD core force-load released (289 chunks) — static snapshot retained
+[crussty-runtime] transform 'net/minecraft/network/PacketDecoder' failed; class runs untransformed: StackMapTable entry #0 (full_frame local) [head 00 05 ff 00 1d 00 05 07 00 08 07 00 38 07 00 0e 07 00 65 01 00 01 07 00 21 fd 00 12 00 07 00 21 ff 00 02 00 06 07 00 08 07 00 38 07 00 0e 07 00 65 01 07 00 1f 00 00 fc]: unknown verification_type_info tag 56 (near [00 05 ff 00 1d 00 05 07 00 08 07 00] at abs 12 )
+[crussty-runtime] transform 'net/minecraft/network/PacketEncoder' failed; class runs untransformed: StackMapTable entry #3 (full_frame local) [head 00 09 fd 00 7e 07 00 d6 01 3c 0a ff 00 07 00 05 07 00 08 07 00 18 07 00 0e 07 00 44 07 00 d6 00 01 07 00 97 fc 00 22 07 00 97 ff 00 02 00 05 07 00 08 07 00 18 07 00 0e]: unknown verification_type_info tag 24 (near [00 09 fd 00 7e 07 00 d6 01 3c 0a ff 00 07 00 05 07 00 08 07 00] at abs 21 )
+[10:45:46 INFO]: UUID of player Stepan is d1652ad9-77ce-3200-9642-f973c97adf36
+[10:45:47 INFO]: System chat: Stepan joined the game
+[10:45:47 INFO]: Stepan[/127.0.0.1:48824] logged in with entity id 1777 at ([minecraft:overworld]-482.5, 61.0, 327.5)
+[c-LoD] pack pushed to d1652ad9-77ce-3200-9642-f973c97adf36 (http://10.1.0.19:8199/clod-pack.zip): 550817 bytes, sha1 d60bd6aa5d5fdfff1018dc9eacabbfc65e1f8ed6
+[c-LoD] tier Off -> Full for d1652ad9-77ce-3200-9642-f973c97adf36 at (-483, 327) world
+[10:45:47 INFO]: [c-LoD] pack pushed to d1652ad9-77ce-3200-9642-f973c97adf36 (http://10.1.0.19:8199/clod-pack.zip): 550817 bytes, sha1 d60bd6aa5d5fdfff1018dc9eacabbfc65e1f8ed6
+[10:45:47 INFO]: [c-LoD] tier Off -> Full for d1652ad9-77ce-3200-9642-f973c97adf36 at (-483, 327) world
+[10:46:21 INFO]: System chat: Incorrect argument for command
+gamerule doDaylightCycle false<--[HERE]
+[10:46:21 INFO]: System chat: Set minecraft:overworld to 6000 tick(s)
+[10:46:21 INFO]: System chat: Set the weather to clear
+[10:46:21 INFO]: System chat: Set Stepan's game mode to Spectator Mode
+[10:46:38 INFO]: System chat: Teleported Stepan to -929.670000, 173.380000, 796.370000
+[10:46:43 INFO]: System chat: Teleported Stepan to -929.670000, 173.380000, 796.370000
+[10:46:48 INFO]: System chat: Teleported Stepan to -929.670000, 173.380000, 796.370000
+[10:46:52 INFO]: System chat: Teleported Stepan to -929.670000, 173.380000, 796.370000
+[10:46:57 INFO]: System chat: Teleported Stepan to -929.670000, 240.000000, 796.370000
+[10:47:01 INFO]: System chat: Set minecraft:overworld to 12610 tick(s)
+[10:47:03 INFO]: System chat: Teleported Stepan to -929.670000, 173.380000, 796.370000
+[10:47:08 INFO]: System chat: Set minecraft:overworld to 18000 tick(s)
+[10:47:10 INFO]: System chat: Teleported Stepan to -929.670000, 173.380000, 796.370000
+[10:47:14 INFO]: System chat: Set minecraft:overworld to 6000 tick(s)
+[10:47:16 INFO]: System chat: Teleported Stepan to -929.670000, 173.380000, 796.370000
