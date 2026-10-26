@@ -181,6 +181,62 @@ impl Atlas {
         out
     }
 
+    /// v4.3 streaming: the same sweep, anchored at a PLAYER position instead
+    /// of the atlas center — rings expand outward from where the player is
+    /// actually standing, so newly-loaded chunks (view distance) enter the
+    /// atlas before anything else: the streamed revisions carry exactly the
+    /// terrain the player is looking at (DH-style nearest-first streaming).
+    /// Only cells that are not yet valid are returned; valid cells are
+    /// skipped cheaply so the steady state costs ~nothing.
+    pub fn scan_task_near(&self, bx: i32, bz: i32, count: u32) -> Vec<(u32, u32)> {
+        if count == 0 {
+            return Vec::new();
+        }
+        let Some((pcx, pcz)) = self.cell_index(bx, bz) else {
+            return Vec::new();
+        };
+        let n = self.cells as i32;
+        let mut out: Vec<(u32, u32)> = Vec::with_capacity(count as usize);
+        // Ring-by-ring Chebyshev spiral; each ring walks its perimeter
+        // (deterministic: top row -> right col -> bottom row -> left col).
+        let max_r = (n - 1).max(0);
+        'rings: for r in 0..=max_r {
+            let x0 = (pcx as i32 - r).max(0);
+            let x1 = (pcx as i32 + r).min(n - 1);
+            let z0 = (pcz as i32 - r).max(0);
+            let z1 = (pcz as i32 + r).min(n - 1);
+            // Ring perimeter cells (dedup via visit order, corners once).
+            let mut ring: Vec<(i32, i32)> = Vec::with_capacity((4 * r as usize + 4) * 2);
+            for x in x0..=x1 {
+                ring.push((x, z0));
+            }
+            for z in z0 + 1..=z1 {
+                ring.push((x1, z));
+            }
+            for x in (x0..x1).rev() {
+                ring.push((x, z1));
+            }
+            for z in (z0 + 1..z1).rev() {
+                ring.push((x0, z));
+            }
+            for (x, z) in ring {
+                let valid = self
+                    .data
+                    .read()
+                    .ok()
+                    .and_then(|d| d.get((z * n + x) as usize).map(|c| c.valid))
+                    .unwrap_or(true);
+                if !valid {
+                    out.push((x as u32, z as u32));
+                    if out.len() >= count as usize {
+                        break 'rings;
+                    }
+                }
+            }
+        }
+        out
+    }
+
     /// World X of cell center.
     pub fn cell_world_x(&self, ix: u32) -> i32 {
         self.center_x - self.half() + (ix * self.cell as u32) as i32 + self.cell / 2

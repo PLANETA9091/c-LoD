@@ -168,7 +168,7 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
     // triggered the client warning "missing mandatory fields min_format and
     // max_format" (ResourceMetadata fallback). 97 = resource_major of 26.3
     // (client version.json: resource_major 97, resource_minor 1).
-    let mcmeta = "{\"pack\":{\"description\":\"c-LoD v3 static LOD terrain (posteffect + heightfield raymarch)\",\"min_format\":97,\"max_format\":97}}".to_string();
+    let mcmeta = "{\"pack\":{\"description\":\"c-LoD v4.3 streaming LOD terrain (posteffect + heightfield raymarch, live revisions)\",\"min_format\":97,\"max_format\":97}}".to_string();
 
     let (aw, ah, atlas_rgba) = atlas.encode_rgba();
     let atlas_png = png::encode_png(aw, ah, &atlas_rgba);

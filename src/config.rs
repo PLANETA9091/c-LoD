@@ -31,11 +31,21 @@ pub struct Config {
     pub cell_size: i32,
     /// Heightmap cells scanned per engine tick (main-thread JNI budget).
     pub scan_budget: u32,
-    /// Static-pack scan deadline: seconds from atlas-world resolution until
-    /// the heightmap sweep is finalized with whatever it has. The pack is
-    /// built EXACTLY ONCE per session — either when the sweep completes or
-    /// when this deadline fires, never before, never again.
+    /// Scan deadline: seconds from atlas-world resolution until the BASE
+    /// pack is finalized with whatever the sweep has (v4.3: the base pack is
+    /// rev 0 — with `stream` on, scanning continues afterwards and further
+    /// revisions stream to clients automatically).
     pub scan_deadline_secs: u64,
+    /// v4.3 LOD streaming: keep scanning after the base pack is finalized
+    /// and re-push the pack whenever a revision accumulates new cells.
+    /// Vanilla clients re-download from the same URL only when the SHA-1
+    /// changes — the LOD surface grows live on an unmodified client.
+    pub stream: bool,
+    /// Minimum seconds between streamed pack revisions (rebuild throttle).
+    pub stream_min_secs: u64,
+    /// Minimum NEW cells since the last build before a revision is worth
+    /// shipping (rebuild gate — prevents empty-revision churn).
+    pub stream_min_cells: u64,
     /// Persist the finalized atlas to `atlas_path` (default
     /// `c-LoD-atlas.bin` next to the server) so restarts rebuild the exact
     /// same pack bytes (same SHA-1) and vanilla clients never re-download.
@@ -94,6 +104,9 @@ impl Default for Config {
             cell_size: 4,
             scan_budget: 4096,
             scan_deadline_secs: 900,
+            stream: true,
+            stream_min_secs: 30,
+            stream_min_cells: 256,
             atlas_cache: true,
             atlas_path: "c-LoD-atlas.bin".to_string(),
             warm_chunks: 8,
@@ -165,6 +178,18 @@ impl Config {
         }
         if let Some(v) = get("scan_deadline_secs").and_then(|v| v.parse::<u64>().ok()) {
             cfg.scan_deadline_secs = v.clamp(10, 86400);
+        }
+        if let Some(v) = get("stream") {
+            cfg.stream = !matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "false" | "0" | "off" | "no"
+            );
+        }
+        if let Some(v) = get("stream_min_secs").and_then(|v| v.parse::<u64>().ok()) {
+            cfg.stream_min_secs = v.clamp(5, 3600);
+        }
+        if let Some(v) = get("stream_min_cells").and_then(|v| v.parse::<u64>().ok()) {
+            cfg.stream_min_cells = v.clamp(16, 10_000_000);
         }
         if let Some(v) = get("atlas_cache") {
             cfg.atlas_cache = !matches!(
@@ -280,6 +305,19 @@ mod tests {
     fn rejects_bad_atlas_size() {
         let c = Config::parse("atlas_size=3000");
         assert_eq!(c.atlas_size, 4096);
+    }
+
+    #[test]
+    fn streaming_options() {
+        let c = Config::parse("");
+        assert!(c.stream, "streaming is the default (v4.3)");
+        assert_eq!(c.stream_min_secs, 30);
+        assert_eq!(c.stream_min_cells, 256);
+
+        let c = Config::parse("stream=false;stream_min_secs=1;stream_min_cells=2");
+        assert!(!c.stream);
+        assert_eq!(c.stream_min_secs, 5, "clamped to the floor");
+        assert_eq!(c.stream_min_cells, 16, "clamped to the floor");
     }
 
     #[test]

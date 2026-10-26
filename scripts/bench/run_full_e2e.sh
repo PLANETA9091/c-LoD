@@ -18,7 +18,7 @@ trap cleanup EXIT
 cleanup
 sleep 1
 
-if grep -q "pack finalized (ONE-TIME, static)" /tmp/server.log 2>/dev/null \
+if grep -q "pack finalized (base rev 0)" /tmp/server.log 2>/dev/null \
    && ps aux | grep "[p]aper-26.3" > /dev/null 2>&1; then
   echo "reusing live finalized server"
 else

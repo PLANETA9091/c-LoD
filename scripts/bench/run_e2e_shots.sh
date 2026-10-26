@@ -16,7 +16,7 @@ wait_for() { # pattern, file, timeout_s
 }
 
 # 1. server sanity
-wait_for "pack finalized (ONE-TIME, static)" /tmp/server.log 5 || { echo "server not finalized"; exit 2; }
+wait_for "pack finalized (base rev 0)" /tmp/server.log 5 || { echo "server not finalized"; exit 2; }
 ps aux | grep "[p]aper-26.3" > /dev/null || { echo "server process dead"; exit 2; }
 curl -s -o /tmp/pack_check.zip -w "pack HTTP %{http_code} %{size_download}B\n" http://127.0.0.1:8199/clod-pack.zip
 

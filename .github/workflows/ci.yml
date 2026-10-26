@@ -165,18 +165,18 @@ jobs:
             echo 'server-port=25565'
             echo 'motd=c-LoD CI'
           } > dist/server.properties
-      - name: Boot #1 (fresh world, fast static-pack config)
+      - name: Boot #1 (fresh world, streaming config)
         working-directory: dist
         env:
-          CLOD_OPTS: "scan_deadline_secs=60;tick_ms=200;atlas_size=1024;cell_size=4;http_port=8199"
+          CLOD_OPTS: "scan_deadline_secs=60;tick_ms=200;atlas_size=1024;cell_size=4;http_port=8199;stream_min_secs=20;stream_min_cells=64"
         run: |
           java -Xmx2G -jar launcher.jar > boot1.log 2>&1 &
           SRV=$!
           for i in $(seq 1 180); do
-            if grep -q "pack finalized (ONE-TIME, static)" boot1.log; then break; fi
+            if grep -q "pack finalized (base rev 0)" boot1.log; then break; fi
             sleep 2
           done
-          if ! grep -q "pack finalized (ONE-TIME, static)" boot1.log; then
+          if ! grep -q "pack finalized (base rev 0)" boot1.log; then
             tail -80 boot1.log; kill -9 $SRV 2>/dev/null || true; exit 1
           fi
           echo "--- gates ---"
@@ -190,36 +190,58 @@ jobs:
           kill $SRV 2>/dev/null || true; sleep 3
           pkill -9 -f "launcher.jar" || true; sleep 2
           pkill -9 -f "paper-26.3" || true; true
-      - name: Boot #2 (restart — atlas cache must reproduce the SAME sha1)
+      - name: Boot #2 (restart — atlas cache + streaming revision)
         working-directory: dist
         env:
-          CLOD_OPTS: "scan_deadline_secs=60;tick_ms=200;atlas_size=1024;cell_size=4;http_port=8199"
+          CLOD_OPTS: "scan_deadline_secs=60;tick_ms=200;atlas_size=1024;cell_size=4;http_port=8199;stream_min_secs=20;stream_min_cells=64"
         run: |
-          java -Xmx2G -jar launcher.jar > boot2.log 2>&1 &
+          rm -f in2; mkfifo in2
+          tail -f in2 | java -Xmx2G -jar launcher.jar > boot2.log 2>&1 &
           SRV=$!
+          exec 9>in2
           for i in $(seq 1 180); do
-            if grep -q "pack finalized (ONE-TIME, static)" boot2.log; then break; fi
+            if grep -q "pack finalized (base rev 0)" boot2.log; then break; fi
+            if ! kill -0 $SRV 2>/dev/null; then echo "SERVER DIED"; tail -60 boot2.log; exit 1; fi
             sleep 2
           done
-          if ! grep -q "pack finalized (ONE-TIME, static)" boot2.log; then
+          if ! grep -q "pack finalized (base rev 0)" boot2.log; then
             tail -80 boot2.log; kill -9 $SRV 2>/dev/null || true; exit 1
           fi
           grep -q "atlas restored" boot2.log || { echo "atlas cache was not restored"; tail -80 boot2.log; exit 1; }
           echo "--- gates (boot #2) ---"
           python3 ../scripts/e2e/gates.py boot2.log
+          echo "--- stream a revision server-side (forceload -> scan -> rebuild) ---"
+          REV0=$(curl -s http://127.0.0.1:8199/clod-pack.info | grep '^revision=' | cut -d= -f2)
+          echo "revision before: $REV0"
+          echo 'forceload add -160 -160 -96 -96' >&9
+          for i in $(seq 1 120); do
+            if grep -q 'pack rebuilt (stream rev 1)' boot2.log; then break; fi
+            if ! kill -0 $SRV 2>/dev/null; then echo "SERVER DIED mid-stream"; tail -40 boot2.log; exit 1; fi
+            sleep 1
+          done
+          grep -q 'pack rebuilt (stream rev 1)' boot2.log || { echo 'FAIL: no streamed revision after forceload'; tail -40 boot2.log; exit 1; }
+          REV1=$(curl -s http://127.0.0.1:8199/clod-pack.info | grep '^revision=' | cut -d= -f2)
+          echo "revision after: $REV1"
+          test "$REV1" -gt "$REV0" || { echo "FAIL: HTTP revision did not advance"; exit 1; }
+          SHA_Z=$(curl -s http://127.0.0.1:8199/clod-pack.sha1)
+          SHA_L=$(grep -o 'sha1 [0-9a-f]\{40\}' boot2.log | tail -1 | cut -d' ' -f2)
+          test "$SHA_Z" = "$SHA_L" || { echo "FAIL: served sha1 != log sha1"; exit 1; }
+          echo "streamed revision verified server-side: rev $REV0 -> $REV1"
           echo "--- stopping boot #2 ---"
           kill $SRV 2>/dev/null || true; sleep 3
           pkill -9 -f "launcher.jar" || true; sleep 2
           pkill -9 -f "paper-26.3" || true; true
-      - name: Static-pack SHA-1 stability across restarts
+      - name: Pack SHA-1 stability across restarts (last saved state)
         working-directory: dist
         run: |
-          S1=$(grep -o 'sha1 [0-9a-f]\{40\}' boot1.log | head -1 | cut -d' ' -f2)
+          # v4.3: boot1 keeps streaming after finalize, so compare the LAST
+          # sha1 boot1 shipped (= last atlas snapshot saved) against the base
+          # sha1 boot2 restored. Equal bytes = clients never re-download.
+          S1=$(grep -o 'sha1 [0-9a-f]\{40\}' boot1.log | tail -1 | cut -d' ' -f2)
           S2=$(grep -o 'sha1 [0-9a-f]\{40\}' boot2.log | head -1 | cut -d' ' -f2)
-          echo "boot1 sha1: $S1"; echo "boot2 sha1: $S2"
+          echo "boot1 last sha1: $S1"; echo "boot2 base sha1: $S2"
           test -n "$S1" && test -n "$S2"
           test "$S1" = "$S2" || { echo "FAIL: restart changed the pack sha1 — clients would re-download"; exit 1; }
-          python3 ../scripts/e2e/gates.py boot2.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

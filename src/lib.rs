@@ -68,17 +68,20 @@ pub unsafe extern "C" fn cplugin_init(
     };
     let cfg = config::Config::parse(&opts);
     log_info(&format!(
-        "booting: atlas {}x{} blocks (cell {}), http :{}, fov {}, static pack (scan deadline {}s, cache {})",
+        "booting: atlas {}x{} blocks (cell {}), http :{}, fov {}, streaming {} (min {}s / {} cells), scan deadline {}s, cache {}",
         cfg.atlas_size,
         cfg.atlas_size,
         cfg.cell_size,
         cfg.http_port,
         cfg.fov,
+        if cfg.stream { "ON" } else { "off" },
+        cfg.stream_min_secs,
+        cfg.stream_min_cells,
         cfg.scan_deadline_secs,
         if cfg.atlas_cache { "on" } else { "off" }
     ));
     log_info(
-        "c-LoD v3.0: static pack mode — one finalize per session, zero rebuilds, zero re-pushes",
+        "c-LoD v4.3: LOD streaming — throttled pack revisions, player-centric scan, zero client modules",
     );
 
     let st = engine::State::new(cfg);
@@ -109,9 +112,11 @@ pub unsafe extern "C" fn cplugin_init(
             .spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_millis(tick_ms));
                 let st = state().expect("state").clone();
-                // Static pack: the one-time finalize runs here (pure Rust +
-                // HTTP swap, no JNI). After it, this call is a cheap no-op.
+                // v4.3: the base finalize (deadline/complete) plus throttled
+                // streamed revisions — both pure Rust + HTTP swap, no JNI.
+                // After they run, both calls are cheap no-ops.
                 engine::maybe_finalize(&st);
+                engine::maybe_rebuild(&st);
                 cplug_sdk::run_on_main_thread({
                     let st = Arc::clone(&st);
                     move |_env| {
