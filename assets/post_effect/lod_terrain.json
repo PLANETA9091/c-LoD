@@ -3,6 +3,12 @@
         "clod_scan": { "width": 640, "height": 2 },
         "clod_rot_a": { "width": 2, "height": 2, "persistent": true },
         "clod_rot_b": { "width": 2, "height": 2, "persistent": true },
+        "clod_page_col": { "width": 128, "height": 128 },
+        "clod_page_hgt": { "width": 128, "height": 128 },
+        "clod_scol_a": { "width": 512, "height": 512, "persistent": true },
+        "clod_scol_b": { "width": 512, "height": 512, "persistent": true },
+        "clod_shgt_a": { "width": 512, "height": 512, "persistent": true },
+        "clod_shgt_b": { "width": 512, "height": 512, "persistent": true },
         "clod_swap": {}
     },
     "passes": [
@@ -34,27 +40,94 @@
         },
         {
             "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/scrape",
+            "inputs": [
+                { "sampler_name": "In", "target": "minecraft:main" }
+            ],
+            "output": "clod_page_col",
+            "uniforms": {
+                "ClodStream": [
+                    { "name": "Layer", "type": "vec4", "value": [0.0, 0.0, 0.0, 0.0] }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/merge",
+            "inputs": [
+                { "sampler_name": "Page", "target": "clod_page_col" },
+                { "sampler_name": "Prev", "target": "clod_scol_a" }
+            ],
+            "output": "clod_scol_b",
+            "uniforms": {
+                "ClodMerge": [
+                    { "name": "PageBase", "type": "vec4", "value": [0.0, 0.0, 0.0, 0.0] }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/rot_copy",
+            "inputs": [
+                { "sampler_name": "In", "target": "clod_scol_b" }
+            ],
+            "output": "clod_scol_a"
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/scrape",
+            "inputs": [
+                { "sampler_name": "In", "target": "minecraft:main" }
+            ],
+            "output": "clod_page_hgt",
+            "uniforms": {
+                "ClodStream": [
+                    { "name": "Layer", "type": "vec4", "value": [1.0, 0.0, 0.0, 0.0] }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/merge",
+            "inputs": [
+                { "sampler_name": "Page", "target": "clod_page_hgt" },
+                { "sampler_name": "Prev", "target": "clod_shgt_a" }
+            ],
+            "output": "clod_shgt_b",
+            "uniforms": {
+                "ClodMerge": [
+                    { "name": "PageBase", "type": "vec4", "value": [4.0, 0.0, 0.0, 0.0] }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/rot_copy",
+            "inputs": [
+                { "sampler_name": "In", "target": "clod_shgt_b" }
+            ],
+            "output": "clod_shgt_a"
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
             "fragment_shader": "clod:post/lod_terrain",
             "inputs": [
                 { "sampler_name": "In", "target": "minecraft:main" },
                 { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
-                { "sampler_name": "Atlas", "location": "clod:atlas", "width": __ATLAS_CELLS__, "height": __ATLAS_CELLS__, "bilinear": true },
-                { "sampler_name": "Col", "location": "clod:atlas_col", "width": __ATLAS_CELLS__, "height": __ATLAS_CELLS__, "bilinear": true },
+                { "sampler_name": "Scol", "target": "clod_scol_a" },
+                { "sampler_name": "Shgt", "target": "clod_shgt_a" },
                 { "sampler_name": "Rot", "target": "clod_rot_a" }
             ],
             "output": "clod_swap",
             "uniforms": {
                 "ClodAtlas": [
-                    { "name": "AtlasInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __ATLAS_SIZE__, __CELL__] }
+                    { "name": "AtlasInfo", "type": "vec4", "value": [__REGION_BLOCKS__, __CELL__, __SEA_LEVEL__, __MAX_HEIGHT__] }
                 ],
                 "ClodParams": [
                     { "name": "LodParams", "type": "vec4", "value": [__LOD_NEAR__, __MAX_HEIGHT__, __SEA_LEVEL__, __MIN_CONF__] }
                 ],
                 "ClodFog": [
                     { "name": "FogParams", "type": "vec4", "value": [__FOG_START__, __FOG_END__, __FOV__, 0.0] }
-                ],
-                "ClodScan": [
-                    { "name": "ScanBox", "type": "vec4", "value": [__CENTER_X__, __CENTER_Z__, __SCAN_HALF__, 0.0] }
                 ],
                 "ClodColors": [
                     { "name": "ColLow", "type": "vec4", "value": __COL_LOW__ },

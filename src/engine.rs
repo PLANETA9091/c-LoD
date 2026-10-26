@@ -1,63 +1,40 @@
-//! The c-LoD engine: a state machine driven from the server main thread.
+//! The c-LoD engine, v5.0 MAP CARRIER STREAMING.
 //!
-//! v4.3 STREAMING lifecycle — the pack is a living surface, rebuilt on
-//! throttled revisions and re-pushed to vanilla clients (new SHA-1, same
-//! URL — clients re-download only when the hash changes, silently after
-//! the first acceptance):
+//! The resource pack is a STATIC shader-only artifact built once per process
+//! boot and pushed once per client join — it contains ZERO world data: no
+//! atlas, no PNGs, nothing world-derived. Every byte of LOD data travels at
+//! runtime through vanilla map packets (`ClientboundMapItemDataPacket`) into
+//! client-side dynamic map textures; the pack's shaders scrape those into
+//! persistent post-chain targets and march the heightfield live.
 //!
-//!   Boot → (restore `c-LoD-atlas.bin` if present and matching)
-//!        → Scanning (budgeted JNI heightmap sweeps, main thread):
-//!            · player-centric spiral (DH-style nearest-first: rings expand
-//!              from each online player, so freshly-loaded chunks stream in
-//!              exactly where the player is looking)
-//!            · radial-from-center filler
-//!        → Finalize (sweep complete OR scan deadline) → BASE pack rev 0:
-//!            1. persist the atlas snapshot to disk (if `atlas_cache`)
-//!            2. build the pack, swap it into the HTTP server
-//!        → FINALIZED: with `stream` on the scan KEEPS RUNNING; whenever
-//!          ≥`stream_min_cells` new cells accumulated and ≥`stream_min_secs`
-//!          elapsed, the pack is REBUILT (engine thread, no JNI) as a new
-//!          revision and pushed to every player whose SHA-1 differs.
-//!          `stream=off` restores the v3 behavior: frozen after finalize.
-//!
-//! The ONLY other dynamic surface stays per-player `/posteffect` tier
-//! switching (Off/Veil/Full) — it touches no bytes.
-//!
-//! Client-side, the `clod:lod_terrain` chain raymarches the world-anchored
-//! heightfield atlas from the live camera every frame — walking, flying or
-//! turning re-projects the LOD surface automatically, and each streamed
-//! revision simply makes more cells hit.
+//! Tick loop (main thread):
+//!   1. boot       — resolve the JNI surface, build the pack once, push it.
+//!   2. scan    — player-centric heightmap sweep into the region store (the
+//!      streamer's data source), with a bounded async force-load frontier.
+//!   3. stream  — per player: advance page cursors (budget), ship dirty pages
+//!      as raw map packets, cycle the offhand map through the 8 pages so the
+//!      client uploads each page to the GPU and the scrape captures it.
+//!   4. players — one resource-pack push per join (the pack never changes),
+//!      per-player posteffect tier switching.
 
-use crate::atlas::Atlas;
 use crate::config::Config;
 use crate::http::PackServer;
 use crate::jni::{self, PlayerInfo};
 use crate::packgen::{self, Pack};
+use crate::stream::{Cell, Streamer, PAGES_PER_REGION};
 use jvmti_bindings::prelude::JniEnv;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 pub const PHASE_BOOT: u8 = 0;
-pub const PHASE_SCANNING: u8 = 1;
-pub const PHASE_PACKING: u8 = 2;
-pub const PHASE_FINALIZED: u8 = 3;
+pub const PHASE_LIVE: u8 = 3;
 
 pub struct State {
     pub cfg: Config,
-    pub atlas: Arc<Atlas>,
     pub server: Arc<PackServer>,
     pub pack: RwLock<Option<Arc<Pack>>>,
-    /// Static-pack phase machine (see PHASE_*).
     pub phase: AtomicU8,
-    /// True when the atlas came from the disk cache (=> finalize immediately
-    /// after the world resolves; bytes must match the previous session).
-    pub restored: bool,
-    /// Set after the one-time chunk warm-up around the atlas center.
-    pub warmed: AtomicU8,
-    /// When the atlas world was first resolved (scan deadline anchor).
-    pub world_seen_at: Mutex<Option<std::time::Instant>>,
-    pub scan_seq: AtomicU64,
     pub world_obj: Mutex<usize>, // jobject handle as usize; main-thread only
     pub world_name: Mutex<String>,
     pub keys: Mutex<Option<Keys>>,
@@ -67,27 +44,20 @@ pub struct State {
     pub tick_no: AtomicU64,
     /// Rate limiter for pack-push failure logs.
     pub push_fails: AtomicU32,
-    /// v4.3 streaming: scanned-cells watermark at the last pack build (the
-    /// delta against `atlas.scanned_cells()` gates a new revision).
-    pub built_cells: AtomicU64,
-    /// v4.3 streaming: when the last pack build happened (throttle anchor).
-    pub last_build: Mutex<Option<std::time::Instant>>,
-    /// v4.3 streaming: current pack revision (0 = base, grows on rebuilds).
-    pub pack_rev: AtomicU64,
-    /// v4.4 streaming: the atlas window shifted to follow the player — the
-    /// next rebuild must ship even below the cell-delta gate (the window
-    /// move can only REDUCE the scanned count).
-    pub window_moved: AtomicBool,
+    /// v5 map-carrier streaming state (Rust side; main-thread only).
+    pub stream: Mutex<Streamer>,
+    /// Per-player virtual map ids (8 pages), assigned on first sight.
+    pub map_ids: Mutex<HashMap<String, [i32; PAGES_PER_REGION]>>,
+    /// Monotonic map-id base (vanilla ids live far below this).
+    map_base: AtomicI32,
     /// v4.4 frontier: chunks force-loaded and waiting for the async load to
-    /// finish (chunk -> tick when queued) so the LOD can grow past the
-    /// player's render distance. Sampled + released a couple ticks later.
+    /// finish (chunk -> tick when queued). Sampled + released a couple of
+    /// ticks later.
     pub force_pending: Mutex<HashMap<(i32, i32), u64>>,
-    /// v4.4 frontier: chunks scanned through the force path so far.
+    /// Frontier chunks scanned through the force path so far.
     pub forced_chunks: AtomicU64,
-    /// v4.4 stream_probe: fires once after finalize — a virtual player at an
-    /// unscanned spot (see config.rs). Fed into the player-centric frontier
-    /// scan so a revision streams with no real client connected.
-    pub probe_pos: Mutex<Option<(i32, i32)>>,
+    /// Diagnostics: cells streamed as page bytes since boot.
+    pub streamed_bytes: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -104,75 +74,33 @@ pub struct PlayerState {
     pub pushed_sha: String,
     pub terrain_on: bool,
     pub atmosphere_on: bool,
-    /// Effect-list re-sends since the pack push. The client may finish the
-    /// pack download/reload AFTER the first effect packet (push/reload race:
-    /// the client logs "Requested post effect does not exist" and drops the
-    /// chains). A few idempotent `PlayerPostEffects.update()` heartbeats let
-    /// the client resolve the chains as soon as the pack is live.
+    /// Effect-list re-sends since the pack push (push/reload race healer).
     pub resends: u32,
     /// Last applied tier (0=Off, 1=Veil, 2=Full) for change logging.
     pub last_tier: u8,
+    /// Offhand page currently displayed on the client.
+    pub page: u8,
+    /// Set once the map ids were assigned and page 0 was handed over.
+    pub streaming: bool,
+    /// Engine tick of the player's first sight (pack push anchor: the push
+    /// must land AFTER the client finished the join screens, or the pack
+    /// prompt screen gets swallowed by the loading terrain screen).
+    pub joined_tick: u64,
 }
 
-/// Per-player LOD tier, re-evaluated every tick. Switching tiers is pure
-/// `/posteffect` add/remove — the pack is never touched.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Tier {
-    /// Other world or no coverage data: no chains applied.
-    Off,
-    /// Atlas world but outside the static window: depth veil only.
-    Veil,
-    /// Inside the static atlas window: terrain + veil.
-    Full,
-}
+/// Engine ticks between the join and the single pack push.
+const PACK_PUSH_DELAY_TICKS: u64 = 40;
 
 impl State {
     pub fn new(cfg: Config) -> Arc<Self> {
-        // Static-pack determinism: restore the frozen snapshot when it
-        // matches the configured geometry; otherwise start an empty atlas.
-        let (atlas, restored) = if cfg.atlas_cache {
-            match Atlas::try_restore(
-                std::path::Path::new(&cfg.atlas_path),
-                cfg.center_x,
-                cfg.center_z,
-                cfg.atlas_size,
-                cfg.cell_size,
-                cfg.sea_level,
-            ) {
-                Some(a) => (Arc::new(a), true),
-                None => (
-                    Arc::new(Atlas::new(
-                        cfg.center_x,
-                        cfg.center_z,
-                        cfg.atlas_size,
-                        cfg.cell_size,
-                        cfg.sea_level,
-                    )),
-                    false,
-                ),
-            }
-        } else {
-            (
-                Arc::new(Atlas::new(
-                    cfg.center_x,
-                    cfg.center_z,
-                    cfg.atlas_size,
-                    cfg.cell_size,
-                    cfg.sea_level,
-                )),
-                false,
-            )
-        };
+        let stream = Streamer::new(cfg.region_blocks, cfg.cell_size, cfg.stream_slots);
         let server = PackServer::new();
         Arc::new(Self {
-            atlas,
+            cfg,
+            stream: Mutex::new(stream),
             server,
             pack: RwLock::new(None),
             phase: AtomicU8::new(PHASE_BOOT),
-            restored,
-            warmed: AtomicU8::new(0),
-            world_seen_at: Mutex::new(None),
-            scan_seq: AtomicU64::new(0),
             world_obj: Mutex::new(0),
             world_name: Mutex::new(String::new()),
             keys: Mutex::new(None),
@@ -180,15 +108,25 @@ impl State {
             pack_uuid: Mutex::new(0),
             tick_no: AtomicU64::new(0),
             push_fails: AtomicU32::new(0),
-            built_cells: AtomicU64::new(0),
-            last_build: Mutex::new(None),
-            pack_rev: AtomicU64::new(0),
-            window_moved: AtomicBool::new(false),
+            map_ids: Mutex::new(HashMap::new()),
+            map_base: AtomicI32::new(1_000_000_000),
             force_pending: Mutex::new(HashMap::new()),
             forced_chunks: AtomicU64::new(0),
-            probe_pos: Mutex::new(None),
-            cfg,
+            streamed_bytes: AtomicU64::new(0),
         })
+    }
+
+    fn assign_map_ids(&self, uuid: &str) -> [i32; PAGES_PER_REGION] {
+        let mut ids = self.map_ids.lock().unwrap();
+        if let Some(v) = ids.get(uuid) {
+            return *v;
+        }
+        let base = self
+            .map_base
+            .fetch_add(PAGES_PER_REGION as i32, Ordering::SeqCst);
+        let v: [i32; PAGES_PER_REGION] = core::array::from_fn(|i| base + i as i32);
+        ids.insert(uuid.to_string(), v);
+        v
     }
 }
 
@@ -199,63 +137,31 @@ static BRIDGE_OK: AtomicU8 = AtomicU8::new(0); // 0 pending, 1 ok, 2 failed-once
 /// One engine tick. MUST run on the main thread.
 pub fn tick(state: &Arc<State>, env: Env) {
     state.tick_no.fetch_add(1, Ordering::Relaxed);
+    if state.tick_no.load(Ordering::Relaxed) % 50 == 0 {
+        crate::log_info(&format!(
+            "engine tick alive: tick {}",
+            state.tick_no.load(Ordering::Relaxed)
+        ));
+    }
     ensure_boot(state, env);
-    scan_batch(state, env);
-    release_forceload(state, env);
+    stream_scan(state, env);
+    poll_forced(state, env);
     manage_players(state, env);
 }
 
-/// One-time: after finalize, release the temporary force-load on the warm
-/// core (the snapshot is taken; a static pack needs no live chunks). Runs on
-/// the main thread because it touches JNI; CAS makes it exactly-once.
-fn release_forceload(state: &Arc<State>, env: Env) {
-    if state.warmed.load(Ordering::SeqCst) != 1
-        || state.phase.load(Ordering::SeqCst) != PHASE_FINALIZED
-    {
-        return;
-    }
-    if state
-        .warmed
-        .compare_exchange(1, 2, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return;
-    }
-    let world_handle = *state.world_obj.lock().unwrap();
-    if world_handle == 0 {
-        return;
-    }
-    let world = unsafe { as_obj(world_handle) };
-    let w = state.cfg.warm_chunks;
-    let mut released = 0usize;
-    for cx in -w..=w {
-        for cz in -w..=w {
-            if jni::warm_chunk(env, world, cx, cz, false) {
-                released += 1;
-            }
-        }
-    }
-    crate::log_info(&format!(
-        "c-LoD core force-load released ({released} chunks) — static snapshot retained"
-    ));
-}
-
+/// One-time boot: JNI surface + the shader-only pack (built IMMEDIATELY — it
+/// holds no world data, so there is nothing to wait for) + effect keys.
 fn ensure_boot(state: &Arc<State>, env: Env) {
-    // Resolve JNI ids once the kernel surface is fully loadable. Paper loads
-    // the player-surface classes lazily, so warmup retries each tick until
-    // the whole surface resolves (see jni::warmup).
     if BRIDGE_OK.load(Ordering::SeqCst) != 1 {
-        if jni::warmup(env) {
+        if jni::warmup(env) && jni::nms_warmup(env) {
             BRIDGE_OK.store(1, Ordering::SeqCst);
-            crate::log_info("c-LoD JNI bridge resolved: true");
-            // Static-pack phase machine: boot complete -> scanning.
+            crate::log_info("c-LoD JNI bridge resolved: true (incl. NMS map surface)");
             let _ = state.phase.compare_exchange(
                 PHASE_BOOT,
-                PHASE_SCANNING,
+                PHASE_LIVE,
                 Ordering::SeqCst,
                 Ordering::SeqCst,
             );
-            // Effect keys (global refs, main thread).
             let terrain = jni::make_key(env, &state.cfg.effect_terrain)
                 .map(|k| unsafe { new_global(env, k) })
                 .unwrap_or(0);
@@ -266,11 +172,30 @@ fn ensure_boot(state: &Arc<State>, env: Env) {
                 terrain,
                 atmosphere,
             });
-            // Pack UUID global.
             let uuid = jni::parse_uuid(env, &state.cfg.pack_uuid)
                 .map(|u| unsafe { new_global(env, u) })
                 .unwrap_or(0);
             *state.pack_uuid.lock().unwrap() = uuid;
+
+            // THE pack: shader-only, data-free, deterministic. Built exactly
+            // once per process; its SHA-1 never changes for the lifetime of
+            // the module (vanilla clients re-download never).
+            let new_pack = packgen::build(&state.cfg);
+            let sha = new_pack.sha1_hex.clone();
+            let len = new_pack.zip.len();
+            state.server.set_pack(
+                new_pack.zip.clone(),
+                crate::http::PackMeta {
+                    rev: 0,
+                    sha1_hex: sha.clone(),
+                    cells: 0,
+                    total_cells: 0,
+                },
+            );
+            *state.pack.write().unwrap() = Some(Arc::new(new_pack));
+            crate::log_info(&format!(
+                "c-LoD shader-only pack built ONCE at boot: {len} bytes, sha1 {sha} — no atlas, no revisions, one push per join"
+            ));
         } else {
             if BRIDGE_OK.swap(2, Ordering::SeqCst) == 0 {
                 crate::log_info(
@@ -281,49 +206,15 @@ fn ensure_boot(state: &Arc<State>, env: Env) {
         }
     }
 
-    // Resolve the atlas world once (and re-resolve if lost).
-    {
-        let mut w = state.world_obj.lock().unwrap();
-        if *w == 0 {
-            if let Some(world) = jni::find_world(env, &state.cfg.world) {
-                let name = world.name.clone();
-                let g = unsafe { new_global(env, world.obj) };
-                *w = g;
-                *state.world_name.lock().unwrap() = name.clone();
-                crate::log_info(&format!("c-LoD atlas world: {name}"));
-                if state.restored {
-                    crate::log_info(&format!(
-                        "c-LoD atlas restored from {} ({}% coverage) — pack will reproduce the previous session's SHA-1",
-                        state.cfg.atlas_path,
-                        state.atlas.scanned_cells() * 100 / state.atlas.total_cells().max(1)
-                    ));
-                }
-                // Anchor the scan deadline at world resolution.
-                *state.world_seen_at.lock().unwrap() = Some(std::time::Instant::now());
-                // One-time core warm-up: modern vanilla keeps no spawn
-                // chunks loaded and the scan never forces generation, so
-                // without this the static snapshot could cover nothing.
-                if state.cfg.warm_chunks > 0 {
-                    let w = state.cfg.warm_chunks;
-                    let mut loaded = 0usize;
-                    for cx in -w..=w {
-                        for cz in -w..=w {
-                            if jni::warm_chunk(env, unsafe { as_obj(g) }, cx, cz, true) {
-                                loaded += 1;
-                            }
-                        }
-                    }
-                    state.warmed.store(1, Ordering::SeqCst);
-                    let loaded0 = jni::is_chunk_loaded(env, unsafe { as_obj(g) }, 0, 0);
-                    let h0 = jni::probe_height(env, unsafe { as_obj(g) }, 0, 0);
-                    crate::log_info(&format!(
-                        "c-LoD core force-loaded: {}x{} chunks around atlas center ({} ok) — isChunkLoaded(0,0)={loaded0:?}, height(0,0)={h0:?} — released at finalize",
-                        2 * w + 1,
-                        2 * w + 1,
-                        loaded
-                    ));
-                }
-            }
+    // Resolve the streaming world once (and re-resolve if lost).
+    let mut w = state.world_obj.lock().unwrap();
+    if *w == 0 {
+        if let Some(world) = jni::find_world(env, &state.cfg.world) {
+            let name = world.name.clone();
+            let g = unsafe { new_global(env, world.obj) };
+            *w = g;
+            *state.world_name.lock().unwrap() = name.clone();
+            crate::log_info(&format!("c-LoD streaming world: {name}"));
         }
     }
 }
@@ -338,12 +229,16 @@ unsafe fn as_obj(handle: usize) -> jvmti_bindings::jni::jobject {
     handle as jvmti_bindings::jni::jobject
 }
 
-fn scan_batch(state: &Arc<State>, env: Env) {
-    // v4.3: scanning runs in PHASE_SCANNING, and — with streaming on —
-    // KEEPS RUNNING after finalize so new revisions accumulate data.
-    let phase = state.phase.load(Ordering::SeqCst);
-    let streaming = state.cfg.stream;
-    if phase != PHASE_SCANNING && !(phase == PHASE_FINALIZED && streaming) {
+/// Cap on chunks queued for force-load per engine tick (see v4.4 notes: the
+/// generation flood starves the tick loop above these numbers).
+const FORCE_MAX_PENDING: usize = 8;
+const FORCE_BUDGET_PER_TICK: usize = 4;
+
+/// Player-centric heightmap sweep into the region store. The LOD data source:
+/// rings of `cell_size` blocks around each player, skipping cells already
+/// valid; unloaded chunks queue for the async force-load frontier.
+fn stream_scan(state: &Arc<State>, env: Env) {
+    if state.phase.load(Ordering::SeqCst) != PHASE_LIVE {
         return;
     }
     let world_handle = *state.world_obj.lock().unwrap();
@@ -351,170 +246,98 @@ fn scan_batch(state: &Arc<State>, env: Env) {
         return;
     }
     let world = unsafe { as_obj(world_handle) };
-    let seq = state.scan_seq.fetch_add(1, Ordering::Relaxed);
-    let budget = state.cfg.scan_budget;
-
-    // Budget split (v4.3): HALF goes to the player-centric spiral — the
-    // terrain around online players streams first; the other half keeps
-    // the radial-from-center sweep moving (it still owns the map when no
-    // one is online). The spiral only returns unscanned cells, so in the
-    // steady state it costs one RwLock read per visited cell.
-    let mut players = jni::players(env);
-
-    // v4.4 stream_probe (CI/e2e): after finalize, drop a VIRTUAL player at
-    // an unscanned spot — the outermost ring of the radial order is the most
-    // reliably unscanned place (the boot scan runs rings from the center and
-    // the deadline cuts it mid-way). The regular player-centric frontier
-    // force-load then fills cells there and a revision streams server-side.
-    if state.cfg.stream_probe
-        && state.phase.load(Ordering::SeqCst) == PHASE_FINALIZED
-        && state.probe_pos.lock().unwrap().is_none()
-    {
-        let n = state.atlas.cells as i32;
-        let probe_cell = state.atlas.outermost_unscanned_cell();
-        if let Some((ix, iz)) = probe_cell {
-            let bx = state.atlas.cell_world_x(ix);
-            let bz = state.atlas.cell_world_z(iz);
-            *state.probe_pos.lock().unwrap() = Some((bx, bz));
-            crate::log_info(&format!(
-                "c-LoD stream_probe: virtual player at ({bx},{bz}) (cell {ix},{iz} of {n}) — frontier force-load should stream a revision"
-            ));
-        } else {
-            // Fully scanned atlas: nothing to prove, retire the probe.
-            *state.probe_pos.lock().unwrap() = Some((0, -0x7fffffff));
-        }
+    let players = jni::players(env);
+    if players.is_empty() {
+        return;
     }
-    if let Some((bx, bz)) = *state.probe_pos.lock().unwrap() {
-        if bz > -0x7fffffff {
-            players.push(PlayerInfo {
-                uuid: String::new(),
-                world: state.world_name.lock().unwrap().clone(),
-                bx,
-                by: 140,
-                bz,
-            });
-        }
-    }
-
-    // v4.4: keep the player inside the atlas window (DH tile-grid model).
-    // Walking into the outer 40% of the window slides it so the scan keeps
-    // filling the horizon the player actually SEES; the vacated trailing
-    // edge re-enters the sweep. Shifts are quantized and the rebuild ships
-    // at the next throttle window (stream_min_secs still guards the client
-    // reload loop).
-    let n_cells = state.atlas.cells as i32;
-    let center_cell = (n_cells - 1) / 2;
-    let shift_step = (n_cells / 16).max(1);
-    // Shift when the data AHEAD of the player (worst Chebyshev direction)
-    // drops below ~80 cells = 160 blocks at the bench cell size — enough to
-    // cover the real-chunk edge (RD) plus a useful LOD band beyond it. The
-    // bench v4.4 bug: a 0.6*span threshold fired AFTER the player had
-    // already walked past the data edge (0.6*256=153 cells > 128 half).
-    let threshold = (n_cells / 2 - 80).max(n_cells / 4);
+    let budget = state.cfg.scan_budget / players.len() as u32;
     for p in &players {
-        let (dx, dz) = match state.atlas.cell_index(p.bx, p.bz) {
-            Some((pcx, pcz)) => (pcx as i32 - center_cell, pcz as i32 - center_cell),
-            // Player outside the window entirely: jump straight to them.
-            None => {
-                let (acx, acz) = state.atlas.center();
-                (
-                    ((p.bx - acx) / state.atlas.cell.max(1)).clamp(-n_cells, n_cells),
-                    ((p.bz - acz) / state.atlas.cell.max(1)).clamp(-n_cells, n_cells),
-                )
-            }
-        };
-        if dx.abs().max(dz.abs()) > threshold {
-            let qx = (dx / shift_step) * shift_step;
-            let qz = (dz / shift_step) * shift_step;
-            if state.atlas.recenter(qx, qz) {
-                state.window_moved.store(true, Ordering::SeqCst);
-                let (acx, acz) = state.atlas.center();
-                crate::log_info(&format!(
-                    "c-LoD atlas window shifted by ({qx},{qz}) cells -> center ({acx}, {acz}) — the LOD horizon follows the player"
-                ));
-            }
+        if p.world.is_empty() {
+            continue;
         }
-    }
-    let near_budget = budget / 2;
-    let mut near_done = 0usize;
-    if near_budget > 0 {
-        for p in &players {
-            let take = near_budget / players.len().max(1) as u32;
-            let tasks = state.atlas.scan_task_near(p.bx, p.bz, take);
-            for (ix, iz) in tasks.iter().copied() {
-                scan_cell(state, env, world, ix, iz, true);
-                near_done += 1;
+        let (rx, rz) = {
+            let s = state.stream.lock().unwrap();
+            s.region_of(p.bx, p.bz)
+        };
+        // Ring sweep around the player, clamped to the region.
+        let side = state.cfg.region_blocks / state.cfg.cell_size;
+        let pcx = ((p.bx - rx * state.cfg.region_blocks) / state.cfg.cell_size).clamp(0, side - 1);
+        let pcz = ((p.bz - rz * state.cfg.region_blocks) / state.cfg.cell_size).clamp(0, side - 1);
+        let mut done = 0u32;
+        let mut ring: i32 = 0;
+        while done < budget && ring <= side {
+            let mut step = |dx: i32, dz: i32| -> bool {
+                let cx = pcx + dx;
+                let cz = pcz + dz;
+                if cx < 0 || cz < 0 || cx >= side || cz >= side {
+                    return false;
+                }
+                {
+                    let s = state.stream.lock().unwrap();
+                    if let Some(cell) = s.region(rx, rz).and_then(|r| r.get(cx as u32, cz as u32)) {
+                        if cell.valid {
+                            return false;
+                        }
+                    }
+                }
+                let wx = rx * state.cfg.region_blocks + cx * state.cfg.cell_size;
+                let wz = rz * state.cfg.region_blocks + cz * state.cfg.cell_size;
+                scan_cell(state, env, world, rx, rz, cx as u32, cz as u32, wx, wz);
+                done += 1;
+                done >= budget
+            };
+            // One ring: top+bottom rows and left+right columns.
+            let mut stop = false;
+            for d in -ring..=ring {
+                if step(d, -ring) || step(d, ring) || step(-ring, d) || step(ring, d) {
+                    stop = true;
+                    break;
+                }
+                if ring == 0 {
+                    break; // the single center cell
+                }
             }
-            if near_done >= near_budget as usize {
+            if stop {
                 break;
             }
+            ring += 1;
         }
-    }
-
-    // Radial filler: when the atlas is complete the center sweep would
-    // only re-sample loaded chunks for nothing — park it.
-    let scanned = state.atlas.scanned_cells();
-    let total = state.atlas.total_cells();
-    if scanned < total {
-        let tasks = state.atlas.scan_task(seq * budget as u64, budget);
-        for (ix, iz) in tasks.iter().copied() {
-            scan_cell(state, env, world, ix, iz, false);
-        }
-    }
-
-    // v4.4 frontier: sample + release chunks whose async force-load finished.
-    poll_forced(state, env, world);
-
-    // Rate-limited scan diagnostics (one line per 25 ticks).
-    if seq.is_multiple_of(25) {
-        use std::sync::atomic::Ordering as O;
-        crate::log_info(&format!(
-            "scan: tick {seq}, atlas v{} ({scanned}/{total} cells, +{near_done} near), rev {}, ok={} unloaded={} err={} forced={}",
-            state.atlas.version(),
-            state.pack_rev.load(O::Relaxed),
-            jni::SCAN_OK.load(O::Relaxed),
-            jni::SCAN_UNLOADED.load(O::Relaxed),
-            jni::SCAN_ERR.load(O::Relaxed),
-            state.forced_chunks.load(O::Relaxed),
-        ));
     }
 }
 
-/// Sample one atlas cell from the world and store it (shared by the
-/// player-centric spiral and the radial sweep).
+/// Sample one world column into the region store (or queue its chunk for the
+/// async force-load frontier when unloaded).
+#[allow(clippy::too_many_arguments)]
 fn scan_cell(
     state: &Arc<State>,
     env: Env,
     world: jvmti_bindings::jni::jobject,
-    ix: u32,
-    iz: u32,
-    allow_force: bool,
+    rx: i32,
+    rz: i32,
+    cx: u32,
+    cz: u32,
+    wx: i32,
+    wz: i32,
 ) {
-    let x = state.atlas.cell_world_x(ix);
-    let z = state.atlas.cell_world_z(iz);
-    if let Some((y, liquid, material, biome)) = jni::sample_surface(env, world, x, z) {
-        // v4.2 Voxy look: bake the REAL surface color (block palette +
-        // biome tint) into the cell so the pack ships colored terrain.
+    if let Some((y, liquid, material, biome)) = jni::sample_surface(env, world, wx, wz) {
         let rgb = crate::palette::surface_color(&material, &biome, liquid);
-        state
-            .atlas
-            .set(ix, iz, (y.clamp(-64, 1023)) as i16, liquid, rgb);
-    } else if allow_force {
-        // v4.4 frontier: the cell's chunk is unloaded. Queue it for an
-        // async force-load so the LOD grows past the render distance.
-        force_chunk_for(state, env, world, x >> 4, z >> 4);
+        let mut s = state.stream.lock().unwrap();
+        s.set_cell(
+            rx,
+            rz,
+            cx,
+            cz,
+            Cell {
+                height: y.clamp(-64, 1023) as i16,
+                water: liquid,
+                valid: true,
+                rgb,
+            },
+        );
+    } else {
+        force_chunk_for(state, env, world, wx >> 4, wz >> 4);
     }
 }
-
-/// Cap on chunks queued for force-load per engine tick. The v4.4-first
-/// build allowed 64 concurrent forces — the resulting generation flood
-/// (2457 chunks in ~3 min, ungenerated far terrain is the expensive kind)
-/// starved the tick loop and the platform watchdog restarted the kernel.
-/// 8 concurrent + a small per-tick budget keeps the chunk system healthy:
-/// ~3 chunks/s sustained, a full 256x256 window still fills in minutes.
-const FORCE_MAX_PENDING: usize = 8;
-/// New force tickets per tick (generation off-thread, but bounded churn).
-const FORCE_BUDGET_PER_TICK: usize = 4;
 
 fn force_chunk_for(
     state: &Arc<State>,
@@ -527,8 +350,6 @@ fn force_chunk_for(
     if pend.contains_key(&(cx, cz)) || pend.len() >= FORCE_MAX_PENDING {
         return;
     }
-    // New tickets this tick are also capped (cheap heuristic: pending entries
-    // queued on the current tick count against the budget).
     let now = state.tick_no.load(Ordering::SeqCst);
     let fresh = pend.values().filter(|t| **t == now).count();
     if fresh >= FORCE_BUDGET_PER_TICK {
@@ -541,10 +362,15 @@ fn force_chunk_for(
 
 /// Sample + release chunks queued by [`force_chunk_for`] once the async load
 /// finished. One chunk covers (16/cell)^2 cells — every still-invalid cell
-/// inside it is sampled in one pass, so each force pays off ~64 cells.
-fn poll_forced(state: &Arc<State>, env: Env, world: jvmti_bindings::jni::jobject) {
+/// inside it is sampled in one pass.
+fn poll_forced(state: &Arc<State>, env: Env) {
     const READY_TICKS: u64 = 2;
     const MAX_SAMPLES: usize = 128;
+    let world_handle = *state.world_obj.lock().unwrap();
+    if world_handle == 0 {
+        return;
+    }
+    let world = unsafe { as_obj(world_handle) };
     let now = state.tick_no.load(Ordering::SeqCst);
     let mut pend = state.force_pending.lock().unwrap();
     let ready: Vec<(i32, i32)> = pend
@@ -555,27 +381,38 @@ fn poll_forced(state: &Arc<State>, env: Env, world: jvmti_bindings::jni::jobject
     let mut samples = 0usize;
     for (cx, cz) in ready {
         if !jni::is_chunk_loaded(env, world, cx, cz).unwrap_or(false) {
-            // Still loading/generating — re-anchor the timer, stay queued.
             pend.insert((cx, cz), now);
             continue;
         }
-        let per_chunk_side = (16 / state.atlas.cell.max(1)).max(1);
+        let side = state.cfg.region_blocks / state.cfg.cell_size;
         let x0 = cx * 16;
         let z0 = cz * 16;
-        for dz in 0..per_chunk_side {
-            for dx in 0..per_chunk_side {
+        for dz in 0..(16 / state.cfg.cell_size.max(1)).max(1) {
+            for dx in 0..(16 / state.cfg.cell_size.max(1)).max(1) {
                 if samples >= MAX_SAMPLES {
                     break;
                 }
-                let wx = x0 + dx * state.atlas.cell;
-                let wz = z0 + dz * state.atlas.cell;
-                let Some((ix, iz)) = state.atlas.cell_index(wx, wz) else {
-                    continue;
+                let wx = x0 + dx * state.cfg.cell_size;
+                let wz = z0 + dz * state.cfg.cell_size;
+                let (rx, rz) = {
+                    let s = state.stream.lock().unwrap();
+                    s.region_of(wx, wz)
                 };
-                if state.atlas.get(ix, iz).is_some() {
-                    continue; // already valid — the force pass only fills holes
+                let ccx =
+                    ((wx - rx * state.cfg.region_blocks) / state.cfg.cell_size).clamp(0, side - 1);
+                let ccz =
+                    ((wz - rz * state.cfg.region_blocks) / state.cfg.cell_size).clamp(0, side - 1);
+                let valid = {
+                    let s = state.stream.lock().unwrap();
+                    s.region(rx, rz)
+                        .and_then(|r| r.get(ccx as u32, ccz as u32))
+                        .map(|c| c.valid)
+                        .unwrap_or(false)
+                };
+                if valid {
+                    continue;
                 }
-                scan_cell(state, env, world, ix, iz, false);
+                scan_cell(state, env, world, rx, rz, ccx as u32, ccz as u32, wx, wz);
                 samples += 1;
             }
         }
@@ -588,20 +425,27 @@ fn poll_forced(state: &Arc<State>, env: Env, world: jvmti_bindings::jni::jobject
     }
 }
 
-/// Tier for one player from world + static window bounds.
+/// Tier for one player from the world only: streaming follows the player, so
+/// any position in the streaming world is Full; other worlds keep the veil.
 fn tier_for(state: &Arc<State>, p: &PlayerInfo) -> Tier {
     if p.world.is_empty() {
         return Tier::Off;
     }
     let wname = state.world_name.lock().unwrap().clone();
     if !wname.is_empty() && p.world != wname {
-        return Tier::Off;
+        return Tier::Veil;
     }
-    if state.atlas.cell_index(p.bx, p.bz).is_some() {
-        Tier::Full
-    } else {
-        Tier::Veil
-    }
+    Tier::Full
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Tier {
+    /// No world (or no pack): no chains applied.
+    Off,
+    /// Other world: depth veil only.
+    Veil,
+    /// Streaming world: terrain + veil.
+    Full,
 }
 
 fn manage_players(state: &Arc<State>, env: Env) {
@@ -625,13 +469,17 @@ fn manage_players(state: &Arc<State>, env: Env) {
             .or_default()
             .clone();
 
-        // 1. Resource pack — pushed whenever the player's last-pushed SHA-1
-        //    differs from the current pack. v3: exactly once per session
-        //    (static pack). v4.3: ALSO on every streamed revision — the
-        //    client re-downloads from the same URL only when the hash
-        //    changed, silently after the first acceptance.
+        // 1. Resource pack — pushed exactly once per player (the pack is
+        //    static; its SHA-1 never changes for the module's lifetime), a
+        //    few seconds AFTER the join so the client's prompt screen lands
+        //    on the in-world screen, not on the loading terrain screen.
+        if st.joined_tick == 0 {
+            st.joined_tick = state.tick_no.load(Ordering::Relaxed).max(1);
+        }
+        let joined_longs_enough =
+            state.tick_no.load(Ordering::Relaxed) >= st.joined_tick + PACK_PUSH_DELAY_TICKS;
         if let Some(pack) = &pack {
-            if st.pushed_sha != pack.sha1_hex {
+            if st.pushed_sha != pack.sha1_hex && joined_longs_enough {
                 if let Some(handle) = jni::player_by_uuid(env, &p.uuid) {
                     let pu = *state.pack_uuid.lock().unwrap();
                     if pu != 0 {
@@ -643,14 +491,13 @@ fn manage_players(state: &Arc<State>, env: Env) {
                             &url,
                             &pack.sha1,
                             &state.cfg.pack_prompt,
-                            false,
+                            true,
                         );
                         if ok {
-                            let rev = state.pack_rev.load(Ordering::Relaxed);
                             st.pushed_sha = pack.sha1_hex.clone();
                             st.resends = 0;
                             crate::log_info(&format!(
-                                "pack rev {rev} pushed to {} ({}): {} bytes, sha1 {}",
+                                "pack pushed to {} ({}): {} bytes, sha1 {} — the ONE push this session",
                                 p.uuid,
                                 url,
                                 pack.zip.len(),
@@ -663,9 +510,7 @@ fn manage_players(state: &Arc<State>, env: Env) {
                 }
             } else if st.resends < 12 && state.tick_no.load(Ordering::Relaxed).is_multiple_of(20) {
                 // Self-healing: re-send the (unchanged) effect list a few
-                // times after EACH push so a client that was mid-reload when
-                // the first packet landed picks the chains up. Identical
-                // lists are a wire no-op — zero flicker, zero reloads.
+                // times after the push (push/reload race healer).
                 if let Some(handle) = jni::player_by_uuid(env, &p.uuid) {
                     if jni::update_effects(env, handle) {
                         st.resends += 1;
@@ -674,7 +519,7 @@ fn manage_players(state: &Arc<State>, env: Env) {
             }
         }
 
-        // 2. Tier switching — the only dynamic surface, pure /posteffect.
+        // 2. Tier switching — pure /posteffect.
         let tier = tier_for(state, &p);
         let tier_no = match tier {
             Tier::Full => 2u8,
@@ -722,17 +567,110 @@ fn manage_players(state: &Arc<State>, env: Env) {
                 st.atmosphere_on =
                     !jni::remove_effect(env, handle, unsafe { as_obj(keys.atmosphere) });
             }
+
+            // 3. MAP-CARRIER STREAMING: raw map packets + offhand page cycle.
+            if have_pack && tier == Tier::Full {
+                stream_player(state, env, handle, &p, &mut st);
+            }
         }
 
         state.per_player.lock().unwrap().insert(p.uuid.clone(), st);
     }
 
-    // Drop state for players who left.
+    // Drop state for players who left (their map ids stay reserved — the
+    // client textures die with the connection anyway).
     state
         .per_player
         .lock()
         .unwrap()
         .retain(|k, _| seen.contains(k));
+}
+
+/// One player's streaming step: page patches + offhand cycling.
+fn stream_player(
+    state: &Arc<State>,
+    env: Env,
+    handle: jvmti_bindings::jni::jobject,
+    p: &PlayerInfo,
+    st: &mut PlayerState,
+) {
+    let uuid = &p.uuid;
+    let ids = state.assign_map_ids(uuid);
+    let (rx, rz) = {
+        let s = state.stream.lock().unwrap();
+        s.region_of(p.bx, p.bz)
+    };
+
+    if !st.streaming {
+        st.streaming = true;
+        st.page = 0;
+        unsafe {
+            jni::give_offhand_map(env, handle, ids[0]);
+        }
+        crate::log_info(&format!(
+            "stream: map ids {}..{} assigned to {uuid}, page 0 in offhand, region ({rx},{rz})",
+            ids[0],
+            ids[PAGES_PER_REGION - 1]
+        ));
+    }
+
+    // Page patches: the per-tick byte budget splits across the 8 pages.
+    let budget = (state.cfg.stream_budget / PAGES_PER_REGION as u32).max(64) as usize;
+    let mut sent_pages = 0u32;
+    let mut sent_bytes = 0u64;
+    for (page, map_id) in ids.iter().enumerate() {
+        let patch = state
+            .stream
+            .lock()
+            .unwrap()
+            .page_patch(rx, rz, page, budget);
+        let Some(patch) = patch else { continue };
+        let p = (patch.x, patch.y, patch.w, patch.h, patch.bytes.as_slice());
+        unsafe {
+            let Some(pkt) = jni::map_page_packet(env, *map_id, Some(p)) else {
+                continue;
+            };
+            if jni::send_packet(env, handle, pkt) {
+                sent_pages += 1;
+                sent_bytes += patch.bytes.len() as u64;
+            }
+        }
+    }
+    if sent_bytes > 0 {
+        state
+            .streamed_bytes
+            .fetch_add(sent_bytes, Ordering::Relaxed);
+    }
+
+    // Offhand page cycle: the client uploads the DISPLAYED map to the GPU,
+    // the scrape pass captures it into the persistent target. Cycle even
+    // without patches — freshly joined clients must see every page once.
+    let tick = state.tick_no.load(Ordering::Relaxed);
+    let want_page = ((tick / state.cfg.page_ticks.max(1) as u64) % PAGES_PER_REGION as u64) as u8;
+    if want_page != st.page {
+        unsafe {
+            if jni::give_offhand_map(env, handle, ids[want_page as usize]) {
+                st.page = want_page;
+            }
+        }
+    }
+
+    // Rate-limited diagnostics.
+    if tick.is_multiple_of(100) {
+        let (cells, scanned) = {
+            let s = state.stream.lock().unwrap();
+            match s.region(rx, rz) {
+                Some(r) => (s.region_cells() * s.region_cells(), r.valid_cells()),
+                None => (0, 0),
+            }
+        };
+        crate::log_info(&format!(
+            "stream: tick {tick} region ({rx},{rz}) {scanned}/{cells} cells, page {}, +{sent_pages} pkts (+{sent_bytes} B), total {} B / {} pkts",
+            st.page,
+            state.streamed_bytes.load(Ordering::Relaxed),
+            jni::STREAM_PACKETS.load(Ordering::Relaxed),
+        ));
+    }
 }
 
 pub fn pack_url(state: &Arc<State>) -> String {
@@ -758,271 +696,9 @@ fn detect_base_url(port: u16) -> String {
     format!("http://{ip}:{port}")
 }
 
-/// Engine-thread finalize driver. Runs `finalize` exactly once when the
-/// static snapshot is complete (restored, swept fully, or deadline reached).
-/// Pure Rust + HTTP swap: no JNI, safe off the main thread.
-pub fn maybe_finalize(state: &Arc<State>) {
-    if state.phase.load(Ordering::SeqCst) != PHASE_SCANNING {
-        return;
-    }
-    // Wait for the atlas world so logs/coverage are coherent before the pack
-    // goes live (one engine tick after world resolution at most).
-    if *state.world_obj.lock().unwrap() == 0 {
-        return;
-    }
-    let complete = state.atlas.scanned_cells() >= state.atlas.total_cells();
-    let deadline_hit = match *state.world_seen_at.lock().unwrap() {
-        Some(t) => t.elapsed().as_secs() >= state.cfg.scan_deadline_secs || state.restored,
-        None => state.restored,
-    };
-    if !complete && !deadline_hit {
-        return;
-    }
-    finalize(state);
-}
-
-/// Build the BASE pack (rev 0), swap it into the HTTP server, persist the
-/// atlas. v4.3: this is no longer the end of the story — with `stream` on,
-/// `maybe_rebuild` keeps shipping revisions from here on.
-fn finalize(state: &Arc<State>) {
-    // Exactly-once guarantee even under racy callers.
-    if state
-        .phase
-        .compare_exchange(
-            PHASE_SCANNING,
-            PHASE_PACKING,
-            Ordering::SeqCst,
-            Ordering::SeqCst,
-        )
-        .is_err()
-    {
-        return;
-    }
-    let (scanned, total) = (state.atlas.scanned_cells(), state.atlas.total_cells());
-
-    if state.cfg.atlas_cache {
-        let path = std::path::Path::new(&state.cfg.atlas_path);
-        match state.atlas.save(path) {
-            Ok(()) => crate::log_info(&format!(
-                "c-LoD atlas snapshot saved: {} ({} cells, {} bytes)",
-                state.cfg.atlas_path,
-                total,
-                std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
-            )),
-            Err(e) => crate::log_info(&format!(
-                "c-LoD atlas snapshot save FAILED ({e}) — restarts will rescan"
-            )),
-        }
-    }
-
-    let new_pack = packgen::build(&state.cfg, &state.atlas);
-    let total_c = state.atlas.total_cells();
-    state.server.set_pack(
-        new_pack.zip.clone(),
-        crate::http::PackMeta {
-            rev: 0,
-            sha1_hex: new_pack.sha1_hex.clone(),
-            cells: scanned,
-            total_cells: total_c,
-        },
-    );
-    crate::log_info(&format!(
-        "c-LoD pack finalized (base rev 0): {scanned}/{total} cells ({}%), {} bytes, sha1 {}{}",
-        scanned * 100 / total.max(1),
-        new_pack.zip.len(),
-        new_pack.sha1_hex,
-        if state.cfg.stream {
-            " — streaming ON"
-        } else {
-            " — static (stream off)"
-        }
-    ));
-    *state.pack.write().unwrap() = Some(Arc::new(new_pack));
-    state.built_cells.store(scanned, Ordering::SeqCst);
-    *state.last_build.lock().unwrap() = Some(std::time::Instant::now());
-    state.phase.store(PHASE_FINALIZED, Ordering::SeqCst);
-}
-
-/// Engine-thread revision driver (v4.3 streaming). Runs AFTER finalize:
-/// whenever ≥`stream_min_cells` NEW cells accumulated since the last build
-/// and ≥`stream_min_secs` elapsed, rebuild the pack from the live atlas,
-/// swap it into the HTTP server and bump the revision. Pure Rust (PNG, zip,
-/// sha1) — no JNI, safe off the main thread. The next engine tick pushes
-/// the new SHA-1 to every player whose client still holds an older pack.
-pub fn maybe_rebuild(state: &Arc<State>) {
-    if !state.cfg.stream || state.phase.load(Ordering::SeqCst) != PHASE_FINALIZED {
-        return;
-    }
-    if *state.world_obj.lock().unwrap() == 0 {
-        return;
-    }
-    // v4.4: a window shift must ship at the next throttle window even though
-    // it can only REDUCE the scanned count (the trailing edge goes void).
-    let forced = state.window_moved.swap(false, Ordering::SeqCst);
-    if !forced {
-        let delta = state
-            .atlas
-            .scanned_cells()
-            .saturating_sub(state.built_cells.load(Ordering::SeqCst));
-        if delta < state.cfg.stream_min_cells {
-            return;
-        }
-    }
-    let due = match *state.last_build.lock().unwrap() {
-        Some(t) => t.elapsed().as_secs() >= state.cfg.stream_min_secs,
-        None => true,
-    };
-    if !due {
-        return;
-    }
-    rebuild(state);
-}
-
-fn rebuild(state: &Arc<State>) {
-    // One rebuild at a time; the watermark update makes re-entry a no-op.
-    let scanned = state.atlas.scanned_cells();
-    let total = state.atlas.total_cells();
-    if state.cfg.atlas_cache {
-        let path = std::path::Path::new(&state.cfg.atlas_path);
-        if let Err(e) = state.atlas.save(path) {
-            crate::log_info(&format!(
-                "c-LoD atlas snapshot save FAILED ({e}) — continuing to stream"
-            ));
-        }
-    }
-    let new_pack = packgen::build(&state.cfg, &state.atlas);
-    let rev = state.pack_rev.fetch_add(1, Ordering::SeqCst) + 1;
-    state.server.set_pack(
-        new_pack.zip.clone(),
-        crate::http::PackMeta {
-            rev,
-            sha1_hex: new_pack.sha1_hex.clone(),
-            cells: scanned,
-            total_cells: total,
-        },
-    );
-    let delta = scanned.saturating_sub(state.built_cells.load(Ordering::SeqCst));
-    crate::log_info(&format!(
-        "c-LoD pack rebuilt (stream rev {rev}): +{delta} cells, {scanned}/{total} ({}%), {} bytes, sha1 {}",
-        scanned * 100 / total.max(1),
-        new_pack.zip.len(),
-        new_pack.sha1_hex
-    ));
-    *state.pack.write().unwrap() = Some(Arc::new(new_pack));
-    state.built_cells.store(scanned, Ordering::SeqCst);
-    *state.last_build.lock().unwrap() = Some(std::time::Instant::now());
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn stream_revision_lifecycle() {
-        // v4.3: after finalize, accumulating stream_min_cells new cells (plus
-        // stream_min_secs) must produce exactly one revision with new bytes;
-        // below the thresholds nothing may rebuild.
-        let dir = std::env::temp_dir().join(format!("clod-str-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).ok();
-        let st = State::new(Config::parse(&format!(
-            "atlas_size=512;cell_size=8;atlas_cache=true;atlas_path={}/a.bin;stream_min_cells=4",
-            dir.display()
-        )));
-        st.phase.store(PHASE_SCANNING, Ordering::SeqCst);
-        *st.world_obj.lock().unwrap() = 1;
-        // Deadline already reached -> base finalize fires on first call.
-        *st.world_seen_at.lock().unwrap() =
-            Some(std::time::Instant::now() - std::time::Duration::from_secs(10_000));
-        st.atlas.set(0, 0, 70, false, [0x91, 0xBD, 0x59]);
-        maybe_finalize(&st);
-        assert_eq!(st.phase.load(Ordering::SeqCst), PHASE_FINALIZED);
-        let base_sha = st.pack.read().unwrap().as_ref().unwrap().sha1_hex.clone();
-        assert_eq!(st.pack_rev.load(Ordering::SeqCst), 0);
-
-        // Below the cell gate: no revision (throttle backdated so ONLY the
-        // cell gate can block here). stream_min_cells clamps to a 64 floor,
-        // so 14 new cells (delta 14) must stay below it.
-        *st.last_build.lock().unwrap() =
-            Some(std::time::Instant::now() - std::time::Duration::from_secs(600));
-        for ix in 1..=14u32 {
-            st.atlas
-                .set(ix, 0, 70 + ix as i16, false, [0x91, 0xBD, 0x59]);
-        }
-        maybe_rebuild(&st);
-        assert_eq!(st.pack_rev.load(Ordering::SeqCst), 0, "gate not reached");
-
-        // Gate reached: one revision, new bytes, HTTP + meta swapped.
-        // delta = 65 scanned - 1 built = 64 >= stream_min_cells.
-        for ix in 15..=64u32 {
-            st.atlas
-                .set(ix, 0, 70 + ix as i16, false, [0x91, 0xBD, 0x59]);
-        }
-        *st.last_build.lock().unwrap() =
-            Some(std::time::Instant::now() - std::time::Duration::from_secs(600));
-        maybe_rebuild(&st);
-        assert_eq!(
-            st.pack_rev.load(Ordering::SeqCst),
-            1,
-            "one streamed revision"
-        );
-        let rev_sha = st.pack.read().unwrap().as_ref().unwrap().sha1_hex.clone();
-        assert_ne!(rev_sha, base_sha, "revision must change the pack bytes");
-        assert_eq!(st.server.meta().rev, 1);
-        assert_eq!(st.server.meta().cells, 65);
-        assert_eq!(
-            st.server.pack_bytes(),
-            st.pack.read().unwrap().as_ref().unwrap().zip.clone()
-        );
-
-        // No NEW cells since the last build: idempotent, no revision churn.
-        maybe_rebuild(&st);
-        assert_eq!(st.pack_rev.load(Ordering::SeqCst), 1);
-
-        // Streaming off: scanning stops after finalize, no rebuilds.
-        let st2 = State::new(Config::parse(
-            "atlas_size=512;cell_size=8;atlas_cache=false;stream=false",
-        ));
-        st2.phase.store(PHASE_SCANNING, Ordering::SeqCst);
-        *st2.world_obj.lock().unwrap() = 1;
-        *st2.world_seen_at.lock().unwrap() =
-            Some(std::time::Instant::now() - std::time::Duration::from_secs(10_000));
-        st2.atlas.set(0, 0, 70, false, [0x91, 0xBD, 0x59]);
-        maybe_finalize(&st2);
-        assert_eq!(st2.phase.load(Ordering::SeqCst), PHASE_FINALIZED);
-        st2.atlas.set(1, 0, 71, false, [0x91, 0xBD, 0x59]);
-        st2.atlas.set(2, 0, 72, false, [0x91, 0xBD, 0x59]);
-        st2.atlas.set(3, 0, 73, false, [0x91, 0xBD, 0x59]);
-        st2.atlas.set(4, 0, 74, false, [0x91, 0xBD, 0x59]);
-        st2.atlas.set(5, 0, 75, false, [0x91, 0xBD, 0x59]);
-        maybe_rebuild(&st2);
-        assert_eq!(
-            st2.pack_rev.load(Ordering::SeqCst),
-            0,
-            "stream=off stays frozen"
-        );
-
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn scan_task_near_spreads_from_player() {
-        let a = Atlas::new(0, 0, 512, 8, 63); // 64x64 cells
-                                              // Player cell center: 512/8 = 64 cells -> center cell (32, 32).
-                                              // Ring 0 (1 cell) + ring 1 (8 cells) = 9 cells — exactly `count`.
-        let tasks = a.scan_task_near(0, 0, 9);
-        assert_eq!(tasks.len(), 9);
-        // All returned cells must sit inside the first rings around (32,32).
-        for (ix, iz) in &tasks {
-            let r = ((*ix as i32) - 32).abs().max(((*iz as i32) - 32).abs());
-            assert!(r <= 1, "cell {:?} too far from the player", (ix, iz));
-        }
-        // Second call with the same count returns the same set (nothing was
-        // marked valid in between — the spiral is deterministic).
-        let again = a.scan_task_near(0, 0, 9);
-        assert_eq!(tasks, again);
-        // Outside the atlas: empty.
-        assert!(a.scan_task_near(99_999, 99_999, 5).is_empty());
-    }
 
     #[test]
     fn pack_url_uses_base() {
@@ -1032,9 +708,7 @@ mod tests {
 
     #[test]
     fn coverage_matches_world_and_bounds() {
-        let st = State::new(Config::parse(
-            "center_x=0;center_z=0;atlas_size=1024;cell_size=4",
-        ));
+        let st = State::new(Config::parse(""));
         *st.world_name.lock().unwrap() = "world".to_string();
         let p = PlayerInfo {
             uuid: "u".into(),
@@ -1044,14 +718,15 @@ mod tests {
             bz: 100,
         };
         assert_eq!(tier_for(&st, &p), Tier::Full);
-        let p_out = PlayerInfo {
+        let p_far = PlayerInfo {
             uuid: "u".into(),
             world: "world".into(),
             bx: 90_000,
             by: 64,
             bz: 0,
         };
-        assert_eq!(tier_for(&st, &p_out), Tier::Veil);
+        // Streaming follows the player anywhere in the world.
+        assert_eq!(tier_for(&st, &p_far), Tier::Full);
         let p_world = PlayerInfo {
             uuid: "u".into(),
             world: "world_nether".into(),
@@ -1059,7 +734,7 @@ mod tests {
             by: 64,
             bz: 0,
         };
-        assert_eq!(tier_for(&st, &p_world), Tier::Off);
+        assert_eq!(tier_for(&st, &p_world), Tier::Veil);
         let p_noworld = PlayerInfo {
             uuid: "u".into(),
             world: String::new(),
@@ -1071,60 +746,22 @@ mod tests {
     }
 
     #[test]
-    fn finalize_happens_exactly_once() {
-        let dir = std::env::temp_dir().join(format!("clod-eng-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).ok();
-        let st = State::new(Config::parse(&format!(
-            "atlas_size=512;cell_size=8;atlas_cache=true;atlas_path={}/a.bin",
-            dir.display()
-        )));
-        st.phase.store(PHASE_SCANNING, Ordering::SeqCst);
-        *st.world_obj.lock().unwrap() = 1; // pretend the world resolved
-        *st.world_seen_at.lock().unwrap() = Some(std::time::Instant::now());
-        st.atlas.set(0, 0, 70, false, [0x91, 0xBD, 0x59]);
+    fn map_ids_unique_per_player() {
+        let st = State::new(Config::parse(""));
+        let a = st.assign_map_ids("a");
+        let b = st.assign_map_ids("b");
+        let a2 = st.assign_map_ids("a");
+        assert_eq!(a, a2);
+        assert_ne!(a[0], b[0]);
+        assert_eq!(a[7] - a[0], 7);
+    }
 
-        // Deadline NOT reached yet, atlas incomplete -> no finalize.
-        maybe_finalize(&st);
-        assert_eq!(st.phase.load(Ordering::SeqCst), PHASE_SCANNING);
+    #[test]
+    fn pack_builds_at_boot_without_world() {
+        // The v5 pack is shader-only: it must build with NO world, NO atlas,
+        // NO scan data — the whole point of map-carrier streaming.
+        let st = State::new(Config::parse(""));
         assert!(st.pack.read().unwrap().is_none());
-
-        // Deadline reached -> finalize; second call is a no-op.
-        *st.world_seen_at.lock().unwrap() =
-            Some(std::time::Instant::now() - std::time::Duration::from_secs(10_000));
-        maybe_finalize(&st);
-        assert_eq!(st.phase.load(Ordering::SeqCst), PHASE_FINALIZED);
-        let sha1 = st.pack.read().unwrap().as_ref().unwrap().sha1_hex.clone();
-        maybe_finalize(&st);
-        assert_eq!(st.phase.load(Ordering::SeqCst), PHASE_FINALIZED);
-        assert_eq!(st.pack.read().unwrap().as_ref().unwrap().sha1_hex, sha1);
-
-        // HTTP server serves the finalized pack bytes.
-        let served = st.server.pack_bytes();
-        assert!(!served.is_empty());
-        assert_eq!(
-            served.len(),
-            st.pack.read().unwrap().as_ref().unwrap().zip.len()
-        );
-
-        // Cache file exists and restores to the same SHA-1 (restart sim).
-        let path = dir.join("a.bin");
-        assert!(path.exists());
-        drop(st);
-        let st2 = State::new(Config::parse(&format!(
-            "atlas_size=512;cell_size=8;atlas_cache=true;atlas_path={}/a.bin",
-            dir.display()
-        )));
-        assert!(st2.restored);
-        assert_eq!(st2.atlas.scanned_cells(), 1);
-        st2.phase.store(PHASE_SCANNING, Ordering::SeqCst);
-        *st2.world_obj.lock().unwrap() = 1;
-        *st2.world_seen_at.lock().unwrap() = Some(std::time::Instant::now());
-        maybe_finalize(&st2);
-        assert_eq!(
-            st2.pack.read().unwrap().as_ref().unwrap().sha1_hex,
-            sha1,
-            "restored session must reproduce the exact same pack SHA-1"
-        );
-        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(st.phase.load(Ordering::SeqCst), PHASE_BOOT);
     }
 }

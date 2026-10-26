@@ -4,7 +4,7 @@
 set -euo pipefail
 D="$HOME/mc-test/dist"
 JAVA="$HOME/mc-test/jdk25/bin/java"
-export CLOD_OPTS="scan_deadline_secs=90;tick_ms=200;atlas_size=512;cell_size=2;http_port=8199;stream_min_secs=45;stream_min_cells=256"
+export CLOD_OPTS="tick_ms=200;region_blocks=512;cell_size=2;http_port=8199;stream_budget=3072;page_ticks=8;scan_budget=8192"
 # 4GB container: Paper+module must fit alongside the client later;
 # host OOM-killer targets the fattest RSS — stay small and fast
 export DIST_JAVA_OPTS="-Xms256M -Xmx700M -XX:MaxMetaspaceSize=256M -XX:MaxDirectMemorySize=128M -XX:+UseG1GC"
@@ -24,11 +24,11 @@ exec 9>/tmp/server.in
 echo "launcher pid $SRV"
 
 for i in $(seq 1 150); do
-  if grep -q "pack finalized (base rev 0)" /tmp/server.log 2>/dev/null; then break; fi
+  if grep -q "shader-only pack built ONCE" /tmp/server.log 2>/dev/null; then break; fi
   if ! kill -0 $SRV 2>/dev/null; then echo "SERVER DIED"; tail -40 /tmp/server.log; exit 1; fi
   sleep 2
 done
-grep -q "pack finalized (base rev 0)" /tmp/server.log || { echo "TIMEOUT waiting for finalize"; tail -40 /tmp/server.log; exit 1; }
+grep -q "shader-only pack built ONCE" /tmp/server.log || { echo "TIMEOUT waiting for the boot pack"; tail -40 /tmp/server.log; exit 1; }
 sleep 2
 echo "=== gates ==="
 python3 /home/z/my-project/c-LoD/scripts/e2e/gates.py /tmp/server.log

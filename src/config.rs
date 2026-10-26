@@ -3,84 +3,53 @@
 //! Options format: `key1=value1;key2=value2;...` (whatever the runtime hands
 //! to `cplugin_init`). Every knob has a working default, so an empty options
 //! string produces a functional module.
+//!
+//! v5.0: the atlas/window/revision knobs are GONE — the pack is a static
+//! shader-only artifact and the world data streams through vanilla map
+//! packets. What remains is the streaming geometry + pacing.
 
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// Port of the embedded HTTP server that serves the generated resource
-    /// pack. The pack URL becomes `pack_base_url + "/clod-pack.zip"`.
+    /// Port of the embedded HTTP server that serves the (static, shader-only)
+    /// resource pack. The pack URL becomes `pack_base_url + "/clod-pack.zip"`.
     pub http_port: u16,
     /// Base URL clients can reach this server on, e.g. `http://play.example.com`.
-    /// If empty, the module auto-detects the first non-loopback IPv4 address.
     pub pack_base_url: String,
     /// Resource pack UUID pushed to clients. Stable across reboots so vanilla
-    /// clients only re-download when the SHA-1 changes.
+    /// clients only ever download once (the SHA-1 is content-fixed).
     pub pack_uuid: String,
     /// Prompt shown by the client for the resource pack.
     pub pack_prompt: String,
-    /// World used for the heightmap atlas (empty = first Bukkit world).
+    /// World streamed to the LOD (empty = first Bukkit world).
     pub world: String,
-    /// Atlas center in block coordinates (default: world spawn).
-    pub center_x: i32,
-    pub center_z: i32,
-    /// Atlas side length in blocks (atlas covers [-size/2, +size/2)).
-    /// Must be a power of two, 512..=16384.
-    pub atlas_size: i32,
-    /// One atlas texel covers `cell` x `cell` blocks (1, 2, 4, 8...).
+    /// Region side length in blocks (power of two, 256..=2048). One region =
+    /// 8 map pages; regions stream into parity-mapped client slots.
+    pub region_blocks: i32,
+    /// One LOD cell covers `cell` x `cell` blocks (1, 2, 4, 8...).
     pub cell_size: i32,
     /// Heightmap cells scanned per engine tick (main-thread JNI budget).
     pub scan_budget: u32,
-    /// Scan deadline: seconds from atlas-world resolution until the BASE
-    /// pack is finalized with whatever the sweep has (v4.3: the base pack is
-    /// rev 0 — with `stream` on, scanning continues afterwards and further
-    /// revisions stream to clients automatically).
-    pub scan_deadline_secs: u64,
-    /// v4.3 LOD streaming: keep scanning after the base pack is finalized
-    /// and re-push the pack whenever a revision accumulates new cells.
-    /// Vanilla clients re-download from the same URL only when the SHA-1
-    /// changes — the LOD surface grows live on an unmodified client.
-    pub stream: bool,
-    /// Minimum seconds between streamed pack revisions (rebuild throttle).
-    /// Floor of 90s: every pushed revision makes a vanilla client run a FULL
-    /// resource reload (~15-20s of Mojang screen on the bench) — revisions
-    /// spaced closer than that can chain reloads into a visible loop.
-    pub stream_min_secs: u64,
-    /// Minimum NEW cells since the last build before a revision is worth
-    /// shipping (rebuild gate — prevents empty-revision churn).
-    pub stream_min_cells: u64,
-    /// CI/e2e probe: no client joins, so nothing new ever loads after the
-    /// boot warm-up is released and NO streamed revision would ever fire.
-    /// With the probe on, the engine drops a VIRTUAL player at an unscanned
-    /// spot after finalize — the regular player-centric force-load frontier
-    /// then fills it and a revision streams server-side. Proves the whole
-    /// rebuild->push->HTTP path with zero console interaction.
-    pub stream_probe: bool,
-    /// Persist the finalized atlas to `atlas_path` (default
-    /// `c-LoD-atlas.bin` next to the server) so restarts rebuild the exact
-    /// same pack bytes (same SHA-1) and vanilla clients never re-download.
-    pub atlas_cache: bool,
-    /// Where the atlas snapshot is persisted.
-    pub atlas_path: String,
-    /// Warm-up radius in CHUNKS around the atlas center: at world resolution
-    /// the engine synchronously loads/generates (2*warm+1)^2 chunks so the
-    /// static snapshot always covers the core region (modern vanilla keeps
-    /// no spawn chunks loaded, and the scan never forces generation).
-    pub warm_chunks: i32,
+    /// v5 map-carrier pacing: page bytes (map texels) streamed per player per
+    /// tick, split across the 8 pages.
+    pub stream_budget: u32,
+    /// v5 map-carrier pacing: engine ticks one page stays in the offhand
+    /// before the cycle moves to the next (each visit uploads the page into
+    /// a client dynamic texture and the scrape captures it).
+    pub page_ticks: u32,
+    /// Region slots on the client (2x2 parity grid). Fixed at 4: the GLSL
+    /// marcher derives the same mapping from the world position.
+    pub stream_slots: u32,
     /// Camera FOV (vertical, degrees) the GLSL ray reconstruction assumes.
-    /// Must match the client's FOV for pixel-perfect alignment; 70 is vanilla.
     pub fov: f32,
     /// Distance (blocks) where the LOD raymarch starts. Keep it BELOW the
     /// client view distance: the chain only paints sky-depth pixels, so real
-    /// chunks always win by depth and the LOD fills underneath the chunk edge
-    /// — the seamless blend DH-style packs achieve (a start above the view
-    /// distance leaves the dreaded gap between real terrain and LOD).
+    /// chunks always win by depth and the LOD fills underneath the chunk edge.
     pub lod_near: f32,
     /// Effective maximum distance of the atmosphere veil (blocks).
     pub veil_far: f32,
     /// 26.3 device-depth near plane (blocks): device d = depth_near / eyeZ.
-    /// Live-verified on a real client (sky reads exactly 0.0); 0.05 is the
-    /// vanilla camera near plane. Only touch if Mojang changes the mapping.
     pub depth_near: f32,
     /// Sea level used for water flagging and LOD water rendering.
     pub sea_level: i32,
@@ -108,19 +77,12 @@ impl Default for Config {
             pack_uuid: "6b1f2f7e-9c0d-4a4b-8b0a-b10d1b4ab100".to_string(),
             pack_prompt: String::new(),
             world: String::new(),
-            center_x: 0,
-            center_z: 0,
-            atlas_size: 4096,
-            cell_size: 4,
+            region_blocks: 512,
+            cell_size: 2,
             scan_budget: 4096,
-            scan_deadline_secs: 900,
-            stream: true,
-            stream_min_secs: 90,
-            stream_min_cells: 512,
-            stream_probe: false,
-            atlas_cache: true,
-            atlas_path: "c-LoD-atlas.bin".to_string(),
-            warm_chunks: 8,
+            stream_budget: 2048,
+            page_ticks: 10,
+            stream_slots: 4,
             fov: 70.0,
             lod_near: 96.0,
             veil_far: 512.0,
@@ -168,15 +130,9 @@ impl Config {
         if let Some(v) = get("world") {
             cfg.world = v.to_string();
         }
-        if let Some(v) = get("center_x").and_then(|v| v.parse::<i32>().ok()) {
-            cfg.center_x = v;
-        }
-        if let Some(v) = get("center_z").and_then(|v| v.parse::<i32>().ok()) {
-            cfg.center_z = v;
-        }
-        if let Some(v) = get("atlas_size").and_then(|v| v.parse::<i32>().ok()) {
-            if (512..=16384).contains(&v) && v > 0 && (v & (v - 1)) == 0 {
-                cfg.atlas_size = v;
+        if let Some(v) = get("region_blocks").and_then(|v| v.parse::<i32>().ok()) {
+            if (256..=2048).contains(&v) && (v & (v - 1)) == 0 {
+                cfg.region_blocks = v;
             }
         }
         if let Some(v) = get("cell_size").and_then(|v| v.parse::<i32>().ok()) {
@@ -187,41 +143,14 @@ impl Config {
         if let Some(v) = get("scan_budget").and_then(|v| v.parse::<u32>().ok()) {
             cfg.scan_budget = v.clamp(64, 65536);
         }
-        if let Some(v) = get("scan_deadline_secs").and_then(|v| v.parse::<u64>().ok()) {
-            cfg.scan_deadline_secs = v.clamp(10, 86400);
+        if let Some(v) = get("stream_budget").and_then(|v| v.parse::<u32>().ok()) {
+            cfg.stream_budget = v.clamp(64, 65536);
         }
-        if let Some(v) = get("stream") {
-            cfg.stream = !matches!(
-                v.trim().to_ascii_lowercase().as_str(),
-                "false" | "0" | "off" | "no"
-            );
+        if let Some(v) = get("page_ticks").and_then(|v| v.parse::<u32>().ok()) {
+            cfg.page_ticks = v.clamp(2, 200);
         }
-        if let Some(v) = get("stream_min_secs").and_then(|v| v.parse::<u64>().ok()) {
-            cfg.stream_min_secs = v.clamp(30, 3600);
-        }
-        if let Some(v) = get("stream_min_cells").and_then(|v| v.parse::<u64>().ok()) {
-            cfg.stream_min_cells = v.clamp(64, 10_000_000);
-        }
-        if let Some(v) = get("stream_probe") {
-            cfg.stream_probe = !matches!(
-                v.trim().to_ascii_lowercase().as_str(),
-                "false" | "0" | "off" | "no"
-            );
-        }
-        if let Some(v) = get("atlas_cache") {
-            cfg.atlas_cache = !matches!(
-                v.trim().to_ascii_lowercase().as_str(),
-                "false" | "0" | "off" | "no"
-            );
-        }
-        if let Some(v) = get("atlas_path") {
-            let v = v.trim();
-            if !v.is_empty() {
-                cfg.atlas_path = v.to_string();
-            }
-        }
-        if let Some(v) = get("warm_chunks").and_then(|v| v.parse::<i32>().ok()) {
-            cfg.warm_chunks = v.clamp(0, 32);
+        if let Some(v) = get("stream_slots").and_then(|v| v.parse::<u32>().ok()) {
+            cfg.stream_slots = v.clamp(1, 4);
         }
         if let Some(v) = get("fov").and_then(|v| v.parse::<f32>().ok()) {
             if (30.0..=150.0).contains(&v) {
@@ -247,7 +176,7 @@ impl Config {
             cfg.sea_level = v;
         }
         if let Some(v) = get("tick_ms").and_then(|v| v.parse::<u64>().ok()) {
-            cfg.tick_ms = v.clamp(200, 60_000);
+            cfg.tick_ms = v.clamp(50, 60_000);
         }
         if let Some(v) = get("effect_terrain") {
             cfg.effect_terrain = v.to_string();
@@ -300,59 +229,44 @@ mod tests {
     fn defaults_are_sane() {
         let c = Config::parse("");
         assert_eq!(c.http_port, 8199);
-        assert_eq!(c.atlas_size, 4096);
-        assert_eq!(c.cell_size, 4);
+        assert_eq!(c.region_blocks, 512);
+        assert_eq!(c.cell_size, 2);
+        assert_eq!(c.stream_slots, 4);
+        assert_eq!(c.page_ticks, 10);
         assert_eq!(c.fov, 70.0);
     }
 
     #[test]
     fn parses_everything() {
         let c = Config::parse(
-            "http_port=9001;fov=90;atlas_size=8192;cell_size=2;color_low=0.1/0.8/0.2;world=world_nether",
+            "http_port=9001;fov=90;region_blocks=1024;cell_size=2;color_low=0.1/0.8/0.2;world=world_nether;stream_budget=4096;page_ticks=5",
         );
         assert_eq!(c.http_port, 9001);
         assert_eq!(c.fov, 90.0);
-        assert_eq!(c.atlas_size, 8192);
+        assert_eq!(c.region_blocks, 1024);
         assert_eq!(c.cell_size, 2);
         assert_eq!(c.color_low, [0.1, 0.8, 0.2]);
         assert_eq!(c.world, "world_nether");
+        assert_eq!(c.stream_budget, 4096);
+        assert_eq!(c.page_ticks, 5);
     }
 
     #[test]
-    fn rejects_bad_atlas_size() {
-        let c = Config::parse("atlas_size=3000");
-        assert_eq!(c.atlas_size, 4096);
+    fn rejects_bad_region() {
+        let c = Config::parse("region_blocks=3000");
+        assert_eq!(c.region_blocks, 512);
+        let c = Config::parse("region_blocks=1024;cell_size=3");
+        assert_eq!(c.cell_size, 2, "non-pow2 cell rejected");
     }
 
     #[test]
-    fn streaming_options() {
-        let c = Config::parse("");
-        assert!(c.stream, "streaming is the default (v4.3)");
-        assert_eq!(c.stream_min_secs, 90);
-        assert_eq!(c.stream_min_cells, 512);
-
-        let c = Config::parse("stream=false;stream_min_secs=1;stream_min_cells=2");
-        assert!(!c.stream);
-        assert_eq!(c.stream_min_secs, 30, "clamped above reload-loop territory");
-        assert_eq!(c.stream_min_cells, 64, "clamped to the floor");
-
-        let c = Config::parse("stream_probe=1");
-        assert!(c.stream_probe);
-        assert!(!Config::parse("").stream_probe, "off by default");
-    }
-
-    #[test]
-    fn static_pack_options() {
-        let c = Config::parse("");
-        assert_eq!(c.scan_deadline_secs, 900);
-        assert!(c.atlas_cache);
-        assert_eq!(c.atlas_path, "c-LoD-atlas.bin");
-        assert_eq!(c.warm_chunks, 8);
-
-        let c = Config::parse("scan_deadline_secs=7;atlas_cache=off;atlas_path=/tmp/atlas.bin");
-        assert_eq!(c.scan_deadline_secs, 10, "clamped to minimum");
-        assert!(!c.atlas_cache);
-        assert_eq!(c.atlas_path, "/tmp/atlas.bin");
+    fn legacy_keys_are_ignored_silently() {
+        // Old option strings must not crash the parser.
+        let c = Config::parse(
+            "atlas_size=1024;scan_deadline_secs=500;center_x=-930;stream_min_secs=90",
+        );
+        assert_eq!(c.region_blocks, 512);
+        assert_eq!(c.http_port, 8199);
     }
 
     #[test]
