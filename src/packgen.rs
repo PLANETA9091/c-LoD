@@ -73,6 +73,42 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
     let fog_start = cfg.lod_near * 1.05;
     let fog_end = atlas.size as f32 * 0.72;
 
+    // v4.2: cull the march with the REAL scanned max height (+8 m margin),
+    // not the world cap — upward rays leave the heightfield an order of
+    // magnitude earlier, which removes the useless grazing marches that
+    // produced the dark center column on v4.1.
+    let scanned_max = atlas.max_height();
+    let max_h = if scanned_max > -32 {
+        (i32::from(scanned_max) + 8).clamp(cfg.sea_level + 16, cfg.max_height)
+    } else {
+        cfg.max_height
+    };
+
+    // v4.2: the SCANNED box — Chebyshev ring extent of the valid cells, in
+    // blocks, centered on the atlas center. The shader marches and fades
+    // against this instead of the nominal atlas footprint: beyond the scan
+    // frontier there is no data (nothing can hit), so rays must stop there —
+    // marching on reads void and the fade must reference the true data edge.
+    let n_cells = atlas.cells as i32;
+    let center_cell = (n_cells - 1) / 2;
+    let snap = atlas.snapshot();
+    let mut max_ring: i32 = -1;
+    for z in 0..n_cells {
+        for x in 0..n_cells {
+            if snap[(z * n_cells + x) as usize].valid {
+                let r = (x - center_cell).abs().max((z - center_cell).abs());
+                if r > max_ring {
+                    max_ring = r;
+                }
+            }
+        }
+    }
+    let scan_half = if max_ring >= 0 {
+        (max_ring + 1) as f32 * atlas.cell as f32
+    } else {
+        0.0
+    };
+
     let veil_rgba = [
         cfg.color_veil[0],
         cfg.color_veil[1],
@@ -84,15 +120,18 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
         ("__FOV__", fmt_f(cfg.fov)),
         ("__ORIGIN_X__", fmt_f(origin_x as f32)),
         ("__ORIGIN_Z__", fmt_f(origin_z as f32)),
+        ("__CENTER_X__", fmt_f(atlas.center_x as f32)),
+        ("__CENTER_Z__", fmt_f(atlas.center_z as f32)),
         ("__ATLAS_SIZE__", fmt_f(atlas.size as f32)),
         ("__ATLAS_CELLS__", atlas.cells.to_string()),
         ("__CELL__", fmt_f(atlas.cell as f32)),
         ("__LOD_NEAR__", fmt_f(cfg.lod_near)),
-        ("__MAX_HEIGHT__", fmt_f(cfg.max_height as f32)),
+        ("__MAX_HEIGHT__", fmt_f(max_h as f32)),
         ("__SEA_LEVEL__", fmt_f(cfg.sea_level as f32)),
         ("__MIN_CONF__", fmt_f(0.25)),
         ("__FOG_START__", fmt_f(fog_start)),
         ("__FOG_END__", fmt_f(fog_end)),
+        ("__SCAN_HALF__", fmt_f(scan_half)),
         // 26.3 post-chain codec: a vec4 uniform value MUST be a 4-element
         // list (client error: "Input is not a list of 4 elements") — pad the
         // RGB palette colors with alpha 1.0.
@@ -133,6 +172,10 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
 
     let (aw, ah, atlas_rgba) = atlas.encode_rgba();
     let atlas_png = png::encode_png(aw, ah, &atlas_rgba);
+    // v4.2 Voxy look: second texture with the REAL per-cell surface colors
+    // (block palette + biome tint, palette.rs) baked at scan time.
+    let (cw, ch, col_rgba) = atlas.encode_color_rgba();
+    let col_png = png::encode_png(cw, ch, &col_rgba);
 
     let mut zip = ZipWriter::new();
     zip.add("pack.mcmeta", mcmeta.as_bytes());
@@ -167,6 +210,7 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
     zip.add("assets/minecraft/shaders/core/sky.vsh", sky_vsh.as_bytes());
     zip.add("assets/minecraft/shaders/core/sky.fsh", sky_fsh.as_bytes());
     zip.add("assets/clod/textures/effect/atlas.png", &atlas_png);
+    zip.add("assets/clod/textures/effect/atlas_col.png", &col_png);
     let zip_bytes = zip.finish();
 
     let mut h = Sha1::new();
@@ -197,7 +241,7 @@ mod tests {
             cfg.cell_size,
             cfg.sea_level,
         );
-        atlas.set(0, 0, 70, false);
+        atlas.set(0, 0, 70, false, [0x91, 0xBD, 0x59]);
         let pack = build(&cfg, &atlas);
 
         assert!(!pack.zip.is_empty());
@@ -211,8 +255,8 @@ mod tests {
         // Must contain the essential entries: scan by walking central dir.
         let count = u16::from_le_bytes([pack.zip[n - 12], pack.zip[n - 11]]) as usize;
         assert_eq!(
-            count, 12,
-            "pack.mcmeta + 2 json + 6 fsh + atlas.png + sky.vsh + sky.fsh"
+            count, 13,
+            "pack.mcmeta + 2 json + 6 fsh + atlas.png + atlas_col.png + sky.vsh + sky.fsh"
         );
 
         // JSON chains are valid JSON (parenthesis balance + token-free).
@@ -261,13 +305,13 @@ mod tests {
         // same pack bytes, regardless of internal version counters.
         let cfg = Config::parse("");
         let a = Atlas::new(0, 0, 256, 4, 63);
-        a.set(1, 1, 90, false);
-        a.set(2, 2, 40, true);
+        a.set(1, 1, 90, false, [0x91, 0xBD, 0x59]);
+        a.set(2, 2, 40, true, [0x3F, 0x76, 0xE4]);
         let pack_a = build(&cfg, &a);
 
         let b = Atlas::new(0, 0, 256, 4, 63);
-        b.set(1, 1, 90, false);
-        b.set(2, 2, 40, true);
+        b.set(1, 1, 90, false, [0x91, 0xBD, 0x59]);
+        b.set(2, 2, 40, true, [0x3F, 0x76, 0xE4]);
         let pack_b = build(&cfg, &b);
 
         assert_eq!(pack_a.zip, pack_b.zip, "pack bytes must be deterministic");
@@ -297,6 +341,39 @@ mod tests {
             p = data_start + size;
         }
         out
+    }
+
+    #[test]
+    fn texture_inputs_use_26_3_effect_path_schema() {
+        // 26.3 PostChain.createPass maps a texture-input location through
+        // lambda$createPass$0 = "textures/effect/<path>.png" (decompiled
+        // bootstrap #9). The location therefore carries NO textures/effect
+        // prefix: "clod:atlas" -> assets/clod/textures/effect/atlas.png.
+        // "clod:effect/atlas" would double to .../effect/effect/... and the
+        // client binds the missing texture (the v4.0-v4.1 invisible-atlas
+        // bug — the whole LOD rendered as the magenta checkerboard).
+        let cfg = Config::parse("");
+        let atlas = Atlas::new(0, 0, 256, 4, 63);
+        let pack = build(&cfg, &atlas);
+        let entries = zip_entries(&pack.zip);
+        let chain = &entries
+            .iter()
+            .find(|(n, _)| n == "assets/clod/post_effect/lod_terrain.json")
+            .unwrap()
+            .1;
+        let chain = String::from_utf8_lossy(chain);
+        assert!(
+            chain.contains("\"location\": \"clod:atlas\""),
+            "chain: {chain}"
+        );
+        assert!(
+            chain.contains("\"location\": \"clod:atlas_col\""),
+            "color atlas input missing: {chain}"
+        );
+        assert!(
+            !chain.contains("clod:effect/"),
+            "effect/ prefix must not appear inside locations: {chain}"
+        );
     }
 
     #[test]
