@@ -193,7 +193,7 @@ jobs:
       - name: Boot #2 (restart — atlas cache + streaming revision)
         working-directory: dist
         env:
-          CLOD_OPTS: "scan_deadline_secs=60;tick_ms=200;atlas_size=1024;cell_size=4;http_port=8199;stream_min_secs=20;stream_min_cells=64"
+          CLOD_OPTS: "scan_deadline_secs=60;tick_ms=200;atlas_size=1024;cell_size=4;http_port=8199;stream_min_secs=20;stream_min_cells=64;stream_probe=1"
         run: |
           rm -f in2; mkfifo in2
           tail -f in2 | java -Xmx2G -jar launcher.jar > boot2.log 2>&1 &
@@ -210,16 +210,16 @@ jobs:
           grep -q "atlas restored" boot2.log || { echo "atlas cache was not restored"; tail -80 boot2.log; exit 1; }
           echo "--- gates (boot #2) ---"
           python3 ../scripts/e2e/gates.py boot2.log
-          echo "--- stream a revision server-side (forceload -> scan -> rebuild) ---"
+          echo "--- stream a revision server-side (stream_probe: virtual player -> frontier force-load -> rebuild) ---"
+          grep -q "stream_probe: virtual player" boot2.log || { echo "FAIL: probe never armed"; tail -40 boot2.log; exit 1; }
           REV0=$(curl -s http://127.0.0.1:8199/clod-pack.info | grep '^revision=' | cut -d= -f2)
           echo "revision before: $REV0"
-          echo 'forceload add -160 -160 -96 -96' >&9
-          for i in $(seq 1 120); do
+          for i in $(seq 1 240); do
             if grep -q 'pack rebuilt (stream rev 1)' boot2.log; then break; fi
             if ! kill -0 $SRV 2>/dev/null; then echo "SERVER DIED mid-stream"; tail -40 boot2.log; exit 1; fi
             sleep 1
           done
-          grep -q 'pack rebuilt (stream rev 1)' boot2.log || { echo 'FAIL: no streamed revision after forceload'; tail -40 boot2.log; exit 1; }
+          grep -q 'pack rebuilt (stream rev 1)' boot2.log || { echo 'FAIL: no streamed revision from the probe'; tail -40 boot2.log; exit 1; }
           REV1=$(curl -s http://127.0.0.1:8199/clod-pack.info | grep '^revision=' | cut -d= -f2)
           echo "revision after: $REV1"
           test "$REV1" -gt "$REV0" || { echo "FAIL: HTTP revision did not advance"; exit 1; }

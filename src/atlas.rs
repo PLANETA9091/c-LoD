@@ -248,6 +248,23 @@ impl Atlas {
         out
     }
 
+    /// v4.4 stream_probe: the outermost UNSCANNED cell in the radial order.
+    /// The order runs rings from the center, so the tail of the order is the
+    /// most reliably unscanned territory (the boot deadline cuts it mid-way)
+    /// — the deterministic place to drop a virtual player for the e2e probe.
+    /// Returns None when every cell is valid (fully scanned atlas).
+    pub fn outermost_unscanned_cell(&self) -> Option<(u32, u32)> {
+        let d = self.data.read().ok()?;
+        let n = self.cells as usize;
+        for &i in self.order.iter().rev() {
+            let (ix, iz) = (i % n as u32, i / n as u32);
+            if !d.get(i as usize).map(|c| c.valid).unwrap_or(true) {
+                return Some((ix, iz));
+            }
+        }
+        None
+    }
+
     /// World X of cell center.
     pub fn cell_world_x(&self, ix: u32) -> i32 {
         self.center().0 - self.half() + (ix * self.cell as u32) as i32 + self.cell / 2

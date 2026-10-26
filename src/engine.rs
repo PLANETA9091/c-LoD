@@ -84,6 +84,10 @@ pub struct State {
     pub force_pending: Mutex<HashMap<(i32, i32), u64>>,
     /// v4.4 frontier: chunks scanned through the force path so far.
     pub forced_chunks: AtomicU64,
+    /// v4.4 stream_probe: fires once after finalize — a virtual player at an
+    /// unscanned spot (see config.rs). Fed into the player-centric frontier
+    /// scan so a revision streams with no real client connected.
+    pub probe_pos: Mutex<Option<(i32, i32)>>,
 }
 
 #[derive(Clone)]
@@ -182,6 +186,7 @@ impl State {
             window_moved: AtomicBool::new(false),
             force_pending: Mutex::new(HashMap::new()),
             forced_chunks: AtomicU64::new(0),
+            probe_pos: Mutex::new(None),
             cfg,
         })
     }
@@ -354,7 +359,42 @@ fn scan_batch(state: &Arc<State>, env: Env) {
     // the radial-from-center sweep moving (it still owns the map when no
     // one is online). The spiral only returns unscanned cells, so in the
     // steady state it costs one RwLock read per visited cell.
-    let players = jni::players(env);
+    let mut players = jni::players(env);
+
+    // v4.4 stream_probe (CI/e2e): after finalize, drop a VIRTUAL player at
+    // an unscanned spot — the outermost ring of the radial order is the most
+    // reliably unscanned place (the boot scan runs rings from the center and
+    // the deadline cuts it mid-way). The regular player-centric frontier
+    // force-load then fills cells there and a revision streams server-side.
+    if state.cfg.stream_probe
+        && state.phase.load(Ordering::SeqCst) == PHASE_FINALIZED
+        && state.probe_pos.lock().unwrap().is_none()
+    {
+        let n = state.atlas.cells as i32;
+        let probe_cell = state.atlas.outermost_unscanned_cell();
+        if let Some((ix, iz)) = probe_cell {
+            let bx = state.atlas.cell_world_x(ix);
+            let bz = state.atlas.cell_world_z(iz);
+            *state.probe_pos.lock().unwrap() = Some((bx, bz));
+            crate::log_info(&format!(
+                "c-LoD stream_probe: virtual player at ({bx},{bz}) (cell {ix},{iz} of {n}) — frontier force-load should stream a revision"
+            ));
+        } else {
+            // Fully scanned atlas: nothing to prove, retire the probe.
+            *state.probe_pos.lock().unwrap() = Some((0, -0x7fffffff));
+        }
+    }
+    if let Some((bx, bz)) = *state.probe_pos.lock().unwrap() {
+        if bz > -0x7fffffff {
+            players.push(PlayerInfo {
+                uuid: String::new(),
+                world: state.world_name.lock().unwrap().clone(),
+                bx,
+                by: 140,
+                bz,
+            });
+        }
+    }
 
     // v4.4: keep the player inside the atlas window (DH tile-grid model).
     // Walking into the outer 40% of the window slides it so the scan keeps
@@ -395,7 +435,6 @@ fn scan_batch(state: &Arc<State>, env: Env) {
             }
         }
     }
-
     let near_budget = budget / 2;
     let mut near_done = 0usize;
     if near_budget > 0 {

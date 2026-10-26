@@ -49,6 +49,13 @@ pub struct Config {
     /// Minimum NEW cells since the last build before a revision is worth
     /// shipping (rebuild gate — prevents empty-revision churn).
     pub stream_min_cells: u64,
+    /// CI/e2e probe: no client joins, so nothing new ever loads after the
+    /// boot warm-up is released and NO streamed revision would ever fire.
+    /// With the probe on, the engine drops a VIRTUAL player at an unscanned
+    /// spot after finalize — the regular player-centric force-load frontier
+    /// then fills it and a revision streams server-side. Proves the whole
+    /// rebuild->push->HTTP path with zero console interaction.
+    pub stream_probe: bool,
     /// Persist the finalized atlas to `atlas_path` (default
     /// `c-LoD-atlas.bin` next to the server) so restarts rebuild the exact
     /// same pack bytes (same SHA-1) and vanilla clients never re-download.
@@ -110,6 +117,7 @@ impl Default for Config {
             stream: true,
             stream_min_secs: 90,
             stream_min_cells: 512,
+            stream_probe: false,
             atlas_cache: true,
             atlas_path: "c-LoD-atlas.bin".to_string(),
             warm_chunks: 8,
@@ -193,6 +201,12 @@ impl Config {
         }
         if let Some(v) = get("stream_min_cells").and_then(|v| v.parse::<u64>().ok()) {
             cfg.stream_min_cells = v.clamp(64, 10_000_000);
+        }
+        if let Some(v) = get("stream_probe") {
+            cfg.stream_probe = !matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "false" | "0" | "off" | "no"
+            );
         }
         if let Some(v) = get("atlas_cache") {
             cfg.atlas_cache = !matches!(
@@ -321,6 +335,10 @@ mod tests {
         assert!(!c.stream);
         assert_eq!(c.stream_min_secs, 30, "clamped above reload-loop territory");
         assert_eq!(c.stream_min_cells, 64, "clamped to the floor");
+
+        let c = Config::parse("stream_probe=1");
+        assert!(c.stream_probe);
+        assert!(!Config::parse("").stream_probe, "off by default");
     }
 
     #[test]
