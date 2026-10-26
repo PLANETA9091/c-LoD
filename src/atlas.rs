@@ -16,15 +16,17 @@
 
 use std::io::Write as _;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use std::sync::RwLock;
 
 /// On-disk snapshot magic + format version.
 const MAGIC: &[u8; 8] = b"CLODAT02";
 
 pub struct Atlas {
-    pub center_x: i32,
-    pub center_z: i32,
+    /// Window center in world blocks — ATOMIC: v4.4 slides the window to
+    /// follow the player (recenter) while readers snapshot it lock-free.
+    pub center_x: AtomicI32,
+    pub center_z: AtomicI32,
     pub size: i32,
     pub cell: i32,
     pub cells: u32,
@@ -72,8 +74,8 @@ impl Atlas {
             (dx.max(dz), ix, iz)
         });
         Self {
-            center_x,
-            center_z,
+            center_x: AtomicI32::new(center_x),
+            center_z: AtomicI32::new(center_z),
             size,
             cell,
             cells,
@@ -89,10 +91,19 @@ impl Atlas {
         self.size / 2
     }
 
+    /// Current window center (world blocks), consistent pair.
+    pub fn center(&self) -> (i32, i32) {
+        (
+            self.center_x.load(Ordering::Relaxed),
+            self.center_z.load(Ordering::Relaxed),
+        )
+    }
+
     /// Cell indices for a world block coordinate, or None when outside.
     pub fn cell_index(&self, x: i32, z: i32) -> Option<(u32, u32)> {
-        let dx = x - (self.center_x - self.half());
-        let dz = z - (self.center_z - self.half());
+        let (cx, cz) = self.center();
+        let dx = x - (cx - self.half());
+        let dz = z - (cz - self.half());
         if dx < 0 || dz < 0 || dx >= self.size || dz >= self.size {
             return None;
         }
@@ -239,12 +250,54 @@ impl Atlas {
 
     /// World X of cell center.
     pub fn cell_world_x(&self, ix: u32) -> i32 {
-        self.center_x - self.half() + (ix * self.cell as u32) as i32 + self.cell / 2
+        self.center().0 - self.half() + (ix * self.cell as u32) as i32 + self.cell / 2
+    }
+
+    /// v4.4 streaming: shift the atlas WINDOW so the player stays near its
+    /// center (the DH tile-grid model with one big tile). dcell_x/dcell_z is
+    /// the window movement in cells (new center = old center + delta in world
+    /// blocks = delta * cell). Content rotates with the WORLD: every cell
+    /// keeps its data at its world position (new[ix] = old[ix + dcell]), the
+    /// vacated trailing edge becomes void and re-enters the sweep at its new
+    /// ring distance. The radial scan order is grid-relative and survives
+    /// unchanged, and `scan_task_near` re-anchors on the player next tick.
+    /// Returns true when the window actually moved.
+    pub fn recenter(&self, dcell_x: i32, dcell_z: i32) -> bool {
+        if dcell_x == 0 && dcell_z == 0 {
+            return false;
+        }
+        let n = self.cells as usize;
+        let Ok(mut old) = self.data.write() else {
+            return false;
+        };
+        let mut moved: Vec<Cell> = vec![Cell::default(); n * n];
+        for iz in 0..n {
+            let sz = iz as i64 + i64::from(dcell_z);
+            if sz < 0 || sz >= n as i64 {
+                continue; // slid in from the data edge: void until scanned
+            }
+            for ix in 0..n {
+                let sx = ix as i64 + i64::from(dcell_x);
+                if sx < 0 || sx >= n as i64 {
+                    continue;
+                }
+                moved[iz * n + ix] = old[sz as usize * n + sx as usize];
+            }
+        }
+        let scanned_now = moved.iter().filter(|c| c.valid).count() as u64;
+        *old = moved;
+        self.scanned.store(scanned_now, Ordering::Relaxed);
+        self.center_x
+            .fetch_add(dcell_x * self.cell, Ordering::Relaxed);
+        self.center_z
+            .fetch_add(dcell_z * self.cell, Ordering::Relaxed);
+        self.version.fetch_add(1, Ordering::Relaxed);
+        true
     }
 
     /// World Z of cell center.
     pub fn cell_world_z(&self, iz: u32) -> i32 {
-        self.center_z - self.half() + (iz * self.cell as u32) as i32 + self.cell / 2
+        self.center().1 - self.half() + (iz * self.cell as u32) as i32 + self.cell / 2
     }
 
     /// Encode the atlas as RGBA8 pixels for the height PNG:
@@ -356,8 +409,9 @@ impl Atlas {
         let n = snap.len();
         let mut out = Vec::with_capacity(MAGIC.len() + 20 + n * 6);
         out.extend_from_slice(MAGIC);
-        out.extend_from_slice(&self.center_x.to_le_bytes());
-        out.extend_from_slice(&self.center_z.to_le_bytes());
+        let (cx, cz) = self.center();
+        out.extend_from_slice(&cx.to_le_bytes());
+        out.extend_from_slice(&cz.to_le_bytes());
         out.extend_from_slice(&self.size.to_le_bytes());
         out.extend_from_slice(&self.cell.to_le_bytes());
         out.extend_from_slice(&self.sea_level.to_le_bytes());
@@ -390,12 +444,13 @@ impl Atlas {
         let size = rd_i32(16)?;
         let cell = rd_i32(20)?;
         let sea = rd_i32(24)?;
-        if cx != want_center_x
-            || cz != want_center_z
-            || size != want_size
-            || cell != want_cell
-            || sea != want_sea_level
-        {
+        // v4.4: the window CENTER is part of the streamed state now (it moves
+        // with the player), so a snapshot restores at its OWN center — only
+        // the geometry (size/cell/sea) must match the running config. The
+        // want_center_* parameters stay for call-site compatibility but no
+        // longer gate the restore.
+        let _ = (want_center_x, want_center_z);
+        if size != want_size || cell != want_cell || sea != want_sea_level {
             return None;
         }
         let atlas = Atlas::new(cx, cz, size, cell, sea);
@@ -527,6 +582,51 @@ mod tests {
     }
 
     #[test]
+    fn recenter_rotates_data_with_the_world() {
+        // 16x16 grid, cell 4 -> 64x64 blocks. Fill two landmark cells at
+        // known world positions, slide the window east+south, verify the
+        // landmarks keep their DATA at the same WORLD positions and the
+        // trailing edge went void.
+        let a = Atlas::new(0, 0, 64, 4, 63);
+        // World (10, 20) -> cell ((10+32)/4, (20+32)/4) = (10, 13).
+        a.set(10, 13, 100, false, [1, 2, 3]);
+        // World (-30, -30) -> cell (0, 0).
+        a.set(0, 0, 50, true, [4, 5, 6]);
+        assert_eq!(a.scanned_cells(), 2);
+
+        // Slide the window 2 cells east (+8 blocks) and 1 cell south (+4).
+        assert!(a.recenter(2, 1));
+        assert_eq!(a.center(), (8, 4));
+
+        // The (10,20) landmark now lives at cell (10-2, 13-1) = (8, 12).
+        let c1 = a.get(8, 12).expect("east landmark followed the world");
+        assert_eq!((c1.height, c1.rgb), (100, [1, 2, 3]));
+        // The (0,0)-world cell moved out of the window (2 cells east, 1
+        // south: old cell (0,0) would map to new (-2,-1) — outside) -> void.
+        assert!(a.get(0, 0).is_none(), "trailing edge is void");
+        // New trailing-edge cells also void; scanned count dropped to 1.
+        assert_eq!(a.scanned_cells(), 1);
+
+        // Sliding BACK restores the world data for cells that STAYED inside
+        // the window throughout; the corner landmark left it (data lost, a
+        // fresh scan refills that cell).
+        assert!(a.recenter(-2, -1));
+        assert_eq!(a.center(), (0, 0));
+        let c2 = a.get(10, 13).expect("landmark back at origin cell");
+        assert_eq!(c2.height, 100);
+        assert!(
+            a.get(0, 0).is_none(),
+            "left the window: data lost until rescanned"
+        );
+        assert_eq!(a.scanned_cells(), 1);
+
+        // Zero shift is a no-op (no version churn, no rebuild forcing).
+        let v = a.version();
+        assert!(!a.recenter(0, 0));
+        assert_eq!(a.version(), v);
+    }
+
+    #[test]
     fn scan_task_is_radial_and_wraps() {
         let a = Atlas::new(0, 0, 64, 4, 63);
         // Asking for more than `total` yields exactly `total` unique cells.
@@ -573,8 +673,7 @@ mod tests {
         assert!(!path.with_extension("tmp").exists());
 
         let b = Atlas::try_restore(&path, 123, -456, 64, 4, 62).expect("restore");
-        assert_eq!(b.center_x, 123);
-        assert_eq!(b.center_z, -456);
+        assert_eq!(b.center(), (123, -456));
         assert_eq!(b.scanned_cells(), 3);
         assert_eq!(b.get(3, 5).unwrap().height, 100);
         assert_eq!(b.get(3, 5).unwrap().rgb, [0x10, 0x20, 0x30]);
@@ -586,8 +685,11 @@ mod tests {
         let (_, _, px_b) = b.encode_rgba();
         assert_eq!(px_a, px_b);
 
-        // Geometry mismatch -> no restore (stale cache).
-        assert!(Atlas::try_restore(&path, 999, -456, 64, 4, 62).is_none());
+        // Geometry mismatch -> no restore (stale cache). The WINDOW CENTER is
+        // part of the streamed state (v4.4: it follows the player), so a
+        // different want_center still restores — at the SNAPSHOT's center.
+        let c = Atlas::try_restore(&path, 999, -456, 64, 4, 62).expect("center moves with data");
+        assert_eq!(c.center(), (123, -456), "snapshot center wins over config");
         assert!(Atlas::try_restore(&path, 123, -456, 128, 4, 62).is_none());
         std::fs::remove_dir_all(&dir).ok();
     }

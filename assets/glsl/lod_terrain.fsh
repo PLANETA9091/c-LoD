@@ -80,6 +80,11 @@ const int MAX_STEPS = 260;
 const int BISECT = 7;
 const float VOID_Y = -63.5;   // cells below this are unscanned = no data
 const float FADE_START = 0.9; // Voxy: fade begins at 90% of the view radius
+// Floor for the FADE radius (blocks). Voxy fades against its fixed LOD view
+// distance; a camera near the data edge must keep a full-length fade ramp or
+// the terrain beside it dissolves into sky (v4.3 bench: west-flat-blue).
+// 150 blocks ~= the visible LOD band for RD8 (96..256) at 2-block cells.
+const float FADE_MIN_RADIUS = 150.0;
 
 // ---- vanilla 26.3 overworld lightmap texel (0,15) --------------------------
 // data/minecraft/timeline/day.json, tracks visual/sky_light_color (+_factor),
@@ -363,6 +368,25 @@ void main() {
     ivec2 tc = cell_tc(hitPos.xz, origin, cell, n);
     bool isWater = cell_water(tc);
 
+    // Side-entry detection (the hanging-curtain fix). A march crossing can
+    // enter a column through its WALL: a real cliff (terrain rose faster
+    // than the ray descended between samples) or a valid island rising out
+    // of unscanned void (hPre < VOID_Y). Painting those pixels with the top
+    // gradient normal (face ~= 1.0, full brightness) produced the bright
+    // vertical curtains at every void boundary on the v4.3 bench. DH bakes
+    // separate darker side quads for the same geometry; we detect the wall
+    // at the hit and use the vanilla horizontal face weights instead.
+    ivec2 tcPre = cell_tc(cam.xz + dir.xz * prevT, origin, cell, n);
+    float hPre = cell_height(tcPre);
+    float hHit = cell_height(tc);
+    float rayPreY = cam.y + dir.y * prevT;
+    bool sideWall = (hHit - hPre) > (rayPreY - hitPos.y) + cell * 0.5;
+    float wallFace = 0.8;
+    if (sideWall) {
+        ivec2 dtc = tc - tcPre;
+        wallFace = abs(dtc.x) >= abs(dtc.y) ? 0.6 : 0.8; // vanilla x/z side weights
+    }
+
     float hL = cell_height(tc - ivec2(1, 0));
     float hR = cell_height(tc + ivec2(1, 0));
     float hD = cell_height(tc - ivec2(0, 1));
@@ -385,6 +409,10 @@ void main() {
     float face = (an.x * 0.6 + an.y * 1.0 + an.z * 0.8) / wsum;
     if (isWater) {
         face = 1.0; // water quads face straight up (flat sea surface)
+    }
+    if (sideWall) {
+        face = wallFace;          // vertical wall: horizontal weight only
+        albedo *= vec3(0.85);     // and a depth hint (DH side quads are darker)
     }
 
     // Light = EXACT vanilla lightmap texel (0,15): distant surface cells are
@@ -417,7 +445,14 @@ void main() {
 
     // ---- FADE: Voxy FogMode.FADE, MODE=1 (xz only), last 10% ------------
     float lenXZ = tHit * length(dir.xz);
-    float rEdge = max(edge_distance_xz(cam, dir, minW, maxW), 1.0);
+    // Voxy's FADE radius is its FIXED render distance, not the distance to
+    // the data edge. Using the raw camera->edge distance collapses the whole
+    // fade into the first blocks whenever the camera stands near the atlas
+    // boundary (bench v4.3: player 36 cells from the west edge -> the entire
+    // western view faded to sky even though every cell was scanned). Floor
+    // the radius at a sane view span so the fade only ever touches the true
+    // frontier, never the terrain next to the player.
+    float rEdge = max(edge_distance_xz(cam, dir, minW, maxW), FADE_MIN_RADIUS);
     // Voxy FogMode.FADE verbatim: colour.a *= (1 - fadeOut) with fadeOut =
     // (len - start)/(end - start), start = 90% of the radius. With SRC_ALPHA
     // blending that is mix(lod, scene, fadeOut) — fadeOut is 0 INSIDE the

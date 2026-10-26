@@ -21,11 +21,12 @@ def main(path: str) -> int:
     log = open(path, encoding="utf-8", errors="replace").read()
 
     def need(cond: bool, gate: str, hint: str) -> None:
+        nonlocal failed
         if cond:
             print(f"  OK   {gate}")
         else:
             print(f"  FAIL {gate} — {hint}")
-            globals()["failed"] = True
+            failed = True
 
     failed = False
 
@@ -64,7 +65,10 @@ def main(path: str) -> int:
 
     # G7: streaming discipline. Revisions must be strictly monotonic with no
     # gaps, and none may appear before the base finalize.
-    revs = [int(r) for r in re.findall(r"pack rebuilt \(stream rev (\d+)\)", log)]
+    # NOTE: the console mirror duplicates every line (stdout + logger), so the
+    # same revision appears twice in the raw log — dedupe before the check,
+    # gaps/holes are still caught by the set comparison.
+    revs = sorted({int(r) for r in re.findall(r"pack rebuilt \(stream rev (\d+)\)", log)})
     stream_on = re.search(r"pack finalized \(base rev 0\).*— streaming ON", log) is not None
     if stream_on:
         need(

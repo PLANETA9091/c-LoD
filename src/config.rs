@@ -42,6 +42,9 @@ pub struct Config {
     /// changes — the LOD surface grows live on an unmodified client.
     pub stream: bool,
     /// Minimum seconds between streamed pack revisions (rebuild throttle).
+    /// Floor of 90s: every pushed revision makes a vanilla client run a FULL
+    /// resource reload (~15-20s of Mojang screen on the bench) — revisions
+    /// spaced closer than that can chain reloads into a visible loop.
     pub stream_min_secs: u64,
     /// Minimum NEW cells since the last build before a revision is worth
     /// shipping (rebuild gate — prevents empty-revision churn).
@@ -105,8 +108,8 @@ impl Default for Config {
             scan_budget: 4096,
             scan_deadline_secs: 900,
             stream: true,
-            stream_min_secs: 30,
-            stream_min_cells: 256,
+            stream_min_secs: 90,
+            stream_min_cells: 512,
             atlas_cache: true,
             atlas_path: "c-LoD-atlas.bin".to_string(),
             warm_chunks: 8,
@@ -186,10 +189,10 @@ impl Config {
             );
         }
         if let Some(v) = get("stream_min_secs").and_then(|v| v.parse::<u64>().ok()) {
-            cfg.stream_min_secs = v.clamp(5, 3600);
+            cfg.stream_min_secs = v.clamp(30, 3600);
         }
         if let Some(v) = get("stream_min_cells").and_then(|v| v.parse::<u64>().ok()) {
-            cfg.stream_min_cells = v.clamp(16, 10_000_000);
+            cfg.stream_min_cells = v.clamp(64, 10_000_000);
         }
         if let Some(v) = get("atlas_cache") {
             cfg.atlas_cache = !matches!(
@@ -311,13 +314,13 @@ mod tests {
     fn streaming_options() {
         let c = Config::parse("");
         assert!(c.stream, "streaming is the default (v4.3)");
-        assert_eq!(c.stream_min_secs, 30);
-        assert_eq!(c.stream_min_cells, 256);
+        assert_eq!(c.stream_min_secs, 90);
+        assert_eq!(c.stream_min_cells, 512);
 
         let c = Config::parse("stream=false;stream_min_secs=1;stream_min_cells=2");
         assert!(!c.stream);
-        assert_eq!(c.stream_min_secs, 5, "clamped to the floor");
-        assert_eq!(c.stream_min_cells, 16, "clamped to the floor");
+        assert_eq!(c.stream_min_secs, 30, "clamped above reload-loop territory");
+        assert_eq!(c.stream_min_cells, 64, "clamped to the floor");
     }
 
     #[test]

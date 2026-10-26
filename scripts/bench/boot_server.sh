@@ -4,7 +4,7 @@
 set -euo pipefail
 D="$HOME/mc-test/dist"
 JAVA="$HOME/mc-test/jdk25/bin/java"
-export CLOD_OPTS="scan_deadline_secs=90;tick_ms=200;atlas_size=512;cell_size=2;http_port=8199;stream_min_secs=15;stream_min_cells=32"
+export CLOD_OPTS="scan_deadline_secs=90;tick_ms=200;atlas_size=512;cell_size=2;http_port=8199;stream_min_secs=45;stream_min_cells=256"
 # 4GB container: Paper+module must fit alongside the client later;
 # host OOM-killer targets the fattest RSS — stay small and fast
 export DIST_JAVA_OPTS="-Xms256M -Xmx700M -XX:MaxMetaspaceSize=256M -XX:MaxDirectMemorySize=128M -XX:+UseG1GC"

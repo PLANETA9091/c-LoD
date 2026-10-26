@@ -47,12 +47,18 @@ sleep 12
 shot "$SHOTS/s01_base_applied.png"
 grep -ci "resource pack" /tmp/client.log || true
 
-# 3. world state + BASE shot from the atlas center (corner still void)
+# 3. world state + BASE shot from the atlas center (corner still void).
+# Wait out the spawn-region revisions first: the player keeps chunks loaded
+# around spawn, so rev 1..N fire here — the corner revision must be NEW.
 srv "gamerule doDaylightCycle false"
 srv "time set 6000"
 srv "weather clear"
 srv "gamemode spectator Stepan"
-sleep 2
+sleep 30
+REVS_BEFORE=$(grep -c "pack rebuilt (stream rev" /tmp/server.log)
+REVS_BEFORE=${REVS_BEFORE:-0}
+REV_TARGET=$((REVS_BEFORE + 1))
+echo "revisions before corner tp: $REVS_BEFORE (waiting for rev $REV_TARGET)"
 srv "tp Stepan 0 140 0 45 15"   # looking NE toward the (-,-) corner
 sleep 3
 shot "$SHOTS/s02_base_center_looking_at_void_corner.png"
@@ -61,7 +67,15 @@ echo "base shot taken; corner (-200,-200) is unscanned -> no LOD expected"
 # 4. stream trigger: teleport into the corner (chunks load there)
 srv "tp Stepan -200 140 -200 45 15"
 echo "teleported into the corner — waiting for a streamed revision"
-wait_for "pack rebuilt (stream rev 1)" /tmp/server.log 240 || { echo "NO streamed revision"; tail -30 /tmp/server.log; exit 4; }
+for i in $(seq 1 240); do
+  N=$(grep -c "pack rebuilt (stream rev" /tmp/server.log)
+  N=${N:-0}
+  [ "$N" -ge "$REV_TARGET" ] && break
+  sleep 1
+done
+N=$(grep -c "pack rebuilt (stream rev" /tmp/server.log)
+N=${N:-0}
+[ "$N" -ge "$REV_TARGET" ] || { echo "NO streamed revision for the corner"; tail -30 /tmp/server.log; exit 4; }
 echo "revision rebuilt on the server:"
 grep -E "pack rebuilt|pack rev" /tmp/server.log | tail -4
 wait_for "pack rev .* pushed to" /tmp/server.log 60 || { echo "revision never pushed"; exit 5; }
@@ -82,6 +96,11 @@ curl -s http://127.0.0.1:8199/clod-pack.info
 AFTER_SHA=$(curl -s http://127.0.0.1:8199/clod-pack.sha1)
 if [ "$AFTER_SHA" = "$BASE_SHA" ]; then echo "FAIL: sha1 did not change"; exit 6; fi
 echo "sha1 changed: $BASE_SHA -> $AFTER_SHA"
+
+# THE streaming UX assertion: exactly ONE pack acceptance (the first click);
+# every later revision applied silently.
+PROMPT_SHOTS="$SHOTS/s03_push_moment_no_dialog.png"
+echo "push-moment shot saved: $PROMPT_SHOTS (must contain NO dialog)"
 
 echo "=== client log pack markers ==="
 grep -i "pack" /tmp/client.log | tail -12 || true

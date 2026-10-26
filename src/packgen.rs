@@ -63,8 +63,9 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
     let lod_terrain_tpl = include_str!("../assets/post_effect/lod_terrain.json");
     let atmosphere_tpl = include_str!("../assets/post_effect/atmosphere.json");
 
-    let origin_x = atlas.center_x - atlas.half();
-    let origin_z = atlas.center_z - atlas.half();
+    let (acx, acz) = atlas.center();
+    let origin_x = acx - atlas.half();
+    let origin_z = acz - atlas.half();
     // 26.3 veil window in EYE-SPACE BLOCKS (the shader converts device depth
     // via eyeZ = depth_near / d): the veil starts taking over just before the
     // LOD band begins and reaches full strength at `veil_far`.
@@ -120,8 +121,8 @@ pub fn build(cfg: &Config, atlas: &Atlas) -> Pack {
         ("__FOV__", fmt_f(cfg.fov)),
         ("__ORIGIN_X__", fmt_f(origin_x as f32)),
         ("__ORIGIN_Z__", fmt_f(origin_z as f32)),
-        ("__CENTER_X__", fmt_f(atlas.center_x as f32)),
-        ("__CENTER_Z__", fmt_f(atlas.center_z as f32)),
+        ("__CENTER_X__", fmt_f(acx as f32)),
+        ("__CENTER_Z__", fmt_f(acz as f32)),
         ("__ATLAS_SIZE__", fmt_f(atlas.size as f32)),
         ("__ATLAS_CELLS__", atlas.cells.to_string()),
         ("__CELL__", fmt_f(atlas.cell as f32)),

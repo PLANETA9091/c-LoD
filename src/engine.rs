@@ -35,7 +35,7 @@ use crate::jni::{self, PlayerInfo};
 use crate::packgen::{self, Pack};
 use jvmti_bindings::prelude::JniEnv;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 pub const PHASE_BOOT: u8 = 0;
@@ -74,6 +74,16 @@ pub struct State {
     pub last_build: Mutex<Option<std::time::Instant>>,
     /// v4.3 streaming: current pack revision (0 = base, grows on rebuilds).
     pub pack_rev: AtomicU64,
+    /// v4.4 streaming: the atlas window shifted to follow the player — the
+    /// next rebuild must ship even below the cell-delta gate (the window
+    /// move can only REDUCE the scanned count).
+    pub window_moved: AtomicBool,
+    /// v4.4 frontier: chunks force-loaded and waiting for the async load to
+    /// finish (chunk -> tick when queued) so the LOD can grow past the
+    /// player's render distance. Sampled + released a couple ticks later.
+    pub force_pending: Mutex<HashMap<(i32, i32), u64>>,
+    /// v4.4 frontier: chunks scanned through the force path so far.
+    pub forced_chunks: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -169,6 +179,9 @@ impl State {
             built_cells: AtomicU64::new(0),
             last_build: Mutex::new(None),
             pack_rev: AtomicU64::new(0),
+            window_moved: AtomicBool::new(false),
+            force_pending: Mutex::new(HashMap::new()),
+            forced_chunks: AtomicU64::new(0),
             cfg,
         })
     }
@@ -342,6 +355,47 @@ fn scan_batch(state: &Arc<State>, env: Env) {
     // one is online). The spiral only returns unscanned cells, so in the
     // steady state it costs one RwLock read per visited cell.
     let players = jni::players(env);
+
+    // v4.4: keep the player inside the atlas window (DH tile-grid model).
+    // Walking into the outer 40% of the window slides it so the scan keeps
+    // filling the horizon the player actually SEES; the vacated trailing
+    // edge re-enters the sweep. Shifts are quantized and the rebuild ships
+    // at the next throttle window (stream_min_secs still guards the client
+    // reload loop).
+    let n_cells = state.atlas.cells as i32;
+    let center_cell = (n_cells - 1) / 2;
+    let shift_step = (n_cells / 16).max(1);
+    // Shift when the data AHEAD of the player (worst Chebyshev direction)
+    // drops below ~80 cells = 160 blocks at the bench cell size — enough to
+    // cover the real-chunk edge (RD) plus a useful LOD band beyond it. The
+    // bench v4.4 bug: a 0.6*span threshold fired AFTER the player had
+    // already walked past the data edge (0.6*256=153 cells > 128 half).
+    let threshold = (n_cells / 2 - 80).max(n_cells / 4);
+    for p in &players {
+        let (dx, dz) = match state.atlas.cell_index(p.bx, p.bz) {
+            Some((pcx, pcz)) => (pcx as i32 - center_cell, pcz as i32 - center_cell),
+            // Player outside the window entirely: jump straight to them.
+            None => {
+                let (acx, acz) = state.atlas.center();
+                (
+                    ((p.bx - acx) / state.atlas.cell.max(1)).clamp(-n_cells, n_cells),
+                    ((p.bz - acz) / state.atlas.cell.max(1)).clamp(-n_cells, n_cells),
+                )
+            }
+        };
+        if dx.abs().max(dz.abs()) > threshold {
+            let qx = (dx / shift_step) * shift_step;
+            let qz = (dz / shift_step) * shift_step;
+            if state.atlas.recenter(qx, qz) {
+                state.window_moved.store(true, Ordering::SeqCst);
+                let (acx, acz) = state.atlas.center();
+                crate::log_info(&format!(
+                    "c-LoD atlas window shifted by ({qx},{qz}) cells -> center ({acx}, {acz}) — the LOD horizon follows the player"
+                ));
+            }
+        }
+    }
+
     let near_budget = budget / 2;
     let mut near_done = 0usize;
     if near_budget > 0 {
@@ -349,7 +403,7 @@ fn scan_batch(state: &Arc<State>, env: Env) {
             let take = near_budget / players.len().max(1) as u32;
             let tasks = state.atlas.scan_task_near(p.bx, p.bz, take);
             for (ix, iz) in tasks.iter().copied() {
-                scan_cell(state, env, world, ix, iz);
+                scan_cell(state, env, world, ix, iz, true);
                 near_done += 1;
             }
             if near_done >= near_budget as usize {
@@ -365,27 +419,38 @@ fn scan_batch(state: &Arc<State>, env: Env) {
     if scanned < total {
         let tasks = state.atlas.scan_task(seq * budget as u64, budget);
         for (ix, iz) in tasks.iter().copied() {
-            scan_cell(state, env, world, ix, iz);
+            scan_cell(state, env, world, ix, iz, false);
         }
     }
+
+    // v4.4 frontier: sample + release chunks whose async force-load finished.
+    poll_forced(state, env, world);
 
     // Rate-limited scan diagnostics (one line per 25 ticks).
     if seq.is_multiple_of(25) {
         use std::sync::atomic::Ordering as O;
         crate::log_info(&format!(
-            "scan: tick {seq}, atlas v{} ({scanned}/{total} cells, +{near_done} near), rev {}, ok={} unloaded={} err={}",
+            "scan: tick {seq}, atlas v{} ({scanned}/{total} cells, +{near_done} near), rev {}, ok={} unloaded={} err={} forced={}",
             state.atlas.version(),
             state.pack_rev.load(O::Relaxed),
             jni::SCAN_OK.load(O::Relaxed),
             jni::SCAN_UNLOADED.load(O::Relaxed),
             jni::SCAN_ERR.load(O::Relaxed),
+            state.forced_chunks.load(O::Relaxed),
         ));
     }
 }
 
 /// Sample one atlas cell from the world and store it (shared by the
 /// player-centric spiral and the radial sweep).
-fn scan_cell(state: &Arc<State>, env: Env, world: jvmti_bindings::jni::jobject, ix: u32, iz: u32) {
+fn scan_cell(
+    state: &Arc<State>,
+    env: Env,
+    world: jvmti_bindings::jni::jobject,
+    ix: u32,
+    iz: u32,
+    allow_force: bool,
+) {
     let x = state.atlas.cell_world_x(ix);
     let z = state.atlas.cell_world_z(iz);
     if let Some((y, liquid, material, biome)) = jni::sample_surface(env, world, x, z) {
@@ -395,6 +460,92 @@ fn scan_cell(state: &Arc<State>, env: Env, world: jvmti_bindings::jni::jobject, 
         state
             .atlas
             .set(ix, iz, (y.clamp(-64, 1023)) as i16, liquid, rgb);
+    } else if allow_force {
+        // v4.4 frontier: the cell's chunk is unloaded. Queue it for an
+        // async force-load so the LOD grows past the render distance.
+        force_chunk_for(state, env, world, x >> 4, z >> 4);
+    }
+}
+
+/// Cap on chunks queued for force-load per engine tick. The v4.4-first
+/// build allowed 64 concurrent forces — the resulting generation flood
+/// (2457 chunks in ~3 min, ungenerated far terrain is the expensive kind)
+/// starved the tick loop and the platform watchdog restarted the kernel.
+/// 8 concurrent + a small per-tick budget keeps the chunk system healthy:
+/// ~3 chunks/s sustained, a full 256x256 window still fills in minutes.
+const FORCE_MAX_PENDING: usize = 8;
+/// New force tickets per tick (generation off-thread, but bounded churn).
+const FORCE_BUDGET_PER_TICK: usize = 4;
+
+fn force_chunk_for(
+    state: &Arc<State>,
+    env: Env,
+    world: jvmti_bindings::jni::jobject,
+    cx: i32,
+    cz: i32,
+) {
+    let mut pend = state.force_pending.lock().unwrap();
+    if pend.contains_key(&(cx, cz)) || pend.len() >= FORCE_MAX_PENDING {
+        return;
+    }
+    // New tickets this tick are also capped (cheap heuristic: pending entries
+    // queued on the current tick count against the budget).
+    let now = state.tick_no.load(Ordering::SeqCst);
+    let fresh = pend.values().filter(|t| **t == now).count();
+    if fresh >= FORCE_BUDGET_PER_TICK {
+        return;
+    }
+    if jni::warm_chunk(env, world, cx, cz, true) {
+        pend.insert((cx, cz), now);
+    }
+}
+
+/// Sample + release chunks queued by [`force_chunk_for`] once the async load
+/// finished. One chunk covers (16/cell)^2 cells — every still-invalid cell
+/// inside it is sampled in one pass, so each force pays off ~64 cells.
+fn poll_forced(state: &Arc<State>, env: Env, world: jvmti_bindings::jni::jobject) {
+    const READY_TICKS: u64 = 2;
+    const MAX_SAMPLES: usize = 128;
+    let now = state.tick_no.load(Ordering::SeqCst);
+    let mut pend = state.force_pending.lock().unwrap();
+    let ready: Vec<(i32, i32)> = pend
+        .iter()
+        .filter(|(_, t)| now.saturating_sub(**t) >= READY_TICKS)
+        .map(|(c, _)| *c)
+        .collect();
+    let mut samples = 0usize;
+    for (cx, cz) in ready {
+        if !jni::is_chunk_loaded(env, world, cx, cz).unwrap_or(false) {
+            // Still loading/generating — re-anchor the timer, stay queued.
+            pend.insert((cx, cz), now);
+            continue;
+        }
+        let per_chunk_side = (16 / state.atlas.cell.max(1)).max(1);
+        let x0 = cx * 16;
+        let z0 = cz * 16;
+        for dz in 0..per_chunk_side {
+            for dx in 0..per_chunk_side {
+                if samples >= MAX_SAMPLES {
+                    break;
+                }
+                let wx = x0 + dx * state.atlas.cell;
+                let wz = z0 + dz * state.atlas.cell;
+                let Some((ix, iz)) = state.atlas.cell_index(wx, wz) else {
+                    continue;
+                };
+                if state.atlas.get(ix, iz).is_some() {
+                    continue; // already valid — the force pass only fills holes
+                }
+                scan_cell(state, env, world, ix, iz, false);
+                samples += 1;
+            }
+        }
+        jni::warm_chunk(env, world, cx, cz, false); // release the force ticket
+        pend.remove(&(cx, cz));
+        state.forced_chunks.fetch_add(1, Ordering::SeqCst);
+        if samples >= MAX_SAMPLES {
+            break;
+        }
     }
 }
 
@@ -666,12 +817,17 @@ pub fn maybe_rebuild(state: &Arc<State>) {
     if *state.world_obj.lock().unwrap() == 0 {
         return;
     }
-    let delta = state
-        .atlas
-        .scanned_cells()
-        .saturating_sub(state.built_cells.load(Ordering::SeqCst));
-    if delta < state.cfg.stream_min_cells {
-        return;
+    // v4.4: a window shift must ship at the next throttle window even though
+    // it can only REDUCE the scanned count (the trailing edge goes void).
+    let forced = state.window_moved.swap(false, Ordering::SeqCst);
+    if !forced {
+        let delta = state
+            .atlas
+            .scanned_cells()
+            .saturating_sub(state.built_cells.load(Ordering::SeqCst));
+        if delta < state.cfg.stream_min_cells {
+            return;
+        }
     }
     let due = match *state.last_build.lock().unwrap() {
         Some(t) => t.elapsed().as_secs() >= state.cfg.stream_min_secs,
@@ -745,7 +901,7 @@ mod tests {
         assert_eq!(st.pack_rev.load(Ordering::SeqCst), 0);
 
         // Below the cell gate: no revision (throttle backdated so ONLY the
-        // cell gate can block here). stream_min_cells clamps to a 16 floor,
+        // cell gate can block here). stream_min_cells clamps to a 64 floor,
         // so 14 new cells (delta 14) must stay below it.
         *st.last_build.lock().unwrap() =
             Some(std::time::Instant::now() - std::time::Duration::from_secs(600));
@@ -757,9 +913,11 @@ mod tests {
         assert_eq!(st.pack_rev.load(Ordering::SeqCst), 0, "gate not reached");
 
         // Gate reached: one revision, new bytes, HTTP + meta swapped.
-        // delta = 17 scanned - 1 built = 16 >= stream_min_cells.
-        st.atlas.set(15, 0, 85, false, [0x91, 0xBD, 0x59]);
-        st.atlas.set(16, 0, 86, false, [0x91, 0xBD, 0x59]);
+        // delta = 65 scanned - 1 built = 64 >= stream_min_cells.
+        for ix in 15..=64u32 {
+            st.atlas
+                .set(ix, 0, 70 + ix as i16, false, [0x91, 0xBD, 0x59]);
+        }
         *st.last_build.lock().unwrap() =
             Some(std::time::Instant::now() - std::time::Duration::from_secs(600));
         maybe_rebuild(&st);
@@ -771,7 +929,7 @@ mod tests {
         let rev_sha = st.pack.read().unwrap().as_ref().unwrap().sha1_hex.clone();
         assert_ne!(rev_sha, base_sha, "revision must change the pack bytes");
         assert_eq!(st.server.meta().rev, 1);
-        assert_eq!(st.server.meta().cells, 17);
+        assert_eq!(st.server.meta().cells, 65);
         assert_eq!(
             st.server.pack_bytes(),
             st.pack.read().unwrap().as_ref().unwrap().zip.clone()
