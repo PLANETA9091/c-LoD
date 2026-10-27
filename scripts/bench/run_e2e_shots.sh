@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # Client e2e phase: launch vanilla client, auto-join, screenshot matrix.
 # Requires: server already booted and pack finalized (boot_server.sh).
+# v5.0.1: shader-only pack (ONE-TIME, static marker); disk is FIXED at
+# cfg center (bench: -1186,542, radius 256); all LOD data rides dust
+# particles — the client phase also waits for the scan/stream to populate.
 set -uo pipefail
 SHOTS="$HOME/mc-test/shots"
 mkdir -p "$SHOTS"
+
+CX=-1186; CZ=542      # bench disk center (boot_server.sh CLOD_OPTS)
+EDGE=$(( 256 ))       # disk radius in blocks
 
 srv() { echo "$1" > /tmp/server.in; }
 
@@ -16,7 +22,7 @@ wait_for() { # pattern, file, timeout_s
 }
 
 # 1. server sanity
-wait_for "pack finalized (base rev 0)" /tmp/server.log 5 || { echo "server not finalized"; exit 2; }
+wait_for "pack finalized (ONE-TIME, static)" /tmp/server.log 5 || { echo "server not finalized"; exit 2; }
 ps aux | grep "[p]aper-26.3" > /dev/null || { echo "server process dead"; exit 2; }
 curl -s -o /tmp/pack_check.zip -w "pack HTTP %{http_code} %{size_download}B\n" http://127.0.0.1:8199/clod-pack.zip
 
@@ -42,6 +48,22 @@ srv "weather clear"
 srv "gamemode spectator Stepan"
 sleep 2
 
+# 3b. THE STREAM: wait for arming, then for the scan to populate the disk.
+#      All LOD bytes arrive as dust particles; shots before this show empty sky.
+wait_for "sky-grid stream armed" /tmp/server.log 120 \
+  && echo "stream armed" || echo "WARN: stream not armed in 120s"
+STREAM_OK=0
+for i in $(seq 1 300); do
+  CELLS=$(curl -s http://127.0.0.1:8199/clod-pack.info | rg -o "cells=([0-9]+)/([0-9]+)" -r '$1' || echo 0)
+  [ "${CELLS:-0}" -ge 2000 ] 2>/dev/null && { STREAM_OK=1; break; }
+  sleep 1
+done
+echo "scan populated: cells=${CELLS:-0} (ok=$STREAM_OK)"
+curl -s http://127.0.0.1:8199/clod-pack.info | head -4
+
+# 4. LOD-heavy shot matrix (v5: fixed disk at CX,CZ). Aerial y=140 decodes
+#    the low particle layer (80) against terrain below; oblique/ground vary
+#    the vantage. Outside-disk shot must show NO LOD (pure vanilla + veil).
 shot() { # name yaw pitch x y z
   srv "tp Stepan $4 $5 $6 $2 $3"
   sleep 3
@@ -49,19 +71,23 @@ shot() { # name yaw pitch x y z
   echo "shot $1 (yaw=$2 pitch=$3 at $4,$5,$6)"
 }
 
-# 4. LOD-heavy shot matrix (v4.2 diagnosis): the fixed atlas window must
-# render the LOD toward ALL FOUR yaw quarters — the v4.1 window bug killed
-# east/south. Aerial + oblique maximize the on-screen LOD area.
-shot 01_aerial_west   90 15   0 140 0
-shot 02_aerial_south   0 15   0 140 0
-shot 03_aerial_north 180 15   0 140 0
-shot 04_aerial_east  270 15   0 140 0
-shot 05_oblique      135 30   0 170 0
-shot 06_ground_west   90  0   0 100 0
-shot 07_veil_outside  90 10 700 140 0
-shot 08_back_inside   90  0   0 120 0
+shot 01_aerial_west   90 15   "$CX" 140 "$CZ"
+shot 02_aerial_south   0 15   "$CX" 140 "$CZ"
+shot 03_aerial_north 180 15   "$CX" 140 "$CZ"
+shot 04_aerial_east  270 15   "$CX" 140 "$CZ"
+shot 05_oblique      135 30   "$CX" 170 "$CZ"
+shot 06_ground_west   90  0   "$CX" 100 "$CZ"
+shot 07_veil_outside  90 10     0 140   0
+shot 08_back_inside   90  0   "$CX" 120 "$CZ"
+
+# 5. STREAMING PROOF: wait one more partial lap (~30 s) and re-shoot — the
+#    LOD must GAIN detail purely from newly decoded particles.
+sleep 30
+shot 09_after_lap    90 15   "$CX" 140 "$CZ"
 
 echo "=== client log pack markers ==="
 rg -N -i "pack|post" /tmp/client.log | tail -12 || true
+echo "=== server stream counters ==="
+rg -N "stream|cells|laps" /tmp/server.log | tail -8 || true
 pkill -f "net.minecraft.client.main.Main" 2>/dev/null || true
 echo "E2E CLIENT PHASE DONE"
