@@ -34,12 +34,30 @@ sleep 5
 ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -frames:v 1 "$SHOTS/00_join_state.png"
 echo "join-state shot taken (pack prompt expected)"
 
-# the server pack prompt is on screen — click Yes (window 640x360 centered on
-# 1280x720 Xvfb: Yes button spans x 489..635, y 376..394 -> center ~562,385)
-python3 /home/z/my-project/c-LoD/scripts/bench/click.py 562 385
-sleep 12
+# the server pack prompt — WAIT for it to actually render (llvmpipe is slow:
+# the prompt can appear 10-30 s after join, a blind click lands on nothing),
+# detect the yellow "Rejecting ... resource pack" line, then click Proceed.
+PROMPT=0
+for i in $(seq 1 60); do
+  ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -frames:v 1 /tmp/prompt_probe.png 2>/dev/null
+  if python3 -c "
+from PIL import Image
+im = Image.open('/tmp/prompt_probe.png').convert('RGB')
+cnt = sum(1 for y in range(330, 365) for x in range(380, 900)
+          if (lambda p: p[0] > 220 and p[1] > 220 and p[2] < 120)(im.getpixel((x, y))))
+print(1 if cnt > 30 else 0)
+" | grep -q "^1$"; then
+    PROMPT=1; break
+  fi
+  sleep 2
+done
+echo "pack prompt visible=$PROMPT"
+ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -frames:v 1 "$SHOTS/00_prompt.png"
+python3 /home/z/my-project/c-LoD/scripts/bench/click.py 561 385   # Proceed
+sleep 15
 ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -frames:v 1 "$SHOTS/00_pack_applied.png"
 echo "pack-accept clicked"
+rg -N "Reloading ResourceManager" /tmp/client.log | tail -3 || true
 
 # 3. world state: lock NOON (the v4.0-killer scenario) + clear weather
 srv "gamerule doDaylightCycle false"
