@@ -326,8 +326,14 @@ fn scan_batch(state: &Arc<State>, env: Env) {
     for (ix, iz) in tasks.iter().copied() {
         let x = state.atlas.cell_world_x(ix);
         let z = state.atlas.cell_world_z(iz);
-        if let Some((y, liquid)) = jni::sample_height(env, world, x, z) {
-            state.atlas.set(ix, iz, (y.clamp(-64, 1023)) as i16, liquid);
+        if let Some((y, liquid, material, biome)) = jni::sample_surface(env, world, x, z) {
+            // v4.2 Voxy look: bake the REAL surface color (block palette +
+            // biome tint) into the cell so the static pack ships colored
+            // terrain, not a two-tone gradient.
+            let rgb = crate::palette::surface_color(&material, &biome, liquid);
+            state
+                .atlas
+                .set(ix, iz, (y.clamp(-64, 1023)) as i16, liquid, rgb);
         }
     }
     // Rate-limited scan diagnostics (one line per 25 ticks).
@@ -640,7 +646,7 @@ mod tests {
         st.phase.store(PHASE_SCANNING, Ordering::SeqCst);
         *st.world_obj.lock().unwrap() = 1; // pretend the world resolved
         *st.world_seen_at.lock().unwrap() = Some(std::time::Instant::now());
-        st.atlas.set(0, 0, 70, false);
+        st.atlas.set(0, 0, 70, false, [0x91, 0xBD, 0x59]);
 
         // Deadline NOT reached yet, atlas incomplete -> no finalize.
         maybe_finalize(&st);

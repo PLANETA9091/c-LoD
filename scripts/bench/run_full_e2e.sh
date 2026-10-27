@@ -3,7 +3,7 @@
 # Designed to run inside a single tool call so the sandbox reaper can't
 # kill the session mid-flight. Trap guarantees pipe-cleanup on ANY exit.
 set -u
-S=/home/z/my-project/scripts/bench
+S=/home/z/my-project/c-LoD/scripts/bench
 
 cleanup() {
   pkill -f "net.minecraft.client.main.Main" 2>/dev/null

@@ -1,8 +1,8 @@
 {
     "targets": {
-        "clod_scan": { "width": 640, "height": 1 },
-        "clod_rot_a": { "width": 1, "height": 1, "persistent": true },
-        "clod_rot_b": { "width": 1, "height": 1, "persistent": true },
+        "clod_scan": { "width": 640, "height": 2 },
+        "clod_rot_a": { "width": 2, "height": 2, "persistent": true },
+        "clod_rot_b": { "width": 2, "height": 2, "persistent": true },
         "clod_swap": {}
     },
     "passes": [
@@ -38,7 +38,8 @@
             "inputs": [
                 { "sampler_name": "In", "target": "minecraft:main" },
                 { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
-                { "sampler_name": "Atlas", "location": "clod:effect/atlas", "width": __ATLAS_CELLS__, "height": __ATLAS_CELLS__, "bilinear": true },
+                { "sampler_name": "Atlas", "location": "clod:atlas", "width": __ATLAS_CELLS__, "height": __ATLAS_CELLS__, "bilinear": true },
+                { "sampler_name": "Col", "location": "clod:atlas_col", "width": __ATLAS_CELLS__, "height": __ATLAS_CELLS__, "bilinear": true },
                 { "sampler_name": "Rot", "target": "clod_rot_a" }
             ],
             "output": "clod_swap",
@@ -51,6 +52,9 @@
                 ],
                 "ClodFog": [
                     { "name": "FogParams", "type": "vec4", "value": [__FOG_START__, __FOG_END__, __FOV__, 0.0] }
+                ],
+                "ClodScan": [
+                    { "name": "ScanBox", "type": "vec4", "value": [__CENTER_X__, __CENTER_Z__, __SCAN_HALF__, 0.0] }
                 ],
                 "ClodColors": [
                     { "name": "ColLow", "type": "vec4", "value": __COL_LOW__ },

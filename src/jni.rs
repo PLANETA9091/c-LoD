@@ -120,6 +120,9 @@ struct WorldIds {
     m_get_block_at: jmethodID,
     m_chunk_loaded: jmethodID,
     m_set_force_loaded: jmethodID,
+    /// v4.2 surface colors: RegionAccessor#getBiome(int,int,int).
+    /// Optional: absent -> palette falls back to a neutral tint.
+    m_get_biome: Option<jmethodID>,
 }
 // Raw method-ID pointers cached process-lifetime; consumed main-thread-only.
 unsafe impl Send for WorldIds {}
@@ -150,10 +153,23 @@ static LOCATION_IDS: Mutex<Option<LocationIds>> = Mutex::new(None);
 #[derive(Clone, Copy)]
 struct BlockIds {
     m_is_liquid: jmethodID,
+    /// v4.2 surface colors: Block#getType() -> org.bukkit.Material.
+    /// Optional: absent -> palette falls back to a neutral tint.
+    m_get_type: Option<jmethodID>,
 }
 // Raw method-ID pointers cached process-lifetime; consumed main-thread-only.
 unsafe impl Send for BlockIds {}
 static BLOCK_IDS: Mutex<Option<BlockIds>> = Mutex::new(None);
+
+/// Enum#name() resolved on the live Material/Biome classes (both are enums,
+/// same method id shape; cached per class).
+#[derive(Clone, Copy)]
+struct EnumIds {
+    m_name: jmethodID,
+}
+unsafe impl Send for EnumIds {}
+static MATERIAL_ENUM: Mutex<Option<(usize, EnumIds)>> = Mutex::new(None);
+static BIOME_ENUM: Mutex<Option<(usize, EnumIds)>> = Mutex::new(None);
 
 fn method_or_log(env: Env, cls: jobject, name: &str, sig: &str) -> Option<jmethodID> {
     // The FIRST GetMethodID on a freshly-seen class can fail spuriously
@@ -202,6 +218,19 @@ fn world_ids(env: Env, world: jobject) -> Option<WorldIds> {
             "getBlockAt",
             "(III)Lorg/bukkit/block/Block;",
         )?,
+        // Color path (v4.2). Resolution failure is not fatal: the world is
+        // still scanned, cells just keep the neutral palette color. Probe the
+        // local class first (the agent's one-shot class-priming quirk, see
+        // method_or_log).
+        m_get_biome: {
+            let _ = env.get_method_id(cls_local, "getBiome", "(III)Lorg/bukkit/block/Biome;");
+            env.exception_clear();
+            env.get_method_id(cls, "getBiome", "(III)Lorg/bukkit/block/Biome;")
+                .or_else(|| {
+                    env.exception_clear();
+                    None
+                })
+        },
     };
     *WORLD_IDS.lock().unwrap() = Some(ids);
     Some(ids)
@@ -274,8 +303,37 @@ fn block_ids(env: Env, block: jobject) -> Option<BlockIds> {
     };
     let ids = BlockIds {
         m_is_liquid: bind_method(env, cls_local, cls, "isLiquid", "()Z")?,
+        m_get_type: {
+            let _ = env.get_method_id(cls_local, "getType", "()Lorg/bukkit/Material;");
+            env.exception_clear();
+            env.get_method_id(cls, "getType", "()Lorg/bukkit/Material;")
+                .or_else(|| {
+                    env.exception_clear();
+                    None
+                })
+        },
     };
     *BLOCK_IDS.lock().unwrap() = Some(ids);
+    Some(ids)
+}
+
+/// Enum#name() resolved once per concrete enum class (Material, Biome).
+fn enum_name_ids(
+    env: Env,
+    obj: jobject,
+    cache: &Mutex<Option<(usize, EnumIds)>>,
+) -> Option<EnumIds> {
+    let cls = env.get_object_class(obj);
+    let key = cls as usize;
+    if let Some((k, ids)) = cache.lock().unwrap().as_ref() {
+        if *k == key {
+            return Some(*ids);
+        }
+    }
+    let ids = EnumIds {
+        m_name: bind_method(env, cls, cls, "name", "()Ljava/lang/String;")?,
+    };
+    *cache.lock().unwrap() = Some((key, ids));
     Some(ids)
 }
 
@@ -671,11 +729,18 @@ pub fn probe_height(env: Env, world: jobject, x: i32, z: i32) -> Option<i32> {
     Some(y)
 }
 
-/// Sample the surface height at one column. Returns (blockY, isLiquid).
+/// Scan diagnostics counters.
+#[allow(dead_code)]
 pub static SCAN_OK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[allow(dead_code)]
 pub static SCAN_UNLOADED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[allow(dead_code)]
 pub static SCAN_ERR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Sample the surface height at one column. Returns (blockY, isLiquid).
+/// Superseded by [`sample_surface`] (v4.2 color payload); kept as a
+/// minimal-surface diagnostic probe.
+#[allow(dead_code)]
 pub fn sample_height(env: Env, world: jobject, x: i32, z: i32) -> Option<(i32, bool)> {
     use std::sync::atomic::Ordering;
     let wid = world_ids(env, world)?;
@@ -720,6 +785,94 @@ pub fn sample_height(env: Env, world: jobject, x: i32, z: i32) -> Option<(i32, b
     clear_if_pending(env);
     SCAN_OK.fetch_add(1, Ordering::Relaxed);
     Some((y, liquid))
+}
+
+/// Sample the surface at one column WITH the v4.2 color payload.
+/// Returns (blockY, isLiquid, material name, biome name). The material /
+/// biome names may be empty when the optional lookups are unavailable —
+/// the palette falls back to a neutral surface color in that case.
+pub fn sample_surface(
+    env: Env,
+    world: jobject,
+    x: i32,
+    z: i32,
+) -> Option<(i32, bool, String, String)> {
+    use std::sync::atomic::Ordering;
+    let wid = world_ids(env, world)?;
+    if env.exception_check() {
+        env.exception_clear();
+        SCAN_ERR.fetch_add(1, Ordering::Relaxed);
+        return None;
+    }
+    // Same loaded-chunk guard as sample_height: never force generation.
+    let loaded = env.call_boolean_method(world, wid.m_chunk_loaded, &[ji(x >> 4), ji(z >> 4)]);
+    if env.exception_check() {
+        env.exception_clear();
+        return None;
+    }
+    if !loaded {
+        SCAN_UNLOADED.fetch_add(1, Ordering::Relaxed);
+        return None;
+    }
+    let y = env.call_int_method(world, wid.m_highest_block, &[ji(x), ji(z)]);
+    if env.exception_check() {
+        env.exception_clear();
+        SCAN_ERR.fetch_add(1, Ordering::Relaxed);
+        return None;
+    }
+    if y < -64 {
+        return Some((y, false, String::new(), String::new()));
+    }
+    let Some(block) =
+        jobj(env.call_object_method(world, wid.m_get_block_at, &[ji(x), ji(y), ji(z)]))
+    else {
+        clear_if_pending(env);
+        return Some((y, false, String::new(), String::new()));
+    };
+    let Some(bid) = block_ids(env, block) else {
+        clear_if_pending(env);
+        return Some((y, false, String::new(), String::new()));
+    };
+    let liquid = env.call_boolean_method(block, bid.m_is_liquid, &[]);
+    if env.exception_check() {
+        env.exception_clear();
+    }
+
+    // Material name (Block#getType().name()).
+    let mut material = String::new();
+    if let Some(m_get_type) = bid.m_get_type {
+        if let Some(mat) = jobj(env.call_object_method(block, m_get_type, &[])) {
+            if env.exception_check() {
+                env.exception_clear();
+            } else if let Some(eid) = enum_name_ids(env, mat, &MATERIAL_ENUM) {
+                material =
+                    jstr(env, env.call_object_method(mat, eid.m_name, &[])).unwrap_or_default();
+                clear_if_pending(env);
+            }
+        } else {
+            clear_if_pending(env);
+        }
+    }
+
+    // Biome name (World#getBiome(x, y, z).name()) — for grass/foliage/water
+    // tints. Sampled at the surface block.
+    let mut biome = String::new();
+    if let Some(m_get_biome) = wid.m_get_biome {
+        if let Some(bio) = jobj(env.call_object_method(world, m_get_biome, &[ji(x), ji(y), ji(z)]))
+        {
+            if env.exception_check() {
+                env.exception_clear();
+            } else if let Some(eid) = enum_name_ids(env, bio, &BIOME_ENUM) {
+                biome = jstr(env, env.call_object_method(bio, eid.m_name, &[])).unwrap_or_default();
+                clear_if_pending(env);
+            }
+        } else {
+            clear_if_pending(env);
+        }
+    }
+
+    SCAN_OK.fetch_add(1, Ordering::Relaxed);
+    Some((y, liquid, material, biome))
 }
 
 // ---------------------------------------------------------------------------

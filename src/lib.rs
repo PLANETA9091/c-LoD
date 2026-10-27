@@ -25,6 +25,7 @@ mod engine;
 mod http;
 mod jni;
 mod packgen;
+mod palette;
 mod png;
 mod sha1;
 mod zipw;
