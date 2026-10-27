@@ -575,23 +575,22 @@ fn manage_players(state: &Arc<State>, env: Env) {
 
 /// The v5 streaming step: fix the disk origin once (config center or the
 /// first player), then spawn the next batch of dust particles over the two
-/// sky planes. One ServerLevel.sendParticles call per particle, count=0.
+/// sky planes — one force ClientboundLevelParticlesPacket per player per
+/// particle (overrideLimiter: survives particle settings + render clip).
 fn stream_step(state: &Arc<State>, env: Env) {
     if state.phase.load(Ordering::SeqCst) != PHASE_LIVE {
         return;
     }
-    let world_handle = *state.world_obj.lock().unwrap();
-    if world_handle == 0 {
+    let players = jni::players(env);
+    if players.is_empty() {
         return;
     }
-    let world = unsafe { as_obj(world_handle) };
 
     // Arm once: fix the disk origin.
     if state.stream_armed.load(Ordering::SeqCst) == 0 {
         let (ox, oz) = if let (Some(x), Some(z)) = (state.cfg.center_x, state.cfg.center_z) {
             (x, z)
         } else {
-            let players = jni::players(env);
             match players.first() {
                 Some(p) => (
                     (p.bx as f64) - f64::from(state.cfg.region_blocks) * 0.5,
@@ -613,7 +612,7 @@ fn stream_step(state: &Arc<State>, env: Env) {
         ));
     }
 
-    // Spawn the next batch.
+    // Spawn the next batch to every player (the disk is shared).
     let batch: Vec<crate::stream::Spawn> = {
         let mut s = state.stream.lock().unwrap();
         s.tick_batch(state.cfg.particles_per_tick as usize).to_vec()
@@ -622,14 +621,19 @@ fn stream_step(state: &Arc<State>, env: Env) {
         return;
     }
     let mut spawned = 0u64;
-    for sp in &batch {
-        if unsafe { jni::spawn_particle(env, world, sp.x, sp.y, sp.z, sp.rgb, sp.scale) } {
-            spawned += 1;
+    for p in &players {
+        let Some(handle) = jni::player_by_uuid(env, &p.uuid) else {
+            continue;
+        };
+        for sp in &batch {
+            if unsafe { jni::spawn_particle(env, handle, sp.x, sp.y, sp.z, sp.rgb, sp.scale) } {
+                spawned += 1;
+            }
         }
     }
     state
         .streamed_cells
-        .fetch_add(spawned / 8, Ordering::Relaxed);
+        .fetch_add(spawned / 8 / players.len().max(1) as u64, Ordering::Relaxed);
 
     // Rate-limited diagnostics.
     let tick = state.tick_no.load(Ordering::Relaxed);
@@ -639,8 +643,9 @@ fn stream_step(state: &Arc<State>, env: Env) {
             (s.valid_cells(), s.laps, s.cells())
         };
         crate::log_info(&format!(
-            "stream: tick {tick} {valid}/{total_cells} cells, lap {}, +{spawned} particles, spawned {} / failed {}",
+            "stream: tick {tick} {valid}/{total_cells} cells, lap {}, +{spawned} particles ({} players), spawned {} / failed {}",
             laps,
+            players.len(),
             jni::STREAM_SPAWNED.load(Ordering::Relaxed),
             jni::STREAM_FAILED.load(Ordering::Relaxed),
         ));

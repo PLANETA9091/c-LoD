@@ -201,9 +201,8 @@ void main() {
 
     // v4.0 encoding preserved: R = az/2pi, G = (el+pi/2)/pi, B = conf.
     // A = fov byte (v4.1): the REAL vertical fov measured by the sky shader.
-    float az = -30.0 * PI / 180.0;   // TEMPORARY PROBE: fixed camera
-    float el = 6.0 * PI / 180.0;
-    conf = 1.0;
+    float az = rot.r * 2.0 * PI;
+    float el = rot.g * PI - PI * 0.5;
 
     vec3 F = vec3(cos(el) * cos(az), sin(el), cos(el) * sin(az));
     vec3 R = vec3(-sin(az), 0.0, cos(az));

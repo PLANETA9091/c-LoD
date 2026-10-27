@@ -40,9 +40,10 @@
             "vertex_shader": "minecraft:core/screenquad",
             "fragment_shader": "clod:post/capture",
             "inputs": [
-                { "sampler_name": "InDepthSampler", "target": "minecraft:main", "use_depth_buffer": true },
-                { "sampler_name": "PrevSampler", "target": "clod_h_b" },
-                { "sampler_name": "RotSampler", "target": "clod_rot_a" }
+                { "sampler_name": "In", "target": "minecraft:main" },
+                { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
+                { "sampler_name": "Prev", "target": "clod_h_b" },
+                { "sampler_name": "Rot", "target": "clod_rot_a" }
             ],
             "output": "clod_h_a",
             "uniforms": {
@@ -58,9 +59,10 @@
             "vertex_shader": "minecraft:core/screenquad",
             "fragment_shader": "clod:post/capture",
             "inputs": [
-                { "sampler_name": "InDepthSampler", "target": "minecraft:main", "use_depth_buffer": true },
-                { "sampler_name": "PrevSampler", "target": "clod_c_b" },
-                { "sampler_name": "RotSampler", "target": "clod_rot_a" }
+                { "sampler_name": "In", "target": "minecraft:main" },
+                { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
+                { "sampler_name": "Prev", "target": "clod_c_b" },
+                { "sampler_name": "Rot", "target": "clod_rot_a" }
             ],
             "output": "clod_c_a",
             "uniforms": {
@@ -76,9 +78,10 @@
             "vertex_shader": "minecraft:core/screenquad",
             "fragment_shader": "clod:post/capture",
             "inputs": [
-                { "sampler_name": "InDepthSampler", "target": "minecraft:main", "use_depth_buffer": true },
-                { "sampler_name": "PrevSampler", "target": "clod_h_a" },
-                { "sampler_name": "RotSampler", "target": "clod_rot_a" }
+                { "sampler_name": "In", "target": "minecraft:main" },
+                { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
+                { "sampler_name": "Prev", "target": "clod_h_a" },
+                { "sampler_name": "Rot", "target": "clod_rot_a" }
             ],
             "output": "clod_h_b",
             "uniforms": {
@@ -94,9 +97,10 @@
             "vertex_shader": "minecraft:core/screenquad",
             "fragment_shader": "clod:post/capture",
             "inputs": [
-                { "sampler_name": "InDepthSampler", "target": "minecraft:main", "use_depth_buffer": true },
-                { "sampler_name": "PrevSampler", "target": "clod_c_a" },
-                { "sampler_name": "RotSampler", "target": "clod_rot_a" }
+                { "sampler_name": "In", "target": "minecraft:main" },
+                { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
+                { "sampler_name": "Prev", "target": "clod_c_a" },
+                { "sampler_name": "Rot", "target": "clod_rot_a" }
             ],
             "output": "clod_c_b",
             "uniforms": {

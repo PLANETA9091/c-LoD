@@ -34,6 +34,7 @@
 //!      adventure Key and PlayerPostEffects come from Class.forName through
 //!      CraftServer's own loader (exact same-loader Class object).
 
+use jvmti_bindings::jni::jfieldID;
 use jvmti_bindings::jni::{jboolean, jint, jmethodID, jobject, jstring, jvalue};
 use jvmti_bindings::prelude::JniEnv;
 use std::sync::{Mutex, OnceLock};
@@ -1067,10 +1068,14 @@ pub struct Nms {
     /// net.minecraft.core.particles.DustParticleOptions.<init>(IF)V
     dust_options_cls: jobject,
     m_dust_new: jmethodID,
-    /// net.minecraft.server.level.ServerLevel.sendParticles(ParticleOptions,DDDIDDDD)I
-    #[allow(dead_code)]
-    server_level_cls: jobject,
-    m_send_particles: jmethodID,
+    /// ClientboundLevelParticlesPacket(ParticleOptions,ZZDDDFFFI)V —
+    /// overrideLimiter=true rides like /particle force (never clipped by
+    /// the client's render distance, always shown).
+    particle_packet_cls: jobject,
+    m_particle_packet_new: jmethodID,
+    /// ServerPlayer.connection field + ServerGamePacketListenerImpl.send
+    f_connection: jfieldID,
+    m_send: jmethodID,
 }
 
 struct SendNms(Nms);
@@ -1163,28 +1168,56 @@ fn resolve_nms(env: Env) -> Option<Nms> {
         "dust_options_cls",
         load("net.minecraft.core.particles.DustParticleOptions")
     );
-    let server_level_cls = step!(
-        "server_level_cls",
-        load("net.minecraft.server.level.ServerLevel")
+    let particle_packet_cls = step!(
+        "particle_packet_cls",
+        load("net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket")
+    );
+    let server_player_cls = step!(
+        "server_player_cls",
+        load("net.minecraft.server.level.ServerPlayer")
+    );
+    let sgp_listener_cls = step!(
+        "sgp_listener_cls",
+        load("net.minecraft.server.network.ServerGamePacketListenerImpl")
     );
 
     let m_dust_new = step!(
         "m_dust_new",
         env.get_method_id(dust_options_cls, "<init>", "(IF)V")
     );
-    let m_send_particles = step!(
-        "m_send_particles",
+    let m_particle_packet_new = step!(
+        "m_particle_packet_new",
         env.get_method_id(
-            server_level_cls,
-            "sendParticles",
-            "(Lnet/minecraft/core/particles/ParticleOptions;DDDIDDDD)I",
+            particle_packet_cls,
+            "<init>",
+            "(Lnet/minecraft/core/particles/ParticleOptions;ZZDDDFFFFI)V",
+        )
+    );
+    let f_connection = step!(
+        "f_connection",
+        env.get_field_id(
+            server_player_cls,
+            "connection",
+            "Lnet/minecraft/server/network/ServerGamePacketListenerImpl;",
+        )
+    );
+    let m_send = step!(
+        "m_send",
+        bind_method(
+            env,
+            sgp_listener_cls,
+            sgp_listener_cls,
+            "send",
+            "(Lnet/minecraft/network/protocol/Packet;)V",
         )
     );
     Some(Nms {
         dust_options_cls,
         m_dust_new,
-        server_level_cls,
-        m_send_particles,
+        particle_packet_cls,
+        m_particle_packet_new,
+        f_connection,
+        m_send,
     })
 }
 
@@ -1192,22 +1225,22 @@ fn nms() -> Option<&'static Nms> {
     NMS.get().and_then(|o| o.as_ref()).map(|s| &s.0)
 }
 
-/// Cached CraftWorld.getHandle method id (resolved on the first live world).
-static M_WORLD_HANDLE: Mutex<usize> = Mutex::new(0);
+/// Cached CraftPlayer.getHandle method id (resolved on the first live player).
+static M_GET_HANDLE: Mutex<usize> = Mutex::new(0);
 
 /// # Safety
-/// Main thread only; `world` must be a live CraftWorld local ref.
-unsafe fn world_level(env: Env, world: jobject) -> Option<jobject> {
+/// Main thread only; `player` must be a live CraftPlayer local ref.
+unsafe fn get_handle(env: Env, player: jobject) -> Option<jobject> {
     let mid = {
-        let cached = *M_WORLD_HANDLE.lock().unwrap();
+        let cached = *M_GET_HANDLE.lock().unwrap();
         if cached != 0 {
             cached as jmethodID
         } else {
-            let cls = env.get_object_class(world);
+            let cls = env.get_object_class(player);
             let probe = env.get_method_id(
                 cls,
                 "getHandle",
-                "()Lnet/minecraft/server/level/ServerLevel;",
+                "()Lnet/minecraft/server/level/ServerPlayer;",
             );
             env.exception_clear();
             let g = env.new_global_ref(cls);
@@ -1216,26 +1249,28 @@ unsafe fn world_level(env: Env, world: jobject) -> Option<jobject> {
                 env.get_method_id(
                     g as jobject,
                     "getHandle",
-                    "()Lnet/minecraft/server/level/ServerLevel;",
+                    "()Lnet/minecraft/server/level/ServerPlayer;",
                 )
             })?;
             clear_if_pending(env);
-            *M_WORLD_HANDLE.lock().unwrap() = mid as usize;
+            *M_GET_HANDLE.lock().unwrap() = mid as usize;
             mid
         }
     };
-    jobj(env.call_object_method(world, mid, &[]))
+    jobj(env.call_object_method(player, mid, &[]))
 }
 
-/// Spawn ONE dust particle at (x, y, z) in the world's ServerLevel.
-/// The particle rides the vanilla particle broadcast to every client in
-/// tracking range — this IS the LOD transport (SKY-GRID BIT-STREAM).
+/// Spawn ONE FORCE dust particle for ONE player: build a
+/// ClientboundLevelParticlesPacket (overrideLimiter = true — the particle
+/// survives the client's particle setting AND its render-distance clip,
+/// exactly like `/particle ... force`) and push it straight into the
+/// connection. This IS the LOD transport (SKY-GRID BIT-STREAM).
 ///
 /// # Safety
-/// Main thread only; `world` must be a live CraftWorld local ref.
+/// Main thread only; `player` must be a live CraftPlayer local ref.
 pub unsafe fn spawn_particle(
     env: Env,
-    world: jobject,
+    player: jobject,
     x: f64,
     y: f64,
     z: f64,
@@ -1245,7 +1280,11 @@ pub unsafe fn spawn_particle(
     let Some(n) = nms() else {
         return false;
     };
-    let Some(level) = world_level(env, world) else {
+    let Some(handle) = get_handle(env, player) else {
+        clear_if_pending(env);
+        return false;
+    };
+    let Some(conn) = jobj(env.get_object_field(handle, n.f_connection)) else {
         clear_if_pending(env);
         return false;
     };
@@ -1260,20 +1299,31 @@ pub unsafe fn spawn_particle(
         clear_if_pending(env);
         return false;
     };
-    // sendParticles(options, x, y, z, count, offX, offY, offZ, speed) —
-    // count = 0 sends exactly one particle at the point, speed 0 = no drift.
+    // (options, overrideLimiter=true, alwaysShow=true, x, y, z,
+    //  xDist=0, yDist=0, zDist=0, maxSpeed=0, count=0 -> exactly one
+    //  particle at the point, zero drift)
     let args = [
         jv(opts),
+        jz(true),
+        jz(true),
         jd(x),
         jd(y),
         jd(z),
+        jf(0.0),
+        jf(0.0),
+        jf(0.0),
+        jf(0.0),
         ji(0),
-        jd(0.0),
-        jd(0.0),
-        jd(0.0),
-        jd(0.0),
     ];
-    let r = env.call_int_method(level, n.m_send_particles, &args);
+    let Some(pkt) = jobj(
+        env.new_object(n.particle_packet_cls, n.m_particle_packet_new, &args)
+            .unwrap_or(std::ptr::null_mut()),
+    ) else {
+        clear_if_pending(env);
+        STREAM_FAILED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return false;
+    };
+    env.call_void_method(conn, n.m_send, &[jv(pkt)]);
     if env.exception_check() {
         if STREAM_FAILED.load(std::sync::atomic::Ordering::Relaxed) < 5 {
             env.exception_describe();
@@ -1282,13 +1332,8 @@ pub unsafe fn spawn_particle(
         STREAM_FAILED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         return false;
     }
-    let ok = r >= 0;
-    if ok {
-        STREAM_SPAWNED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    } else {
-        STREAM_FAILED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
-    ok
+    STREAM_SPAWNED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    true
 }
 
 /// Remember the CraftServer classloader global for the NMS loader path

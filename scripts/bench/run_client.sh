@@ -3,7 +3,7 @@
 # Usage: run_client.sh   — logs to /tmp/client.log, DISPLAY :99 (1280x720)
 set -euo pipefail
 C="$HOME/mc-test/client"
-JAVA="$HOME/mc-test/jdk25/bin/java"
+JAVA="$HOME/tools/jdk25/bin/java"
 
 pkill -f "net.minecraft.client.main.Main" 2>/dev/null || true
 pkill Xvfb 2>/dev/null || true

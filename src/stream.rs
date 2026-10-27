@@ -31,15 +31,24 @@
 
 /// Sub-cell lattice: 4 positions per axis inside one cell.
 pub const SUB_PER_CELL: f64 = 4.0;
-/// Height plane Y (the 8-bit height word).
-pub const PLANE_HI_Y: f64 = 260.0;
-/// Color plane Y (the 8-bit color index word).
-pub const PLANE_LO_Y: f64 = 272.0;
+/// Particle layers: each cell's word spawns its 4 particles on EVERY layer
+/// (a vertical "column" of sub-lattices). A layer is decodable when the
+/// particle renders in front of geometry (26.3 reversed-Z hides particles
+/// against the sky), so low layers decode from the ground, high ones from
+/// elevated vantage points.
+pub const LAYER_Y: [f64; 2] = [80.0, 200.0];
+/// Legacy plane constants (kept for packgen templating of the layer list).
+pub const PLANE_HI_Y: f64 = LAYER_Y[1];
+pub const PLANE_LO_Y: f64 = LAYER_Y[0];
 /// Dust particle scale (blocks) — size must be stable for the decoder.
 pub const DUST_SCALE: f64 = 0.8;
-/// Neutral particle color — the client multiplies channels by a random
-/// factor, so color can NOT carry data; position does.
-pub const DUST_RGB: u32 = 0x404040;
+/// Dust colors: the client multiplies ALL channels by one random factor, so
+/// the HUE survives — the capture shader strobes on hue + the sky-depth test
+/// (dust renders in front of the sky, where device depth reads 0).
+/// HI plane (heights): BLACK dust — dark points on the bright day sky.
+pub const DUST_RGB: u32 = 0x000000;
+/// LO plane (colors): WHITE dust — bright points on the day sky.
+pub const DUST_RGB_LO: u32 = 0xFFFFFF;
 /// Water color index in the 6x6x6 lattice.
 pub const COLOR_WATER: u16 = 216;
 
@@ -151,7 +160,15 @@ impl Streamer {
 
     /// Spawn positions of one word: 4 particles, slot = Z sub, bits = X sub.
     /// msb-first: slot 0 carries bits 14..15 (the HIGH pair).
-    pub fn word_spawns(word: u16, cx: f64, cz: f64, sub: f64, plane_y: f64, out: &mut Vec<Spawn>) {
+    pub fn word_spawns(
+        word: u16,
+        cx: f64,
+        cz: f64,
+        sub: f64,
+        plane_y: f64,
+        rgb: u32,
+        out: &mut Vec<Spawn>,
+    ) {
         for slot in 0..4usize {
             let bits = ((word >> (14 - 2 * slot)) & 3) as f64;
             let dx = (bits - 1.5) * sub;
@@ -160,7 +177,7 @@ impl Streamer {
                 x: cx + dx,
                 y: plane_y,
                 z: cz + dz,
-                rgb: DUST_RGB,
+                rgb,
                 scale: DUST_SCALE,
             });
         }
@@ -193,8 +210,10 @@ impl Streamer {
             let cxw = wx + self.cell_size as f64 * 0.5;
             let czw = wz + self.cell_size as f64 * 0.5;
             let (hword, cword) = Self::encode_words(&cell);
-            Self::word_spawns(hword, cxw, czw, sub, PLANE_HI_Y, &mut self.batch);
-            Self::word_spawns(cword, cxw, czw, sub, PLANE_LO_Y, &mut self.batch);
+            for &ly in LAYER_Y.iter() {
+                Self::word_spawns(hword, cxw, czw, sub, ly, DUST_RGB, &mut self.batch);
+                Self::word_spawns(cword, cxw, czw, sub, ly, DUST_RGB_LO, &mut self.batch);
+            }
             self.streamed_cells += 1;
         }
         if self.cursor >= total {
@@ -236,7 +255,7 @@ mod tests {
         let byte: u16 = 0b10_01_11_00;
         let word = byte << 8;
         let mut out = Vec::new();
-        Streamer::word_spawns(word, 0.0, 0.0, 1.0, 0.0, &mut out);
+        Streamer::word_spawns(word, 0.0, 0.0, 1.0, 0.0, DUST_RGB, &mut out);
         assert_eq!(out.len(), 4);
         // slot 0 -> bits 14..15 = 0b10 = 2; slot 1 -> 0b01 = 1;
         // slot 2 -> 0b11 = 3; slot 3 -> 0b00 = 0.
@@ -275,19 +294,19 @@ mod tests {
                 s.set_cell(cx, cz, cell(64 + (cx % 8) as i16, false, [100, 100, 100]));
             }
         }
-        // 1024 particles / tick = 128 cells (4 HI + 4 LO each).
-        let b: Vec<Spawn> = s.tick_batch(1024).to_vec();
-        assert_eq!(b.len(), 1024);
+        // 2048 particles / tick = 128 cells (2 layers x (4 HI + 4 LO) = 16).
+        let b: Vec<Spawn> = s.tick_batch(2048).to_vec();
+        assert_eq!(b.len(), 2048);
         assert_eq!(s.streamed_cells, 128);
         // Full lap: 16384 cells / 128 per tick = 128 ticks.
         for _ in 0..127 {
-            s.tick_batch(1024);
+            s.tick_batch(2048);
         }
         assert_eq!(s.laps, 1);
         assert_eq!(s.streamed_cells, 16384);
         // Cursor wrapped: the next batch starts from cell 0 again.
-        let b: Vec<Spawn> = s.tick_batch(8).to_vec();
-        assert_eq!(b.len(), 8);
+        let b: Vec<Spawn> = s.tick_batch(16).to_vec();
+        assert_eq!(b.len(), 16);
         let first = &b[0];
         let (wx, _wz) = s.cell_origin(0, 0);
         assert!((first.x - (wx + 2.0)).abs() < 1.0);
@@ -299,13 +318,14 @@ mod tests {
         // Only 2 valid cells on the disk.
         s.set_cell(0, 0, cell(70, false, [90, 90, 90]));
         s.set_cell(15, 15, cell(80, true, [0, 0, 200]));
-        let b: Vec<Spawn> = s.tick_batch(1024).to_vec();
-        // 2 cells x 8 particles each.
-        assert_eq!(b.len(), 16);
+        let b: Vec<Spawn> = s.tick_batch(2048).to_vec();
+        // 2 cells x 2 layers x 8 particles each.
+        assert_eq!(b.len(), 32);
         assert_eq!(s.streamed_cells, 2);
-        // Water cell streams the water color word: LO plane carries 216<<8.
-        let lo: Vec<&Spawn> = b.iter().skip(12).collect();
+        // Water cell streams the water color word on both layers (white dust).
+        let lo: Vec<&Spawn> = b.iter().skip(28).collect();
         assert_eq!(lo.len(), 4);
+        assert!(lo.iter().all(|p| p.rgb == DUST_RGB_LO));
         // All spawns of the second cell sit at cell (15,15) center.
         let (wx, wz) = s.cell_origin(15, 15);
         for p in lo {
@@ -318,8 +338,8 @@ mod tests {
     fn batch_positions_on_sub_lattice() {
         let mut s = Streamer::new(100.0, -40.0, 64, 4);
         s.set_cell(3, 5, cell(70, false, [200, 100, 50]));
-        let b: Vec<Spawn> = s.tick_batch(1024).to_vec();
-        assert_eq!(b.len(), 8);
+        let b: Vec<Spawn> = s.tick_batch(2048).to_vec();
+        assert_eq!(b.len(), 16);
         let sub = 4.0 / SUB_PER_CELL; // 1.0
         let (wx, wz) = s.cell_origin(3, 5);
         let cxw = wx + 2.0;
@@ -331,11 +351,22 @@ mod tests {
             assert!((dx / sub + 1.5).fract().abs() < 1e-6);
             assert!((dz / sub + 1.5).fract().abs() < 1e-6);
             assert!(dx.abs() <= 2.0 && dz.abs() <= 2.0);
-            assert_eq!(p.rgb, DUST_RGB);
+            let want_rgb = if b.iter().position(|s| s == p).unwrap() % 8 < 4 {
+                DUST_RGB // height word (black)
+            } else {
+                DUST_RGB_LO // color word (white)
+            };
+            assert_eq!(p.rgb, want_rgb);
             assert!((p.scale - DUST_SCALE).abs() < 1e-9);
         }
-        // HI plane first (heights), LO plane second (colors).
-        assert_eq!(b[0].y, PLANE_HI_Y);
-        assert_eq!(b[4].y, PLANE_LO_Y);
+        // Order: layer0 heights, layer0 colors, layer1 heights, layer1 colors.
+        assert_eq!(b[0].y, LAYER_Y[0]);
+        assert_eq!(b[0].rgb, DUST_RGB);
+        assert_eq!(b[4].y, LAYER_Y[0]);
+        assert_eq!(b[4].rgb, DUST_RGB_LO);
+        assert_eq!(b[8].y, LAYER_Y[1]);
+        assert_eq!(b[8].rgb, DUST_RGB);
+        assert_eq!(b[12].y, LAYER_Y[1]);
+        assert_eq!(b[12].rgb, DUST_RGB_LO);
     }
 }

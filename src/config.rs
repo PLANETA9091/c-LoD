@@ -78,7 +78,7 @@ impl Default for Config {
             region_blocks: 512,
             cell_size: 2,
             scan_budget: 4096,
-            particles_per_tick: 1024,
+            particles_per_tick: 2048,
             center_x: None,
             center_z: None,
             fov: 70.0,
@@ -232,7 +232,7 @@ mod tests {
         assert_eq!(c.http_port, 8199);
         assert_eq!(c.region_blocks, 512);
         assert_eq!(c.cell_size, 2);
-        assert_eq!(c.particles_per_tick, 1024);
+        assert_eq!(c.particles_per_tick, 2048);
         assert!(c.center_x.is_none());
         assert_eq!(c.fov, 70.0);
     }
