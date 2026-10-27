@@ -758,7 +758,8 @@ struct GenIds {
     m_add_ticket: jmethodID,
     /// removeTicketWithRadius(TicketType, ChunkPos, int)
     m_remove_ticket: jmethodID,
-    /// TicketType.CHUNK_LOAD (static field).
+    /// TicketType.FORCED (static field): flags=15 — guaranteed generation
+    /// (vanilla /forceload semantics), non-persistent once removed.
     ticket_type_cls: jobject,
     f_chunk_load: jfieldID,
     /// ChunkPos.<init>(II)V + its class.
@@ -874,7 +875,7 @@ fn resolve_gen(env: Env) -> Option<GenIds> {
         "f_chunk_load",
         env.get_static_field_id(
             ticket_type_cls,
-            "CHUNK_LOAD",
+            "FORCED",
             "Lnet/minecraft/server/level/TicketType;",
         )
     );
@@ -894,14 +895,14 @@ fn resolve_gen(env: Env) -> Option<GenIds> {
     })
 }
 
-/// The CHUNK_LOAD TicketType object (static field read; local ref, valid for
+/// The FORCED TicketType object (generation guaranteed) (static field read; local ref, valid for
 /// the current call frame only).
 fn chunk_load_type(env: Env, g: &GenIds) -> Option<jobject> {
     let t = env.get_static_object_field(g.ticket_type_cls, g.f_chunk_load);
     jobj(t)
 }
 
-/// Request an ASYNC chunk generation + retention ticket (moonrise CHUNK_LOAD).
+/// Request an ASYNC chunk generation + retention ticket (moonrise FORCED).
 /// Non-blocking: the chunk generates at NORMAL priority on the chunk system's
 /// workers; the engine polls isChunkLoaded. Returns false when the bridge is
 /// unresolved or the call raised.
@@ -950,7 +951,7 @@ pub fn request_chunk_gen(env: Env, world: jobject, cx: i32, cz: i32) -> bool {
     ok
 }
 
-/// Release the chunk's CHUNK_LOAD ticket (after sampling or at finalize).
+/// Release the chunk's FORCED ticket (after sampling or at finalize).
 pub fn release_chunk_ticket(env: Env, world: jobject, cx: i32, cz: i32) -> bool {
     let Some(g) = gen() else {
         clear_if_pending(env);

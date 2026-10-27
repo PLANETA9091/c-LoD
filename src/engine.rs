@@ -46,7 +46,7 @@ pub struct State {
     pub push_fails: AtomicU32,
     /// v5 sky-grid streaming state (Rust side; main-thread only).
     pub stream: Mutex<Streamer>,
-    /// v5.0.2 frontier: chunks with an in-flight moonrise CHUNK_LOAD ticket
+    /// v5.0.4 frontier: chunks with an in-flight moonrise FORCED ticket
     /// (chunk -> tick when requested). NON-BLOCKING: the chunk generates on
     /// the chunk system's workers; this ledger is polled each tick and the
     /// ticket is released after sampling (v4.4's Bukkit setChunkForceLoaded
