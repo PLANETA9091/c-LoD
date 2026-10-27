@@ -178,7 +178,6 @@ float edge_distance_xz(vec3 cam, vec3 dir, vec2 minW, vec2 maxW) {
 }
 
 void main() {
-    // TEMPORARY BENCH DIAGNOSTIC: dump the two streamed targets raw.
     vec4 scene = texture(InSampler, texCoord);
     float depth = texture(InDepthSampler, texCoord).r;
     vec2 px = texCoord * ScreenSize;
@@ -187,23 +186,11 @@ void main() {
     // the sky and the sun/moon quads sit at EXACTLY 0.0, real terrain reads
     // positive values that grow with proximity. Real chunks always win.
     if (depth > 1.0e-6) {
-        if (px.x < 12.0) {
-            fragColor = vec4(0.0, 1.0, 0.0, 1.0);
-        } else {
-            fragColor = scene;
-        }
+        fragColor = scene;
         return;
     }
 
     vec4 rot = texelFetch(RotSampler, ivec2(0, 0), 0);
-    if (px.x < 36.0) {
-        if (px.x < 20.0) {
-            fragColor = vec4(1.0, 0.0, 0.0, 1.0); // conf gate taken
-        } else {
-            fragColor = vec4(rot.b, rot.a, 0.0, 1.0); // conf / fov-byte values
-        }
-        return;
-    }
     float conf = rot.b;
     float minConf = LodParams.w;
 
@@ -309,11 +296,7 @@ void main() {
     }
 
     if (tHit < 0.0) {
-        if (px.x < 44.0) {
-            fragColor = vec4(0.0, 0.0, 1.0, 1.0); // marched, no hit
-        } else {
-            fragColor = scene; // open sky (or out of data): vanilla wins
-        }
+        fragColor = scene; // open sky (or out of data): vanilla wins
         return;
     }
 

@@ -1,5 +1,5 @@
 {
   "id": "lod",
-  "version": "5.0.3",
+  "version": "5.0.4",
   "description": "True server-side LOD: shader-only pack pushed once, all world data streams as sky-grid dust particles (SKY-GRID BIT-STREAM). No Display entities, no textures, no repacks."
 }
