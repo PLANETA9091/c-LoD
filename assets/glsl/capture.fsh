@@ -13,7 +13,7 @@
 // sub-position inside the cell IS the 2-bit value, its Z sub-position IS
 // the slot. Sub-cell quantum = cell/4, centered. HI word = BLACK dust,
 // LO word = WHITE dust — the client multiplies all channels by one random
-// factor, so the hue survives.
+// factor, so the hue survives (black stays black, white dims to 0.48..1).
 //
 // This pass decodes ONE word back into its persistent 256x256 target (1 px
 // = 1 cell). For the pixel's cell it re-projects all 2x16 sub-particle
@@ -28,10 +28,10 @@ uniform sampler2D InDepthSampler; // minecraft:main depth (in-front-of-geometry 
 uniform sampler2D PrevSampler;    // previous plane target (persistent)
 uniform sampler2D RotSampler;     // clod_rot_a (camera + fog channel)
 
-layout(std140) uniform SamplerInfo {
-    vec2 OutSize; // this target (256 x 256): 1 px = 1 cell
-    vec2 InSize;  // screen size (projection viewport)
-};
+// v5.0.3: SamplerInfo never existed as a client UBO — it stayed zeroed
+// (the whole capture wrote cell (0,0), the march divided by zero).
+// The screen size rides the STANDARD Globals block (ScreenSize), the
+// target size is compile-time known.
 
 // x = origin_x, y = origin_z, z = HIGH layer y, w = LOW layer y
 layout(std140) uniform ClodGrid {
@@ -49,21 +49,31 @@ layout(location = 0) out vec4 fragColor;
 const float PI = 3.14159265358979;
 
 void main() {
-    ivec2 px = ivec2(clamp(texCoord, 0.0, 1.0) * OutSize);
-    px = clamp(px, ivec2(0), ivec2(OutSize) - 1);
+    ivec2 px = ivec2(clamp(texCoord, 0.0, 1.0) * vec2(256.0));
+    px = clamp(px, ivec2(0), ivec2(vec2(256.0)) - 1);
 
-    // Probe camera (the live rot el-channel still carries the group-A
-    // regression; the bench player looks yaw=180 south, pitch=-5).
-    float az = 180.0 * PI / 180.0;
-    float el = -5.0 * PI / 180.0;
-    float fov = 70.0;
+    // Probe camera: the LIVE camera from the sky camera-channel (clod_rot_a,
+    // written by the sky override every frame): R = az/2pi,
+    // G = (el+pi/2)/pi, B = conf, A = (fov-5)/115*254. The v5.0.0 hard-coded
+    // bench pose (yaw=180, pitch=-5, fov=70) decoded NOTHING the moment the
+    // player turned — the projections missed every particle.
+    vec4 rotP = texelFetch(RotSampler, ivec2(0, 0), 0);
+    float az = rotP.r * 2.0 * PI;
+    float el = rotP.g * PI - PI * 0.5;
+    float fov = 5.0 + rotP.a * 115.0;
+    if (rotP.b < 0.05) {
+        // No live camera yet (pre-first-frame): neutral noon pose fallback.
+        az = 180.0 * PI / 180.0;
+        el = -5.0 * PI / 180.0;
+        fov = 70.0;
+    }
 
     vec3 F = vec3(cos(el) * cos(az), sin(el), cos(el) * sin(az));
     vec3 R = vec3(-sin(az), 0.0, cos(az));
     vec3 U = vec3(-cos(az) * sin(el), cos(el), -sin(az) * sin(el));
 
     float tanH = tan(radians(fov) * 0.5);
-    float aspect = InSize.x / max(InSize.y, 1.0);
+    float aspect = ScreenSize.x / max(ScreenSize.y, 1.0);
     vec3 cam = vec3(CameraBlockPos) + CameraOffset;
 
     float cell = StreamInfo.x;
@@ -112,9 +122,11 @@ void main() {
                 float mx = max(pc.r, max(pc.g, pc.b));
                 bool dust;
                 if (StreamInfo.w < 0.5) {
-                    dust = mx < 0.14; // black dust (HI word)
+                    dust = mx < 0.14; // black dust (HI word): 0 * rand = 0
                 } else {
-                    dust = mn > 0.5 && (mx - mn) < 0.14; // white dust (LO word)
+                    // white dust (LO word): 1 * rand[0.48..1] dims it — the
+                    // hue (achromatic) survives, the floor must be below 0.48.
+                    dust = mn > 0.35 && (mx - mn) < 0.14;
                 }
                 if (!dust) {
                     continue;

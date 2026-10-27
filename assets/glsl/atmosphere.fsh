@@ -15,10 +15,10 @@
 uniform sampler2D InSampler;      // minecraft:main color
 uniform sampler2D InDepthSampler; // minecraft:main depth
 
-layout(std140) uniform SamplerInfo {
-    vec2 OutSize;
-    vec2 InSize;
-};
+// v5.0.3: SamplerInfo never existed as a client UBO — it stayed zeroed
+// (the whole capture wrote cell (0,0), the march divided by zero).
+// The screen size rides the STANDARD Globals block (ScreenSize), the
+// target size is compile-time known.
 
 // x = veil start (blocks), y = veil end (blocks), z = strength, w = unused
 layout(std140) uniform ClodAtmo {

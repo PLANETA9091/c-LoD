@@ -132,7 +132,8 @@ struct WorldIds {
     m_highest_block: jmethodID,
     m_get_block_at: jmethodID,
     m_chunk_loaded: jmethodID,
-    m_set_force_loaded: jmethodID,
+    /// v5.0.2: CraftWorld.getHandle() -> ServerLevel (moonrise ticket bridge).
+    m_get_handle: jmethodID,
     /// v4.2 surface colors: RegionAccessor#getBiome(int,int,int).
     /// Optional: absent -> palette falls back to a neutral tint.
     m_get_biome: Option<jmethodID>,
@@ -223,7 +224,13 @@ fn world_ids(env: Env, world: jobject) -> Option<WorldIds> {
         m_name: bind_method(env, cls_local, cls, "getName", "()Ljava/lang/String;")?,
         m_highest_block: bind_method(env, cls_local, cls, "getHighestBlockYAt", "(II)I")?,
         m_chunk_loaded: bind_method(env, cls_local, cls, "isChunkLoaded", "(II)Z")?,
-        m_set_force_loaded: bind_method(env, cls_local, cls, "setChunkForceLoaded", "(IIZ)V")?,
+        m_get_handle: bind_method(
+            env,
+            cls_local,
+            cls,
+            "getHandle",
+            "()Lnet/minecraft/server/level/ServerLevel;",
+        )?,
         m_get_block_at: bind_method(
             env,
             cls_local,
@@ -718,30 +725,264 @@ pub fn find_world(env: Env, name: &str) -> Option<WorldRef> {
     None
 }
 
-/// Force-load one chunk (vanilla /forceload semantics: load + generate +
-/// RETAIN until un-forced). Paper unloads freshly generated chunks within
-/// seconds when no players are near, so plain getChunkAt warm-up evaporates
-/// before the sweep reaches the cells.
-pub fn warm_chunk(env: Env, world: jobject, cx: i32, cz: i32, retain: bool) -> bool {
+// ---------------------------------------------------------------------------
+// v5.0.2 moonrise ticket bridge — NON-BLOCKING chunk generation requests.
+//
+// v4.4's Bukkit setChunkForceLoaded surface was REMOVED: on a fresh world it
+// SYNCHRONOUSLY generated each frontier chunk on the main thread (BLOCKING
+// priority syncLoad, ServerLevel.setChunkForced -> getChunk -> syncLoad) and
+// stalled the server for minutes (watchdog "has not responded for 10
+// seconds"), starving the pack HTTP surface with it. The ticket bridge below
+// rides the engine Paper itself uses for async work:
+//
+// The fix rides the engine Paper itself uses for async chunk work:
+//   ServerChunkCache.addTicketAndLoadWithRadius(TicketType, ChunkPos, int)
+//     -> ChunkHolderManager ticket + ASYNC gen at NORMAL priority,
+//        returns a CompletableFuture we do not even need to keep (completion
+//        is polled via isChunkLoaded by the engine tick).
+//   ServerChunkCache.removeTicketWithRadius(TicketType, ChunkPos, int)
+//     -> release after sampling (or at finalize).
+// TicketType.CHUNK_LOAD is the load-only, non-persistent type (flags=2:
+// FLAG_LOADING) — the chunk is loaded to FULL for data access without
+// ticking, and nothing leaks into level.dat.
+//
+// Everything resolves through CraftServer's loader (same as the NMS surface
+// below); every call is main-thread-only.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy)]
+struct GenIds {
+    /// net.minecraft.server.level.ServerLevel#getChunkSource()
+    m_get_chunk_source: jmethodID,
+    /// addTicketAndLoadWithRadius(TicketType, ChunkPos, int) -> CompletableFuture
+    m_add_ticket: jmethodID,
+    /// removeTicketWithRadius(TicketType, ChunkPos, int)
+    m_remove_ticket: jmethodID,
+    /// TicketType.CHUNK_LOAD (static field).
+    ticket_type_cls: jobject,
+    f_chunk_load: jfieldID,
+    /// ChunkPos.<init>(II)V + its class.
+    chunk_pos_cls: jobject,
+    m_chunk_pos_new: jmethodID,
+}
+struct SendGenIds(GenIds);
+unsafe impl Send for SendGenIds {}
+unsafe impl Sync for SendGenIds {}
+static GEN_IDS: OnceLock<Option<SendGenIds>> = OnceLock::new();
+
+fn gen() -> Option<&'static GenIds> {
+    GEN_IDS.get().and_then(|o| o.as_ref()).map(|s| &s.0)
+}
+
+macro_rules! gstep {
+    ($name:expr, $e:expr) => {
+        match $e {
+            Some(v) => v,
+            None => {
+                eprintln!("[c-LoD] gen resolve FAILED at: {}", $name);
+                return None;
+            }
+        }
+    };
+}
+
+fn resolve_gen(env: Env) -> Option<GenIds> {
+    use cplug_sdk::classes as sdkcls;
+    let loader = *LOADER.lock().unwrap();
+    if loader == 0 {
+        eprintln!("[c-LoD] gen resolve FAILED at: loader stash empty");
+        return None;
+    }
+    let class_cls = sdkcls::find_class("java/lang/Class")
+        .map(|c| c.as_jclass())
+        .or_else(|| {
+            eprintln!("[c-LoD] gen resolve FAILED at: find_class Class");
+            None
+        })?;
+    let m_for_name = env
+        .get_static_method_id(
+            class_cls,
+            "forName",
+            "(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;",
+        )
+        .or_else(|| {
+            eprintln!("[c-LoD] gen resolve FAILED at: forName method id");
+            None
+        })?;
+    let load = |dotted: &str| -> Option<jobject> {
+        let jn = env.new_string_utf(dotted)?;
+        let k = env.call_static_object_method(
+            class_cls,
+            m_for_name,
+            &[jv(jn), jz(true), jv(loader as jobject)],
+        );
+        clear_if_pending(env);
+        match jobj(k) {
+            Some(c) => Some(env.new_global_ref(c) as jobject),
+            None => {
+                eprintln!("[c-LoD] gen resolve FAILED at: forName({dotted})");
+                None
+            }
+        }
+    };
+
+    let server_level_cls = gstep!(
+        "server_level_cls",
+        load("net.minecraft.server.level.ServerLevel")
+    );
+    let chunk_cache_cls = gstep!(
+        "chunk_cache_cls",
+        load("net.minecraft.server.level.ServerChunkCache")
+    );
+    let ticket_type_cls = gstep!(
+        "ticket_type_cls",
+        load("net.minecraft.server.level.TicketType")
+    );
+    let chunk_pos_cls = gstep!("chunk_pos_cls", load("net.minecraft.world.level.ChunkPos"));
+
+    let m_get_chunk_source = gstep!(
+        "m_get_chunk_source",
+        bind_method(
+            env,
+            server_level_cls,
+            server_level_cls,
+            "getChunkSource",
+            "()Lnet/minecraft/server/level/ServerChunkCache;",
+        )
+    );
+    let m_add_ticket = gstep!(
+        "m_add_ticket",
+        bind_method(
+            env,
+            chunk_cache_cls,
+            chunk_cache_cls,
+            "addTicketAndLoadWithRadius",
+            "(Lnet/minecraft/server/level/TicketType;Lnet/minecraft/world/level/ChunkPos;I)Ljava/util/concurrent/CompletableFuture;",
+        )
+    );
+    let m_remove_ticket = gstep!(
+        "m_remove_ticket",
+        bind_method(
+            env,
+            chunk_cache_cls,
+            chunk_cache_cls,
+            "removeTicketWithRadius",
+            "(Lnet/minecraft/server/level/TicketType;Lnet/minecraft/world/level/ChunkPos;I)V",
+        )
+    );
+    let f_chunk_load = gstep!(
+        "f_chunk_load",
+        env.get_static_field_id(
+            ticket_type_cls,
+            "CHUNK_LOAD",
+            "Lnet/minecraft/server/level/TicketType;",
+        )
+    );
+    let m_chunk_pos_new = gstep!(
+        "m_chunk_pos_new",
+        env.get_method_id(chunk_pos_cls, "<init>", "(II)V")
+    );
+
+    Some(GenIds {
+        m_get_chunk_source,
+        m_add_ticket,
+        m_remove_ticket,
+        ticket_type_cls,
+        f_chunk_load,
+        chunk_pos_cls,
+        m_chunk_pos_new,
+    })
+}
+
+/// The CHUNK_LOAD TicketType object (static field read; local ref, valid for
+/// the current call frame only).
+fn chunk_load_type(env: Env, g: &GenIds) -> Option<jobject> {
+    let t = env.get_static_object_field(g.ticket_type_cls, g.f_chunk_load);
+    jobj(t)
+}
+
+/// Request an ASYNC chunk generation + retention ticket (moonrise CHUNK_LOAD).
+/// Non-blocking: the chunk generates at NORMAL priority on the chunk system's
+/// workers; the engine polls isChunkLoaded. Returns false when the bridge is
+/// unresolved or the call raised.
+pub fn request_chunk_gen(env: Env, world: jobject, cx: i32, cz: i32) -> bool {
+    if GEN_IDS.get().is_none() {
+        let _ = GEN_IDS.set(match resolve_gen(env) {
+            Some(g) => Some(SendGenIds(g)),
+            None => {
+                clear_if_pending(env);
+                None
+            }
+        });
+    }
+    let Some(g) = gen() else {
+        clear_if_pending(env);
+        return false;
+    };
     let Some(wid) = world_ids(env, world) else {
         clear_if_pending(env);
         return false;
     };
-    if retain {
-        env.call_void_method(world, wid.m_set_force_loaded, &[ji(cx), ji(cz), jz(true)]);
-        let ok = !env.exception_check();
+    let Some(level) = jobj(env.call_object_method(world, wid.m_get_handle, &[])) else {
         clear_if_pending(env);
-        return ok;
+        return false;
+    };
+    let Some(cache) = jobj(env.call_object_method(level, g.m_get_chunk_source, &[])) else {
+        clear_if_pending(env);
+        return false;
+    };
+    let Some(ttype) = chunk_load_type(env, g) else {
+        clear_if_pending(env);
+        return false;
+    };
+    let Some(pos) = env.new_object(g.chunk_pos_cls, g.m_chunk_pos_new, &[ji(cx), ji(cz)]) else {
+        clear_if_pending(env);
+        return false;
+    };
+    // The returned future is intentionally dropped: ticket retention is
+    // tracked by the engine's gen_wish ledger + isChunkLoaded polling.
+    let _future = env.call_object_method(cache, g.m_add_ticket, &[jv(ttype), jv(pos), ji(0)]);
+    let ok = !env.exception_check();
+    if !ok {
+        env.exception_describe();
     }
-    // Release pass: un-force (the engine calls this at finalize).
-    env.call_void_method(world, wid.m_set_force_loaded, &[ji(cx), ji(cz), jz(false)]);
+    clear_if_pending(env);
+    ok
+}
+
+/// Release the chunk's CHUNK_LOAD ticket (after sampling or at finalize).
+pub fn release_chunk_ticket(env: Env, world: jobject, cx: i32, cz: i32) -> bool {
+    let Some(g) = gen() else {
+        clear_if_pending(env);
+        return false;
+    };
+    let Some(wid) = world_ids(env, world) else {
+        clear_if_pending(env);
+        return false;
+    };
+    let Some(level) = jobj(env.call_object_method(world, wid.m_get_handle, &[])) else {
+        clear_if_pending(env);
+        return false;
+    };
+    let Some(cache) = jobj(env.call_object_method(level, g.m_get_chunk_source, &[])) else {
+        clear_if_pending(env);
+        return false;
+    };
+    let Some(ttype) = chunk_load_type(env, g) else {
+        clear_if_pending(env);
+        return false;
+    };
+    let Some(pos) = env.new_object(g.chunk_pos_cls, g.m_chunk_pos_new, &[ji(cx), ji(cz)]) else {
+        clear_if_pending(env);
+        return false;
+    };
+    env.call_void_method(cache, g.m_remove_ticket, &[jv(ttype), jv(pos), ji(0)]);
     let ok = !env.exception_check();
     clear_if_pending(env);
     ok
 }
 
 /// Diagnostic: direct isChunkLoaded probe.
-#[allow(dead_code)]
 pub fn is_chunk_loaded(env: Env, world: jobject, cx: i32, cz: i32) -> Option<bool> {
     let wid = world_ids(env, world)?;
     let v = env.call_boolean_method(world, wid.m_chunk_loaded, &[ji(cx), ji(cz)]);

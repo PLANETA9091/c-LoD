@@ -36,7 +36,7 @@ pub const SUB_PER_CELL: f64 = 4.0;
 /// particle renders in front of geometry (26.3 reversed-Z hides particles
 /// against the sky), so low layers decode from the ground, high ones from
 /// elevated vantage points.
-pub const LAYER_Y: [f64; 2] = [80.0, 200.0];
+pub const LAYER_Y: [f64; 2] = [80.0, 120.0];
 /// Legacy plane constants (kept for packgen templating of the layer list).
 pub const PLANE_HI_Y: f64 = LAYER_Y[1];
 pub const PLANE_LO_Y: f64 = LAYER_Y[0];

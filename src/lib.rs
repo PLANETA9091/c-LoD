@@ -30,6 +30,7 @@ mod stream;
 mod zipw;
 
 use cplug_abi::{CPluginApi, JavaVmPtr};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 pub(crate) fn log_info(msg: &str) {
@@ -100,7 +101,12 @@ pub unsafe extern "C" fn cplugin_init(
         std::thread::Builder::new()
             .name("clod-engine".into())
             .spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_millis(tick_ms));
+                // Idle throttling: 1 s between ticks with no players online
+                // (v5.0.3: the 100 ms scheduling churn on an idle server was
+                // implicated in native crashes after the last player left).
+                let idle = st.idle_ticks.load(Ordering::Relaxed);
+                let ms = if idle > 10 { tick_ms * 10 } else { tick_ms };
+                std::thread::sleep(std::time::Duration::from_millis(ms));
                 let st = state().expect("state").clone();
                 // v5: one engine tick — boot/pack (once), disk scan,
                 // dust-particle streaming, per-player tiers. All main thread.

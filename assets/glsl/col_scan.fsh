@@ -1,5 +1,6 @@
 #version 330
 #extension GL_ARB_separate_shader_objects : require
+#include <minecraft:globals.glsl>
 
 // c-LoD pass 1 (v4.2): scan the camera-channel columns.
 //
@@ -21,10 +22,10 @@
 
 uniform sampler2D InSampler; // minecraft:main
 
-layout(std140) uniform SamplerInfo {
-    vec2 OutSize;
-    vec2 InSize;
-};
+// v5.0.3: SamplerInfo never existed as a client UBO — it stayed zeroed
+// (the whole capture wrote cell (0,0), the march divided by zero).
+// The screen size rides the STANDARD Globals block (ScreenSize), the
+// target size is compile-time known.
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
@@ -59,7 +60,7 @@ bool row_valid_fog(int y) {
 void main() {
     int slice = int(gl_FragCoord.x);
     int group = int(gl_FragCoord.y); // 0 = camera, 1 = fog
-    int rows = int(InSize.y);
+    int rows = int(ScreenSize.y);
     int best = -1;
     for (int r = 0; r < ROWS_PER_SLICE; ++r) {
         int y = slice * ROWS_PER_SLICE + r;

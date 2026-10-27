@@ -40,10 +40,10 @@ uniform sampler2D HeightSampler;  // clod_h_b — streamed height bytes (1 px = 
 uniform sampler2D ColBufSampler;  // clod_c_b — streamed color index bytes (1 px = 1 cell)
 uniform sampler2D RotSampler;     // clod:clod_rot_a (2x2 persistent, camera + fog channel)
 
-layout(std140) uniform SamplerInfo {
-    vec2 OutSize;
-    vec2 InSize;
-};
+// v5.0.3: SamplerInfo never existed as a client UBO — it stayed zeroed
+// (the whole capture wrote cell (0,0), the march divided by zero).
+// The screen size rides the STANDARD Globals block (ScreenSize), the
+// target size is compile-time known.
 
 // x = disk origin x, y = disk origin z, z = plane HI y, w = plane LO y
 layout(std140) uniform ClodGrid {
@@ -181,16 +181,29 @@ void main() {
     // TEMPORARY BENCH DIAGNOSTIC: dump the two streamed targets raw.
     vec4 scene = texture(InSampler, texCoord);
     float depth = texture(InDepthSampler, texCoord).r;
+    vec2 px = texCoord * ScreenSize;
 
     // 26.3 device depth (live-verified): d = near/eyeZ, infinite far plane —
     // the sky and the sun/moon quads sit at EXACTLY 0.0, real terrain reads
     // positive values that grow with proximity. Real chunks always win.
     if (depth > 1.0e-6) {
-        fragColor = scene;
+        if (px.x < 12.0) {
+            fragColor = vec4(0.0, 1.0, 0.0, 1.0);
+        } else {
+            fragColor = scene;
+        }
         return;
     }
 
     vec4 rot = texelFetch(RotSampler, ivec2(0, 0), 0);
+    if (px.x < 36.0) {
+        if (px.x < 20.0) {
+            fragColor = vec4(1.0, 0.0, 0.0, 1.0); // conf gate taken
+        } else {
+            fragColor = vec4(rot.b, rot.a, 0.0, 1.0); // conf / fov-byte values
+        }
+        return;
+    }
     float conf = rot.b;
     float minConf = LodParams.w;
 
@@ -210,7 +223,7 @@ void main() {
 
     float fov = 5.0 + rot.a * 115.0; // inverse of (fov-5)/115*254
     float tanH = tan(radians(fov) * 0.5);
-    float aspect = OutSize.x / max(OutSize.y, 1.0);
+    float aspect = ScreenSize.x / max(ScreenSize.y, 1.0);
 
     vec2 ndc = texCoord * 2.0 - 1.0;
     vec3 dir = normalize(F + R * (ndc.x * tanH * aspect) + U * (ndc.y * tanH));
@@ -248,7 +261,7 @@ void main() {
     // March: start at the LOD near edge (real chunks live inside it), step
     // proportional to the screen-space footprint of one streamed cell.
     float t = near;
-    float dt = max(cell * 0.5, t * (2.0 * tanH / max(OutSize.y, 1.0)));
+    float dt = max(cell * 0.5, t * (2.0 * tanH / max(ScreenSize.y, 1.0)));
     float tHit = -1.0;
 
     // Sign convention: above = groundY - rayY; POSITIVE means the ray is
@@ -266,7 +279,7 @@ void main() {
         prevT = t;
         prevDiff = above;
         t = min(t + dt, horizon);
-        dt = max(cell * 0.5, t * (2.0 * tanH / max(OutSize.y, 1.0)));
+        dt = max(cell * 0.5, t * (2.0 * tanH / max(ScreenSize.y, 1.0)));
 
         xz = cam.xz + dir.xz * t;
         above = ground_at(xz, wflag, okflag) - (cam.y + dir.y * t);
@@ -296,9 +309,14 @@ void main() {
     }
 
     if (tHit < 0.0) {
-        fragColor = scene; // open sky (or out of data): vanilla wins
+        if (px.x < 44.0) {
+            fragColor = vec4(0.0, 0.0, 1.0, 1.0); // marched, no hit
+        } else {
+            fragColor = scene; // open sky (or out of data): vanilla wins
+        }
         return;
     }
+
 
     float fade = smoothstep(minConf, minConf + 0.15, conf);
     vec3 hitPos = cam + dir * tHit;

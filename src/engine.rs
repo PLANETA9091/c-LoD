@@ -46,14 +46,18 @@ pub struct State {
     pub push_fails: AtomicU32,
     /// v5 sky-grid streaming state (Rust side; main-thread only).
     pub stream: Mutex<Streamer>,
-    /// v4.4 frontier: chunks force-loaded and waiting for the async load to
-    /// finish (chunk -> tick when queued). Sampled + released a couple of
-    /// ticks later.
-    pub force_pending: Mutex<HashMap<(i32, i32), u64>>,
+    /// v5.0.2 frontier: chunks with an in-flight moonrise CHUNK_LOAD ticket
+    /// (chunk -> tick when requested). NON-BLOCKING: the chunk generates on
+    /// the chunk system's workers; this ledger is polled each tick and the
+    /// ticket is released after sampling (v4.4's Bukkit setChunkForceLoaded
+    /// sync-generated chunks on the main thread and stalled the server).
+    pub gen_wish: Mutex<HashMap<(i32, i32), u64>>,
     /// Frontier chunks scanned through the force path so far.
     pub forced_chunks: AtomicU64,
     /// Diagnostics: cells streamed as particles since boot.
     pub streamed_cells: AtomicU64,
+    /// Consecutive engine ticks with zero players online (idle throttling).
+    pub idle_ticks: AtomicU32,
     /// Set once the streamer origin was fixed and particles are flying.
     pub stream_armed: AtomicU8,
 }
@@ -107,9 +111,10 @@ impl State {
             pack_uuid: Mutex::new(0),
             tick_no: AtomicU64::new(0),
             push_fails: AtomicU32::new(0),
-            force_pending: Mutex::new(HashMap::new()),
+            gen_wish: Mutex::new(HashMap::new()),
             forced_chunks: AtomicU64::new(0),
             streamed_cells: AtomicU64::new(0),
+            idle_ticks: AtomicU32::new(0),
             stream_armed: AtomicU8::new(0),
         })
     }
@@ -133,6 +138,15 @@ pub fn tick(state: &Arc<State>, env: Env) {
     poll_forced(state, env);
     stream_step(state, env);
     manage_players(state, env);
+    // Idle throttling: with nobody online the engine loop sleeps 10x longer
+    // between ticks (the scheduling churn of an idle server was implicated
+    // in native crashes after the last player left). per_player holds one
+    // entry per online player after manage_players.
+    if state.per_player.lock().unwrap().is_empty() {
+        state.idle_ticks.fetch_add(1, Ordering::Relaxed);
+    } else {
+        state.idle_ticks.store(0, Ordering::Relaxed);
+    }
 }
 
 /// One-time boot: JNI surface + the shader-only pack (built IMMEDIATELY — it
@@ -215,10 +229,25 @@ unsafe fn as_obj(handle: usize) -> jvmti_bindings::jni::jobject {
     handle as jvmti_bindings::jni::jobject
 }
 
-/// Cap on chunks queued for force-load per engine tick (see v4.4 notes: the
-/// generation flood starves the tick loop above these numbers).
-const FORCE_MAX_PENDING: usize = 8;
+/// Cap on chunks queued for async generation per engine tick (see v4.4 notes:
+/// the generation flood starves the tick loop above these numbers; v5.0.2
+/// keeps it as a politeness bound for the moonrise ticket requests too).
 const FORCE_BUDGET_PER_TICK: usize = 4;
+/// Cap on chunks with an in-flight CHUNK_LOAD ticket (async gen backlog).
+const GEN_MAX_WISH: usize = 96;
+/// Re-issue a ticket that produced a loaded chunk within this many ticks
+/// (moonrise retries internally; this guards against lost tickets).
+const GEN_REISSUE_TICKS: u64 = 200;
+
+/// Pure admission gate for the gen-wish ledger (unit-tested): duplicate chunk
+/// rejected, backlog capped, per-tick request budget enforced.
+fn wish_admit(wish: &HashMap<(i32, i32), u64>, cx: i32, cz: i32, now: u64, budget: usize) -> bool {
+    if wish.contains_key(&(cx, cz)) || wish.len() >= GEN_MAX_WISH {
+        return false;
+    }
+    let fresh = wish.values().filter(|t| **t == now).count();
+    fresh < budget
+}
 
 /// Center-centric heightmap sweep into the disk store. The LOD data source:
 /// rings of `cell_size` blocks around the disk center, skipping cells
@@ -322,76 +351,98 @@ fn force_chunk_for(
     cx: i32,
     cz: i32,
 ) {
-    let mut pend = state.force_pending.lock().unwrap();
-    if pend.contains_key(&(cx, cz)) || pend.len() >= FORCE_MAX_PENDING {
-        return;
-    }
     let now = state.tick_no.load(Ordering::SeqCst);
-    let fresh = pend.values().filter(|t| **t == now).count();
-    if fresh >= FORCE_BUDGET_PER_TICK {
-        return;
+    {
+        let wish = state.gen_wish.lock().unwrap();
+        if !wish_admit(&wish, cx, cz, now, FORCE_BUDGET_PER_TICK) {
+            return;
+        }
     }
-    if jni::warm_chunk(env, world, cx, cz, true) {
-        pend.insert((cx, cz), now);
+    // v5.0.2: NON-BLOCKING moonrise CHUNK_LOAD ticket. The chunk generates
+    // on the chunk system's workers; poll_forced picks it up when loaded.
+    if jni::request_chunk_gen(env, world, cx, cz) {
+        state.gen_wish.lock().unwrap().insert((cx, cz), now);
     }
 }
 
-/// Sample + release chunks queued by [`force_chunk_for`] once the async load
-/// finished. One chunk covers (16/cell)^2 cells — every still-invalid cell
-/// inside it is sampled in one pass.
+/// Sample every still-invalid disk cell of one loaded chunk (16/cell)^2
+/// grid. Returns the number of cells sampled.
+fn sample_chunk(
+    state: &Arc<State>,
+    env: Env,
+    world: jvmti_bindings::jni::jobject,
+    cx: i32,
+    cz: i32,
+    max_samples: usize,
+) -> usize {
+    let mut samples = 0usize;
+    let x0 = cx * 16;
+    let z0 = cz * 16;
+    for dz in 0..(16 / state.cfg.cell_size.max(1)).max(1) {
+        for dx in 0..(16 / state.cfg.cell_size.max(1)).max(1) {
+            if samples >= max_samples {
+                return samples;
+            }
+            let wx = x0 + dx * state.cfg.cell_size;
+            let wz = z0 + dz * state.cfg.cell_size;
+            let occ = {
+                let s = state.stream.lock().unwrap();
+                world_to_cell(&s, wx, wz)
+            };
+            let Some((ccx, ccz)) = occ else {
+                continue;
+            };
+            let valid = {
+                let s = state.stream.lock().unwrap();
+                s.get(ccx, ccz).map(|c| c.valid).unwrap_or(false)
+            };
+            if valid {
+                continue;
+            }
+            scan_cell(state, env, world, ccx, ccz, wx, wz);
+            samples += 1;
+        }
+    }
+    samples
+}
+
+/// Poll the gen-wish ledger: chunks whose async CHUNK_LOAD ticket finished
+/// are sampled + released; stuck tickets are re-issued. NON-BLOCKING by
+/// construction — no call here may sync-generate.
 fn poll_forced(state: &Arc<State>, env: Env) {
-    const READY_TICKS: u64 = 2;
     const MAX_SAMPLES: usize = 128;
+    // Player gate: with nobody online the frontier must not churn tickets —
+    // the long-idle ticket re-issue loop was implicated in a native crash
+    // (SIGSEGV in scan_cell ~9 min after the last player left). Chunks with
+    // in-flight tickets keep them; work resumes when a player returns.
+    if jni::players(env).is_empty() {
+        return;
+    }
     let world_handle = *state.world_obj.lock().unwrap();
     if world_handle == 0 {
         return;
     }
     let world = unsafe { as_obj(world_handle) };
     let now = state.tick_no.load(Ordering::SeqCst);
-    let mut pend = state.force_pending.lock().unwrap();
-    let ready: Vec<(i32, i32)> = pend
-        .iter()
-        .filter(|(_, t)| now.saturating_sub(**t) >= READY_TICKS)
-        .map(|(c, _)| *c)
-        .collect();
+    let entries: Vec<((i32, i32), u64)> = {
+        let wish = state.gen_wish.lock().unwrap();
+        wish.iter().map(|(c, t)| (*c, *t)).collect()
+    };
     let mut samples = 0usize;
-    for (cx, cz) in ready {
-        if !jni::is_chunk_loaded(env, world, cx, cz).unwrap_or(false) {
-            pend.insert((cx, cz), now);
-            continue;
-        }
-        let x0 = cx * 16;
-        let z0 = cz * 16;
-        for dz in 0..(16 / state.cfg.cell_size.max(1)).max(1) {
-            for dx in 0..(16 / state.cfg.cell_size.max(1)).max(1) {
-                if samples >= MAX_SAMPLES {
-                    break;
-                }
-                let wx = x0 + dx * state.cfg.cell_size;
-                let wz = z0 + dz * state.cfg.cell_size;
-                let occ = {
-                    let s = state.stream.lock().unwrap();
-                    world_to_cell(&s, wx, wz)
-                };
-                let Some((ccx, ccz)) = occ else {
-                    continue;
-                };
-                let valid = {
-                    let s = state.stream.lock().unwrap();
-                    s.get(ccx, ccz).map(|c| c.valid).unwrap_or(false)
-                };
-                if valid {
-                    continue;
-                }
-                scan_cell(state, env, world, ccx, ccz, wx, wz);
-                samples += 1;
-            }
-        }
-        jni::warm_chunk(env, world, cx, cz, false); // release the force ticket
-        pend.remove(&(cx, cz));
-        state.forced_chunks.fetch_add(1, Ordering::SeqCst);
+    for ((cx, cz), t0) in entries {
         if samples >= MAX_SAMPLES {
             break;
+        }
+        if jni::is_chunk_loaded(env, world, cx, cz).unwrap_or(false) {
+            samples += sample_chunk(state, env, world, cx, cz, MAX_SAMPLES - samples);
+            jni::release_chunk_ticket(env, world, cx, cz);
+            state.gen_wish.lock().unwrap().remove(&(cx, cz));
+            state.forced_chunks.fetch_add(1, Ordering::SeqCst);
+        } else if now.saturating_sub(t0) >= GEN_REISSUE_TICKS {
+            // Ticket lost (never completed): re-issue once per window.
+            if jni::request_chunk_gen(env, world, cx, cz) {
+                state.gen_wish.lock().unwrap().insert((cx, cz), now);
+            }
         }
     }
 }
@@ -551,14 +602,25 @@ fn manage_players(state: &Arc<State>, env: Env) {
 
             if want_terrain && !st.terrain_on {
                 st.terrain_on = jni::add_effect(env, handle, unsafe { as_obj(keys.terrain) });
+                crate::log_info(&format!(
+                    "effect terrain add -> {} ({} {})",
+                    st.terrain_on, p.uuid, tier_no
+                ));
             } else if !want_terrain && st.terrain_on {
-                st.terrain_on = !jni::remove_effect(env, handle, unsafe { as_obj(keys.terrain) });
+                let ok = jni::remove_effect(env, handle, unsafe { as_obj(keys.terrain) });
+                st.terrain_on = !ok;
+                crate::log_info(&format!("effect terrain remove -> {} ({})", ok, p.uuid));
             }
             if want_atmo && !st.atmosphere_on {
                 st.atmosphere_on = jni::add_effect(env, handle, unsafe { as_obj(keys.atmosphere) });
+                crate::log_info(&format!(
+                    "effect atmosphere add -> {} ({} {})",
+                    st.atmosphere_on, p.uuid, tier_no
+                ));
             } else if !want_atmo && st.atmosphere_on {
-                st.atmosphere_on =
-                    !jni::remove_effect(env, handle, unsafe { as_obj(keys.atmosphere) });
+                let ok = jni::remove_effect(env, handle, unsafe { as_obj(keys.atmosphere) });
+                st.atmosphere_on = !ok;
+                crate::log_info(&format!("effect atmosphere remove -> {} ({})", ok, p.uuid));
             }
         }
 
@@ -744,5 +806,63 @@ mod tests {
         // Negative / beyond-disk coords clamp into the disk footprint...
         assert_eq!(world_to_cell(&s, -50, -50), None);
         assert_eq!(world_to_cell(&s, 600, 600), None);
+    }
+
+    #[test]
+    fn wish_admit_gates_duplicates_backlog_and_budget() {
+        let mut wish: HashMap<(i32, i32), u64> = HashMap::new();
+        // Fresh chunk on a fresh tick: admitted.
+        assert!(wish_admit(&wish, 3, 5, 100, FORCE_BUDGET_PER_TICK));
+        wish.insert((3, 5), 100);
+        // Same chunk again (in-flight ticket): rejected.
+        assert!(!wish_admit(&wish, 3, 5, 100, FORCE_BUDGET_PER_TICK));
+        // Another chunk, same tick, budget (4) not yet exhausted: admitted.
+        assert!(wish_admit(&wish, 7, 1, 100, FORCE_BUDGET_PER_TICK));
+        wish.insert((7, 1), 100);
+        assert!(wish_admit(&wish, 7, 2, 100, FORCE_BUDGET_PER_TICK));
+        wish.insert((7, 2), 100);
+        assert!(wish_admit(&wish, 7, 3, 100, FORCE_BUDGET_PER_TICK));
+        wish.insert((7, 3), 100);
+        // Budget for THIS tick exhausted: rejected...
+        assert!(!wish_admit(&wish, 7, 4, 100, FORCE_BUDGET_PER_TICK));
+        // ...but the same chunk is fine on the NEXT tick.
+        assert!(wish_admit(&wish, 7, 4, 101, FORCE_BUDGET_PER_TICK));
+    }
+
+    #[test]
+    fn wish_admit_caps_backlog_at_gen_max() {
+        let mut wish: HashMap<(i32, i32), u64> = HashMap::new();
+        for i in 0..GEN_MAX_WISH {
+            let key = (i as i32, (i as i32 * 7) % 13);
+            assert!(wish_admit(&wish, key.0, key.1, 1, FORCE_BUDGET_PER_TICK));
+            wish.insert(key, i as u64);
+        }
+        assert_eq!(wish.len(), GEN_MAX_WISH);
+        // Ledger full: ANY new chunk is rejected regardless of tick/budget.
+        assert!(!wish_admit(&wish, -1, -1, 99, FORCE_BUDGET_PER_TICK));
+    }
+
+    #[test]
+    fn gen_wish_ledger_lifecycle_drains_and_reissues() {
+        // Simulates the poll_forced contract with a pure stand-in for the
+        // JNI probes: loaded chunks drain (sample+release), stale ones
+        // re-issue (fresh timestamp), unknown stay.
+        let mut wish: HashMap<(i32, i32), u64> = HashMap::new();
+        wish.insert((0, 0), 10);
+        wish.insert((1, 0), 10);
+        wish.insert((2, 0), 10);
+        let now = 10 + GEN_REISSUE_TICKS; // all past the reissue window
+        let loaded = |c: (i32, i32)| c.0 == 0; // only (0,0) finished generating
+        let entries: Vec<((i32, i32), u64)> = wish.iter().map(|(c, t)| (*c, *t)).collect();
+        for ((cx, cz), t0) in entries {
+            if loaded((cx, cz)) {
+                wish.remove(&(cx, cz));
+            } else if now.saturating_sub(t0) >= GEN_REISSUE_TICKS {
+                wish.insert((cx, cz), now);
+            }
+        }
+        assert!(!wish.contains_key(&(0, 0)), "drained after sampling");
+        assert_eq!(wish.get(&(1, 0)), Some(&now), "re-issued");
+        assert_eq!(wish.get(&(2, 0)), Some(&now), "re-issued");
     }
 }
