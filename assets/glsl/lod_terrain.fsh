@@ -2,26 +2,22 @@
 #extension GL_ARB_separate_shader_objects : require
 #include <minecraft:globals.glsl>
 
-// c-LoD pass 4 (v5.0 "MAP CARRIER"): the actual level-of-distant-detail
+// c-LoD pass (v5.0 "SKY-GRID BIT-STREAM"): the actual level-of-distant-detail
 // renderer.
 //
 // For every pixel that shows sky (device depth ~ 0) we march a view ray
 // against the streamed heightfield. There is NO atlas in the resource pack:
-// the heightfield lives in two persistent post-chain targets (clod_scol_a /
-// clod_shgt_a, 512x512) that the earlier passes of this very chain fill every
-// frame by scraping the map-carrier slot (see assets/glsl/scrape.fsh and
-// merge.fsh). The data was streamed from the server as vanilla map packets —
-// the client received it like any multiplayer map and never re-downloaded a
-// resource pack.
+// the heightfield lives in two persistent post-chain target pairs
+// (clod_h_a/b heights, clod_c_a/b colors, 256x256, 1 px = 1 cell) that the
+// earlier capture passes of this very chain fill every frame by decoding the
+// dust-particle sky-grid (see assets/glsl/capture.fsh). The data arrives as
+// vanilla dust particles — the client received it with zero downloads after
+// the one-time pack push.
 //
 // Geometry (must match src/stream.rs exactly):
-//   region       = floor(xz / REGION_BLOCKS)                 (512 blocks)
-//   slot         = parity(region)                             (0..3, 2x2 grid)
-//   target pixel = slot * 256 + floor((xz - region * REGION) / CELL)
-// The march walks ACROSS region borders: each sample re-derives its region,
-// validates the slot's region stamp (hole cell (0,0) of the quadrant), and
-// reads the cell. Stale slots (a parity slot whose quadrant was overwritten
-// by a different region) validate against their stamp and read as void.
+//   cell = floor((xz - GridOrigin) / CELL)                      (0..255)
+//   height pixel = HeightSampler[cell]  (R byte - 64)
+//   color pixel  = ColBufSampler[cell]  (R byte = 6x6x6 lattice idx, 216 = water)
 //
 // Shading reproduces the Voxy color model exactly, as in v4.2:
 //   color = albedo x vanillaFaceShade x lightmap(0, 15)
@@ -40,13 +36,18 @@
 
 uniform sampler2D InSampler;      // minecraft:main color
 uniform sampler2D InDepthSampler; // minecraft:main depth
-uniform sampler2D ScolSampler;    // clod_scol_a — streamed surface colors
-uniform sampler2D ShgtSampler;    // clod_shgt_a — streamed heights/flags
+uniform sampler2D HeightSampler;  // clod_h_b — streamed height bytes (1 px = 1 cell)
+uniform sampler2D ColBufSampler;  // clod_c_b — streamed color index bytes (1 px = 1 cell)
 uniform sampler2D RotSampler;     // clod:clod_rot_a (2x2 persistent, camera + fog channel)
 
 layout(std140) uniform SamplerInfo {
     vec2 OutSize;
     vec2 InSize;
+};
+
+// x = disk origin x, y = disk origin z, z = plane HI y, w = plane LO y
+layout(std140) uniform ClodGrid {
+    vec4 GridInfo;
 };
 
 // x = region blocks, y = cell size, z = sea level, w = max terrain height
@@ -123,64 +124,47 @@ float resolve_day_tick(vec3 fogRgb, float prevTick, bool prevValid) {
     return tEve;
 }
 
-// ---- streamed heightfield: the region grid ---------------------------------
+// ---- streamed heightfield: the fixed disk ----------------------------------
 // One streamed cell = one flat Voxy-style quad. Every read is NEAREST
 // (texelFetch on the integer cell coordinate) — bilinear smearing was the
 // v4.2 "textures overlay badly" bug and is never coming back.
 
-bool clod_hole(ivec2 cell) {
-    // The first 8 cells of every quadrant row carry page markers on the wire;
-    // hole cell (0,0) holds the region stamp. No terrain lives there.
-    return (cell.y & 127) == 0 && (cell.x & 127) < 8;
-}
-
 // Sample the streamed ground at a world xz. Returns the surface Y, or -1e8
-// for "no data" (void, stale slot, marker holes). Water reads sea level and
-// sets `water`.
+// for "no data" (void, never decoded). Water cells stream their real
+// surface height; the water FLAG lives in the color word (idx 216).
 float ground_at(vec2 xz, out bool water, out bool ok) {
-    float rb = AtlasInfo.x;             // region blocks (512)
-    float cell = AtlasInfo.y;           // blocks per cell (2)
-    vec2 r = floor(xz / rb);            // region coords (works for negatives)
-    vec2 lo = xz - r * rb;              // 0..rb
-    ivec2 celli = ivec2(floor(lo / cell)); // 0..255
-    ivec2 slot = ivec2(0, 0);           // TEMPORARY BENCH: single slot
-    ivec2 quadrant = celli >> 7;        // 0..1 per axis
-
-    // Region stamp validation: the slot quadrant must belong to THIS region.
-    // The stamp lives in the quadrant's hole cell (0,0) = region cell
-    // (qx*128, qz*128) -> target pixel slot*256 + quadrant*128.
-    vec4 st = texelFetch(ShgtSampler, slot * 256 + quadrant * 128, 0);
+    float cell = AtlasInfo.y;             // blocks per cell
+    ivec2 celli = ivec2(floor((xz - GridInfo.xy) / cell)); // 0..255
     ok = false;
     water = false;
-    if (st.b < 0.5) {
-        return -1.0e8; // no page ever routed here
+    if (any(lessThan(celli, ivec2(0))) || any(greaterThanEqual(celli, ivec2(256)))) {
+        return -1.0e8; // outside the streamed disk
     }
-    float expx = mod(r.x, 16.0);
-    float expz = mod(r.y, 16.0);
-    if (abs(st.r * 15.0 - expx) > 0.5 || abs(st.g * 15.0 - expz) > 0.5) {
-        return -1.0e8; // stale slot: a different region lived here
+    vec4 c = texelFetch(ColBufSampler, celli, 0);
+    if (c.a < 0.5) {
+        return -1.0e8; // no word ever decoded for this cell
     }
-    if (clod_hole(celli)) {
-        return -1.0e8; // marker holes carry no terrain
-    }
-
-    // Target layout: slot*256 + region cell (0..255), row-major.
-    vec4 h = texelFetch(ShgtSampler, slot * 256 + celli, 0);
-    if (h.b < 0.5) {
-        return -1.0e8; // void (unscanned)
+    water = abs(c.r * 255.0 - 216.0) < 0.5;
+    vec4 h = texelFetch(HeightSampler, celli, 0);
+    if (h.a < 0.5) {
+        return -1.0e8; // height word not decoded yet
     }
     ok = true;
-    water = h.g > 0.5;
-    if (water) {
-        return LodParams.z; // flat sea surface
-    }
-    return h.a * 255.0 - 128.0 + h.r * 255.0;
+    return h.r * 255.0 - 64.0;
 }
 
-// Surface color of one streamed cell (exact palette RGB, already snapped by
-// the scrape pass).
-vec3 color_at(ivec2 celli, ivec2 slot) {
-    return texelFetch(ScolSampler, slot * 256 + celli, 0).rgb;
+// Surface color of one streamed cell: the 6x6x6 RGB lattice decode.
+// Water (idx 216) returns a negative sentinel — the caller uses its own
+// water fallback color.
+vec3 color_at(ivec2 celli, out bool water) {
+    vec4 c = texelFetch(ColBufSampler, celli, 0);
+    float idx = floor(c.r * 255.0 + 0.5);
+    water = idx > 215.5;
+    if (water) {
+        return vec3(-1.0);
+    }
+    vec3 lattice = vec3(mod(idx, 6.0), mod(floor(idx / 6.0), 6.0), floor(idx / 36.0));
+    return lattice * (51.0 / 255.0);
 }
 
 // Horizontal distance from cam to the box boundary along dir.xz.
@@ -333,10 +317,10 @@ void main() {
     // Shade inputs at the hit: per-cell flags + per-cell gradient normal
     // (nearest reads; the normal is constant per cell = flat Voxy quads).
     float rb = region;
-    vec2 hr = floor(hitPos.xz / rb);
-    vec2 hlo = hitPos.xz - hr * rb;
-    ivec2 tc = ivec2(floor(hlo / cell));
-    ivec2 hslot = ivec2(0, 0);          // TEMPORARY BENCH: single slot
+    vec2 hr = floor((hitPos.xz - GridInfo.xy) / rb);
+    vec2 hmin = GridInfo.xy + hr * rb;
+    vec2 hmax = hmin + vec2(rb);
+    ivec2 tc = ivec2(floor((hitPos.xz - GridInfo.xy) / cell));
 
     bool isWater = false; bool okW; bool dum;
     float hC = ground_at(hitPos.xz, isWater, okW);
@@ -353,11 +337,11 @@ void main() {
     vec3 nrm = normalize(vec3(hL - hR, 2.0 * cell, hD - hU));
 
     // ---- COLOR: the Voxy model -------------------------------------------
-    vec3 col = color_at(tc, hslot);
-    float colorless = step(max(col.r, max(col.g, col.b)), 1.0 / 255.0);
+    bool colWater;
+    vec3 col = color_at(tc, colWater);
     float hn = clamp((hitPos.y - sea) / max(maxY - sea, 1.0), 0.0, 1.0);
-    vec3 fallback = isWater ? ColWater.rgb : mix(ColLow.rgb, ColHigh.rgb, smoothstep(0.15, 0.9, hn));
-    vec3 albedo = mix(col, fallback, colorless);
+    vec3 fallback = (isWater || colWater) ? ColWater.rgb : mix(ColLow.rgb, ColHigh.rgb, smoothstep(0.15, 0.9, hn));
+    vec3 albedo = colWater ? fallback : (col.r < 0.0 ? fallback : col);
 
     // Vanilla face shade (meshing weights: up 1.0 / z 0.8 / x 0.6) applied
     // through the height-gradient normal, exactly like Voxy's baked quads.
@@ -392,11 +376,8 @@ void main() {
     lit = mix(lit, fogTint, fog);
 
     // ---- FADE: Voxy FogMode.FADE, MODE=1 (xz only), last 10% ------------
-    // The radius reference is the streamed region the hit landed in: data
-    // beyond it is either another (stamped, validated) region or void — the
-    // march stops at the true data frontier on its own.
-    vec2 hmin = hr * rb;
-    vec2 hmax = hmin + vec2(rb);
+    // The radius reference is the streamed disk edge: data beyond it is
+    // void — the march stops at the true data frontier on its own.
     float lenXZ = tHit * length(dir.xz);
     float rEdge = max(edge_distance_xz(cam, dir, hmin, hmax), 1.0);
     float fadeOut = clamp((lenXZ - FADE_START * rEdge) / max((1.0 - FADE_START) * rEdge, 1.0), 0.0, 1.0);

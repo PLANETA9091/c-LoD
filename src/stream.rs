@@ -1,66 +1,119 @@
-//! The streaming core: per-region LOD stores encoded straight into the
-//! vanilla map-color alphabet, served to clients as `ClientboundMapItemDataPacket`
-//! patches over 8 virtual "pages" (128x128 maps) per player.
+//! The streaming core: SKY-GRID BIT-STREAM (v5.0).
 //!
-//! Geometry: one REGION is `region_blocks` (512) wide -> `region_cells` (256)
-//! cells of `cell_size` (2) blocks. A region needs 8 pages:
-//!   page 0..3 -> COLOR layer, quadrant q = p & 3 (qx = q & 1, qz = q >> 1);
-//!   page 4..7 -> HEIGHT layer, same quadrants.
-//! A page texel (x, y) maps to region cell ((qx*128 + x), (qz*128 + y)) except
-//! texels (0,0) and (1,0), which are the PAGE MARKERS:
-//!   (0,0) = region slot digit (0..stream_slots-1),
-//!   (1,0) = page digit (0..7),
-//!   (2,0) = base-Y high nibble, (3,0) = base-Y low nibble (base = nibbles-128).
-//! The two data cells under the marker texels are permanently void (2x2
-//! blocks per 512x512 region — invisible at LOD distance).
+//! Every byte of LOD data travels to the vanilla client as DUST PARTICLES
+//! spawned above the scan disk — no map carriers, no offhand item, no
+//! textures in the pack at all.
 //!
-//! Region slots: a region always streams into slot `parity(rx) + 2*parity(rz)`
-//! — the SAME mapping the client shader derives from the world position, so
-//! the server and the marcher agree without any out-of-band state, and up to
-//! 4 regions (current + history) stay resident in the client's persistent
-//! scrape targets.
+//! Two particle planes float over the disk:
+//!   HI (Y=260) — the 8-bit height word of the cell (h + 64, clamped 0..255);
+//!   LO (Y=272) — the 8-bit color index of the cell (6x6x6 RGB lattice
+//!   0..215, water = 216) in the HIGH byte of the word.
 //!
-//! Per page the streamer keeps a `sent` shadow of the last encoded 128x128
-//! bytes; every tick each page advances its cursor, re-encodes visited cells
-//! (they may have been rescan-updated), and produces a bounding-rect patch of
-//! the rows that differ. Patches travel as raw map packets (one per dirty
-//! page per tick).
+//! One 16-bit word encodes EIGHT data bits as FOUR particles:
+//!   particle slot s (0..3, Z axis) carries bits (14 - 2*s) .. (15 - 2*s);
+//!   its X sub-position inside the cell IS the 2-bit value, its Z
+//!   sub-position IS the slot. The sub-cell quantum is cell/4, centered.
+//!   (The low byte of the word stays zero — the decoder reads the high
+//!   byte only, keeping the codec dead simple and symmetric.)
+//!
+//! Server-side pacing: `tick_batch()` returns the next chunk of spawns
+//! (at most `particles_per_tick`), marching the disk row-major, valid
+//! cells only. A full 256x256 disk at 1024 particles/tick (128 cells =
+//! 4 + 4 planes) takes 512 engine ticks — one lap every ~26 s at the
+//! default 50 ms cadence, continuously refreshing the client's picture.
+//!
+//! The client-side decoder (`assets/glsl/capture.fsh`) re-projects all 16
+//! sub-cell positions of a cell onto the screen, strobes them against the
+//! depth buffer (dust renders on the OPAQUE layer and writes depth; sky
+//! reads 1.0), and OR-merges decoded words into persistent ping-pong
+//! targets. A particle that never made it through the strobe simply keeps
+//! the previous value — the stream self-heals on the next lap.
 
-use crate::mapcolor;
-use std::collections::HashMap;
-
-pub const PAGE_MAP_SIZE: usize = 128;
-pub const PAGES_PER_REGION: usize = 8;
-/// Markers: slot, page, base-Y hi, base-Y lo.
-pub const MARKER_TEXELS: usize = 4;
+/// Sub-cell lattice: 4 positions per axis inside one cell.
+pub const SUB_PER_CELL: f64 = 4.0;
+/// Height plane Y (the 8-bit height word).
+pub const PLANE_HI_Y: f64 = 260.0;
+/// Color plane Y (the 8-bit color index word).
+pub const PLANE_LO_Y: f64 = 272.0;
+/// Dust particle scale (blocks) — size must be stable for the decoder.
+pub const DUST_SCALE: f64 = 0.8;
+/// Neutral particle color — the client multiplies channels by a random
+/// factor, so color can NOT carry data; position does.
+pub const DUST_RGB: u32 = 0x404040;
+/// Water color index in the 6x6x6 lattice.
+pub const COLOR_WATER: u16 = 216;
 
 #[derive(Clone, Copy, Default, PartialEq)]
 pub struct Cell {
     pub height: i16,
     pub water: bool,
     pub valid: bool,
-    /// Surface albedo (palette.rs) — quantized lazily at encode time.
+    /// Surface albedo (palette.rs).
     pub rgb: [u8; 3],
 }
 
-pub struct Region {
-    /// region_cells^2 cells, row-major z outer.
-    cells: Vec<Cell>,
-    /// 8 page images: last bytes SENT to the client (16 KiB each).
-    sent: Vec<Vec<u8>>,
-    /// 8 cursors: next cell offset (0..16384) to re-check on each page.
-    cursor: [u32; PAGES_PER_REGION],
-    pub scanned: u64,
+impl Cell {
+    /// The 8-bit color index (6x6x6 RGB lattice, water=216).
+    pub fn color_index(&self) -> u16 {
+        if self.water {
+            return COLOR_WATER;
+        }
+        let r = (self.rgb[0] / 51).min(5) as u16;
+        let g = (self.rgb[1] / 51).min(5) as u16;
+        let b = (self.rgb[2] / 51).min(5) as u16;
+        r + g * 6 + b * 36
+    }
 }
 
-impl Region {
-    fn new(_rx: i32, _rz: i32, cells_side: usize) -> Self {
-        Region {
-            cells: vec![Cell::default(); cells_side * cells_side],
-            sent: vec![vec![0u8; PAGE_MAP_SIZE * PAGE_MAP_SIZE]; PAGES_PER_REGION],
-            cursor: [0; PAGES_PER_REGION],
-            scanned: 0,
+/// One dust particle to spawn this tick.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spawn {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub rgb: u32,
+    pub scale: f64,
+}
+
+/// The whole streaming state (server side): one fixed disk of cells plus
+/// the phase cursor of the particle stream.
+pub struct Streamer {
+    /// World-space corner (min x/z) of the cell grid.
+    pub origin_x: f64,
+    pub origin_z: f64,
+    pub cell_size: i32,
+    /// Grid side in cells (region_blocks / cell_size).
+    pub side: u32,
+    /// side x side cells, row-major z outer.
+    cells: Vec<Cell>,
+    /// Next cell offset (0..side^2) to stream.
+    cursor: u64,
+    /// Pre-allocated spawn batch for the current tick.
+    batch: Vec<Spawn>,
+    /// Cells streamed since boot (diagnostics).
+    pub streamed_cells: u64,
+    /// Laps completed over the whole disk.
+    pub laps: u64,
+}
+
+impl Streamer {
+    pub fn new(origin_x: f64, origin_z: f64, region_blocks: i32, cell_size: i32) -> Self {
+        let side = (region_blocks / cell_size).max(1) as u32;
+        Streamer {
+            origin_x,
+            origin_z,
+            cell_size,
+            side,
+            cells: vec![Cell::default(); side as usize * side as usize],
+            cursor: 0,
+            batch: Vec::with_capacity(4096),
+            streamed_cells: 0,
+            laps: 0,
         }
+    }
+
+    pub fn cells(&self) -> u64 {
+        (self.side as u64) * (self.side as u64)
     }
 
     pub fn valid_cells(&self) -> u64 {
@@ -68,213 +121,87 @@ impl Region {
     }
 
     pub fn get(&self, cx: u32, cz: u32) -> Option<Cell> {
-        let side = (self.cells.len() as f64).sqrt() as usize;
+        let side = self.side as usize;
         self.cells.get(cz as usize * side + cx as usize).copied()
     }
 
-    fn set(&mut self, cx: u32, cz: u32, side: u32, cell: Cell) {
-        let idx = cz as usize * side as usize + cx as usize;
-        if let Some(slot) = self.cells.get_mut(idx) {
-            let was_valid = slot.valid;
-            if *slot != cell {
-                *slot = cell;
-                if !was_valid && cell.valid {
-                    self.scanned += 1;
-                }
-            }
-        }
-    }
-}
-
-/// The whole streaming state (server side).
-pub struct Streamer {
-    pub region_blocks: i32,
-    pub cell_size: i32,
-    pub slots: u32,
-    regions: HashMap<(i32, i32), Region>,
-}
-
-/// A patch ready for the wire.
-pub struct PagePatch {
-    /// Bounding rect in page texels.
-    pub x: u8,
-    pub y: u8,
-    pub w: u8,
-    pub h: u8,
-    /// Row-major rect bytes (w*h).
-    pub bytes: Vec<u8>,
-}
-
-impl Streamer {
-    pub fn new(region_blocks: i32, cell_size: i32, slots: u32) -> Self {
-        Streamer {
-            region_blocks,
-            cell_size,
-            slots: slots.clamp(1, 4),
-            regions: HashMap::new(),
-        }
-    }
-
-    pub fn region_cells(&self) -> u32 {
-        (self.region_blocks / self.cell_size).max(1) as u32
-    }
-
-    pub fn region_of(&self, bx: i32, bz: i32) -> (i32, i32) {
-        let rb = self.region_blocks;
-        (bx.div_euclid(rb), bz.div_euclid(rb))
-    }
-
-    /// Deterministic client-side slot for a region (parity mapping, shared
-    /// with the GLSL marcher).
-    pub fn slot_of(&self, rx: i32, rz: i32) -> u32 {
-        // TEMPORARY BENCH: single-slot mode — the parity mapping returns once
-        // the carrier loop is visually proven end-to-end.
-        let _ = (rx, rz);
-        0
-    }
-
-    pub fn region_mut(&mut self, rx: i32, rz: i32) -> &mut Region {
-        let side = self.region_cells();
-        self.regions
-            .entry((rx, rz))
-            .or_insert_with(|| Region::new(rx, rz, side as usize))
-    }
-
-    pub fn region(&self, rx: i32, rz: i32) -> Option<&Region> {
-        self.regions.get(&(rx, rz))
-    }
-
-    pub fn set_cell(&mut self, rx: i32, rz: i32, cx: u32, cz: u32, cell: Cell) {
-        let side = self.region_cells();
-        if cx >= side || cz >= side {
+    pub fn set_cell(&mut self, cx: u32, cz: u32, cell: Cell) {
+        let side = self.side as usize;
+        if cx as usize >= side || cz as usize >= side {
             return;
         }
-        self.region_mut(rx, rz).set(cx, cz, side, cell);
+        if let Some(slot) = self.cells.get_mut(cz as usize * side + cx as usize) {
+            *slot = cell;
+        }
     }
 
-    /// Advance one page's cursor: re-encode visited cells and collect the
-    /// changed ones into a patch. Returns None when the page is clean.
-    pub fn page_patch(
-        &mut self,
-        rx: i32,
-        rz: i32,
-        page: usize,
-        budget: usize,
-    ) -> Option<PagePatch> {
-        assert!(page < PAGES_PER_REGION);
-        let side = self.region_cells();
-        let slot = self.slot_of(rx, rz);
-        let slot_digit = (slot % self.slots.max(1)) as u8;
-        let total = (PAGE_MAP_SIZE * PAGE_MAP_SIZE) as u32;
-        let mut changed: Vec<(usize, u8)> = Vec::new();
-        {
-            let region = self.regions.get_mut(&(rx, rz))?;
-            let mut cur = region.cursor[page];
-            let mut steps = 0usize;
-            let take = (budget.max(1)).min(total as usize);
-            let layer_color = page < 4;
-            let q = page & 3;
-            let qx = (q & 1) as u32;
-            let qz = (q >> 1) as u32;
+    /// World-space min corner of one cell.
+    pub fn cell_origin(&self, cx: u32, cz: u32) -> (f64, f64) {
+        (
+            self.origin_x + cx as f64 * self.cell_size as f64,
+            self.origin_z + cz as f64 * self.cell_size as f64,
+        )
+    }
 
-            // Region base Y (must match encode_page).
-            let mut base = i32::MAX;
-            for c in &region.cells {
-                if c.valid && !c.water {
-                    base = base.min(c.height as i32);
-                }
-            }
-            if base == i32::MAX {
-                base = 63;
-            }
-            base = (base - 4).clamp(-128, 127);
-            let nib = (base + 128) as u8;
+    /// Encode one cell into its two 16-bit words (HI height, LO color).
+    pub fn encode_words(cell: &Cell) -> (u16, u16) {
+        let h = (i32::from(cell.height) + 64).clamp(0, 255) as u16;
+        (h << 8, cell.color_index() << 8)
+    }
 
-            while steps < take {
-                let t = cur as usize;
-                let x = t % PAGE_MAP_SIZE;
-                let y = t / PAGE_MAP_SIZE;
-                let want = if y == 0 && x < MARKER_TEXELS {
-                    match x {
-                        0 => mapcolor::marker_byte(slot_digit),
-                        1 => mapcolor::marker_byte(page as u8),
-                        2 => mapcolor::marker_byte(nib >> 4),
-                        3 => mapcolor::marker_byte(nib & 0x0F),
-                        4 => mapcolor::marker_byte(((rx % 16) + 16) as u8 % 16),
-                        5 => mapcolor::marker_byte(((rz % 16) + 16) as u8 % 16),
-                        _ => mapcolor::marker_byte(15),
-                    }
-                } else {
-                    let cx = qx * PAGE_MAP_SIZE as u32 + x as u32;
-                    let cz = qz * PAGE_MAP_SIZE as u32 + y as u32;
-                    let cell = region
-                        .cells
-                        .get(cz as usize * side as usize + cx as usize)
-                        .copied()
-                        .unwrap_or_default();
-                    if !cell.valid {
-                        mapcolor::void_code()
-                    } else if layer_color {
-                        if cell.water {
-                            mapcolor::color_byte([64, 64, 255])
-                        } else {
-                            mapcolor::color_byte(cell.rgb)
-                        }
-                    } else if cell.water {
-                        mapcolor::water_code()
-                    } else {
-                        mapcolor::height_code(cell.height as i32, base)
-                    }
-                };
-                if region.sent[page][t] != want {
-                    region.sent[page][t] = want;
-                    changed.push((t, want));
-                }
-                cur = (cur + 1) % total;
-                region.cursor[page] = cur;
-                steps += 1;
+    /// Spawn positions of one word: 4 particles, slot = Z sub, bits = X sub.
+    /// msb-first: slot 0 carries bits 14..15 (the HIGH pair).
+    pub fn word_spawns(word: u16, cx: f64, cz: f64, sub: f64, plane_y: f64, out: &mut Vec<Spawn>) {
+        for slot in 0..4usize {
+            let bits = ((word >> (14 - 2 * slot)) & 3) as f64;
+            let dx = (bits - 1.5) * sub;
+            let dz = (slot as f64 - 1.5) * sub;
+            out.push(Spawn {
+                x: cx + dx,
+                y: plane_y,
+                z: cz + dz,
+                rgb: DUST_RGB,
+                scale: DUST_SCALE,
+            });
+        }
+    }
+
+    /// Advance the stream by one engine tick: fill the batch with at most
+    /// `budget` dust spawns (valid cells only, row-major cursor).
+    pub fn tick_batch(&mut self, budget: usize) -> &[Spawn] {
+        self.batch.clear();
+        let total = self.side as u64 * self.side as u64;
+        if total == 0 {
+            return &self.batch;
+        }
+        let sub = self.cell_size as f64 / SUB_PER_CELL;
+        let budget = budget.max(8);
+        let mut steps = 0u64;
+        while self.batch.len() < budget && steps < total {
+            let t = self.cursor % total;
+            self.cursor += 1;
+            steps += 1;
+            let cx = (t % self.side as u64) as u32;
+            let cz = (t / self.side as u64) as u32;
+            let Some(cell) = self.get(cx, cz) else {
+                continue;
+            };
+            if !cell.valid {
+                continue; // void cells stream nothing — budget goes to data
             }
+            let (wx, wz) = self.cell_origin(cx, cz);
+            let cxw = wx + self.cell_size as f64 * 0.5;
+            let czw = wz + self.cell_size as f64 * 0.5;
+            let (hword, cword) = Self::encode_words(&cell);
+            Self::word_spawns(hword, cxw, czw, sub, PLANE_HI_Y, &mut self.batch);
+            Self::word_spawns(cword, cxw, czw, sub, PLANE_LO_Y, &mut self.batch);
+            self.streamed_cells += 1;
         }
-        if changed.is_empty() {
-            return None;
+        if self.cursor >= total {
+            self.cursor %= total;
+            self.laps += 1;
         }
-        // Bounding rect of the changed texels.
-        let minx = changed
-            .iter()
-            .map(|(t, _)| t % PAGE_MAP_SIZE)
-            .min()
-            .unwrap();
-        let maxx = changed
-            .iter()
-            .map(|(t, _)| t % PAGE_MAP_SIZE)
-            .max()
-            .unwrap();
-        let miny = changed
-            .iter()
-            .map(|(t, _)| t / PAGE_MAP_SIZE)
-            .min()
-            .unwrap();
-        let maxy = changed
-            .iter()
-            .map(|(t, _)| t / PAGE_MAP_SIZE)
-            .max()
-            .unwrap();
-        let w = maxx - minx + 1;
-        let h = maxy - miny + 1;
-        let mut bytes = vec![0u8; w * h];
-        for (t, b) in changed {
-            let x = t % PAGE_MAP_SIZE;
-            let y = t / PAGE_MAP_SIZE;
-            bytes[(y - miny) * w + (x - minx)] = b;
-        }
-        let _ = slot; // carried by the page markers themselves
-        Some(PagePatch {
-            x: minx as u8,
-            y: miny as u8,
-            w: w as u8,
-            h: h as u8,
-            bytes,
-        })
+        &self.batch
     }
 }
 
@@ -282,138 +209,133 @@ impl Streamer {
 mod tests {
     use super::*;
 
-    fn streamer() -> Streamer {
-        Streamer::new(512, 2, 4)
-    }
-
-    #[test]
-    fn region_and_slot_math() {
-        let s = streamer();
-        assert_eq!(s.region_cells(), 256);
-        assert_eq!(s.region_of(-1, 800), (-1, 1));
-        // TEMPORARY BENCH: single-slot mode — every region maps to slot 0.
-        assert_eq!(s.slot_of(0, 0), 0);
-        assert_eq!(s.slot_of(1, 0), 0);
-        assert_eq!(s.slot_of(0, 1), 0);
-        assert_eq!(s.slot_of(-1, -1), 0);
-        assert_eq!(s.slot_of(3, -2), 0);
-    }
-
-    #[test]
-    fn patch_flow_full_and_incremental() {
-        let mut s = streamer();
-        // Scan a row of the current region.
-        for cx in 10..80u32 {
-            s.set_cell(
-                0,
-                0,
-                cx,
-                5,
-                Cell {
-                    height: 70,
-                    water: false,
-                    valid: true,
-                    rgb: [127, 178, 56],
-                },
-            );
-        }
-        // First sweep with a big budget must produce one big patch containing
-        // the whole row (plus markers).
-        let p = s.page_patch(0, 0, 0, 1 << 20).expect("dirty page 0");
-        assert!(p.w as usize + p.x as usize <= PAGE_MAP_SIZE);
-        // The row must be inside the rect.
-        assert!(p.y <= 5 && p.y + p.h > 5);
-        // Height layer (page 4) also dirty (same cells).
-        assert!(s.page_patch(0, 0, 4, 1 << 20).is_some());
-        // First full sweep of every remaining page (they were never visited).
-        for page in 0..PAGES_PER_REGION {
-            let _ = s.page_patch(0, 0, page, 1 << 20);
-        }
-        // Second sweep: everything sent, nothing dirty (markers included).
-        for page in 0..PAGES_PER_REGION {
-            assert!(
-                s.page_patch(0, 0, page, 1 << 20).is_none(),
-                "page {page} must be clean"
-            );
+    fn cell(h: i16, water: bool, rgb: [u8; 3]) -> Cell {
+        Cell {
+            height: h,
+            water,
+            valid: true,
+            rgb,
         }
     }
 
     #[test]
-    fn patch_budget_spreads_work() {
-        let mut s = streamer();
-        for cx in 0..128u32 {
-            for cz in 0..128u32 {
-                s.set_cell(
-                    0,
-                    0,
-                    cx,
-                    cz,
-                    Cell {
-                        height: 65,
-                        water: false,
-                        valid: true,
-                        rgb: [127, 178, 56],
-                    },
-                );
+    fn color_index_lattice_and_water() {
+        let c = cell(70, false, [0, 0, 0]);
+        assert_eq!(c.color_index(), 0);
+        let c = cell(70, false, [255, 255, 255]);
+        assert_eq!(c.color_index(), 5 + 5 * 6 + 5 * 36);
+        let c = cell(70, false, [127, 178, 56]);
+        assert_eq!(c.color_index(), 2 + 3 * 6 + 36);
+        let c = cell(70, true, [10, 20, 30]);
+        assert_eq!(c.color_index(), COLOR_WATER);
+    }
+
+    #[test]
+    fn word_round_trip_msb_first() {
+        // 8 data bits in the high byte, 4 slots msb-first.
+        let byte: u16 = 0b10_01_11_00;
+        let word = byte << 8;
+        let mut out = Vec::new();
+        Streamer::word_spawns(word, 0.0, 0.0, 1.0, 0.0, &mut out);
+        assert_eq!(out.len(), 4);
+        // slot 0 -> bits 14..15 = 0b10 = 2; slot 1 -> 0b01 = 1;
+        // slot 2 -> 0b11 = 3; slot 3 -> 0b00 = 0.
+        let got: Vec<f64> = out.iter().map(|s| s.x).collect();
+        assert_eq!(got, vec![0.5, -0.5, 1.5, -1.5]);
+        let zs: Vec<f64> = out.iter().map(|s| s.z).collect();
+        assert_eq!(zs, vec![-1.5, -0.5, 0.5, 1.5]);
+        // Re-encode from positions: bits = round(x/sub + 1.5)
+        for (s, slot) in out.iter().zip(0..4usize) {
+            let bits = (s.x + 1.5).round() as i32;
+            let word_bits = (word >> (14 - 2 * slot)) & 3;
+            assert_eq!(bits as u16, word_bits);
+        }
+    }
+
+    #[test]
+    fn height_word_clamps_to_byte() {
+        let c = cell(-64, false, [0, 0, 0]);
+        let (h, _) = Streamer::encode_words(&c);
+        assert_eq!(h >> 8, 0);
+        let c = cell(320, false, [0, 0, 0]);
+        let (h, _) = Streamer::encode_words(&c);
+        assert_eq!(h >> 8, 255);
+        let c = cell(64, false, [0, 0, 0]);
+        let (h, _) = Streamer::encode_words(&c);
+        assert_eq!(h >> 8, 128);
+    }
+
+    #[test]
+    fn batch_budget_and_phase_cycle() {
+        let mut s = Streamer::new(0.0, 0.0, 512, 4);
+        assert_eq!(s.side, 128);
+        // Fill the whole disk with valid cells.
+        for cz in 0..128u32 {
+            for cx in 0..128u32 {
+                s.set_cell(cx, cz, cell(64 + (cx % 8) as i16, false, [100, 100, 100]));
             }
         }
-        // Small budget: each sweep reports SOME progress until the page is
-        // fully transmitted; page 0 must take many sweeps for 16K texels.
-        let mut sweeps = 0;
-        while s.page_patch(0, 0, 0, 128).is_some() && sweeps < 100_000 {
-            sweeps += 1;
+        // 1024 particles / tick = 128 cells (4 HI + 4 LO each).
+        let b: Vec<Spawn> = s.tick_batch(1024).to_vec();
+        assert_eq!(b.len(), 1024);
+        assert_eq!(s.streamed_cells, 128);
+        // Full lap: 16384 cells / 128 per tick = 128 ticks.
+        for _ in 0..127 {
+            s.tick_batch(1024);
         }
-        assert!(sweeps >= 100, "a full page needs many budgeted sweeps");
+        assert_eq!(s.laps, 1);
+        assert_eq!(s.streamed_cells, 16384);
+        // Cursor wrapped: the next batch starts from cell 0 again.
+        let b: Vec<Spawn> = s.tick_batch(8).to_vec();
+        assert_eq!(b.len(), 8);
+        let first = &b[0];
+        let (wx, _wz) = s.cell_origin(0, 0);
+        assert!((first.x - (wx + 2.0)).abs() < 1.0);
     }
 
     #[test]
-    fn markers_carry_slot_page_base() {
-        let mut s = streamer();
-        s.set_cell(
-            0,
-            0,
-            5,
-            5,
-            Cell {
-                height: 90,
-                water: false,
-                valid: true,
-                rgb: [127, 178, 56],
-            },
-        );
-        let _p = s.page_patch(0, 0, 1, 1 << 20).expect("page 1 dirty");
-        // Decode the marker digits back out of the page image via `sent`.
-        let img = &s.region(0, 0).unwrap().sent[1];
-        assert_eq!(mapcolor::marker_value(img[0]), Some(0)); // slot
-        assert_eq!(mapcolor::marker_value(img[1]), Some(1)); // page
-        let hi = mapcolor::marker_value(img[2]).unwrap();
-        let lo = mapcolor::marker_value(img[3]).unwrap();
-        let base = (hi << 4 | lo) as i32 - 128;
-        assert_eq!(base, 86, "base = min height - 4");
+    fn void_cells_cost_nothing() {
+        let mut s = Streamer::new(0.0, 0.0, 64, 4);
+        // Only 2 valid cells on the disk.
+        s.set_cell(0, 0, cell(70, false, [90, 90, 90]));
+        s.set_cell(15, 15, cell(80, true, [0, 0, 200]));
+        let b: Vec<Spawn> = s.tick_batch(1024).to_vec();
+        // 2 cells x 8 particles each.
+        assert_eq!(b.len(), 16);
+        assert_eq!(s.streamed_cells, 2);
+        // Water cell streams the water color word: LO plane carries 216<<8.
+        let lo: Vec<&Spawn> = b.iter().skip(12).collect();
+        assert_eq!(lo.len(), 4);
+        // All spawns of the second cell sit at cell (15,15) center.
+        let (wx, wz) = s.cell_origin(15, 15);
+        for p in lo {
+            assert!((p.x - (wx + 2.0)).abs() <= 1.6);
+            assert!((p.z - (wz + 2.0)).abs() <= 1.6);
+        }
     }
 
     #[test]
-    fn void_and_water_semantics() {
-        let mut s = streamer();
-        // Water column + untouched void.
-        s.set_cell(
-            0,
-            0,
-            9,
-            9,
-            Cell {
-                height: 62,
-                water: true,
-                valid: true,
-                rgb: [63, 118, 228],
-            },
-        );
-        let _ = s.page_patch(0, 0, 4, 1 << 20).unwrap(); // height page quadrant 0
-        let img = &s.region(0, 0).unwrap().sent[4];
-        // Texel of cell (9,9) in quadrant 1 of the height layer: x=9,y=9.
-        let t = 9 * PAGE_MAP_SIZE + 9;
-        assert_eq!(img[t], mapcolor::water_code());
-        // An untouched cell stays void.
-        assert_eq!(img[64 * PAGE_MAP_SIZE + 64], mapcolor::void_code());
+    fn batch_positions_on_sub_lattice() {
+        let mut s = Streamer::new(100.0, -40.0, 64, 4);
+        s.set_cell(3, 5, cell(70, false, [200, 100, 50]));
+        let b: Vec<Spawn> = s.tick_batch(1024).to_vec();
+        assert_eq!(b.len(), 8);
+        let sub = 4.0 / SUB_PER_CELL; // 1.0
+        let (wx, wz) = s.cell_origin(3, 5);
+        let cxw = wx + 2.0;
+        let czw = wz + 2.0;
+        for p in b.iter() {
+            // dx in {-1.5,-0.5,0.5,1.5} * sub from the cell center.
+            let dx = p.x - cxw;
+            let dz = p.z - czw;
+            assert!((dx / sub + 1.5).fract().abs() < 1e-6);
+            assert!((dz / sub + 1.5).fract().abs() < 1e-6);
+            assert!(dx.abs() <= 2.0 && dz.abs() <= 2.0);
+            assert_eq!(p.rgb, DUST_RGB);
+            assert!((p.scale - DUST_SCALE).abs() < 1e-9);
+        }
+        // HI plane first (heights), LO plane second (colors).
+        assert_eq!(b[0].y, PLANE_HI_Y);
+        assert_eq!(b[4].y, PLANE_LO_Y);
     }
 }

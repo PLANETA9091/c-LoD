@@ -1,15 +1,14 @@
 //! Assembles the c-LoD resource pack: pack.mcmeta, the two post-effect
-//! chains (JSON with config values substituted), the GLSL shaders and the
-//! core-shader overrides (sky camera channel + text map carrier). Output is
-//! a zip (STORE) + its SHA-1 for client caching.
+//! chains (JSON with config values substituted) and the GLSL shaders plus
+//! the core sky override (camera channel). Output is a zip (STORE) + its
+//! SHA-1 for client caching.
 //!
-//! v5.0: THE PACK CONTAINS NO WORLD DATA. No atlas PNGs, nothing
-//! world-derived — every LOD byte streams at runtime through vanilla map
-//! packets. The pack is therefore byte-identical for the module's whole
-//! lifetime, is pushed exactly once per client join, and never rebuilds.
+//! v5.0: THE PACK CONTAINS NO WORLD DATA AND NO TEXTURES AT ALL. Every LOD
+//! byte streams at runtime as dust particles over the sky-grid; the pack is
+//! byte-identical for the module's whole lifetime, is pushed exactly once
+//! per client join, and never rebuilds.
 
 use crate::config::Config;
-use crate::mapcolor;
 use crate::sha1::Sha1;
 use crate::zipw::ZipWriter;
 
@@ -98,8 +97,15 @@ pub fn build(cfg: &Config) -> Pack {
         ("__ATMO_STRENGTH__", fmt_f(0.92)),
         // 26.3 device depth: d = depth_near / eyeZ (infinite far, sky == 0.0).
         ("__DEPTH_NEAR__", fmt_f(cfg.depth_near)),
-        // The streaming alphabet (identical to src/mapcolor.rs on the server).
-        ("__CLOD_ALPHA__", mapcolor::glsl_alphabet()),
+        // SKY-GRID geometry (must match src/stream.rs exactly).
+        ("__ORIGIN_X__", fmt_f(cfg.center_x.unwrap_or(0.0) as f32)),
+        ("__ORIGIN_Z__", fmt_f(cfg.center_z.unwrap_or(0.0) as f32)),
+        ("__PLANE_HI_Y__", fmt_f(crate::stream::PLANE_HI_Y as f32)),
+        ("__PLANE_LO_Y__", fmt_f(crate::stream::PLANE_LO_Y as f32)),
+        (
+            "__SUB__",
+            fmt_f(cfg.cell_size as f32 / crate::stream::SUB_PER_CELL as f32),
+        ),
     ];
 
     let lod_terrain_json = substitute(lod_terrain_tpl, &map);
@@ -108,22 +114,17 @@ pub fn build(cfg: &Config) -> Pack {
     let col_scan = include_str!("../assets/glsl/col_scan.fsh");
     let rot_solve = include_str!("../assets/glsl/rot_solve.fsh");
     let rot_copy = include_str!("../assets/glsl/rot_copy.fsh");
-    let scrape = substitute(include_str!("../assets/glsl/scrape.fsh"), &map);
-    let merge = include_str!("../assets/glsl/merge.fsh");
+    let capture = include_str!("../assets/glsl/capture.fsh");
     let lod_terrain = include_str!("../assets/glsl/lod_terrain.fsh");
     let clod_blit = include_str!("../assets/glsl/clod_blit.fsh");
     let atmosphere = include_str!("../assets/glsl/atmosphere.fsh");
     // Camera channel: the vanilla sky core-shader override.
     let sky_vsh = include_str!("../assets/glsl/sky.vsh");
     let sky_fsh = include_str!("../assets/glsl/sky.fsh");
-    // Map carrier: the vanilla text core-shader override (parks the streamed
-    // map quad into the scrape slot; everything else is vanilla).
-    let text_vsh = include_str!("../assets/glsl/text.vsh");
-    let text_fsh = include_str!("../assets/glsl/text.fsh");
 
     // 26.3 pack.mcmeta schema (see v3 notes): min_format/max_format mandatory
     // for formats > 64; 97 = resource_major of 26.3.
-    let mcmeta = "{\"pack\":{\"description\":\"c-LoD v5 streamed LOD (shader-only pack, world data rides vanilla map packets)\",\"min_format\":97,\"max_format\":97}}".to_string();
+    let mcmeta = "{\"pack\":{\"description\":\"c-LoD v5 sky-grid streamed LOD (shader-only pack, zero textures, world data rides dust particles)\",\"min_format\":97,\"max_format\":97}}".to_string();
 
     let mut zip = ZipWriter::new();
     zip.add("pack.mcmeta", mcmeta.as_bytes());
@@ -141,8 +142,7 @@ pub fn build(cfg: &Config) -> Pack {
         rot_solve.as_bytes(),
     );
     zip.add("assets/clod/shaders/post/rot_copy.fsh", rot_copy.as_bytes());
-    zip.add("assets/clod/shaders/post/scrape.fsh", scrape.as_bytes());
-    zip.add("assets/clod/shaders/post/merge.fsh", merge.as_bytes());
+    zip.add("assets/clod/shaders/post/capture.fsh", capture.as_bytes());
     zip.add(
         "assets/clod/shaders/post/lod_terrain.fsh",
         lod_terrain.as_bytes(),
@@ -157,14 +157,6 @@ pub fn build(cfg: &Config) -> Pack {
     );
     zip.add("assets/minecraft/shaders/core/sky.vsh", sky_vsh.as_bytes());
     zip.add("assets/minecraft/shaders/core/sky.fsh", sky_fsh.as_bytes());
-    zip.add(
-        "assets/minecraft/shaders/core/text.vsh",
-        text_vsh.as_bytes(),
-    );
-    zip.add(
-        "assets/minecraft/shaders/core/text.fsh",
-        text_fsh.as_bytes(),
-    );
     let zip_bytes = zip.finish();
 
     let mut h = Sha1::new();
@@ -197,8 +189,8 @@ mod tests {
 
         let count = u16::from_le_bytes([pack.zip[n - 12], pack.zip[n - 11]]) as usize;
         assert_eq!(
-            count, 15,
-            "pack.mcmeta + 2 json + 8 fsh + sky.vsh + sky.fsh + text.vsh + text.fsh"
+            count, 12,
+            "pack.mcmeta + 2 json + 7 fsh + sky.vsh + sky.fsh"
         );
     }
 
@@ -229,8 +221,15 @@ mod tests {
         }
         let blob = String::from_utf8_lossy(&pack.zip);
         assert!(!blob.contains("__FOV__"), "tokens must be substituted");
-        assert!(!blob.contains("__CLOD_ALPHA__"), "LUT must be substituted");
-        assert!(blob.contains("CLOD_ALPHA_N"), "LUT must be present");
+        assert!(
+            !blob.contains("__ORIGIN_X__"),
+            "grid tokens must be substituted"
+        );
+        assert!(
+            !blob.contains("__PLANE_HI_Y__"),
+            "plane tokens must be substituted"
+        );
+        assert!(blob.contains("clod_h_b"), "stream targets must be present");
     }
 
     #[test]
@@ -252,44 +251,36 @@ mod tests {
             .unwrap()
             .1;
         let chain = String::from_utf8_lossy(chain);
-        assert!(chain.contains("clod:post/scrape"), "scrape pass missing");
-        assert!(chain.contains("clod:post/merge"), "merge pass missing");
+        assert!(chain.contains("clod:post/capture"), "capture pass missing");
         assert!(
-            !chain.contains("clod:atlas"),
-            "no atlas texture inputs may remain"
+            chain.contains("clod:post/lod_terrain"),
+            "march pass missing"
         );
-        assert!(chain.contains("\"clod_scol_a\""), "stream target missing");
+        assert!(
+            !chain.contains("location"),
+            "no texture-input locations may remain (stream-only)"
+        );
+        assert!(chain.contains("\"clod_h_b\""), "height target missing");
+        assert!(chain.contains("\"clod_c_b\""), "color target missing");
         assert!(
             chain.contains("\"persistent\": true"),
             "persistence missing"
         );
         assert!(
             !chain.contains("ScanBox"),
-            "the static scan box is gone (region grid)"
+            "the static scan box is gone (sky-grid)"
         );
     }
 
     #[test]
-    fn camera_and_carrier_overrides_ship() {
+    fn camera_override_ships() {
         let cfg = Config::parse("");
         let pack = build(&cfg);
         let entries = zip_entries(&pack.zip);
         let names: Vec<&str> = entries.iter().map(|(n, _)| n.as_str()).collect();
         assert!(names.contains(&"assets/minecraft/shaders/core/sky.fsh"));
-        assert!(names.contains(&"assets/minecraft/shaders/core/text.vsh"));
-        assert!(names.contains(&"assets/minecraft/shaders/core/text.fsh"));
-
-        let text = &entries
-            .iter()
-            .find(|(n, _)| n == "assets/minecraft/shaders/core/text.vsh")
-            .unwrap()
-            .1;
-        let text = String::from_utf8_lossy(text);
-        assert!(text.contains("MAP CARRIER"), "carrier marker missing");
-        assert!(text.contains("vClodMap"), "map varying missing");
-        assert!(
-            text.contains("#if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)"),
-            "variant guards must be preserved"
-        );
+        assert!(!names.contains(&"assets/minecraft/shaders/core/text.fsh"));
+        assert!(!names.contains(&"assets/clod/shaders/post/scrape.fsh"));
+        assert!(names.contains(&"assets/clod/shaders/post/capture.fsh"));
     }
 }

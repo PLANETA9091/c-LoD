@@ -1,20 +1,20 @@
 //! c-LoD — true server-side LOD for Paper 26.3, as a CRUSSTY module.
 //!
-//! Architecture (NO Display entities, NO client mods):
-//!   1. The module scans world heightmaps into a texture atlas (JNI, main
-//!      thread, budgeted per tick) until the sweep completes or the scan
-//!      deadline fires. The atlas is frozen and (by default) persisted.
-//!   2. It generates a server resource pack containing two `/posteffect`
-//!      chains + GLSL shaders + the atlas PNG, and serves it over an
-//!      embedded HTTP server. The pack is built EXACTLY ONCE per session —
-//!      never rebuilt, never re-pushed with new bytes (no client reloads).
-//!   3. Players receive the pack once (`setResourcePack`, stable SHA-1);
-//!      across restarts the restored snapshot reproduces the same bytes.
-//!   4. On the client, `clod:lod_terrain` recovers the view rotation from
-//!      the vanilla sun/moon position (GameTime is a free data channel),
-//!      raymarches the world-anchored heightfield atlas from the live
-//!      camera every frame and paints distant terrain — LOD auto-updates
-//!      as players move, with zero server-side pack work.
+//! Architecture (NO Display entities, NO client mods, NO runtime repack):
+//!   1. The module scans world heightmaps into a fixed cell disk (JNI, main
+//!      thread, budgeted per tick).
+//!   2. It generates a SHADER-ONLY server resource pack (two `/posteffect`
+//!      chains + GLSL + the sky camera override; ZERO textures, zero world
+//!      data) and serves it over an embedded HTTP server. The pack is built
+//!      EXACTLY ONCE per session — never rebuilt, never re-pushed.
+//!   3. Players receive the pack once (`setResourcePack`, stable SHA-1).
+//!   4. Every LOD byte streams at runtime as DUST PARTICLES over two sky
+//!      planes above the disk (SKY-GRID BIT-STREAM): HI Y=260 carries the
+//!      8-bit height word, LO Y=272 the 8-bit color index; 4 particles =
+//!      one 16-bit word, sub-cell position = bits. The pack's capture
+//!      shaders decode them against the depth buffer into persistent
+//!      targets; `clod:lod_terrain` raymarches the heightfield from the
+//!      live camera every frame and paints distant terrain.
 //!   5. `clod:atmosphere` hides the render-distance edge with a depth veil.
 //!      Per tick the engine switches chains per player (Off / Veil / Full
 //!      tiers) — the only dynamic part, pure `/posteffect`.
@@ -23,7 +23,6 @@ mod config;
 mod engine;
 mod http;
 mod jni;
-mod mapcolor;
 mod packgen;
 mod palette;
 mod sha1;
@@ -68,16 +67,11 @@ pub unsafe extern "C" fn cplugin_init(
     };
     let cfg = config::Config::parse(&opts);
     log_info(&format!(
-        "booting: streaming regions {} blocks (cell {}), http :{}, fov {}, page_ticks {}, stream_budget {}",
-        cfg.region_blocks,
-        cfg.cell_size,
-        cfg.http_port,
-        cfg.fov,
-        cfg.page_ticks,
-        cfg.stream_budget
+        "booting: sky-grid disk {} blocks (cell {}), http :{}, fov {}, particles/tick {}",
+        cfg.region_blocks, cfg.cell_size, cfg.http_port, cfg.fov, cfg.particles_per_tick
     ));
     log_info(
-        "c-LoD v5.0: MAP CARRIER STREAMING — shader-only pack pushed once, world data rides vanilla map packets",
+        "c-LoD v5.0: SKY-GRID BIT-STREAM — shader-only pack pushed once, world data rides dust particles",
     );
 
     let st = engine::State::new(cfg);
@@ -108,8 +102,8 @@ pub unsafe extern "C" fn cplugin_init(
             .spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_millis(tick_ms));
                 let st = state().expect("state").clone();
-                // v5: one engine tick — boot/pack (once), region scan,
-                // map-carrier streaming, per-player tiers. All main thread.
+                // v5: one engine tick — boot/pack (once), disk scan,
+                // dust-particle streaming, per-player tiers. All main thread.
                 cplug_sdk::run_on_main_thread({
                     let st = Arc::clone(&st);
                     move |_env| {

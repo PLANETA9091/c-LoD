@@ -5,8 +5,8 @@
 //! string produces a functional module.
 //!
 //! v5.0: the atlas/window/revision knobs are GONE — the pack is a static
-//! shader-only artifact and the world data streams through vanilla map
-//! packets. What remains is the streaming geometry + pacing.
+//! shader-only artifact and the world data streams as dust particles over
+//! the sky-grid planes. What remains is the streaming geometry + pacing.
 
 use std::collections::HashMap;
 
@@ -24,23 +24,21 @@ pub struct Config {
     pub pack_prompt: String,
     /// World streamed to the LOD (empty = first Bukkit world).
     pub world: String,
-    /// Region side length in blocks (power of two, 256..=2048). One region =
-    /// 8 map pages; regions stream into parity-mapped client slots.
+    /// Region side length in blocks (power of two, 256..=2048). One region
+    /// = one streamed disk of cells.
     pub region_blocks: i32,
     /// One LOD cell covers `cell` x `cell` blocks (1, 2, 4, 8...).
     pub cell_size: i32,
     /// Heightmap cells scanned per engine tick (main-thread JNI budget).
     pub scan_budget: u32,
-    /// v5 map-carrier pacing: page bytes (map texels) streamed per player per
-    /// tick, split across the 8 pages.
-    pub stream_budget: u32,
-    /// v5 map-carrier pacing: engine ticks one page stays in the offhand
-    /// before the cycle moves to the next (each visit uploads the page into
-    /// a client dynamic texture and the scrape captures it).
-    pub page_ticks: u32,
-    /// Region slots on the client (2x2 parity grid). Fixed at 4: the GLSL
-    /// marcher derives the same mapping from the world position.
-    pub stream_slots: u32,
+    /// v5 sky-grid pacing: dust particles spawned per engine tick (each
+    /// cell costs 4 height + 4 color particles).
+    pub particles_per_tick: u32,
+    /// Fixed disk origin (world x/z of the grid's min corner). Empty = the
+    /// first player's position at arm time. The disk is the same for every
+    /// client; particles fly only over this square.
+    pub center_x: Option<f64>,
+    pub center_z: Option<f64>,
     /// Camera FOV (vertical, degrees) the GLSL ray reconstruction assumes.
     pub fov: f32,
     /// Distance (blocks) where the LOD raymarch starts. Keep it BELOW the
@@ -80,9 +78,9 @@ impl Default for Config {
             region_blocks: 512,
             cell_size: 2,
             scan_budget: 4096,
-            stream_budget: 2048,
-            page_ticks: 10,
-            stream_slots: 4,
+            particles_per_tick: 1024,
+            center_x: None,
+            center_z: None,
             fov: 70.0,
             lod_near: 96.0,
             veil_far: 512.0,
@@ -143,14 +141,17 @@ impl Config {
         if let Some(v) = get("scan_budget").and_then(|v| v.parse::<u32>().ok()) {
             cfg.scan_budget = v.clamp(64, 65536);
         }
-        if let Some(v) = get("stream_budget").and_then(|v| v.parse::<u32>().ok()) {
-            cfg.stream_budget = v.clamp(64, 65536);
+        if let Some(v) = get("particles_per_tick")
+            .or_else(|| get("stream_budget"))
+            .and_then(|v| v.parse::<u32>().ok())
+        {
+            cfg.particles_per_tick = v.clamp(64, 16384);
         }
-        if let Some(v) = get("page_ticks").and_then(|v| v.parse::<u32>().ok()) {
-            cfg.page_ticks = v.clamp(2, 200);
+        if let Some(v) = get("center_x").and_then(|v| v.parse::<f64>().ok()) {
+            cfg.center_x = Some(v);
         }
-        if let Some(v) = get("stream_slots").and_then(|v| v.parse::<u32>().ok()) {
-            cfg.stream_slots = v.clamp(1, 4);
+        if let Some(v) = get("center_z").and_then(|v| v.parse::<f64>().ok()) {
+            cfg.center_z = Some(v);
         }
         if let Some(v) = get("fov").and_then(|v| v.parse::<f32>().ok()) {
             if (30.0..=150.0).contains(&v) {
@@ -231,15 +232,15 @@ mod tests {
         assert_eq!(c.http_port, 8199);
         assert_eq!(c.region_blocks, 512);
         assert_eq!(c.cell_size, 2);
-        assert_eq!(c.stream_slots, 4);
-        assert_eq!(c.page_ticks, 10);
+        assert_eq!(c.particles_per_tick, 1024);
+        assert!(c.center_x.is_none());
         assert_eq!(c.fov, 70.0);
     }
 
     #[test]
     fn parses_everything() {
         let c = Config::parse(
-            "http_port=9001;fov=90;region_blocks=1024;cell_size=2;color_low=0.1/0.8/0.2;world=world_nether;stream_budget=4096;page_ticks=5",
+            "http_port=9001;fov=90;region_blocks=1024;cell_size=2;color_low=0.1/0.8/0.2;world=world_nether;particles_per_tick=4096;center_x=-930.5;center_z=796",
         );
         assert_eq!(c.http_port, 9001);
         assert_eq!(c.fov, 90.0);
@@ -247,8 +248,9 @@ mod tests {
         assert_eq!(c.cell_size, 2);
         assert_eq!(c.color_low, [0.1, 0.8, 0.2]);
         assert_eq!(c.world, "world_nether");
-        assert_eq!(c.stream_budget, 4096);
-        assert_eq!(c.page_ticks, 5);
+        assert_eq!(c.particles_per_tick, 4096);
+        assert_eq!(c.center_x, Some(-930.5));
+        assert_eq!(c.center_z, Some(796.0));
     }
 
     #[test]

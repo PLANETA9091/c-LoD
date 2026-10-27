@@ -52,6 +52,18 @@ fn ji(v: i32) -> jvalue {
     jvalue { i: v as jint }
 }
 
+fn jf(v: f32) -> jvalue {
+    jvalue {
+        f: v as jvmti_bindings::jni::jfloat,
+    }
+}
+
+fn jd(v: f64) -> jvalue {
+    jvalue {
+        d: v as jvmti_bindings::jni::jdouble,
+    }
+}
+
 fn jobj(o: jobject) -> Option<jobject> {
     if o.is_null() {
         None
@@ -476,12 +488,19 @@ fn resolve(env: Env) -> Option<Ids> {
         jobj(k)
     };
 
-    let bukkit_cls = force_load("org.bukkit.Bukkit")
-        .or_else(|| { eprintln!("[c-LoD] resolve FAILED at: force_load org.bukkit.Bukkit"); None })?;
-    let key_cls = force_load("net.kyori.adventure.key.Key")
-        .or_else(|| { eprintln!("[c-LoD] resolve FAILED at: force_load Key"); None })?;
-    let post_effects_cls = force_load("io.papermc.paper.entity.PlayerPostEffects")
-        .or_else(|| { eprintln!("[c-LoD] resolve FAILED at: force_load PlayerPostEffects"); None })?;
+    let bukkit_cls = force_load("org.bukkit.Bukkit").or_else(|| {
+        eprintln!("[c-LoD] resolve FAILED at: force_load org.bukkit.Bukkit");
+        None
+    })?;
+    let key_cls = force_load("net.kyori.adventure.key.Key").or_else(|| {
+        eprintln!("[c-LoD] resolve FAILED at: force_load Key");
+        None
+    })?;
+    let post_effects_cls =
+        force_load("io.papermc.paper.entity.PlayerPostEffects").or_else(|| {
+            eprintln!("[c-LoD] resolve FAILED at: force_load PlayerPostEffects");
+            None
+        })?;
     // getServer re-resolved on the EXACT Bukkit class from this loader.
     let m_get_server = sm!(bukkit_cls, "getServer", "()Lorg/bukkit/Server;");
 
@@ -503,7 +522,10 @@ fn resolve(env: Env) -> Option<Ids> {
         "getOnlinePlayers",
         "()Ljava/util/Collection;",
     )
-    .or_else(|| { eprintln!("[c-LoD] resolve FAILED at: getOnlinePlayers"); None })?;
+    .or_else(|| {
+        eprintln!("[c-LoD] resolve FAILED at: getOnlinePlayers");
+        None
+    })?;
     let m_server_worlds = bind_method(
         env,
         server_cls_local,
@@ -1042,31 +1064,13 @@ pub fn remove_effect(env: Env, player: jobject, key: jobject) -> bool {
 // ---------------------------------------------------------------------------
 
 pub struct Nms {
-    /// net.minecraft.world.level.saveddata.maps.MapId(int)
-    map_id_cls: jobject,
-    m_map_id_new: jmethodID,
-    /// MapItemSavedData$MapPatch(int,int,int,int,byte[])
-    map_patch_cls: jobject,
-    m_map_patch_new: jmethodID,
-    /// ClientboundMapItemDataPacket(MapId, byte, boolean, Collection, MapPatch)
-    map_packet_cls: jobject,
-    m_map_packet_new: jmethodID,
-    /// ServerGamePacketListenerImpl.send(Packet)
-    m_send: jmethodID,
-    /// ServerPlayer.connection field
-    f_connection: jfieldID,
-    /// ItemStack(ItemLike) + set(DataComponentType, Object)
-    item_stack_cls: jobject,
-    m_item_stack_new: jmethodID,
-    m_item_stack_set: jmethodID,
-    /// Items.FILLED_MAP static field + the Items class itself
-    items_cls: jobject,
-    f_filled_map: jfieldID,
-    /// DataComponents.MAP_ID static field + the DataComponents class itself
-    data_components_cls: jobject,
-    f_map_id: jfieldID,
-    /// EquipmentSlot.OFFHAND static field
-    f_offhand: jfieldID,
+    /// net.minecraft.core.particles.DustParticleOptions.<init>(IF)V
+    dust_options_cls: jobject,
+    m_dust_new: jmethodID,
+    /// net.minecraft.server.level.ServerLevel.sendParticles(ParticleOptions,DDDIDDDD)I
+    #[allow(dead_code)]
+    server_level_cls: jobject,
+    m_send_particles: jmethodID,
 }
 
 struct SendNms(Nms);
@@ -1078,11 +1082,9 @@ static NMS: OnceLock<Option<SendNms>> = OnceLock::new();
 /// together with the NMS surface. Main-thread-only.
 static LOADER: Mutex<usize> = Mutex::new(0);
 
-/// Stream diagnostics: raw map packets handed to the connection + offhand swaps.
-pub static STREAM_PACKETS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-pub static STREAM_PAGE_SWAPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-use jvmti_bindings::jni::jfieldID;
+/// Stream diagnostics: dust spawns handed to ServerLevel + failures.
+pub static STREAM_SPAWNED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static STREAM_FAILED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Resolve the NMS surface once (main thread). Returns true when usable.
 pub fn nms_warmup(env: Env) -> bool {
@@ -1126,13 +1128,20 @@ fn resolve_nms(env: Env) -> Option<Nms> {
     }
     let class_cls = sdkcls::find_class("java/lang/Class")
         .map(|c| c.as_jclass())
-        .or_else(|| { eprintln!("[c-LoD] NMS resolve FAILED at: find_class Class"); None })?;
-    let m_for_name = env.get_static_method_id(
-        class_cls,
-        "forName",
-        "(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;",
-    )
-    .or_else(|| { eprintln!("[c-LoD] NMS resolve FAILED at: forName method id"); None })?;
+        .or_else(|| {
+            eprintln!("[c-LoD] NMS resolve FAILED at: find_class Class");
+            None
+        })?;
+    let m_for_name = env
+        .get_static_method_id(
+            class_cls,
+            "forName",
+            "(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;",
+        )
+        .or_else(|| {
+            eprintln!("[c-LoD] NMS resolve FAILED at: forName method id");
+            None
+        })?;
     let load = |dotted: &str| -> Option<jobject> {
         let jn = step!("jn", env.new_string_utf(dotted));
         let k = env.call_static_object_method(
@@ -1150,84 +1159,32 @@ fn resolve_nms(env: Env) -> Option<Nms> {
         }
     };
 
-    let map_id_cls = step!("map_id_cls", load("net.minecraft.world.level.saveddata.maps.MapId"));
-    let map_patch_cls = step!("map_patch_cls", load("net.minecraft.world.level.saveddata.maps.MapItemSavedData$MapPatch"));
-    let map_packet_cls = step!("map_packet_cls", load("net.minecraft.network.protocol.game.ClientboundMapItemDataPacket"));
-    let item_stack_cls = step!("item_stack_cls", load("net.minecraft.world.item.ItemStack"));
-    let items_cls = step!("items_cls", load("net.minecraft.world.item.Items"));
-    let data_components_cls = step!("data_components_cls", load("net.minecraft.core.component.DataComponents"));
-    let equipment_slot_cls = step!("equipment_slot_cls", load("net.minecraft.world.entity.EquipmentSlot"));
-    let server_player_cls = step!("server_player_cls", load("net.minecraft.server.level.ServerPlayer"));
-    let sgp_listener_cls = step!("sgp_listener_cls", load("net.minecraft.server.network.ServerGamePacketListenerImpl"));
+    let dust_options_cls = step!(
+        "dust_options_cls",
+        load("net.minecraft.core.particles.DustParticleOptions")
+    );
+    let server_level_cls = step!(
+        "server_level_cls",
+        load("net.minecraft.server.level.ServerLevel")
+    );
 
-    let m_map_id_new = step!("m_map_id_new", env.get_method_id(map_id_cls, "<init>", "(I)V"));
-    let m_map_patch_new = step!("m_map_patch_new", env.get_method_id(map_patch_cls, "<init>", "(IIII[B)V"));
-    let m_map_packet_new = step!("m_map_packet_new", env.get_method_id(
-        map_packet_cls,
-        "<init>",
-        "(Lnet/minecraft/world/level/saveddata/maps/MapId;BZLjava/util/Collection;Lnet/minecraft/world/level/saveddata/maps/MapItemSavedData$MapPatch;)V",
-    ));
-    let m_send = step!("m_send", bind_method(
-        env,
-        sgp_listener_cls,
-        sgp_listener_cls,
-        "send",
-        "(Lnet/minecraft/network/protocol/Packet;)V",
-    ));
-    let f_connection = step!("f_connection", env.get_field_id(
-        server_player_cls,
-        "connection",
-        "Lnet/minecraft/server/network/ServerGamePacketListenerImpl;",
-    ));
-    let m_item_stack_new = step!("m_item_stack_new", env.get_method_id(
-        item_stack_cls,
-        "<init>",
-        "(Lnet/minecraft/world/level/ItemLike;)V",
-    ));
-    // public <T> T set(DataComponentType<T>, T) — T erases to Object.
-    let m_item_stack_set = step!("m_item_stack_set", env.get_method_id(
-        item_stack_cls,
-        "set",
-        "(Lnet/minecraft/core/component/DataComponentType;Ljava/lang/Object;)Ljava/lang/Object;",
-    ));
-    let f_filled_map = step!("f_filled_map",
-        env.get_static_field_id(items_cls, "FILLED_MAP", "Lnet/minecraft/world/item/Item;"));
-    let f_map_id = step!("f_map_id", env.get_static_field_id(
-        data_components_cls,
-        "MAP_ID",
-        "Lnet/minecraft/core/component/DataComponentType;",
-    ));
-    let f_offhand = step!("f_offhand", env.get_static_field_id(
-        equipment_slot_cls,
-        "OFFHAND",
-        "Lnet/minecraft/world/entity/EquipmentSlot;",
-    ));
-    // setItemSlot lives on Entity; resolve through the concrete ServerPlayer.
-    let m_set_item_slot = step!("m_set_item_slot", bind_method(
-        env,
-        server_player_cls,
-        server_player_cls,
-        "setItemSlot",
-        "(Lnet/minecraft/world/entity/EquipmentSlot;Lnet/minecraft/world/item/ItemStack;)V",
-    ));
-    let _ = m_set_item_slot; // setItemSlot binds lazily per call site (see give_offhand_map)
+    let m_dust_new = step!(
+        "m_dust_new",
+        env.get_method_id(dust_options_cls, "<init>", "(IF)V")
+    );
+    let m_send_particles = step!(
+        "m_send_particles",
+        env.get_method_id(
+            server_level_cls,
+            "sendParticles",
+            "(Lnet/minecraft/core/particles/ParticleOptions;DDDIDDDD)I",
+        )
+    );
     Some(Nms {
-        map_id_cls,
-        m_map_id_new,
-        map_patch_cls,
-        m_map_patch_new,
-        map_packet_cls,
-        m_map_packet_new,
-        m_send,
-        f_connection,
-        item_stack_cls,
-        m_item_stack_new,
-        m_item_stack_set,
-        items_cls,
-        f_filled_map,
-        data_components_cls,
-        f_map_id,
-        f_offhand,
+        dust_options_cls,
+        m_dust_new,
+        server_level_cls,
+        m_send_particles,
     })
 }
 
@@ -1235,22 +1192,22 @@ fn nms() -> Option<&'static Nms> {
     NMS.get().and_then(|o| o.as_ref()).map(|s| &s.0)
 }
 
-/// Cached CraftPlayer.getHandle method id (resolved on the first live player).
-static M_GET_HANDLE: Mutex<usize> = Mutex::new(0);
+/// Cached CraftWorld.getHandle method id (resolved on the first live world).
+static M_WORLD_HANDLE: Mutex<usize> = Mutex::new(0);
 
 /// # Safety
-/// Main thread only; `player` must be a live CraftPlayer local ref.
-unsafe fn get_handle(env: Env, player: jobject) -> Option<jobject> {
+/// Main thread only; `world` must be a live CraftWorld local ref.
+unsafe fn world_level(env: Env, world: jobject) -> Option<jobject> {
     let mid = {
-        let cached = *M_GET_HANDLE.lock().unwrap();
+        let cached = *M_WORLD_HANDLE.lock().unwrap();
         if cached != 0 {
             cached as jmethodID
         } else {
-            let cls = env.get_object_class(player);
+            let cls = env.get_object_class(world);
             let probe = env.get_method_id(
                 cls,
                 "getHandle",
-                "()Lnet/minecraft/server/level/ServerPlayer;",
+                "()Lnet/minecraft/server/level/ServerLevel;",
             );
             env.exception_clear();
             let g = env.new_global_ref(cls);
@@ -1259,167 +1216,79 @@ unsafe fn get_handle(env: Env, player: jobject) -> Option<jobject> {
                 env.get_method_id(
                     g as jobject,
                     "getHandle",
-                    "()Lnet/minecraft/server/level/ServerPlayer;",
+                    "()Lnet/minecraft/server/level/ServerLevel;",
                 )
             })?;
             clear_if_pending(env);
-            *M_GET_HANDLE.lock().unwrap() = mid as usize;
+            *M_WORLD_HANDLE.lock().unwrap() = mid as usize;
             mid
         }
     };
-    jobj(env.call_object_method(player, mid, &[]))
+    jobj(env.call_object_method(world, mid, &[]))
 }
 
-/// Build a ClientboundMapItemDataPacket for one page patch. Returns a LOCAL
-/// ref the caller must hand to [`send_packet`] on the same thread.
+/// Spawn ONE dust particle at (x, y, z) in the world's ServerLevel.
+/// The particle rides the vanilla particle broadcast to every client in
+/// tracking range — this IS the LOD transport (SKY-GRID BIT-STREAM).
 ///
 /// # Safety
-/// Main thread only.
-pub unsafe fn map_page_packet(
+/// Main thread only; `world` must be a live CraftWorld local ref.
+pub unsafe fn spawn_particle(
     env: Env,
-    map_id: i32,
-    patch: Option<(u8, u8, u8, u8, &[u8])>,
-) -> Option<jobject> {
-    let n = nms()?;
-    let jmid = env.new_object(n.map_id_cls, n.m_map_id_new, &[ji(map_id)])?;
-    let jpatch = match patch {
-        Some((x, y, w, h, bytes)) => {
-            let jarr = env.new_byte_array(bytes.len() as i32)?;
-            let jb: Vec<jvmti_bindings::jni::jbyte> = bytes.iter().map(|b| *b as i8).collect();
-            env.set_byte_array_region(jarr, 0, bytes.len() as i32, &jb);
-            if env.exception_check() {
-                env.exception_clear();
-                return None;
-            }
-            env.new_object(
-                n.map_patch_cls,
-                n.m_map_patch_new,
-                &[
-                    ji(x as i32),
-                    ji(y as i32),
-                    ji(w as i32),
-                    ji(h as i32),
-                    jv(jarr),
-                ],
-            )?
-        }
-        None => std::ptr::null_mut(),
+    world: jobject,
+    x: f64,
+    y: f64,
+    z: f64,
+    rgb: u32,
+    scale: f64,
+) -> bool {
+    let Some(n) = nms() else {
+        return false;
     };
-    let args = [
-        jv(jmid),
-        jvmti_bindings::jni::jvalue { b: 3 }, // scale byte (cosmetic)
-        jz(true),                             // locked
-        jv(std::ptr::null_mut()),             // no decorations
-        jv(jpatch),
-    ];
-    let pkt = env.new_object(n.map_packet_cls, n.m_map_packet_new, &args);
-    if env.exception_check() {
-        env.exception_describe();
-        env.exception_clear();
-        return None;
-    }
-    jobj(pkt.unwrap_or(std::ptr::null_mut()))
-}
-
-/// Send any packet to one player (raw NMS connection.send).
-///
-/// # Safety
-/// Main thread only; both refs must be live local refs.
-pub unsafe fn send_packet(env: Env, player: jobject, packet: jobject) -> bool {
-    let Some(n) = nms() else { return false };
-    let Some(handle) = get_handle(env, player) else {
+    let Some(level) = world_level(env, world) else {
         clear_if_pending(env);
         return false;
     };
-    let Some(conn) = jobj(env.get_object_field(handle, n.f_connection)) else {
-        clear_if_pending(env);
-        return false;
-    };
-    env.call_void_method(conn, n.m_send, &[jv(packet)]);
-    if env.exception_check() {
-        env.exception_describe();
-        env.exception_clear();
-        return false;
-    }
-    STREAM_PACKETS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    true
-}
-
-/// Put (or replace) the offhand item with a FILLED_MAP bound to `map_id`.
-///
-/// # Safety
-/// Main thread only.
-pub unsafe fn give_offhand_map(env: Env, player: jobject, map_id: i32) -> bool {
-    let Some(n) = nms() else { return false };
-    let Some(filled) = jobj(env.get_static_object_field(n.items_cls, n.f_filled_map)) else {
-        clear_if_pending(env);
-        return false;
-    };
-    // Items.FILLED_MAP is an Item (ItemLike) — construct ItemStack(item).
-    let Some(stack) = jobj(
-        env.new_object(n.item_stack_cls, n.m_item_stack_new, &[jv(filled)])
-            .unwrap_or(std::ptr::null_mut()),
-    ) else {
-        clear_if_pending(env);
-        return false;
-    };
-    let Some(mid) = jobj(
-        env.new_object(n.map_id_cls, n.m_map_id_new, &[ji(map_id)])
-            .unwrap_or(std::ptr::null_mut()),
-    ) else {
-        clear_if_pending(env);
-        return false;
-    };
-    let Some(map_id_comp) = jobj(env.get_static_object_field(n.data_components_cls, n.f_map_id))
-    else {
-        clear_if_pending(env);
-        return false;
-    };
-    // stack = stack.set(MAP_ID, mid)
-    let set_args = [jv(map_id_comp), jv(mid)];
-    let _ = env.call_object_method(stack, n.m_item_stack_set, &set_args);
-    if env.exception_check() {
-        env.exception_describe();
-        env.exception_clear();
-        return false;
-    }
-    let Some(offhand) = jobj(env.get_static_object_field(n.item_stack_cls, n.f_offhand)) else {
-        clear_if_pending(env);
-        return false;
-    };
-    // setItemSlot resolves through the concrete player handle class (Entity).
-    let Some(handle) = get_handle(env, player) else {
-        clear_if_pending(env);
-        return false;
-    };
-    let hcls = env.get_object_class(handle);
-    let probe = env.get_method_id(
-        hcls,
-        "setItemSlot",
-        "(Lnet/minecraft/world/entity/EquipmentSlot;Lnet/minecraft/world/item/ItemStack;)V",
-    );
-    env.exception_clear();
-    let hg = env.new_global_ref(hcls);
-    let mid_set = probe.or_else(|| {
-        env.exception_clear();
-        env.get_method_id(
-            hg as jobject,
-            "setItemSlot",
-            "(Lnet/minecraft/world/entity/EquipmentSlot;Lnet/minecraft/world/item/ItemStack;)V",
+    let Some(opts) = jobj(
+        env.new_object(
+            n.dust_options_cls,
+            n.m_dust_new,
+            &[ji(rgb as i32), jf(scale as f32)],
         )
-    });
-    let Some(mid_set) = mid_set else {
+        .unwrap_or(std::ptr::null_mut()),
+    ) else {
         clear_if_pending(env);
         return false;
     };
-    env.call_void_method(handle, mid_set, &[jv(offhand), jv(stack)]);
+    // sendParticles(options, x, y, z, count, offX, offY, offZ, speed) —
+    // count = 0 sends exactly one particle at the point, speed 0 = no drift.
+    let args = [
+        jv(opts),
+        jd(x),
+        jd(y),
+        jd(z),
+        ji(0),
+        jd(0.0),
+        jd(0.0),
+        jd(0.0),
+        jd(0.0),
+    ];
+    let r = env.call_int_method(level, n.m_send_particles, &args);
     if env.exception_check() {
-        env.exception_describe();
+        if STREAM_FAILED.load(std::sync::atomic::Ordering::Relaxed) < 5 {
+            env.exception_describe();
+        }
         env.exception_clear();
+        STREAM_FAILED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         return false;
     }
-    STREAM_PAGE_SWAPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    true
+    let ok = r >= 0;
+    if ok {
+        STREAM_SPAWNED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    } else {
+        STREAM_FAILED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    ok
 }
 
 /// Remember the CraftServer classloader global for the NMS loader path

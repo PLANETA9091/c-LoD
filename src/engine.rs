@@ -1,30 +1,30 @@
-//! The c-LoD engine, v5.0 MAP CARRIER STREAMING.
+//! The c-LoD engine, v5.0 SKY-GRID BIT-STREAM.
 //!
 //! The resource pack is a STATIC shader-only artifact built once per process
 //! boot and pushed once per client join — it contains ZERO world data: no
 //! atlas, no PNGs, nothing world-derived. Every byte of LOD data travels at
-//! runtime through vanilla map packets (`ClientboundMapItemDataPacket`) into
-//! client-side dynamic map textures; the pack's shaders scrape those into
-//! persistent post-chain targets and march the heightfield live.
+//! runtime as DUST PARTICLES flying over the scan disk on two sky planes
+//! (HI = height word at Y=260, LO = color index word at Y=272); the pack's
+//! capture shaders decode them against the depth buffer into persistent
+//! targets and the marcher renders the heightfield live.
 //!
 //! Tick loop (main thread):
 //!   1. boot       — resolve the JNI surface, build the pack once, push it.
-//!   2. scan    — player-centric heightmap sweep into the region store (the
+//!   2. scan       — center-centric heightmap sweep into the disk store (the
 //!      streamer's data source), with a bounded async force-load frontier.
-//!   3. stream  — per player: advance page cursors (budget), ship dirty pages
-//!      as raw map packets, cycle the offhand map through the 8 pages so the
-//!      client uploads each page to the GPU and the scrape captures it.
-//!   4. players — one resource-pack push per join (the pack never changes),
-//!      per-player posteffect tier switching.
+//!   3. stream     — spawn the next batch of dust particles over the disk
+//!      (ServerLevel.sendParticles, one call per particle, count=0).
+//!   4. players    — one resource-pack push per join (the pack never
+//!      changes), per-player posteffect tier switching.
 
 use crate::config::Config;
 use crate::http::PackServer;
 use crate::jni::{self, PlayerInfo};
 use crate::packgen::{self, Pack};
-use crate::stream::{Cell, Streamer, PAGES_PER_REGION};
+use crate::stream::{Cell, Streamer};
 use jvmti_bindings::prelude::JniEnv;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 pub const PHASE_BOOT: u8 = 0;
@@ -44,20 +44,18 @@ pub struct State {
     pub tick_no: AtomicU64,
     /// Rate limiter for pack-push failure logs.
     pub push_fails: AtomicU32,
-    /// v5 map-carrier streaming state (Rust side; main-thread only).
+    /// v5 sky-grid streaming state (Rust side; main-thread only).
     pub stream: Mutex<Streamer>,
-    /// Per-player virtual map ids (8 pages), assigned on first sight.
-    pub map_ids: Mutex<HashMap<String, [i32; PAGES_PER_REGION]>>,
-    /// Monotonic map-id base (vanilla ids live far below this).
-    map_base: AtomicI32,
     /// v4.4 frontier: chunks force-loaded and waiting for the async load to
     /// finish (chunk -> tick when queued). Sampled + released a couple of
     /// ticks later.
     pub force_pending: Mutex<HashMap<(i32, i32), u64>>,
     /// Frontier chunks scanned through the force path so far.
     pub forced_chunks: AtomicU64,
-    /// Diagnostics: cells streamed as page bytes since boot.
-    pub streamed_bytes: AtomicU64,
+    /// Diagnostics: cells streamed as particles since boot.
+    pub streamed_cells: AtomicU64,
+    /// Set once the streamer origin was fixed and particles are flying.
+    pub stream_armed: AtomicU8,
 }
 
 #[derive(Clone)]
@@ -78,10 +76,6 @@ pub struct PlayerState {
     pub resends: u32,
     /// Last applied tier (0=Off, 1=Veil, 2=Full) for change logging.
     pub last_tier: u8,
-    /// Offhand page currently displayed on the client.
-    pub page: u8,
-    /// Set once the map ids were assigned and page 0 was handed over.
-    pub streaming: bool,
     /// Engine tick of the player's first sight (pack push anchor: the push
     /// must land AFTER the client finished the join screens, or the pack
     /// prompt screen gets swallowed by the loading terrain screen).
@@ -93,7 +87,12 @@ const PACK_PUSH_DELAY_TICKS: u64 = 40;
 
 impl State {
     pub fn new(cfg: Config) -> Arc<Self> {
-        let stream = Streamer::new(cfg.region_blocks, cfg.cell_size, cfg.stream_slots);
+        let stream = Streamer::new(
+            cfg.center_x.unwrap_or(0.0),
+            cfg.center_z.unwrap_or(0.0),
+            cfg.region_blocks,
+            cfg.cell_size,
+        );
         let server = PackServer::new();
         Arc::new(Self {
             cfg,
@@ -108,25 +107,11 @@ impl State {
             pack_uuid: Mutex::new(0),
             tick_no: AtomicU64::new(0),
             push_fails: AtomicU32::new(0),
-            map_ids: Mutex::new(HashMap::new()),
-            map_base: AtomicI32::new(1_000_000_000),
             force_pending: Mutex::new(HashMap::new()),
             forced_chunks: AtomicU64::new(0),
-            streamed_bytes: AtomicU64::new(0),
+            streamed_cells: AtomicU64::new(0),
+            stream_armed: AtomicU8::new(0),
         })
-    }
-
-    fn assign_map_ids(&self, uuid: &str) -> [i32; PAGES_PER_REGION] {
-        let mut ids = self.map_ids.lock().unwrap();
-        if let Some(v) = ids.get(uuid) {
-            return *v;
-        }
-        let base = self
-            .map_base
-            .fetch_add(PAGES_PER_REGION as i32, Ordering::SeqCst);
-        let v: [i32; PAGES_PER_REGION] = core::array::from_fn(|i| base + i as i32);
-        ids.insert(uuid.to_string(), v);
-        v
     }
 }
 
@@ -137,7 +122,7 @@ static BRIDGE_OK: AtomicU8 = AtomicU8::new(0); // 0 pending, 1 ok, 2 failed-once
 /// One engine tick. MUST run on the main thread.
 pub fn tick(state: &Arc<State>, env: Env) {
     state.tick_no.fetch_add(1, Ordering::Relaxed);
-    if state.tick_no.load(Ordering::Relaxed) % 50 == 0 {
+    if state.tick_no.load(Ordering::Relaxed).is_multiple_of(50) {
         crate::log_info(&format!(
             "engine tick alive: tick {}",
             state.tick_no.load(Ordering::Relaxed)
@@ -146,6 +131,7 @@ pub fn tick(state: &Arc<State>, env: Env) {
     ensure_boot(state, env);
     stream_scan(state, env);
     poll_forced(state, env);
+    stream_step(state, env);
     manage_players(state, env);
 }
 
@@ -155,7 +141,7 @@ fn ensure_boot(state: &Arc<State>, env: Env) {
     if BRIDGE_OK.load(Ordering::SeqCst) != 1 {
         if jni::warmup(env) && jni::nms_warmup(env) {
             BRIDGE_OK.store(1, Ordering::SeqCst);
-            crate::log_info("c-LoD JNI bridge resolved: true (incl. NMS map surface)");
+            crate::log_info("c-LoD JNI bridge resolved: true (incl. NMS particle surface)");
             let _ = state.phase.compare_exchange(
                 PHASE_BOOT,
                 PHASE_LIVE,
@@ -194,7 +180,7 @@ fn ensure_boot(state: &Arc<State>, env: Env) {
             );
             *state.pack.write().unwrap() = Some(Arc::new(new_pack));
             crate::log_info(&format!(
-                "c-LoD shader-only pack built ONCE at boot: {len} bytes, sha1 {sha} — no atlas, no revisions, one push per join"
+                "c-LoD pack finalized (ONE-TIME, static): shader-only, {len} bytes, sha1 {sha} — no atlas, no textures, one push per join"
             ));
         } else {
             if BRIDGE_OK.swap(2, Ordering::SeqCst) == 0 {
@@ -234,9 +220,9 @@ unsafe fn as_obj(handle: usize) -> jvmti_bindings::jni::jobject {
 const FORCE_MAX_PENDING: usize = 8;
 const FORCE_BUDGET_PER_TICK: usize = 4;
 
-/// Player-centric heightmap sweep into the region store. The LOD data source:
-/// rings of `cell_size` blocks around each player, skipping cells already
-/// valid; unloaded chunks queue for the async force-load frontier.
+/// Center-centric heightmap sweep into the disk store. The LOD data source:
+/// rings of `cell_size` blocks around the disk center, skipping cells
+/// already valid; unloaded chunks queue for the async force-load frontier.
 fn stream_scan(state: &Arc<State>, env: Env) {
     if state.phase.load(Ordering::SeqCst) != PHASE_LIVE {
         return;
@@ -250,70 +236,62 @@ fn stream_scan(state: &Arc<State>, env: Env) {
     if players.is_empty() {
         return;
     }
-    let budget = state.cfg.scan_budget / players.len() as u32;
-    for p in &players {
-        if p.world.is_empty() {
-            continue;
-        }
-        let (rx, rz) = {
-            let s = state.stream.lock().unwrap();
-            s.region_of(p.bx, p.bz)
-        };
-        // Ring sweep around the player, clamped to the region.
-        let side = state.cfg.region_blocks / state.cfg.cell_size;
-        let pcx = ((p.bx - rx * state.cfg.region_blocks) / state.cfg.cell_size).clamp(0, side - 1);
-        let pcz = ((p.bz - rz * state.cfg.region_blocks) / state.cfg.cell_size).clamp(0, side - 1);
-        let mut done = 0u32;
-        let mut ring: i32 = 0;
-        while done < budget && ring <= side {
-            let mut step = |dx: i32, dz: i32| -> bool {
-                let cx = pcx + dx;
-                let cz = pcz + dz;
-                if cx < 0 || cz < 0 || cx >= side || cz >= side {
-                    return false;
-                }
-                {
-                    let s = state.stream.lock().unwrap();
-                    if let Some(cell) = s.region(rx, rz).and_then(|r| r.get(cx as u32, cz as u32)) {
-                        if cell.valid {
-                            return false;
-                        }
+    let budget = state.cfg.scan_budget;
+    let (side, ox, oz, cell) = {
+        let s = state.stream.lock().unwrap();
+        (s.side as i32, s.origin_x, s.origin_z, state.cfg.cell_size)
+    };
+    // Ring sweep from the disk center outward.
+    let center = side / 2;
+    let mut done = 0u32;
+    let mut ring: i32 = 0;
+    while done < budget && ring <= side {
+        let mut step = |dx: i32, dz: i32| -> bool {
+            let cx = center + dx;
+            let cz = center + dz;
+            if cx < 0 || cz < 0 || cx >= side || cz >= side {
+                return false;
+            }
+            {
+                let s = state.stream.lock().unwrap();
+                if let Some(cell) = s.get(cx as u32, cz as u32) {
+                    if cell.valid {
+                        return false;
                     }
                 }
-                let wx = rx * state.cfg.region_blocks + cx * state.cfg.cell_size;
-                let wz = rz * state.cfg.region_blocks + cz * state.cfg.cell_size;
-                scan_cell(state, env, world, rx, rz, cx as u32, cz as u32, wx, wz);
-                done += 1;
-                done >= budget
-            };
-            // One ring: top+bottom rows and left+right columns.
-            let mut stop = false;
-            for d in -ring..=ring {
-                if step(d, -ring) || step(d, ring) || step(-ring, d) || step(ring, d) {
-                    stop = true;
-                    break;
-                }
-                if ring == 0 {
-                    break; // the single center cell
-                }
             }
-            if stop {
+            let wx = ox + f64::from(cx) * f64::from(cell);
+            let wz = oz + f64::from(cz) * f64::from(cell);
+            scan_cell(
+                state, env, world, cx as u32, cz as u32, wx as i32, wz as i32,
+            );
+            done += 1;
+            done >= budget
+        };
+        // One ring: top+bottom rows and left+right columns.
+        let mut stop = false;
+        for d in -ring..=ring {
+            if step(d, -ring) || step(d, ring) || step(-ring, d) || step(ring, d) {
+                stop = true;
                 break;
             }
-            ring += 1;
+            if ring == 0 {
+                break; // the single center cell
+            }
         }
+        if stop {
+            break;
+        }
+        ring += 1;
     }
 }
 
-/// Sample one world column into the region store (or queue its chunk for the
+/// Sample one world column into the disk store (or queue its chunk for the
 /// async force-load frontier when unloaded).
-#[allow(clippy::too_many_arguments)]
 fn scan_cell(
     state: &Arc<State>,
     env: Env,
     world: jvmti_bindings::jni::jobject,
-    rx: i32,
-    rz: i32,
     cx: u32,
     cz: u32,
     wx: i32,
@@ -323,8 +301,6 @@ fn scan_cell(
         let rgb = crate::palette::surface_color(&material, &biome, liquid);
         let mut s = state.stream.lock().unwrap();
         s.set_cell(
-            rx,
-            rz,
             cx,
             cz,
             Cell {
@@ -384,7 +360,6 @@ fn poll_forced(state: &Arc<State>, env: Env) {
             pend.insert((cx, cz), now);
             continue;
         }
-        let side = state.cfg.region_blocks / state.cfg.cell_size;
         let x0 = cx * 16;
         let z0 = cz * 16;
         for dz in 0..(16 / state.cfg.cell_size.max(1)).max(1) {
@@ -394,25 +369,21 @@ fn poll_forced(state: &Arc<State>, env: Env) {
                 }
                 let wx = x0 + dx * state.cfg.cell_size;
                 let wz = z0 + dz * state.cfg.cell_size;
-                let (rx, rz) = {
+                let occ = {
                     let s = state.stream.lock().unwrap();
-                    s.region_of(wx, wz)
+                    world_to_cell(&s, wx, wz)
                 };
-                let ccx =
-                    ((wx - rx * state.cfg.region_blocks) / state.cfg.cell_size).clamp(0, side - 1);
-                let ccz =
-                    ((wz - rz * state.cfg.region_blocks) / state.cfg.cell_size).clamp(0, side - 1);
+                let Some((ccx, ccz)) = occ else {
+                    continue;
+                };
                 let valid = {
                     let s = state.stream.lock().unwrap();
-                    s.region(rx, rz)
-                        .and_then(|r| r.get(ccx as u32, ccz as u32))
-                        .map(|c| c.valid)
-                        .unwrap_or(false)
+                    s.get(ccx, ccz).map(|c| c.valid).unwrap_or(false)
                 };
                 if valid {
                     continue;
                 }
-                scan_cell(state, env, world, rx, rz, ccx as u32, ccz as u32, wx, wz);
+                scan_cell(state, env, world, ccx, ccz, wx, wz);
                 samples += 1;
             }
         }
@@ -425,8 +396,22 @@ fn poll_forced(state: &Arc<State>, env: Env) {
     }
 }
 
-/// Tier for one player from the world only: streaming follows the player, so
-/// any position in the streaming world is Full; other worlds keep the veil.
+/// World block coords -> disk cell coords (None when outside the disk).
+fn world_to_cell(s: &Streamer, wx: i32, wz: i32) -> Option<(u32, u32)> {
+    let cell = s.cell_size;
+    let side = s.side as i32;
+    let cx = (((wx as f64 - s.origin_x) / cell as f64).floor() as i32).clamp(0, side - 1);
+    let cz = (((wz as f64 - s.origin_z) / cell as f64).floor() as i32).clamp(0, side - 1);
+    let bx = s.origin_x + cx as f64 * cell as f64;
+    let bz = s.origin_z + cz as f64 * cell as f64;
+    if (wx as f64 - bx).abs() >= cell as f64 || (wz as f64 - bz).abs() >= cell as f64 {
+        return None;
+    }
+    Some((cx as u32, cz as u32))
+}
+
+/// Tier for one player: Full only INSIDE the streamed disk (particles fly
+/// over that square, so data exists only there); other worlds keep the veil.
 fn tier_for(state: &Arc<State>, p: &PlayerInfo) -> Tier {
     if p.world.is_empty() {
         return Tier::Off;
@@ -435,7 +420,15 @@ fn tier_for(state: &Arc<State>, p: &PlayerInfo) -> Tier {
     if !wname.is_empty() && p.world != wname {
         return Tier::Veil;
     }
-    Tier::Full
+    let inside = {
+        let s = state.stream.lock().unwrap();
+        world_to_cell(&s, p.bx, p.bz).is_some()
+    };
+    if inside {
+        Tier::Full
+    } else {
+        Tier::Veil
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -567,18 +560,12 @@ fn manage_players(state: &Arc<State>, env: Env) {
                 st.atmosphere_on =
                     !jni::remove_effect(env, handle, unsafe { as_obj(keys.atmosphere) });
             }
-
-            // 3. MAP-CARRIER STREAMING: raw map packets + offhand page cycle.
-            if have_pack && tier == Tier::Full {
-                stream_player(state, env, handle, &p, &mut st);
-            }
         }
 
         state.per_player.lock().unwrap().insert(p.uuid.clone(), st);
     }
 
-    // Drop state for players who left (their map ids stay reserved — the
-    // client textures die with the connection anyway).
+    // Drop state for players who left.
     state
         .per_player
         .lock()
@@ -586,89 +573,76 @@ fn manage_players(state: &Arc<State>, env: Env) {
         .retain(|k, _| seen.contains(k));
 }
 
-/// One player's streaming step: page patches + offhand cycling.
-fn stream_player(
-    state: &Arc<State>,
-    env: Env,
-    handle: jvmti_bindings::jni::jobject,
-    p: &PlayerInfo,
-    st: &mut PlayerState,
-) {
-    let uuid = &p.uuid;
-    let ids = state.assign_map_ids(uuid);
-    let (rx, rz) = {
-        let s = state.stream.lock().unwrap();
-        s.region_of(p.bx, p.bz)
-    };
+/// The v5 streaming step: fix the disk origin once (config center or the
+/// first player), then spawn the next batch of dust particles over the two
+/// sky planes. One ServerLevel.sendParticles call per particle, count=0.
+fn stream_step(state: &Arc<State>, env: Env) {
+    if state.phase.load(Ordering::SeqCst) != PHASE_LIVE {
+        return;
+    }
+    let world_handle = *state.world_obj.lock().unwrap();
+    if world_handle == 0 {
+        return;
+    }
+    let world = unsafe { as_obj(world_handle) };
 
-    if !st.streaming {
-        st.streaming = true;
-        st.page = 0;
-        unsafe {
-            jni::give_offhand_map(env, handle, ids[0]);
-        }
+    // Arm once: fix the disk origin.
+    if state.stream_armed.load(Ordering::SeqCst) == 0 {
+        let (ox, oz) = if let (Some(x), Some(z)) = (state.cfg.center_x, state.cfg.center_z) {
+            (x, z)
+        } else {
+            let players = jni::players(env);
+            match players.first() {
+                Some(p) => (
+                    (p.bx as f64) - f64::from(state.cfg.region_blocks) * 0.5,
+                    (p.bz as f64) - f64::from(state.cfg.region_blocks) * 0.5,
+                ),
+                None => return, // no anchor yet
+            }
+        };
+        let (side, cells) = {
+            let mut s = state.stream.lock().unwrap();
+            *s = Streamer::new(ox, oz, state.cfg.region_blocks, state.cfg.cell_size);
+            (s.side, s.cells())
+        };
+        let lap_ticks = cells / ((state.cfg.particles_per_tick as u64) / 8).max(1);
+        state.stream_armed.store(1, Ordering::SeqCst);
         crate::log_info(&format!(
-            "stream: map ids {}..{} assigned to {uuid}, page 0 in offhand, region ({rx},{rz})",
-            ids[0],
-            ids[PAGES_PER_REGION - 1]
+            "c-LoD sky-grid stream armed: {side}x{side} cells at ({ox:.0},{oz:.0}), {} particles/tick, {lap_ticks} ticks/lap",
+            state.cfg.particles_per_tick
         ));
     }
 
-    // Page patches: the per-tick byte budget splits across the 8 pages.
-    let budget = (state.cfg.stream_budget / PAGES_PER_REGION as u32).max(64) as usize;
-    let mut sent_pages = 0u32;
-    let mut sent_bytes = 0u64;
-    for (page, map_id) in ids.iter().enumerate() {
-        let patch = state
-            .stream
-            .lock()
-            .unwrap()
-            .page_patch(rx, rz, page, budget);
-        let Some(patch) = patch else { continue };
-        let p = (patch.x, patch.y, patch.w, patch.h, patch.bytes.as_slice());
-        unsafe {
-            let Some(pkt) = jni::map_page_packet(env, *map_id, Some(p)) else {
-                continue;
-            };
-            if jni::send_packet(env, handle, pkt) {
-                sent_pages += 1;
-                sent_bytes += patch.bytes.len() as u64;
-            }
+    // Spawn the next batch.
+    let batch: Vec<crate::stream::Spawn> = {
+        let mut s = state.stream.lock().unwrap();
+        s.tick_batch(state.cfg.particles_per_tick as usize).to_vec()
+    };
+    if batch.is_empty() {
+        return;
+    }
+    let mut spawned = 0u64;
+    for sp in &batch {
+        if unsafe { jni::spawn_particle(env, world, sp.x, sp.y, sp.z, sp.rgb, sp.scale) } {
+            spawned += 1;
         }
     }
-    if sent_bytes > 0 {
-        state
-            .streamed_bytes
-            .fetch_add(sent_bytes, Ordering::Relaxed);
-    }
-
-    // Offhand page cycle: the client uploads the DISPLAYED map to the GPU,
-    // the scrape pass captures it into the persistent target. Cycle even
-    // without patches — freshly joined clients must see every page once.
-    let tick = state.tick_no.load(Ordering::Relaxed);
-    let want_page = ((tick / state.cfg.page_ticks.max(1) as u64) % PAGES_PER_REGION as u64) as u8;
-    if want_page != st.page {
-        unsafe {
-            if jni::give_offhand_map(env, handle, ids[want_page as usize]) {
-                st.page = want_page;
-            }
-        }
-    }
+    state
+        .streamed_cells
+        .fetch_add(spawned / 8, Ordering::Relaxed);
 
     // Rate-limited diagnostics.
+    let tick = state.tick_no.load(Ordering::Relaxed);
     if tick.is_multiple_of(100) {
-        let (cells, scanned) = {
+        let (valid, laps, total_cells) = {
             let s = state.stream.lock().unwrap();
-            match s.region(rx, rz) {
-                Some(r) => (s.region_cells() * s.region_cells(), r.valid_cells()),
-                None => (0, 0),
-            }
+            (s.valid_cells(), s.laps, s.cells())
         };
         crate::log_info(&format!(
-            "stream: tick {tick} region ({rx},{rz}) {scanned}/{cells} cells, page {}, +{sent_pages} pkts (+{sent_bytes} B), total {} B / {} pkts",
-            st.page,
-            state.streamed_bytes.load(Ordering::Relaxed),
-            jni::STREAM_PACKETS.load(Ordering::Relaxed),
+            "stream: tick {tick} {valid}/{total_cells} cells, lap {}, +{spawned} particles, spawned {} / failed {}",
+            laps,
+            jni::STREAM_SPAWNED.load(Ordering::Relaxed),
+            jni::STREAM_FAILED.load(Ordering::Relaxed),
         ));
     }
 }
@@ -710,6 +684,7 @@ mod tests {
     fn coverage_matches_world_and_bounds() {
         let st = State::new(Config::parse(""));
         *st.world_name.lock().unwrap() = "world".to_string();
+        // Default disk: origin (0,0), 512 blocks side, cell 2 -> 0..512.
         let p = PlayerInfo {
             uuid: "u".into(),
             world: "world".into(),
@@ -725,8 +700,8 @@ mod tests {
             by: 64,
             bz: 0,
         };
-        // Streaming follows the player anywhere in the world.
-        assert_eq!(tier_for(&st, &p_far), Tier::Full);
+        // Outside the streamed disk: veil (no particles fly there).
+        assert_eq!(tier_for(&st, &p_far), Tier::Veil);
         let p_world = PlayerInfo {
             uuid: "u".into(),
             world: "world_nether".into(),
@@ -746,22 +721,23 @@ mod tests {
     }
 
     #[test]
-    fn map_ids_unique_per_player() {
-        let st = State::new(Config::parse(""));
-        let a = st.assign_map_ids("a");
-        let b = st.assign_map_ids("b");
-        let a2 = st.assign_map_ids("a");
-        assert_eq!(a, a2);
-        assert_ne!(a[0], b[0]);
-        assert_eq!(a[7] - a[0], 7);
-    }
-
-    #[test]
     fn pack_builds_at_boot_without_world() {
         // The v5 pack is shader-only: it must build with NO world, NO atlas,
-        // NO scan data — the whole point of map-carrier streaming.
+        // NO scan data — the whole point of sky-grid streaming.
         let st = State::new(Config::parse(""));
         assert!(st.pack.read().unwrap().is_none());
         assert_eq!(st.phase.load(Ordering::SeqCst), PHASE_BOOT);
+    }
+
+    #[test]
+    fn world_to_cell_maps_inside_disk() {
+        let st = State::new(Config::parse(""));
+        let s = st.stream.lock().unwrap();
+        assert_eq!(world_to_cell(&s, 0, 0), Some((0, 0)));
+        assert_eq!(world_to_cell(&s, 511, 511), Some((255, 255)));
+        assert_eq!(world_to_cell(&s, 100, 200), Some((50, 100)));
+        // Negative / beyond-disk coords clamp into the disk footprint...
+        assert_eq!(world_to_cell(&s, -50, -50), None);
+        assert_eq!(world_to_cell(&s, 600, 600), None);
     }
 }

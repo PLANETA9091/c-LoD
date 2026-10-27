@@ -31,7 +31,7 @@ def main(path: str) -> int:
     failed = False
 
     need(
-        re.search(r"\[c-LoD\] booting: streaming regions \d+ blocks", log) is not None,
+        re.search(r"\[c-LoD\] booting: sky-grid disk \d+ blocks", log) is not None,
         "G1 inject (cplugin_init, config parsed)",
         "module never reached cplugin_init or config parsing failed",
     )
@@ -46,14 +46,14 @@ def main(path: str) -> int:
         "Bukkit never came up / engine thread never started",
     )
     need(
-        re.search(r"JNI bridge resolved: true \(incl\. NMS map surface\)", log) is not None,
-        "G4 Paper JNI + NMS map surface resolved",
+        re.search(r"JNI bridge resolved: true \(incl\. NMS particle surface\)", log) is not None,
+        "G4 Paper JNI + NMS particle surface resolved",
         "Paper 26.3 API/NMS surface incomplete — module idles (see JNI FAILED above)",
     )
     m = re.search(r"streaming world: (\S+)", log)
     need(m is not None, "G5 streaming world resolved", "no Bukkit world available")
     pm = re.search(
-        r"shader-only pack built ONCE at boot: (\d+) bytes, sha1 ([0-9a-f]{40})",
+        r"pack finalized \(ONE-TIME, static\): shader-only, (\d+) bytes, sha1 ([0-9a-f]{40})",
         log,
     )
     need(pm is not None, "G6 shader-only pack built once at boot", "packgen never produced clod-pack.zip")
@@ -62,15 +62,21 @@ def main(path: str) -> int:
         need(
             log.count(sha) >= 1 and "pack rebuilt" not in log,
             "G7 pack discipline: ONE build, ZERO revisions",
-            "the pack must never rebuild in v5 (world data rides map packets)",
+            "the pack must never rebuild in v5 (world data rides dust particles)",
         )
-    # Streaming discipline (only meaningful once a player joined):
-    swaps = re.findall(r"stream: map ids (\d+)\.\.(\d+) assigned", log)
-    pkts = re.search(r"total (\d+) B / (\d+) pkts", log)
-    if swaps or pkts:
-        need(True, "G8 map-carrier streaming active (packets + page swaps)", "")
-        if pkts:
-            need(int(pkts.group(2)) > 0, "G9 map packets sent to the client", "no raw map packets were handed to the connection")
+    # Sky-grid streaming discipline (only meaningful once the engine armed):
+    armed = re.search(r"sky-grid stream armed: (\d+)x(\d+) cells at \((-?[\d.]+),(-?[\d.]+)\), (\d+) particles/tick, (\d+) ticks/lap", log)
+    if armed:
+        need(int(armed.group(1)) > 0, "G8 sky-grid stream armed (disk geometry)", "")
+        spawned = re.search(r"spawned (\d+) / failed (\d+)", log)
+        if spawned:
+            need(
+                int(spawned.group(1)) > 0 and int(spawned.group(2)) == 0,
+                "G9 dust particles spawned through the NMS bridge",
+                "sendParticles never succeeded (see STREAM_FAILED / exceptions)",
+            )
+    nse = log.count("NoSuchMethodError") + log.count("NoClassDefFoundError")
+    need(nse == 0, "G10 no JNI linkage errors", f"{nse} linkage errors in the boot log")
 
     print()
     if failed:
