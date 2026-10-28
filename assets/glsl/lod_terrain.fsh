@@ -125,14 +125,26 @@ float resolve_day_tick(vec3 fogRgb, float prevTick, bool prevValid) {
 }
 
 // ---- streamed heightfield: the fixed disk ----------------------------------
-// One streamed cell = one flat Voxy-style quad. Every read is NEAREST
+// One streamed cell = one flat Voxy-style quad. Base reads are NEAREST
 // (texelFetch on the integer cell coordinate) — bilinear smearing was the
 // v4.2 "textures overlay badly" bug and is never coming back.
+//
+// v5.2.0 DH-style distance smoothing: past ~100 blocks a 2-block cell is
+// ~1 px on screen and NEAREST reads alias into a speckled wall (v5.1.1
+// 400 m finding). Instead of bilinear (the v4.2 bug) we average a 2x2 cell
+// neighborhood of DECODED values, valid cells only, blended in by a
+// distance weight. Two explicit LOD levels in-shader, no mip chain, the
+// data frontier stays exact (void neighbors are skipped, never smeared).
+
+// NEAREST detail within 96 blocks, full 2x2 average past 288.
+float smooth_w(float t) {
+    return smoothstep(96.0, 288.0, t);
+}
 
 // Sample the streamed ground at a world xz. Returns the surface Y, or -1e8
 // for "no data" (void, never decoded). Water cells stream their real
 // surface height; the water FLAG lives in the color word (idx 216).
-float ground_at(vec2 xz, out bool water, out bool ok) {
+float ground_at(vec2 xz, float w, out bool water, out bool ok) {
     float cell = AtlasInfo.y;             // blocks per cell
     ivec2 celli = ivec2(floor((xz - GridInfo.xy) / cell)); // 0..255
     ok = false;
@@ -150,13 +162,33 @@ float ground_at(vec2 xz, out bool water, out bool ok) {
         return -1.0e8; // height word not decoded yet
     }
     ok = true;
-    return h.r * 255.0 - 64.0;
+    float h0 = h.r * 255.0 - 64.0;
+    if (w <= 0.0) {
+        return h0;
+    }
+    // 2x2 cell average, valid neighbors only (data frontier stays exact).
+    float sum = h0;
+    float cnt = 1.0;
+    ivec2 nb[3] = ivec2[3](ivec2(1, 0), ivec2(0, 1), ivec2(1, 1));
+    for (int i = 0; i < 3; ++i) {
+        ivec2 q = celli + nb[i];
+        if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, ivec2(256)))) {
+            continue;
+        }
+        vec4 hq = texelFetch(HeightSampler, q, 0);
+        if (hq.a < 0.5) {
+            continue;
+        }
+        sum += hq.r * 255.0 - 64.0;
+        cnt += 1.0;
+    }
+    return mix(h0, sum / cnt, w);
 }
 
 // Surface color of one streamed cell: the 6x6x6 RGB lattice decode.
 // Water (idx 216) returns a negative sentinel — the caller uses its own
 // water fallback color.
-vec3 color_at(ivec2 celli, out bool water) {
+vec3 color_at(ivec2 celli, float w, out bool water) {
     vec4 c = texelFetch(ColBufSampler, celli, 0);
     float idx = floor(c.r * 255.0 + 0.5);
     water = idx > 215.5;
@@ -164,7 +196,39 @@ vec3 color_at(ivec2 celli, out bool water) {
         return vec3(-1.0);
     }
     vec3 lattice = vec3(mod(idx, 6.0), mod(floor(idx / 6.0), 6.0), floor(idx / 36.0));
-    return lattice * (51.0 / 255.0);
+    vec3 rgb = lattice * (51.0 / 255.0);
+    if (w <= 0.0) {
+        return rgb;
+    }
+    // 2x2 average of decoded RGB (land cells only, water stays a flag:
+    // averaging the lattice index itself would decode to garbage colors).
+    vec3 sum = rgb;
+    float cnt = 1.0;
+    float wc = 0.0;
+    ivec2 nb[3] = ivec2[3](ivec2(1, 0), ivec2(0, 1), ivec2(1, 1));
+    for (int i = 0; i < 3; ++i) {
+        ivec2 q = celli + nb[i];
+        if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, ivec2(256)))) {
+            continue;
+        }
+        vec4 cq = texelFetch(ColBufSampler, q, 0);
+        if (cq.a < 0.5) {
+            continue;
+        }
+        float iq = floor(cq.r * 255.0 + 0.5);
+        if (iq > 215.5) {
+            wc += 1.0;
+            continue;
+        }
+        vec3 lq = vec3(mod(iq, 6.0), mod(floor(iq / 6.0), 6.0), floor(iq / 36.0));
+        sum += lq * (51.0 / 255.0);
+        cnt += 1.0;
+    }
+    if (wc > (cnt + wc) * 0.5) {
+        water = true; // neighborhood turned mostly water
+        return vec3(-1.0);
+    }
+    return mix(rgb, sum / cnt, w);
 }
 
 // Horizontal distance from cam to the box boundary along dir.xz.
@@ -256,11 +320,11 @@ void main() {
     // underground), seeded at the camera (t = 0, clamped above-ground).
     bool dw; bool dok;
     float prevT = 0.0;
-    float prevDiff = min(ground_at(cam.xz, dw, dok) - cam.y, -1.0);
+    float prevDiff = min(ground_at(cam.xz, 0.0, dw, dok) - cam.y, -1.0);
 
     vec2 xz = cam.xz + dir.xz * t;
     bool wflag; bool okflag;
-    float above = ground_at(xz, wflag, okflag) - (cam.y + dir.y * t);
+    float above = ground_at(xz, smooth_w(t), wflag, okflag) - (cam.y + dir.y * t);
 
     for (int i = 0; i < MAX_STEPS; ++i) {
         prevT = t;
@@ -269,7 +333,7 @@ void main() {
         dt = max(cell * 0.5, t * (2.0 * tanH / max(ScreenSize.y, 1.0)));
 
         xz = cam.xz + dir.xz * t;
-        above = ground_at(xz, wflag, okflag) - (cam.y + dir.y * t);
+        above = ground_at(xz, smooth_w(t), wflag, okflag) - (cam.y + dir.y * t);
 
         if (above > 0.0 && prevDiff <= 0.0) {
             // Entering crossing between prevT and t; bisection converges on
@@ -280,7 +344,7 @@ void main() {
                 float mid = (lo + hi) * 0.5;
                 vec2 mxz = cam.xz + dir.xz * mid;
                 bool mw; bool mo;
-                float g = ground_at(mxz, mw, mo);
+                float g = ground_at(mxz, smooth_w(mid), mw, mo);
                 if (g - (cam.y + dir.y * mid) > 0.0) {
                     hi = mid;
                 } else {
@@ -323,11 +387,12 @@ void main() {
     ivec2 tc = ivec2(floor((hitPos.xz - GridInfo.xy) / cell));
 
     bool isWater = false; bool okW; bool dum;
-    float hC = ground_at(hitPos.xz, isWater, okW);
-    float hL = ground_at(hitPos.xz - vec2(cell, 0.0), dum, okW);
-    float hR = ground_at(hitPos.xz + vec2(cell, 0.0), dum, okW);
-    float hD = ground_at(hitPos.xz - vec2(0.0, cell), dum, okW);
-    float hU = ground_at(hitPos.xz + vec2(0.0, cell), dum, okW);
+    float sw = smooth_w(tHit); // one smoothing weight for shading inputs
+    float hC = ground_at(hitPos.xz, sw, isWater, okW);
+    float hL = ground_at(hitPos.xz - vec2(cell, 0.0), sw, dum, okW);
+    float hR = ground_at(hitPos.xz + vec2(cell, 0.0), sw, dum, okW);
+    float hD = ground_at(hitPos.xz - vec2(0.0, cell), sw, dum, okW);
+    float hU = ground_at(hitPos.xz + vec2(0.0, cell), sw, dum, okW);
     // Void neighbors read -1e8: clamp them to the center height so the
     // normal stays flat instead of exploding at the data frontier.
     hL = hL < -1.0e7 ? hC : hL;
@@ -338,7 +403,7 @@ void main() {
 
     // ---- COLOR: the Voxy model -------------------------------------------
     bool colWater;
-    vec3 col = color_at(tc, colWater);
+    vec3 col = color_at(tc, sw, colWater);
     float hn = clamp((hitPos.y - sea) / max(maxY - sea, 1.0), 0.0, 1.0);
     vec3 fallback = (isWater || colWater) ? ColWater.rgb : mix(ColLow.rgb, ColHigh.rgb, smoothstep(0.15, 0.9, hn));
     vec3 albedo = colWater ? fallback : (col.r < 0.0 ? fallback : col);
