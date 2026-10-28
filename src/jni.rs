@@ -1307,9 +1307,10 @@ pub fn remove_effect(env: Env, player: jobject, key: jobject) -> bool {
 // ---------------------------------------------------------------------------
 
 pub struct Nms {
-    /// net.minecraft.core.particles.DustParticleOptions.<init>(IF)V
-    dust_options_cls: jobject,
-    m_dust_new: jmethodID,
+    /// ParticleTypes.HAPPY_VILLAGER (SimpleParticleType static) — the ONLY
+    /// particle texture the 26.3 client actually renders on software raster
+    /// backends (dust/explosion/flame stay invisible: broken sprite UVs).
+    happy_villager: jobject,
     /// ClientboundLevelParticlesPacket(ParticleOptions,ZZDDDFFFI)V —
     /// overrideLimiter=true rides like /particle force (never clipped by
     /// the client's render distance, always shown).
@@ -1406,9 +1407,19 @@ fn resolve_nms(env: Env) -> Option<Nms> {
         }
     };
 
-    let dust_options_cls = step!(
-        "dust_options_cls",
-        load("net.minecraft.core.particles.DustParticleOptions")
+    let particle_types_cls = step!(
+        "particle_types_cls",
+        load("net.minecraft.core.particles.ParticleTypes")
+    );
+    let happy_villager = step!(
+        "happy_villager",
+        env.get_static_field_id(
+            particle_types_cls,
+            "HAPPY_VILLAGER",
+            "Lnet/minecraft/core/particles/SimpleParticleType;",
+        )
+        .and_then(|fid| Some(env.get_static_object_field(particle_types_cls, fid)))
+        .map(|o| env.new_global_ref(o) as jobject)
     );
     let particle_packet_cls = step!(
         "particle_packet_cls",
@@ -1423,10 +1434,7 @@ fn resolve_nms(env: Env) -> Option<Nms> {
         load("net.minecraft.server.network.ServerGamePacketListenerImpl")
     );
 
-    let m_dust_new = step!(
-        "m_dust_new",
-        env.get_method_id(dust_options_cls, "<init>", "(IF)V")
-    );
+    let _ = &happy_villager; // consumed below in the Nms struct
     let m_particle_packet_new = step!(
         "m_particle_packet_new",
         env.get_method_id(
@@ -1454,8 +1462,7 @@ fn resolve_nms(env: Env) -> Option<Nms> {
         )
     );
     Some(Nms {
-        dust_options_cls,
-        m_dust_new,
+        happy_villager,
         particle_packet_cls,
         m_particle_packet_new,
         f_connection,
@@ -1502,23 +1509,20 @@ unsafe fn get_handle(env: Env, player: jobject) -> Option<jobject> {
     jobj(env.call_object_method(player, mid, &[]))
 }
 
-/// Spawn ONE FORCE dust particle for ONE player: build a
+/// Spawn ONE FORCE villager-sparkle particle for ONE player: build a
 /// ClientboundLevelParticlesPacket (overrideLimiter = true — the particle
 /// survives the client's particle setting AND its render-distance clip,
 /// exactly like `/particle ... force`) and push it straight into the
 /// connection. This IS the LOD transport (SKY-GRID BIT-STREAM).
 ///
+/// happy_villager replaces the v5.0 dust carrier: dust quads render with
+/// degenerate UVs on every 26.3 software backend (verified live on GL
+/// llvmpipe AND Vulkan lavapipe — dust stays 1-2 px while explosions and
+/// town-sparkles render full-size).
+///
 /// # Safety
 /// Main thread only; `player` must be a live CraftPlayer local ref.
-pub unsafe fn spawn_particle(
-    env: Env,
-    player: jobject,
-    x: f64,
-    y: f64,
-    z: f64,
-    rgb: u32,
-    scale: f64,
-) -> bool {
+pub unsafe fn spawn_particle(env: Env, player: jobject, x: f64, y: f64, z: f64) -> bool {
     let Some(n) = nms() else {
         return false;
     };
@@ -1530,17 +1534,8 @@ pub unsafe fn spawn_particle(
         clear_if_pending(env);
         return false;
     };
-    let Some(opts) = jobj(
-        env.new_object(
-            n.dust_options_cls,
-            n.m_dust_new,
-            &[ji(rgb as i32), jf(scale as f32)],
-        )
-        .unwrap_or(std::ptr::null_mut()),
-    ) else {
-        clear_if_pending(env);
-        return false;
-    };
+    // SimpleParticleType is a process-lifetime JVM static — borrow it directly.
+    let opts = n.happy_villager;
     // (options, overrideLimiter=true, alwaysShow=true, x, y, z,
     //  xDist=0, yDist=0, zDist=0, maxSpeed=0, count=0 -> exactly one
     //  particle at the point, zero drift)

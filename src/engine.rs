@@ -688,7 +688,7 @@ fn stream_step(state: &Arc<State>, env: Env) {
             continue;
         };
         for sp in &batch {
-            if unsafe { jni::spawn_particle(env, handle, sp.x, sp.y, sp.z, sp.rgb, sp.scale) } {
+            if unsafe { jni::spawn_particle(env, handle, sp.x, sp.y, sp.z) } {
                 spawned += 1;
             }
         }

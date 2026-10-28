@@ -2,26 +2,25 @@
 #extension GL_ARB_separate_shader_objects : require
 #include <minecraft:globals.glsl>
 
-// c-LoD v5.0 SKY-GRID BIT-STREAM capture pass.
+// c-LoD v5.1 SKY-GRID BIT-STREAM capture pass.
 //
-// The server streams LOD cells as dust particles in vertical COLUMNS: each
-// cell spawns its sub-lattice on two layers (low Y=80 decodes from ground
-// vantage, high Y=200 from elevated vantage — 26.3 reversed-Z hides
-// particles against the bare sky, so a layer only reads where geometry is
-// BEHIND the particle). One 16-bit word = 4 particles per layer:
+// The server streams LOD cells as villager-sparkle particles (the only
+// texture the 26.3 software rasterizers draw — dust quads die with
+// degenerate UVs, verified live on GL llvmpipe AND Vulkan lavapipe).
+// The HEIGHT word rides the high layer (Y=120), the COLOR word the low
+// layer (Y=80): the carrier has one hue, so the capture pass tells words
+// apart by plane height. One 16-bit word = 4 particles per layer:
 // particle slot s (Z axis, msb-first) carries bits (14-2s)..(15-2s); its X
 // sub-position inside the cell IS the 2-bit value, its Z sub-position IS
-// the slot. Sub-cell quantum = cell/4, centered. HI word = BLACK dust,
-// LO word = WHITE dust — the client multiplies all channels by one random
-// factor, so the hue survives (black stays black, white dims to 0.48..1).
+// the slot. Sub-cell quantum = cell/4, centered.
 //
 // This pass decodes ONE word back into its persistent 256x256 target (1 px
-// = 1 cell). For the pixel's cell it re-projects all 2x16 sub-particle
+// = 1 cell). For the pixel's cell it re-projects all 16 sub-particle
 // positions onto the screen (probe camera), strobes every projection: the
-// pixel must sit in front of geometry (device depth > 0) and its main color
-// must match the dust hue — then OR-merges the decoded word into the
-// previous value. Anything not strobed keeps its old value; the stream
-// self-heals on the next lap.
+// pixel must sit in front of geometry (device depth > 0), and its main
+// color must match the bright villager-green hue — then OR-merges the
+// decoded word into the previous value. Anything not strobed keeps its old
+// value; the stream self-heals on the next lap.
 
 uniform sampler2D InSampler;      // minecraft:main color (dust hue strobe)
 uniform sampler2D InDepthSampler; // minecraft:main depth (in-front-of-geometry test)
@@ -84,56 +83,47 @@ void main() {
     uint word = 0u;
     bool anyHit = false;
 
-    // Two particle layers share the same word: re-project the sub-lattice
-    // at BOTH heights.
-    for (int li = 0; li < 2; ++li) {
-        float planeY = li == 0 ? GridInfo.w : GridInfo.z; // w = low, z = high
+    // v5.1: one plane per pass — the HI word decodes on the high layer,
+    // the LO word on the low layer (single carrier hue).
+    float planeY = StreamInfo.w < 0.5 ? GridInfo.z : GridInfo.w;
 
-        for (int qz = 0; qz < 4; ++qz) {
-            for (int qx = 0; qx < 4; ++qx) {
-                vec3 P = vec3(
-                    cellWorld.x + (float(qx) - 1.5) * sub,
-                    planeY,
-                    cellWorld.y + (float(qz) - 1.5) * sub
-                );
-                vec3 d = P - cam;
-                float z = dot(d, F);
-                if (z < 2.0) {
-                    continue; // behind / too close
-                }
-                vec2 ndc = vec2(
-                    dot(d, R) / (z * tanH * aspect),
-                    dot(d, U) / (z * tanH)
-                );
-                if (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0) {
-                    continue; // off screen
-                }
-                vec2 sc = ndc * 0.5 + 0.5;
-                // STROBE: the particle must render in front of geometry
-                // (device depth > 0; against the bare sky particles are
-                // hidden by the reversed-Z pipeline), and its hue must match
-                // the dust color for this word.
-                float dep = texture(InDepthSampler, sc).r;
-                if (dep < 1.0e-6) {
-                    continue; // against the bare sky — no read possible
-                }
-                vec3 pc = texture(InSampler, sc).rgb;
-                float mn = min(pc.r, min(pc.g, pc.b));
-                float mx = max(pc.r, max(pc.g, pc.b));
-                bool dust;
-                if (StreamInfo.w < 0.5) {
-                    dust = mx < 0.14; // black dust (HI word): 0 * rand = 0
-                } else {
-                    // white dust (LO word): 1 * rand[0.48..1] dims it — the
-                    // hue (achromatic) survives, the floor must be below 0.48.
-                    dust = mn > 0.35 && (mx - mn) < 0.14;
-                }
-                if (!dust) {
-                    continue;
-                }
-                word |= uint(qx) << (14 - 2 * qz);
-                anyHit = true;
+    for (int qz = 0; qz < 4; ++qz) {
+        for (int qx = 0; qx < 4; ++qx) {
+            vec3 P = vec3(
+                cellWorld.x + (float(qx) - 1.5) * sub,
+                planeY,
+                cellWorld.y + (float(qz) - 1.5) * sub
+            );
+            vec3 d = P - cam;
+            float z = dot(d, F);
+            if (z < 2.0) {
+                continue; // behind / too close
             }
+            vec2 ndc = vec2(
+                dot(d, R) / (z * tanH * aspect),
+                dot(d, U) / (z * tanH)
+            );
+            if (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0) {
+                continue; // off screen
+            }
+            vec2 sc = ndc * 0.5 + 0.5;
+            // STROBE: the particle must render in front of geometry
+            // (device depth > 0; against the bare sky particles are
+            // hidden by the reversed-Z pipeline), and its hue must match
+            // the bright villager-green carrier.
+            float dep = texture(InDepthSampler, sc).r;
+            if (dep < 1.0e-6) {
+                continue; // against the bare sky — no read possible
+            }
+            vec3 pc = texture(InSampler, sc).rgb;
+            bool dust = pc.g > 0.45
+                && pc.g > pc.r + 0.10
+                && pc.g > pc.b + 0.10;
+            if (!dust) {
+                continue;
+            }
+            word |= uint(qx) << (14 - 2 * qz);
+            anyHit = true;
         }
     }
 
