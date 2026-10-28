@@ -601,25 +601,56 @@ fn manage_players(state: &Arc<State>, env: Env) {
                 have_pack && (tier == Tier::Full || tier == Tier::Veil) && keys.atmosphere != 0;
 
             if want_terrain && !st.terrain_on {
-                st.terrain_on = jni::add_effect(env, handle, unsafe { as_obj(keys.terrain) });
+                let tkey = unsafe { as_obj(keys.terrain) };
+                let ok = jni::add_effect(env, handle, tkey);
+                if ok {
+                    st.terrain_on = true;
+                } else {
+                    // add -> false: 26.3 PostEffectCommand returns false when the
+                    // effect is ALREADY attached (fast client relog keeps the
+                    // server-side attachment). Reconcile with ONE remove+add
+                    // cycle and stop retrying — a per-tick retry storm (~100/s)
+                    // makes the client rebuild its post chain every tick and
+                    // starves the render thread (llvmpipe freeze).
+                    let rm = jni::remove_effect(env, handle, tkey);
+                    let ok2 = jni::add_effect(env, handle, tkey);
+                    st.terrain_on = true; // no more retries until the tier flips
+                    crate::log_info(&format!(
+                        "effect terrain resync (remove -> {}) add -> {} ({})",
+                        rm, ok2, p.uuid
+                    ));
+                }
                 crate::log_info(&format!(
                     "effect terrain add -> {} ({} {})",
                     st.terrain_on, p.uuid, tier_no
                 ));
             } else if !want_terrain && st.terrain_on {
                 let ok = jni::remove_effect(env, handle, unsafe { as_obj(keys.terrain) });
-                st.terrain_on = !ok;
+                // remove -> false means it was not attached; either way stop retrying
+                st.terrain_on = false;
                 crate::log_info(&format!("effect terrain remove -> {} ({})", ok, p.uuid));
             }
             if want_atmo && !st.atmosphere_on {
-                st.atmosphere_on = jni::add_effect(env, handle, unsafe { as_obj(keys.atmosphere) });
+                let akey = unsafe { as_obj(keys.atmosphere) };
+                let ok = jni::add_effect(env, handle, akey);
+                if ok {
+                    st.atmosphere_on = true;
+                } else {
+                    let rm = jni::remove_effect(env, handle, akey);
+                    let ok2 = jni::add_effect(env, handle, akey);
+                    st.atmosphere_on = true;
+                    crate::log_info(&format!(
+                        "effect atmosphere resync (remove -> {}) add -> {} ({})",
+                        rm, ok2, p.uuid
+                    ));
+                }
                 crate::log_info(&format!(
                     "effect atmosphere add -> {} ({} {})",
                     st.atmosphere_on, p.uuid, tier_no
                 ));
             } else if !want_atmo && st.atmosphere_on {
                 let ok = jni::remove_effect(env, handle, unsafe { as_obj(keys.atmosphere) });
-                st.atmosphere_on = !ok;
+                st.atmosphere_on = false;
                 crate::log_info(&format!("effect atmosphere remove -> {} ({})", ok, p.uuid));
             }
         }
