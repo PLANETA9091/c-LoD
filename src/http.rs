@@ -46,6 +46,16 @@ impl PackServer {
         }
     }
 
+    /// Refresh the LIVE stream counters served by /clod-pack.info without
+    /// touching the pack bytes or its content-fixed sha1 (v5.2.2: the info
+    /// endpoint used to report the boot-time cells=0 forever).
+    pub fn set_meta(&self, cells: u64, total_cells: u64) {
+        if let Ok(mut m) = self.meta.write() {
+            m.cells = cells;
+            m.total_cells = total_cells;
+        }
+    }
+
     /// Snapshot of the currently served pack bytes (empty until finalize).
     #[allow(dead_code)] // used by tests and diagnostics
     pub fn pack_bytes(&self) -> Vec<u8> {
@@ -230,5 +240,28 @@ mod tests {
         assert!(String::from_utf8_lossy(&resp).starts_with("HTTP/1.1 404"));
 
         drop(h);
+    }
+
+    #[test]
+    fn set_meta_updates_live_counters_without_touching_pack() {
+        let srv = PackServer::new();
+        srv.set_pack(
+            vec![9, 9],
+            PackMeta {
+                rev: 1,
+                sha1_hex: "fff".into(),
+                cells: 0,
+                total_cells: 0,
+            },
+        );
+        // v5.2.2: the engine refreshes live scan counters every 100 ticks;
+        // bytes and sha1 must stay untouched.
+        srv.set_meta(53034, 65536);
+        let m = srv.meta();
+        assert_eq!(m.cells, 53034);
+        assert_eq!(m.total_cells, 65536);
+        assert_eq!(m.rev, 1);
+        assert_eq!(m.sha1_hex, "fff");
+        assert_eq!(srv.pack_bytes(), vec![9, 9]);
     }
 }

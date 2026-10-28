@@ -29,9 +29,15 @@ LX[B]=-546;      LZ[B]=924            # NE quarter
 LX[C]=-802;      LZ[C]=1180           # SW quarter
 LX[D]=-546;      LZ[D]=1180           # SE quarter
 LX[E]=-674;      LZ[E]=1052           # window center
+# v5.2.2 wave 2: rim legs (southern + eastern window edges)
+LX[F]=-844;      LZ[F]=1222           # SW rim
+LX[G]=-674;      LZ[G]=1222           # south rim
+LX[H]=-504;      LZ[H]=1222           # SE rim
+LX[I]=-504;      LZ[I]=1052           # east rim
 # yaw so the horizon shot looks INTO the window (toward -674,1052)
 declare -A YAW
 YAW[tower]=45; YAW[A]=135; YAW[B]=225; YAW[C]=315; YAW[D]=45; YAW[E]=0
+YAW[F]=225; YAW[G]=180; YAW[H]=135; YAW[I]=90
 
 srv() { echo "$1" > /tmp/server.in; }
 shot() { ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 \

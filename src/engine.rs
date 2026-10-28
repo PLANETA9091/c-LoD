@@ -735,6 +735,9 @@ fn stream_step(state: &Arc<State>, env: Env) {
             let s = state.stream.lock().unwrap();
             (s.valid_cells(), s.laps, s.cells())
         };
+        // v5.2.2: /clod-pack.info serves LIVE scan counters (it used to
+        // report the boot-time cells=0 forever).
+        state.server.set_meta(valid, total_cells);
         crate::log_info(&format!(
             "stream: tick {tick} {valid}/{total_cells} cells, lap {}, +{spawned} particles ({} players), spawned {} / failed {}",
             laps,
