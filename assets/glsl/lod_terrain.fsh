@@ -195,7 +195,9 @@ float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
         return avg;
     }
     // Level 2: +-2 cross average (v5.2.1) — kills the residual 1-texel
-    // shimmer at 400 m where a single 2x2 step is still sub-texel.
+    // shimmer at 400 m. ONLY the shading calls pass w2 > 0: the march
+    // stays on the 2x2 level (the +50% march cost of the cross made the
+    // llvmpipe post-frame slower than the shot interval — paint flickered).
     if (w2 <= 0.0) {
         return avg;
     }
@@ -387,7 +389,7 @@ void main() {
 
     vec2 xz = cam.xz + dir.xz * t;
     bool wflag; bool okflag;
-    float above = ground_at(xz, smooth_w(t), smooth_w2(t), wflag, okflag) - (cam.y + dir.y * t);
+    float above = ground_at(xz, smooth_w(t), 0.0, wflag, okflag) - (cam.y + dir.y * t);
 
     for (int i = 0; i < MAX_STEPS; ++i) {
         prevT = t;
@@ -396,7 +398,7 @@ void main() {
         dt = max(cell * 0.5, t * (2.0 * tanH / max(ScreenSize.y, 1.0)));
 
         xz = cam.xz + dir.xz * t;
-        above = ground_at(xz, smooth_w(t), smooth_w2(t), wflag, okflag) - (cam.y + dir.y * t);
+        above = ground_at(xz, smooth_w(t), 0.0, wflag, okflag) - (cam.y + dir.y * t);
 
         if (above > 0.0 && prevDiff <= 0.0) {
             // Entering crossing between prevT and t; bisection converges on
@@ -407,7 +409,7 @@ void main() {
                 float mid = (lo + hi) * 0.5;
                 vec2 mxz = cam.xz + dir.xz * mid;
                 bool mw; bool mo;
-                float g = ground_at(mxz, smooth_w(mid), smooth_w2(mid), mw, mo);
+                float g = ground_at(mxz, smooth_w(mid), 0.0, mw, mo);
                 if (g - (cam.y + dir.y * mid) > 0.0) {
                     hi = mid;
                 } else {
