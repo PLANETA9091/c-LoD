@@ -1,1 +1,4 @@
-paint diff px daylight: 8854
+400m disk wall paint diff px: 45590
+horizon band diff px: 9264
+bamboo daylight diff px: 8854
+low cam night diff px: 13936
