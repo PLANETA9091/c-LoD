@@ -1,0 +1,15 @@
+  [12:48:39 INFO]: [c-LoD] stream: tick 14600 31784/65536 cells, lap 84, +1024 particles (1 players), spawned 14658560 / failed 0
+> [c-LoD] stream: tick 14700 31784/65536 cells, lap 85, +1024 particles (1 players), spawned 14760960 / failed 0
+  [12:48:49 INFO]: [c-LoD] stream: tick 14700 31784/65536 cells, lap 85, +1024 particles (1 players), spawned 14760960 / failed 0
+>   [12:24:16 INFO]: [c-LoD] tier Off -> Full for d1652ad9-77ce-3200-9642-f973c97adf36 at (240, 320) world
+> [c-LoD] pack pushed to d1652ad9-77ce-3200-9642-f973c97adf36 (http://21.0.13.92:8199/clod-pack.zip): 49869 bytes, sha1 8d1ffae1441f333c2601dc102aa07b1c236b9725 — the ONE push this session
+  [12:24:20 INFO]: [c-LoD] pack pushed to d1652ad9-77ce-3200-9642-f973c97adf36 (http://21.0.13.92:8199/clod-pack.zip): 49869 bytes, sha1 8d1ffae1441f333c2601dc102aa07b1c236b9725 — the ONE push this session
+> >   [12:26:45 INFO]: System chat: Player Stepan has 2 post effects: clod:atmosphere, clod:lod_terrain
+> [c-LoD] tier Off -> Full for d1652ad9-77ce-3200-9642-f973c97adf36 at (30, 130) world
+  [12:32:06 INFO]: [c-LoD] tier Off -> Full for d1652ad9-77ce-3200-9642-f973c97adf36 at (30, 130) world
+> [c-LoD] pack pushed to d1652ad9-77ce-3200-9642-f973c97adf36 (http://21.0.13.92:8199/clod-pack.zip): 49869 bytes, sha1 8d1ffae1441f333c2601dc102aa07b1c236b9725 — the ONE push this session
+  [12:32:11 INFO]: [c-LoD] pack pushed to d1652ad9-77ce-3200-9642-f973c97adf36 (http://21.0.13.92:8199/clod-pack.zip): 49869 bytes, sha1 8d1ffae1441f333c2601dc102aa07b1c236b9725 — the ONE push this session
+>   [12:33:55 INFO]: System chat: Player Stepan has 2 post effects: clod:atmosphere, clod:lod_terrain
+> >   [12:38:43 INFO]: System chat: Player Stepan has 2 post effects: clod:lod_terrain, clod:atmosphere
+> [c-LoD] tier Full -> Veil for d1652ad9-77ce-3200-9642-f973c97adf36 at (-40, 96) world
+  [12:40:41 INFO]: [c-LoD] tier Full -> Veil for d1652ad9-77ce-3200-9642-f973c97adf36 at (-40, 96) world
