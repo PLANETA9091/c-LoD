@@ -1417,7 +1417,8 @@ fn resolve_nms(env: Env) -> Option<Nms> {
             particle_types_cls,
             "HAPPY_VILLAGER",
             "Lnet/minecraft/core/particles/SimpleParticleType;",
-        ).map(|fid| env.get_static_object_field(particle_types_cls, fid))
+        )
+        .map(|fid| env.get_static_object_field(particle_types_cls, fid))
         .map(|o| env.new_global_ref(o) as jobject)
     );
     let particle_packet_cls = step!(

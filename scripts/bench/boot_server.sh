@@ -6,7 +6,10 @@ D="$HOME/mc-test/dist"
 JAVA="$HOME/tools/jdk25/bin/java"
 # Disk center: override via CLOD_CENTER env ("x,z"), default region spawn
 CENTER="${CLOD_CENTER:-0,64}"
-export CLOD_OPTS="tick_ms=100;region_blocks=512;cell_size=2;particles_per_tick=1024;scan_budget=4096;http_port=8199;center_x=${CENTER%,*};center_z=${CENTER#*,}"
+# v5.2.2: particles_per_tick 2048 (was 1024) — halves the lap (256 ticks),
+# doubling the per-bit decode probability per minute; server CPU headroom
+# verified (spawn cost is one packet per particle, 0 failed at 33M+).
+export CLOD_OPTS="tick_ms=100;region_blocks=512;cell_size=2;particles_per_tick=2048;scan_budget=4096;http_port=8199;center_x=${CENTER%,*};center_z=${CENTER#*,}"
 # 4GB container: Paper+module must fit alongside the client later;
 # host OOM-killer targets the fattest RSS — stay small and fast
 export DIST_JAVA_OPTS="-Xms256M -Xmx700M -XX:MaxMetaspaceSize=256M -XX:MaxDirectMemorySize=128M -XX:+UseG1GC"
