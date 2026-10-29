@@ -44,12 +44,89 @@ pub const PLANE_LO_Y: f64 = LAYER_Y[0];
 pub const COLOR_WATER: u16 = 216;
 
 /// v5.3 proximity culling: particles never spawn within this radius (blocks,
-/// 3D, eye-centered) of a player. The near field needs no LOD — real chunks
-/// always win the depth test and the dome's near gate paints nothing inside
-/// the vanilla chunk bubble — and close dots are the largest, most visible
-/// ones. Skipped spawns also cut the packet budget for every player standing
-/// inside the disk.
-pub const CULL_RADIUS: f64 = 64.0;
+/// 3D, eye-centered) of a player. MUST stay well below the capture's decode
+/// zone (~28..96 blocks — beyond ~96 the fog washes the hue below the strobe
+/// threshold and the cell stops decoding; the v5.3.0 64-block cull killed
+/// the whole transport live on the bench). Near dots are the biggest, so the
+/// eraser mask discs stay small; the dome's near gate paints nothing inside
+/// the vanilla chunk bubble anyway.
+pub const CULL_RADIUS: f64 = 28.0;
+
+/// v5.3.1 STEALTH far gate: particles never spawn FARTHER than this (blocks,
+/// 3D, eye-centered) from a player either. Beyond ~96 blocks the fog-washed
+/// hue stops decoding (the capture's un-fog can only stretch so far), so a
+/// far dot is PERMANENTLY visible garbage: rendered (force mode survives the
+/// client's render-distance clip) but never decoded, hence never erased by
+/// the dust-mask pass — exactly the sky specks seen from high vantages.
+/// The persistent capture buffers make the disk cumulative: as players move,
+/// the zone sweeps the grid and every cell still decodes within seconds.
+pub const ZONE_FAR: f64 = 112.0;
+
+/// v5.3.1 view-frustum spawn gate. The client's vertical FOV is a video
+/// setting (30..110); the server cannot read it, so the cone assumes the
+/// widest setting plus a margin. Dots outside the cone would be rendered
+/// (force mode) but never looked at — invisible waste at best, and in
+/// sky-blind views (looking down at water: no sky pixels -> the rot channel
+/// decays -> decode AND eraser die) they would be plainly visible.
+/// The margin keeps the gate safe: every dot that COULD land on someone's
+/// screen is spawned; the extra cone is invisible waste only.
+pub const ASSUMED_FOV_DEG: f64 = 110.0;
+pub const FRUSTUM_MARGIN_DEG: f64 = 8.0;
+
+/// v5.3.1 sky-blind gate: the camera channel is measured from SKY pixels
+/// (rot_solve), and its confidence decays once no sky is in view. The eraser
+/// shares the same camera, so dots spawned into a sky-blind frustum are
+/// never erased. The server knows the player pitch exactly (Bukkit syncs it
+/// every tick): treat the view as sky-blind when even the frustum's TOP edge
+/// (pitch + ASSUMED_FOV/2 + margin) stays below the horizon. The 47° limit
+/// bakes in an 8° terrain-silhouette margin for mountain bowls.
+pub const SKY_PITCH_LIMIT_DEG: f32 = 47.0;
+
+/// Cosine of the gate half-cone (ASSUMED_FOV/2 + FRUSTUM_MARGIN).
+pub fn cos_half_cone() -> f64 {
+    let half = (ASSUMED_FOV_DEG * 0.5 + FRUSTUM_MARGIN_DEG).to_radians();
+    half.cos()
+}
+
+/// Bukkit yaw/pitch (degrees) -> unit look vector.
+/// yaw 0 = +Z (south), 90 = -X (west); pitch -90 = up, +90 = down.
+pub fn look_dir(yaw_deg: f32, pitch_deg: f32) -> [f64; 3] {
+    let yaw = f64::from(yaw_deg).to_radians();
+    let pitch = f64::from(pitch_deg).to_radians();
+    let cp = pitch.cos();
+    [-yaw.sin() * cp, -pitch.sin(), yaw.cos() * cp]
+}
+
+/// v5.3.1 spawn visibility gate for ONE dot against ONE player.
+/// A dot is spawned to this player only when the player can actually SEE it
+/// AND the client machinery can decode AND erase it:
+///   1. sky in view (else the rot channel is dying -> no decode, no erase);
+///   2. inside the decode band [CULL_RADIUS, ZONE_FAR] (3D, eye-centered);
+///   3. inside the frustum cone (widest-FOV assumption + margin).
+///
+/// Every spawned dot is therefore on-screen, decodable and erased — the
+/// transport is invisible from every vantage, sky-blind views included:
+/// there is simply nothing there to see.
+pub fn spawn_visible(
+    s: &Spawn,
+    eye: [f64; 3],
+    look: [f64; 3],
+    sky_visible: bool,
+    cos_half: f64,
+) -> bool {
+    if !sky_visible {
+        return false;
+    }
+    let dx = s.x - eye[0];
+    let dy = s.y - eye[1];
+    let dz = s.z - eye[2];
+    let d2 = dx * dx + dy * dy + dz * dz;
+    if d2 <= CULL_RADIUS * CULL_RADIUS || d2 > ZONE_FAR * ZONE_FAR {
+        return false;
+    }
+    let inv = 1.0 / d2.sqrt();
+    (dx * look[0] + dy * look[1] + dz * look[2]) * inv > cos_half
+}
 
 #[derive(Clone, Copy, Default, PartialEq)]
 pub struct Cell {
@@ -169,14 +246,6 @@ impl Streamer {
                 z: cz + dz,
             });
         }
-    }
-
-    /// True when the spawn sits inside a player's cull sphere (v5.3).
-    pub fn within_cull(s: &Spawn, px: f64, py: f64, pz: f64, radius: f64) -> bool {
-        let dx = s.x - px;
-        let dy = s.y - py;
-        let dz = s.z - pz;
-        dx * dx + dy * dy + dz * dz < radius * radius
     }
 
     /// Advance the stream by one engine tick: fill the batch with at most
@@ -332,15 +401,62 @@ mod tests {
     }
 
     #[test]
-    fn proximity_cull_matches_radius() {
-        let s = Spawn { x: 10.0, y: 80.0, z: 10.0 };
-        // Eye 5 blocks under the spawn: 3D distance 5 — inside 64, outside 4.
-        assert!(Streamer::within_cull(&s, 10.5, 74.62, 10.5, 64.0));
-        assert!(!Streamer::within_cull(&s, 10.5, 74.62, 10.5, 4.0));
-        // Far player: outside.
-        assert!(!Streamer::within_cull(&s, 200.0, 70.0, -300.0, 64.0));
-        // Exactly on the boundary counts as outside (strict <).
-        assert!(!Streamer::within_cull(&s, 10.0, 16.0, 10.0, 64.0));
+    fn look_dir_bukkit_conventions() {
+        // yaw 0, level -> +Z (south).
+        let d = look_dir(0.0, 0.0);
+        assert!((d[0]).abs() < 1e-9 && (d[1]).abs() < 1e-9 && (d[2] - 1.0).abs() < 1e-9);
+        // yaw 90 -> -X (west).
+        let d = look_dir(90.0, 0.0);
+        assert!((d[0] + 1.0).abs() < 1e-9 && (d[2]).abs() < 1e-9);
+        // pitch -90 -> straight up; +90 -> straight down.
+        let up = look_dir(0.0, -90.0);
+        assert!((up[1] - 1.0).abs() < 1e-9);
+        let down = look_dir(0.0, 90.0);
+        assert!((down[1] + 1.0).abs() < 1e-9);
+        // Unit length at an oblique pose.
+        let d = look_dir(37.0, -21.0);
+        let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        assert!((len - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn spawn_visible_gate_band_and_cone() {
+        let cos_half = cos_half_cone();
+        // Eye at the origin looking south (+Z); dot 50 blocks ahead: visible.
+        let s = Spawn { x: 0.0, y: 80.0, z: 50.0 };
+        let eye = [0.0, 80.0, 0.0];
+        let look = look_dir(0.0, 0.0);
+        assert!(spawn_visible(&s, eye, look, true, cos_half));
+        // Same dot BEHIND the camera: outside the cone.
+        let s = Spawn { x: 0.0, y: 80.0, z: -50.0 };
+        assert!(!spawn_visible(&s, eye, look, true, cos_half));
+        // Inside the cone but too close (inside the 28-block cull bubble).
+        let s = Spawn { x: 0.0, y: 80.0, z: 20.0 };
+        assert!(!spawn_visible(&s, eye, look, true, cos_half));
+        // Inside the cone but beyond the 112-block decode zone: permanent
+        // undecodable garbage — never spawned.
+        let s = Spawn { x: 0.0, y: 80.0, z: 200.0 };
+        assert!(!spawn_visible(&s, eye, look, true, cos_half));
+        // Sky-blind view: nothing spawns at all, cone or not.
+        let s = Spawn { x: 0.0, y: 80.0, z: 50.0 };
+        assert!(!spawn_visible(&s, eye, look, false, cos_half));
+        // Sideways dot at the cone edge: 90 degrees off the look axis.
+        let s = Spawn { x: 50.0, y: 80.0, z: 0.0 };
+        assert!(!spawn_visible(&s, eye, look, true, cos_half));
+    }
+
+    #[test]
+    fn spawn_gate_zone_is_symmetric_3d() {
+        // A dot 50 blocks straight BELOW the eye decodes fine when the
+        // player looks down at it with sky in view (high vantage, horizon
+        // in frame): the band test is 3D, not horizontal.
+        let cos_half = cos_half_cone();
+        let eye = [0.0, 130.0, 0.0];
+        let s = Spawn { x: 0.0, y: 80.0, z: 0.0 };
+        let look = look_dir(0.0, 0.0); // level — dots below are OUTSIDE the cone
+        assert!(!spawn_visible(&s, eye, look, true, cos_half));
+        let look = look_dir(0.0, 40.0); // pitched down 40, sky still in view
+        assert!(spawn_visible(&s, eye, look, true, cos_half));
     }
 
     #[test]

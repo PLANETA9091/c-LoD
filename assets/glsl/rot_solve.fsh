@@ -12,7 +12,10 @@
 //
 // Camera: the payload is measured, not fitted — confidence jumps to 1 on
 // the first valid row and the basis is frame-exact. When the column is
-// fully occluded the previous estimate decays at 0.99/frame (~3 s).
+// fully occluded the previous estimate decays at 0.95/frame (v5.3.1: was
+// 0.99 — the decay must outrun the player's turn speed so the capture's
+// blind-camera gate (< 0.25) trips BEFORE the stale pose starts decoding
+// garbage: ~0.5 s at 60 fps, ~2.7 s on the 3 fps bench).
 // Fog: no decay semantics needed — values persist unchanged until a new
 // valid group B row arrives (the fog state is constant between changes).
 
@@ -73,7 +76,7 @@ void main() {
     if (px == ivec2(0, 0)) {
         // Camera pixel (v4.1 semantics).
         vec4 prev = texelFetch(PrevSampler, ivec2(0, 0), 0);
-        vec4 rot = vec4(prev.r, prev.g, prev.b * 0.99, prev.a);
+        vec4 rot = vec4(prev.r, prev.g, prev.b * 0.95, prev.a);
         int best = best_row(0);
         if (best >= 0) {
             float a[6];

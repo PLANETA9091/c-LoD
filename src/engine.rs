@@ -719,24 +719,54 @@ fn stream_step(state: &Arc<State>, env: Env) {
         let Some(handle) = jni::player_by_uuid(env, &p.uuid) else {
             continue;
         };
-        // v5.3 proximity culling: no particles within CULL_RADIUS (3D, eye)
-        // of THIS player — the near field needs no LOD (real chunks win by
-        // depth, the dome's near gate paints nothing inside the bubble) and
-        // close dots are the largest, most visible ones. Every other player
-        // still receives them, so the shared disk decodes from vantages.
+        // v5.3.1 spawn gate: spawn a dot to THIS player only when the client
+        // can see it AND decode AND erase it. The server knows the player's
+        // exact camera (Bukkit syncs yaw/pitch every tick), so the gate is
+        // the product of three tests: sky-in-view (the rot channel is
+        // sky-measured — dots spawned into sky-blind frustums are never
+        // erased), the decode band [CULL_RADIUS, ZONE_FAR] (outside it a dot
+        // is either too big to erase or permanently undecodable), and the
+        // view frustum (widest-FOV assumption + margin). Everything else the
+        // cursor streams is skipped for this player: invisible waste the
+        // transport no longer pays for.
         let px = f64::from(p.bx) + 0.5;
         let py = f64::from(p.by) + 1.62;
         let pz = f64::from(p.bz) + 0.5;
+        let sky_visible = p.pitch < crate::stream::SKY_PITCH_LIMIT_DEG;
+        let look = crate::stream::look_dir(p.yaw, p.pitch);
+        let cos_half = crate::stream::cos_half_cone();
+        // v5.3.1 diag: per-tick gate breakdown (near / far / cone / blind).
+        let mut n_near = 0u64;
+        let mut n_far = 0u64;
+        let mut n_cone = 0u64;
         for sp in &batch {
-            if crate::stream::Streamer::within_cull(
-                sp, px, py, pz, crate::stream::CULL_RADIUS,
-            ) {
+            if !crate::stream::spawn_visible(sp, [px, py, pz], look, sky_visible, cos_half) {
                 culled += 1;
+                if !sky_visible {
+                    continue;
+                }
+                let dx = sp.x - px;
+                let dy = sp.y - py;
+                let dz = sp.z - pz;
+                let d2 = dx * dx + dy * dy + dz * dz;
+                if d2 <= crate::stream::CULL_RADIUS * crate::stream::CULL_RADIUS {
+                    n_near += 1;
+                } else if d2 > crate::stream::ZONE_FAR * crate::stream::ZONE_FAR {
+                    n_far += 1;
+                } else {
+                    n_cone += 1;
+                }
                 continue;
             }
             if unsafe { jni::spawn_particle(env, handle, sp.x, sp.y, sp.z) } {
                 spawned += 1;
             }
+        }
+        if state.tick_no.load(Ordering::Relaxed).is_multiple_of(100) {
+            crate::log_info(&format!(
+                "gate: sky {} near {} far {} cone {}",
+                sky_visible, n_near, n_far, n_cone
+            ));
         }
     }
     state
@@ -753,12 +783,15 @@ fn stream_step(state: &Arc<State>, env: Env) {
         // v5.2.2: /clod-pack.info serves LIVE scan counters (it used to
         // report the boot-time cells=0 forever).
         state.server.set_meta(valid, total_cells);
+        let p0 = players.first();
         crate::log_info(&format!(
-            "stream: tick {tick} {valid}/{total_cells} cells, lap {}, +{spawned} particles ({} players, culled {culled}), spawned {} / failed {}",
+            "stream: tick {tick} {valid}/{total_cells} cells, lap {}, +{spawned} particles ({} players, culled {culled}), spawned {} / failed {}, cam0 {}",
             laps,
             players.len(),
             jni::STREAM_SPAWNED.load(Ordering::Relaxed),
             jni::STREAM_FAILED.load(Ordering::Relaxed),
+            p0.map(|p| format!("yaw {:.0} pitch {:.0}", p.yaw, p.pitch))
+                .unwrap_or_else(|| "none".into()),
         ));
     }
 }
@@ -807,6 +840,8 @@ mod tests {
             bx: 100,
             by: 64,
             bz: 100,
+            yaw: 0.0,
+            pitch: 0.0,
         };
         assert_eq!(tier_for(&st, &p), Tier::Full);
         let p_far = PlayerInfo {
@@ -815,6 +850,8 @@ mod tests {
             bx: 90_000,
             by: 64,
             bz: 0,
+            yaw: 0.0,
+            pitch: 0.0,
         };
         // Outside the streamed disk: veil (no particles fly there).
         assert_eq!(tier_for(&st, &p_far), Tier::Veil);
@@ -824,6 +861,8 @@ mod tests {
             bx: 0,
             by: 64,
             bz: 0,
+            yaw: 0.0,
+            pitch: 0.0,
         };
         assert_eq!(tier_for(&st, &p_world), Tier::Veil);
         let p_noworld = PlayerInfo {
@@ -832,6 +871,8 @@ mod tests {
             bx: 0,
             by: 64,
             bz: 0,
+            yaw: 0.0,
+            pitch: 0.0,
         };
         assert_eq!(tier_for(&st, &p_noworld), Tier::Off);
     }

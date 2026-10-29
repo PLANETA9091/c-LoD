@@ -194,8 +194,8 @@ mod tests {
 
         let count = u16::from_le_bytes([pack.zip[n - 12], pack.zip[n - 11]]) as usize;
         assert_eq!(
-            count, 12,
-            "pack.mcmeta + 2 json + 7 fsh + sky.vsh + sky.fsh"
+            count, 13,
+            "pack.mcmeta + 2 json + 8 fsh + sky.vsh + sky.fsh"
         );
     }
 

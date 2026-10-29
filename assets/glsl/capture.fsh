@@ -66,15 +66,22 @@ void main() {
     // bench pose (yaw=180, pitch=-5, fov=70) decoded NOTHING the moment the
     // player turned — the projections missed every particle.
     vec4 rotP = texelFetch(RotSampler, ivec2(0, 0), 0);
+    if (rotP.b < 0.25) {
+        // v5.3.1 BLIND-CAMERA GATE: the camera channel is measured from sky
+        // pixels and its confidence decays once no sky is in view. Decoding
+        // with a stale pose would OR random hue noise into the persistent
+        // words and stamp garbage into the eraser mask. Pass the previous
+        // state through instead; the stream self-heals on the next sky view
+        // (confidence jumps back to 1 on the first valid row, frame-exact).
+        // The server-side spawn gate (stream.rs spawn_visible) stops feeding
+        // dots into sky-blind frustums, so there is nothing to decode here
+        // anyway — this gate keeps the buffers honest while conf decays.
+        fragColor = texelFetch(PrevSampler, px, 0);
+        return;
+    }
     float az = rotP.r * 2.0 * PI;
     float el = rotP.g * PI - PI * 0.5;
     float fov = 5.0 + rotP.a * 115.0;
-    if (rotP.b < 0.05) {
-        // No live camera yet (pre-first-frame): neutral noon pose fallback.
-        az = 180.0 * PI / 180.0;
-        el = -5.0 * PI / 180.0;
-        fov = 70.0;
-    }
 
     vec3 F = vec3(cos(el) * cos(az), sin(el), cos(el) * sin(az));
     vec3 R = vec3(-sin(az), 0.0, cos(az));
@@ -83,6 +90,25 @@ void main() {
     float tanH = tan(radians(fov) * 0.5);
     float aspect = ScreenSize.x / max(ScreenSize.y, 1.0);
     vec3 cam = vec3(CameraBlockPos) + CameraOffset;
+
+    // v5.3 UN-FOG: the vanilla particle renderer fogs the carrier exactly
+    // like terrain, so dots beyond the fog start fail the hue strobe (the
+    // green channel sinks toward the blue fog color — measured live:
+    // (112,149,139) instead of villager green). The fog state rides the
+    // same camera channel (group B, identical to lod_terrain.fsh); the
+    // loop un-fogs every strobe sample with the dot's own distance.
+    vec4 fogCol = texelFetch(RotSampler, ivec2(1, 0), 0);
+    vec4 fogRng = texelFetch(RotSampler, ivec2(0, 1), 0);
+    bool fogLive = fogRng.a > 0.5 && fogCol.a > 0.004;
+    float fStart = fogLive ? fogRng.r * 255.0 * 8.0 : 96.0;
+    float fEnd = fogLive ? fogRng.g * 255.0 * 8.0 : 320.0;
+    float vanRD = fogRng.b * 255.0 * 16.0;
+    vec3 fogTint = fogLive ? fogCol.rgb : vec3(0.75, 0.85, 1.0);
+    float fogOpacity = fogLive ? fogCol.a : 1.0;
+    float invEndFogDelta = 1.0 / max(fEnd - fStart, 1.0);
+    float startDelta = -fStart * invEndFogDelta;
+    float endDistance = max(fogLive ? vanRD : 128.0, 320.0) * 1.7320508;
+    float maxFog = clamp(endDistance * invEndFogDelta + startDelta, 0.0, 1.0);
 
     float cell = StreamInfo.x;
     float sub = StreamInfo.y;
@@ -116,13 +142,30 @@ void main() {
                 continue; // off screen
             }
             vec2 sc = ndc * 0.5 + 0.5;
-            // STROBE v5.3: hue match only (see the header — the depth gate
-            // blinded every sky-background dot; the carrier never writes
-            // depth anyway, the pixel depth was always the BACKGROUND's).
-            vec3 pc = texture(InSampler, sc).rgb;
-            bool dust = pc.g > 0.45
-                && pc.g > pc.r + 0.10
-                && pc.g > pc.b + 0.10;
+            // STROBE v5.3.1: 5-tap cross (center + 4 axis taps at 0.75
+            // texel) on the UN-FOGGED color. Tolerates +-0.75 px of camera
+            // jitter / angular motion between the client's particle
+            // projection and the rot-channel reconstruction (bilinear smear
+            // widens effective coverage to ~1.5 px); first passing tap wins.
+            // The dot's own distance z drives the same linear fog the
+            // renderer applied; (1-f) is clamped so deep-fog noise never
+            // explodes.
+            vec2 texel = 1.0 / ScreenSize;
+            float fog = clamp(z * invEndFogDelta + startDelta, 0.0, maxFog) * fogOpacity;
+            bool dust = false;
+            for (int t = 0; t < 5; ++t) {
+                vec2 off = t == 0 ? vec2(0.0)
+                    : t == 1 ? vec2(0.75 * texel.x, 0.0)
+                    : t == 2 ? vec2(-0.75 * texel.x, 0.0)
+                    : t == 3 ? vec2(0.0, 0.75 * texel.y)
+                    : vec2(0.0, -0.75 * texel.y);
+                vec3 raw = texture(InSampler, sc + off).rgb;
+                vec3 pc = (raw - fogTint * fog) / max(1.0 - fog, 0.15);
+                if (pc.g > 0.40 && pc.g > pc.r + 0.08 && pc.g > pc.b + 0.08) {
+                    dust = true;
+                    break;
+                }
+            }
             if (!dust) {
                 continue;
             }

@@ -21,3 +21,8 @@ jvmti-bindings = "2"
 lto = "fat"
 codegen-units = 1
 strip = "none"
+
+# Vendored with the float accessors the v5.3.1 spawn gate needs
+# (Location.getYaw/getPitch return float; upstream has int/long/bool/object only).
+[patch.crates-io]
+jvmti-bindings = { path = "vendor/jvmti-bindings" }

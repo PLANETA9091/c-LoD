@@ -159,6 +159,10 @@ struct LocationIds {
     m_get_block_y: jmethodID,
     m_get_block_z: jmethodID,
     m_loc_get_world: jmethodID,
+    /// v5.3.1: exact client camera (Bukkit syncs rotation every tick) —
+    /// drives the server-side spawn gate (frustum + sky-blind test).
+    m_get_yaw: jmethodID,
+    m_get_pitch: jmethodID,
 }
 // Raw method-ID pointers cached process-lifetime; consumed main-thread-only.
 unsafe impl Send for LocationIds {}
@@ -307,6 +311,8 @@ fn location_ids(env: Env, loc: jobject) -> Option<LocationIds> {
         m_get_block_y: bind_method(env, cls_local, cls, "getBlockY", "()I")?,
         m_get_block_z: bind_method(env, cls_local, cls, "getBlockZ", "()I")?,
         m_loc_get_world: bind_method(env, cls_local, cls, "getWorld", "()Lorg/bukkit/World;")?,
+        m_get_yaw: bind_method(env, cls_local, cls, "getYaw", "()F")?,
+        m_get_pitch: bind_method(env, cls_local, cls, "getPitch", "()F")?,
     };
     *LOCATION_IDS.lock().unwrap() = Some(ids);
     Some(ids)
@@ -608,9 +614,12 @@ pub struct PlayerInfo {
     pub uuid: String,
     pub world: String,
     pub bx: i32,
-    #[allow(dead_code)] // y is useful for future band filtering
+    /// Eye height anchor for the spawn gate (band filtering, v5.3.1).
     pub by: i32,
     pub bz: i32,
+    /// v5.3.1: exact client camera rotation (Bukkit yaw/pitch degrees).
+    pub yaw: f32,
+    pub pitch: f32,
 }
 
 pub struct WorldRef {
@@ -631,6 +640,15 @@ fn online_players_iter(env: Env, ids: &Ids) -> Option<jobject> {
     let collection = jobj(env.call_object_method(srv, ids.m_server_players, &[]))?;
     let iterator = jobj(env.call_object_method(collection, ids.m_iterator, &[]))?;
     Some(iterator)
+}
+
+/// JNI float method return. The vendored jvmti-bindings wrapper gained
+/// `call_float_method` for the v5.3.1 spawn gate (Location.getYaw/getPitch
+/// return float; upstream had int/long/bool/object only). Main thread only,
+/// live local ref. A pending exception (dead ref) yields 0.0 — the caller
+/// clears and skips.
+fn call_float_method(env: Env, obj: jobject, mid: jmethodID) -> f32 {
+    env.call_float_method(obj, mid, &[])
 }
 
 pub fn players(env: Env) -> Vec<PlayerInfo> {
@@ -672,6 +690,8 @@ pub fn players(env: Env) -> Vec<PlayerInfo> {
         let bx = env.call_int_method(loc, lids.m_get_block_x, &[]);
         let by = env.call_int_method(loc, lids.m_get_block_y, &[]);
         let bz = env.call_int_method(loc, lids.m_get_block_z, &[]);
+        let yaw = call_float_method(env, loc, lids.m_get_yaw);
+        let pitch = call_float_method(env, loc, lids.m_get_pitch);
         let world = jobj(env.call_object_method(loc, lids.m_loc_get_world, &[]))
             .and_then(|w| {
                 let wid = world_ids(env, w)?;
@@ -687,6 +707,8 @@ pub fn players(env: Env) -> Vec<PlayerInfo> {
             bx,
             by,
             bz,
+            yaw,
+            pitch,
         });
     }
     clear_if_pending(env);
