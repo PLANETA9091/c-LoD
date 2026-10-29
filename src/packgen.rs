@@ -115,6 +115,7 @@ pub fn build(cfg: &Config) -> Pack {
     let rot_solve = include_str!("../assets/glsl/rot_solve.fsh");
     let rot_copy = include_str!("../assets/glsl/rot_copy.fsh");
     let capture = include_str!("../assets/glsl/capture.fsh");
+    let dust_mask = include_str!("../assets/glsl/dust_mask.fsh");
     let lod_terrain = include_str!("../assets/glsl/lod_terrain.fsh");
     let clod_blit = include_str!("../assets/glsl/clod_blit.fsh");
     let atmosphere = include_str!("../assets/glsl/atmosphere.fsh");
@@ -143,6 +144,10 @@ pub fn build(cfg: &Config) -> Pack {
     );
     zip.add("assets/clod/shaders/post/rot_copy.fsh", rot_copy.as_bytes());
     zip.add("assets/clod/shaders/post/capture.fsh", capture.as_bytes());
+    zip.add(
+        "assets/clod/shaders/post/dust_mask.fsh",
+        dust_mask.as_bytes(),
+    );
     zip.add(
         "assets/clod/shaders/post/lod_terrain.fsh",
         lod_terrain.as_bytes(),

@@ -43,6 +43,14 @@ pub const PLANE_LO_Y: f64 = LAYER_Y[0];
 /// Water color index in the 6x6x6 lattice.
 pub const COLOR_WATER: u16 = 216;
 
+/// v5.3 proximity culling: particles never spawn within this radius (blocks,
+/// 3D, eye-centered) of a player. The near field needs no LOD — real chunks
+/// always win the depth test and the dome's near gate paints nothing inside
+/// the vanilla chunk bubble — and close dots are the largest, most visible
+/// ones. Skipped spawns also cut the packet budget for every player standing
+/// inside the disk.
+pub const CULL_RADIUS: f64 = 64.0;
+
 #[derive(Clone, Copy, Default, PartialEq)]
 pub struct Cell {
     pub height: i16,
@@ -161,6 +169,14 @@ impl Streamer {
                 z: cz + dz,
             });
         }
+    }
+
+    /// True when the spawn sits inside a player's cull sphere (v5.3).
+    pub fn within_cull(s: &Spawn, px: f64, py: f64, pz: f64, radius: f64) -> bool {
+        let dx = s.x - px;
+        let dy = s.y - py;
+        let dz = s.z - pz;
+        dx * dx + dy * dy + dz * dz < radius * radius
     }
 
     /// Advance the stream by one engine tick: fill the batch with at most
@@ -313,6 +329,18 @@ mod tests {
             assert!((p.x - (wx + 2.0)).abs() <= 1.6);
             assert!((p.z - (wz + 2.0)).abs() <= 1.6);
         }
+    }
+
+    #[test]
+    fn proximity_cull_matches_radius() {
+        let s = Spawn { x: 10.0, y: 80.0, z: 10.0 };
+        // Eye 5 blocks under the spawn: 3D distance 5 — inside 64, outside 4.
+        assert!(Streamer::within_cull(&s, 10.5, 74.62, 10.5, 64.0));
+        assert!(!Streamer::within_cull(&s, 10.5, 74.62, 10.5, 4.0));
+        // Far player: outside.
+        assert!(!Streamer::within_cull(&s, 200.0, 70.0, -300.0, 64.0));
+        // Exactly on the boundary counts as outside (strict <).
+        assert!(!Streamer::within_cull(&s, 10.0, 16.0, 10.0, 64.0));
     }
 
     #[test]

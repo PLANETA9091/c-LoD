@@ -714,11 +714,26 @@ fn stream_step(state: &Arc<State>, env: Env) {
         return;
     }
     let mut spawned = 0u64;
+    let mut culled = 0u64;
     for p in &players {
         let Some(handle) = jni::player_by_uuid(env, &p.uuid) else {
             continue;
         };
+        // v5.3 proximity culling: no particles within CULL_RADIUS (3D, eye)
+        // of THIS player — the near field needs no LOD (real chunks win by
+        // depth, the dome's near gate paints nothing inside the bubble) and
+        // close dots are the largest, most visible ones. Every other player
+        // still receives them, so the shared disk decodes from vantages.
+        let px = f64::from(p.bx) + 0.5;
+        let py = f64::from(p.by) + 1.62;
+        let pz = f64::from(p.bz) + 0.5;
         for sp in &batch {
+            if crate::stream::Streamer::within_cull(
+                sp, px, py, pz, crate::stream::CULL_RADIUS,
+            ) {
+                culled += 1;
+                continue;
+            }
             if unsafe { jni::spawn_particle(env, handle, sp.x, sp.y, sp.z) } {
                 spawned += 1;
             }
@@ -739,7 +754,7 @@ fn stream_step(state: &Arc<State>, env: Env) {
         // report the boot-time cells=0 forever).
         state.server.set_meta(valid, total_cells);
         crate::log_info(&format!(
-            "stream: tick {tick} {valid}/{total_cells} cells, lap {}, +{spawned} particles ({} players), spawned {} / failed {}",
+            "stream: tick {tick} {valid}/{total_cells} cells, lap {}, +{spawned} particles ({} players, culled {culled}), spawned {} / failed {}",
             laps,
             players.len(),
             jni::STREAM_SPAWNED.load(Ordering::Relaxed),

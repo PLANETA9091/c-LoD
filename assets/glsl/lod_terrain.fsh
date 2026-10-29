@@ -39,6 +39,7 @@ uniform sampler2D InDepthSampler; // minecraft:main depth
 uniform sampler2D HeightSampler;  // clod_h_b — streamed height bytes (1 px = 1 cell)
 uniform sampler2D ColBufSampler;  // clod_c_b — streamed color index bytes (1 px = 1 cell)
 uniform sampler2D RotSampler;     // clod:clod_rot_a (2x2 persistent, camera + fog channel)
+uniform sampler2D MaskSampler;    // clod_mask — dust eraser mask (this frame, v5.3)
 
 // v5.0.3: SamplerInfo never existed as a client UBO — it stayed zeroed
 // (the whole capture wrote cell (0,0), the march divided by zero).
@@ -306,10 +307,50 @@ float edge_distance_xz(vec3 cam, vec3 dir, vec2 minW, vec2 maxW) {
     return e * length(dir.xz);
 }
 
+// v5.3 DUST ERASER: fill a mask-disc from unmasked surroundings. Two rings
+// of 8 samples at r+1 and 2r+2 px; masked samples are skipped so a
+// neighboring dot never bleeds into the fill. A rare fully-surrounded
+// pixel keeps its raw color (still better than a hole). The eye never
+// sees the transport: capture already read the dust BEFORE this repaint.
+vec3 erase_dust(float r) {
+    vec2 s1 = vec2(r + 1.0) / ScreenSize;
+    vec2 s2 = vec2(2.0 * r + 2.0) / ScreenSize;
+    vec3 sum = vec3(0.0);
+    float cnt = 0.0;
+    for (int i = 0; i < 8; ++i) {
+        float a = float(i) * 0.7853981634;
+        vec2 d = vec2(cos(a), sin(a));
+        vec2 q1 = texCoord + d * s1;
+        if (texture(MaskSampler, q1).r < 0.5) {
+            sum += texture(InSampler, q1).rgb;
+            cnt += 1.0;
+        }
+        vec2 q2 = texCoord + d * s2;
+        if (texture(MaskSampler, q2).r < 0.5) {
+            sum += texture(InSampler, q2).rgb;
+            cnt += 1.0;
+        }
+    }
+    if (cnt > 0.5) {
+        return sum / cnt;
+    }
+    return texture(InSampler, texCoord).rgb;
+}
+
 void main() {
     vec4 scene = texture(InSampler, texCoord);
     float depth = texture(InDepthSampler, texCoord).r;
     vec2 px = texCoord * ScreenSize;
+
+    // v5.3 DUST ERASER runs FIRST: masked pixels are repainted from their
+    // surroundings before anything else. Over real terrain the early return
+    // below then passes the cleaned color through; over sky the dome path
+    // uses the cleaned color as its fog-blend base. The transport is
+    // invisible from every vantage while capture decoded it unharmed.
+    vec4 mk = texture(MaskSampler, texCoord);
+    if (mk.r > 0.5) {
+        scene.rgb = erase_dust(mk.g * 64.0);
+    }
 
     // 26.3 device depth (live-verified): d = near/eyeZ, infinite far plane —
     // the sky and the sun/moon quads sit at EXACTLY 0.0, real terrain reads
@@ -513,6 +554,13 @@ void main() {
     float rEdge = max(edge_distance_xz(cam, dir, hmin, hmax), 1.0);
     float fadeOut = clamp((lenXZ - FADE_START * rEdge) / max((1.0 - FADE_START) * rEdge, 1.0), 0.0, 1.0);
 
-    vec3 outCol = mix(mix(scene.rgb, lit, fade), scene.rgb, fadeOut);
+    // v5.3 NEAR GATE (backlog "paint spills onto the near dome"): the dome
+    // paints ONLY beyond the vanilla chunk bubble. Real chunks own the
+    // inside of vanRD by depth; chunk-load gaps during fast motion now show
+    // vanilla sky instead of a flat dome wall.
+    float rd = fogLive ? max(vanRD, 64.0) : 128.0;
+    float gate = smoothstep(rd * 0.92, rd * 1.10, tHit);
+
+    vec3 outCol = mix(mix(scene.rgb, lit, fade * gate), scene.rgb, fadeOut);
     fragColor = vec4(outCol, scene.a);
 }

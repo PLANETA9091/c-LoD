@@ -7,6 +7,7 @@
         "clod_h_b": { "width": 256, "height": 256, "persistent": true },
         "clod_c_a": { "width": 256, "height": 256, "persistent": true },
         "clod_c_b": { "width": 256, "height": 256, "persistent": true },
+        "clod_mask": {},
         "clod_swap": {}
     },
     "passes": [
@@ -114,13 +115,32 @@
         },
         {
             "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/dust_mask",
+            "inputs": [
+                { "sampler_name": "Height", "target": "clod_h_b" },
+                { "sampler_name": "ColBuf", "target": "clod_c_b" },
+                { "sampler_name": "Rot", "target": "clod_rot_a" }
+            ],
+            "output": "clod_mask",
+            "uniforms": {
+                "ClodGrid": [
+                    { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __PLANE_HI_Y__, __PLANE_LO_Y__] }
+                ],
+                "ClodStream": [
+                    { "name": "StreamInfo", "type": "vec4", "value": [__CELL__, __SUB__, __DEPTH_NEAR__, 0.0] }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
             "fragment_shader": "clod:post/lod_terrain",
             "inputs": [
                 { "sampler_name": "In", "target": "minecraft:main" },
                 { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
                 { "sampler_name": "Height", "target": "clod_h_b" },
                 { "sampler_name": "ColBuf", "target": "clod_c_b" },
-                { "sampler_name": "Rot", "target": "clod_rot_a" }
+                { "sampler_name": "Rot", "target": "clod_rot_a" },
+                { "sampler_name": "Mask", "target": "clod_mask" }
             ],
             "output": "clod_swap",
             "uniforms": {

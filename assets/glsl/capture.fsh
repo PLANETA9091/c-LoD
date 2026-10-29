@@ -16,11 +16,20 @@
 //
 // This pass decodes ONE word back into its persistent 256x256 target (1 px
 // = 1 cell). For the pixel's cell it re-projects all 16 sub-particle
-// positions onto the screen (probe camera), strobes every projection: the
-// pixel must sit in front of geometry (device depth > 0), and its main
-// color must match the bright villager-green hue — then OR-merges the
-// decoded word into the previous value. Anything not strobed keeps its old
-// value; the stream self-heals on the next lap.
+// positions onto the screen (probe camera) and strobes every projection
+// against the bright villager-green hue, then OR-merges the decoded word
+// into the previous value. Anything not strobed keeps its old value; the
+// stream self-heals on the next lap.
+//
+// v5.3: the old sky-depth rejection (dep < 1e-6) is GONE. 26.3 reversed-Z
+// reads the bare sky as depth 0 and the carrier (translucent sheet) never
+// writes depth, so the old gate silently blinded the decoder to every dot
+// against the sky — the most visible ones, and the whole HI plane from
+// ground views. The hue test alone is precise (sky is blue: g - b < 0),
+// sky-background dots now decode AND get erased by the dust-mask pass.
+// v5.3: the fresh THIS-frame word also rides the .b channel (never
+// OR-merged) — dust_mask.fsh projects exactly those live sub-positions
+// to build the eraser mask.
 
 uniform sampler2D InSampler;      // minecraft:main color (dust hue strobe)
 uniform sampler2D InDepthSampler; // minecraft:main depth (in-front-of-geometry test)
@@ -107,14 +116,9 @@ void main() {
                 continue; // off screen
             }
             vec2 sc = ndc * 0.5 + 0.5;
-            // STROBE: the particle must render in front of geometry
-            // (device depth > 0; against the bare sky particles are
-            // hidden by the reversed-Z pipeline), and its hue must match
-            // the bright villager-green carrier.
-            float dep = texture(InDepthSampler, sc).r;
-            if (dep < 1.0e-6) {
-                continue; // against the bare sky — no read possible
-            }
+            // STROBE v5.3: hue match only (see the header — the depth gate
+            // blinded every sky-background dot; the carrier never writes
+            // depth anyway, the pixel depth was always the BACKGROUND's).
             vec3 pc = texture(InSampler, sc).rgb;
             bool dust = pc.g > 0.45
                 && pc.g > pc.r + 0.10
@@ -131,5 +135,11 @@ void main() {
     uint prevByte = uint(prev.r * 255.0 + 0.5);
     uint outByte = anyHit ? (prevByte | (word >> 8)) : prevByte;
     float mark = anyHit ? 1.0 : prev.a;
-    fragColor = vec4(float(outByte) / 255.0, anyHit ? 1.0 : 0.0, 0.0, mark);
+    // .b = the FRESH word (this frame, not OR-merged) for the eraser mask.
+    fragColor = vec4(
+        float(outByte) / 255.0,
+        anyHit ? 1.0 : 0.0,
+        float(word >> 8) / 255.0,
+        mark
+    );
 }
