@@ -115,6 +115,7 @@ pub fn build(cfg: &Config) -> Pack {
     let rot_solve = include_str!("../assets/glsl/rot_solve.fsh");
     let rot_copy = include_str!("../assets/glsl/rot_copy.fsh");
     let capture = include_str!("../assets/glsl/capture.fsh");
+    let dust_conceal = include_str!("../assets/glsl/dust_conceal.fsh");
     let lod_terrain = include_str!("../assets/glsl/lod_terrain.fsh");
     let clod_blit = include_str!("../assets/glsl/clod_blit.fsh");
     let atmosphere = include_str!("../assets/glsl/atmosphere.fsh");
@@ -143,6 +144,10 @@ pub fn build(cfg: &Config) -> Pack {
     );
     zip.add("assets/clod/shaders/post/rot_copy.fsh", rot_copy.as_bytes());
     zip.add("assets/clod/shaders/post/capture.fsh", capture.as_bytes());
+    zip.add(
+        "assets/clod/shaders/post/dust_conceal.fsh",
+        dust_conceal.as_bytes(),
+    );
     zip.add(
         "assets/clod/shaders/post/lod_terrain.fsh",
         lod_terrain.as_bytes(),
@@ -189,8 +194,8 @@ mod tests {
 
         let count = u16::from_le_bytes([pack.zip[n - 12], pack.zip[n - 11]]) as usize;
         assert_eq!(
-            count, 12,
-            "pack.mcmeta + 2 json + 7 fsh + sky.vsh + sky.fsh"
+            count, 13,
+            "pack.mcmeta + 2 json + 8 fsh + sky.vsh + sky.fsh"
         );
     }
 
@@ -253,6 +258,14 @@ mod tests {
         let chain = String::from_utf8_lossy(chain);
         assert!(chain.contains("clod:post/capture"), "capture pass missing");
         assert!(
+            chain.contains("clod:post/dust_conceal"),
+            "dust conceal pass missing"
+        );
+        assert!(
+            chain.contains("clod_conceal_swap"),
+            "conceal side target missing"
+        );
+        assert!(
             chain.contains("clod:post/lod_terrain"),
             "march pass missing"
         );
@@ -269,6 +282,37 @@ mod tests {
         assert!(
             !chain.contains("ScanBox"),
             "the static scan box is gone (sky-grid)"
+        );
+        // ORDER: conceal must sit AFTER the last capture pass (it must not
+        // hide the dust before the strobe reads it) and BEFORE the march
+        // (the eye must never see the carrier through the final blit).
+        let last_capture = chain.rfind("clod:post/capture").unwrap();
+        let conceal = chain.find("clod:post/dust_conceal").unwrap();
+        let march = chain.find("clod:post/lod_terrain").unwrap();
+        assert!(
+            last_capture < conceal && conceal < march,
+            "chain order must be capture..capture -> dust_conceal -> lod_terrain"
+        );
+        // The march must consume the CONCEALED frame (its In input is
+        // rewired), while its depth input stays on the live main target
+        // (the conceal pass never writes depth). Exactly 3 occurrences:
+        // targets definition + conceal pass output + march input.
+        assert_eq!(
+            chain.matches("clod_conceal_swap").count(),
+            3,
+            "conceal target: definition + output + march input"
+        );
+        let march_inputs = &chain[march..];
+        assert!(
+            march_inputs
+                .contains("{ \"sampler_name\": \"In\", \"target\": \"clod_conceal_swap\" }"),
+            "march must read the concealed color target"
+        );
+        assert!(
+            march_inputs.contains(
+                "{ \"sampler_name\": \"InDepth\", \"target\": \"minecraft:main\", \"use_depth_buffer\": true }"
+            ),
+            "march depth must stay on the live main target"
         );
     }
 

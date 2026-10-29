@@ -7,7 +7,8 @@
         "clod_h_b": { "width": 256, "height": 256, "persistent": true },
         "clod_c_a": { "width": 256, "height": 256, "persistent": true },
         "clod_c_b": { "width": 256, "height": 256, "persistent": true },
-        "clod_swap": {}
+        "clod_swap": {},
+        "clod_conceal_swap": {}
     },
     "passes": [
         {
@@ -114,9 +115,17 @@
         },
         {
             "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/dust_conceal",
+            "inputs": [
+                { "sampler_name": "In", "target": "minecraft:main" }
+            ],
+            "output": "clod_conceal_swap"
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
             "fragment_shader": "clod:post/lod_terrain",
             "inputs": [
-                { "sampler_name": "In", "target": "minecraft:main" },
+                { "sampler_name": "In", "target": "clod_conceal_swap" },
                 { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
                 { "sampler_name": "Height", "target": "clod_h_b" },
                 { "sampler_name": "ColBuf", "target": "clod_c_b" },

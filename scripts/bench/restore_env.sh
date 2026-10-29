@@ -34,7 +34,10 @@ if [ ! -x "$T/jdk-25.0.5+8/bin/java" ]; then
   (cd "$T" && tar xzf jdk25.tar.gz)
 fi
 ln -sfn "$T/jdk-25.0.5+8" ~/mc-test/jdk25
-~/mc-test/jdk25/bin/java -version 2>&1 | head -1
+# boot_server.sh resolves the JVM at /home/z/tools/jdk25 — keep BOTH
+# symlinks alive (sandbox resets drop the tools dir wholesale).
+ln -sfn "$T/jdk-25.0.5+8" "$T/jdk25"
+"$T/jdk25/bin/java" -version 2>&1 | head -1
 
 # ---- glslang 16.6.0 -------------------------------------------------------
 if [ ! -x "$T/glslang/bin/glslangValidator" ]; then
