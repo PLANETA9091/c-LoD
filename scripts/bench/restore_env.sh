@@ -34,6 +34,7 @@ if [ ! -x "$T/jdk-25.0.5+8/bin/java" ]; then
   (cd "$T" && tar xzf jdk25.tar.gz)
 fi
 ln -sfn "$T/jdk-25.0.5+8" ~/mc-test/jdk25
+ln -sfn "$T/jdk-25.0.5+8" "$T/jdk25"   # boot_server.sh resolves $HOME/tools/jdk25
 ~/mc-test/jdk25/bin/java -version 2>&1 | head -1
 
 # ---- glslang 16.6.0 -------------------------------------------------------
