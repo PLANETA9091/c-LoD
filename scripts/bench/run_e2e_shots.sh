@@ -8,8 +8,8 @@ set -uo pipefail
 SHOTS="$HOME/mc-test/shots"
 mkdir -p "$SHOTS"
 
-CX=-1186; CZ=542      # bench disk center (boot_server.sh CLOD_OPTS)
-EDGE=$(( 256 ))       # disk radius in blocks
+CX=0; CZ=64           # bench disk center (boot_server.sh CLOD_OPTS center_x=0;center_z=64)
+EDGE=$(( 512 ))       # disk radius in blocks (region_blocks=512)
 
 srv() { echo "$1" > /tmp/server.in; }
 
@@ -73,6 +73,12 @@ wait_for "sky-grid stream armed" /tmp/server.log 120 \
 STREAM_OK=0
 for i in $(seq 1 300); do
   CELLS=$(curl -s http://127.0.0.1:8199/clod-pack.info | rg -o "cells=([0-9]+)/([0-9]+)" -r '$1' || echo 0)
+  # v5.1.0: the info endpoint may under-report (meta.cells=0 cosmetic bug) —
+  # fall back to the live server.log stream counter "N/65536 cells".
+  if [ "${CELLS:-0}" -lt 2000 ]; then
+    LOGCELLS=$(rg -o "([0-9]+)/65536 cells" /tmp/server.log -r '$1' 2>/dev/null | tail -1 || echo 0)
+    [ "${LOGCELLS:-0}" -gt "${CELLS:-0}" ] 2>/dev/null && CELLS=$LOGCELLS
+  fi
   [ "${CELLS:-0}" -ge 2000 ] 2>/dev/null && { STREAM_OK=1; break; }
   sleep 1
 done

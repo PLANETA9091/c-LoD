@@ -22,6 +22,7 @@ use crate::http::PackServer;
 use crate::jni::{self, PlayerInfo};
 use crate::packgen::{self, Pack};
 use crate::stream::{Cell, Streamer};
+use jvmti_bindings::jni::jobject;
 use jvmti_bindings::prelude::JniEnv;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
@@ -492,6 +493,47 @@ pub enum Tier {
     Full,
 }
 
+/// Keep one posteffect chain in sync with the player's tier. Returns the
+/// new "chain is on" state.
+///
+/// v5.1.0 finding: `pe.add(Key)` can return false persistently while the
+/// chain is ALREADY on the player's effect list (server/client list desync
+/// after a pack reload or a client relog) — the old code spammed
+/// "add -> false" every tick and never recovered. The healer mirrors the
+/// proven manual fix: remove (clears the stale entry) + add again,
+/// throttled to every 100th tick so a permanently broken add cannot flood
+/// the log.
+fn sync_effect(
+    env: Env,
+    handle: jobject,
+    key: jobject,
+    on: bool,
+    want: bool,
+    name: &str,
+    tick: u64,
+) -> bool {
+    if want && !on {
+        let mut ok = jni::add_effect(env, handle, key);
+        if ok {
+            crate::log_info(&format!("effect {name} add -> true"));
+        } else if tick.is_multiple_of(100) {
+            jni::remove_effect(env, handle, key);
+            ok = jni::add_effect(env, handle, key);
+            crate::log_info(&format!(
+                "effect {name} add -> {} (remove+add healer, tick {tick})",
+                ok
+            ));
+        }
+        ok
+    } else if !want && on {
+        let ok = jni::remove_effect(env, handle, key);
+        crate::log_info(&format!("effect {name} remove -> {} ({})", ok, name));
+        !ok
+    } else {
+        on
+    }
+}
+
 fn manage_players(state: &Arc<State>, env: Env) {
     let keys = state.keys.lock().unwrap().clone();
     let Some(keys) = keys else { return };
@@ -599,29 +641,26 @@ fn manage_players(state: &Arc<State>, env: Env) {
             let want_terrain = have_pack && tier == Tier::Full && keys.terrain != 0;
             let want_atmo =
                 have_pack && (tier == Tier::Full || tier == Tier::Veil) && keys.atmosphere != 0;
+            let tick = state.tick_no.load(Ordering::Relaxed);
 
-            if want_terrain && !st.terrain_on {
-                st.terrain_on = jni::add_effect(env, handle, unsafe { as_obj(keys.terrain) });
-                crate::log_info(&format!(
-                    "effect terrain add -> {} ({} {})",
-                    st.terrain_on, p.uuid, tier_no
-                ));
-            } else if !want_terrain && st.terrain_on {
-                let ok = jni::remove_effect(env, handle, unsafe { as_obj(keys.terrain) });
-                st.terrain_on = !ok;
-                crate::log_info(&format!("effect terrain remove -> {} ({})", ok, p.uuid));
-            }
-            if want_atmo && !st.atmosphere_on {
-                st.atmosphere_on = jni::add_effect(env, handle, unsafe { as_obj(keys.atmosphere) });
-                crate::log_info(&format!(
-                    "effect atmosphere add -> {} ({} {})",
-                    st.atmosphere_on, p.uuid, tier_no
-                ));
-            } else if !want_atmo && st.atmosphere_on {
-                let ok = jni::remove_effect(env, handle, unsafe { as_obj(keys.atmosphere) });
-                st.atmosphere_on = !ok;
-                crate::log_info(&format!("effect atmosphere remove -> {} ({})", ok, p.uuid));
-            }
+            st.terrain_on = sync_effect(
+                env,
+                handle,
+                unsafe { as_obj(keys.terrain) },
+                st.terrain_on,
+                want_terrain,
+                "terrain",
+                tick,
+            );
+            st.atmosphere_on = sync_effect(
+                env,
+                handle,
+                unsafe { as_obj(keys.atmosphere) },
+                st.atmosphere_on,
+                want_atmo,
+                "atmosphere",
+                tick,
+            );
         }
 
         state.per_player.lock().unwrap().insert(p.uuid.clone(), st);

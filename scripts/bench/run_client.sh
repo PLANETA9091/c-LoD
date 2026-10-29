@@ -41,6 +41,9 @@ grep -q "^onboardAccessibility:" "$OPT" && sed -i 's/^onboardAccessibility:.*/on
 grep -q "^tutorialStep:" "$OPT" && sed -i 's/^tutorialStep:.*/tutorialStep:none/' "$OPT" || echo "tutorialStep:none" >> "$OPT"
 grep -q "^biomeBlendRadius:" "$OPT" && sed -i 's/^biomeBlendRadius:.*/biomeBlendRadius:0/' "$OPT" || echo "biomeBlendRadius:0" >> "$OPT"
 grep -q "^simulationDistance:" "$OPT" && sed -i 's/^simulationDistance:.*/simulationDistance:4/' "$OPT" || echo "simulationDistance:4" >> "$OPT"
+# v5.1.1 A/B hygiene: vanilla clouds drift between shots and poison the
+# pixel diff with thousands of false-change pixels. Kill them.
+grep -q "^renderClouds:" "$OPT" && sed -i 's/^renderClouds:.*/renderClouds:false/' "$OPT" || echo "renderClouds:false" >> "$OPT"
 
 export LP_NUM_THREADS=$(nproc)
 nohup "$JAVA" -Xmx1200M \
