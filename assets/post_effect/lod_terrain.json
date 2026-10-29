@@ -119,6 +119,9 @@
             "inputs": [
                 { "sampler_name": "Height", "target": "clod_h_b" },
                 { "sampler_name": "ColBuf", "target": "clod_c_b" },
+                { "sampler_name": "Height2", "target": "clod_h_a" },
+                { "sampler_name": "ColBuf2", "target": "clod_c_a" },
+                { "sampler_name": "In", "target": "minecraft:main" },
                 { "sampler_name": "Rot", "target": "clod_rot_a" }
             ],
             "output": "clod_mask",

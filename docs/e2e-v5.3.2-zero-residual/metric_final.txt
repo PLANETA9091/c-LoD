@@ -1,0 +1,5 @@
+frame 1280x720
+changed   4312 (0.4679%)
+green_off 1148
+green_on  0
+resid     0.0000%

@@ -15,6 +15,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 command -v glslangValidator >/dev/null || {
+  # Sandbox-reset fallback: the bench toolchain lives in /home/z/tools.
+  if [ -x /home/z/tools/glslang/bin/glslangValidator ]; then
+    export PATH="/home/z/tools/glslang/bin:$PATH"
+  fi
+}
+command -v glslangValidator >/dev/null || {
   echo "glslangValidator not found" >&2
   exit 1
 }

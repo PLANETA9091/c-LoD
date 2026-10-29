@@ -275,6 +275,30 @@ mod tests {
             !chain.contains("ScanBox"),
             "the static scan box is gone (sky-grid)"
         );
+        // v5.3.2 zero-residual: the mask must sit between the last capture
+        // and the march, read BOTH capture rounds' fresh words plus the raw
+        // frame (color net), and consume the same ClodGrid/ClodStream UBOs.
+        let last_capture = chain.rfind("clod:post/capture").unwrap();
+        let mask = chain.find("clod:post/dust_mask").unwrap();
+        let march = chain.find("clod:post/lod_terrain").unwrap();
+        assert!(
+            last_capture < mask && mask < march,
+            "chain order must be capture..capture -> dust_mask -> lod_terrain"
+        );
+        let mask_pass = &chain[mask..march];
+        for token in [
+            "\"target\": \"clod_h_b\"",
+            "\"target\": \"clod_c_b\"",
+            "\"target\": \"clod_h_a\"",
+            "\"target\": \"clod_c_a\"",
+            "\"target\": \"minecraft:main\"",
+            "\"target\": \"clod_rot_a\"",
+        ] {
+            assert!(
+                mask_pass.contains(token),
+                "dust_mask inputs must carry both capture rounds + main + rot: {token}"
+            );
+        }
     }
 
     #[test]

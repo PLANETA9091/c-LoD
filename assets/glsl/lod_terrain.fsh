@@ -307,28 +307,29 @@ float edge_distance_xz(vec3 cam, vec3 dir, vec2 minW, vec2 maxW) {
     return e * length(dir.xz);
 }
 
-// v5.3 DUST ERASER: fill a mask-disc from unmasked surroundings. Two rings
-// of 8 samples at r+1 and 2r+2 px; masked samples are skipped so a
-// neighboring dot never bleeds into the fill. A rare fully-surrounded
-// pixel keeps its raw color (still better than a hole). The eye never
-// sees the transport: capture already read the dust BEFORE this repaint.
+// v5.3 DUST ERASER: fill a mask-disc from unmasked surroundings.
+// v5.3.2: ADAPTIVE rings. Dense spawn waves mask whole neighborhoods — a
+// fixed 3-ring kernel landed entirely inside the mask (cnt == 0) and the
+// raw green survived at the dot-band edge (measured live: 59 px/frame).
+// The kernel now doubles its radius (r+1 .. 16r+16) until it has enough
+// unmasked background; the early exit keeps ordinary dots filled locally.
 vec3 erase_dust(float r) {
-    vec2 s1 = vec2(r + 1.0) / ScreenSize;
-    vec2 s2 = vec2(2.0 * r + 2.0) / ScreenSize;
     vec3 sum = vec3(0.0);
     float cnt = 0.0;
-    for (int i = 0; i < 8; ++i) {
-        float a = float(i) * 0.7853981634;
-        vec2 d = vec2(cos(a), sin(a));
-        vec2 q1 = texCoord + d * s1;
-        if (texture(MaskSampler, q1).r < 0.5) {
-            sum += texture(InSampler, q1).rgb;
-            cnt += 1.0;
+    for (int k = 0; k < 5; ++k) {
+        float rad = (k == 0) ? (r + 1.0) : (2.0 * r + 2.0) * float(1 << (k - 1));
+        vec2 s = vec2(rad) / ScreenSize;
+        for (int i = 0; i < 8; ++i) {
+            float a = float(i) * 0.7853981634;
+            vec2 d = vec2(cos(a), sin(a));
+            vec2 q = texCoord + d * s;
+            if (texture(MaskSampler, q).r < 0.5) {
+                sum += texture(InSampler, q).rgb;
+                cnt += 1.0;
+            }
         }
-        vec2 q2 = texCoord + d * s2;
-        if (texture(MaskSampler, q2).r < 0.5) {
-            sum += texture(InSampler, q2).rgb;
-            cnt += 1.0;
+        if (cnt > 3.0) {
+            break;
         }
     }
     if (cnt > 0.5) {

@@ -21,10 +21,25 @@
 //
 // Geometry MUST match src/stream.rs::word_spawns and capture.fsh exactly:
 // spawn = cell CENTER + ((qx - 1.5) * sub, 0, (slot - 1.5) * sub).
+//
+// v5.3.2 ZERO-RESIDUAL: the projection above only covers dots whose word
+// decoded this frame. A strobe miss (rendered sprite offset beyond the
+// 5-tap cross, or hue sunk below threshold at the fog edge) leaves a live
+// green pixel with NO mask — the measured 19 residual px/frame. Two closes:
+// (1) the mask now merges BOTH capture rounds' fresh words (the first
+// round's word used to die in the h_a/c_a ping-pong twin); (2) a COLOR NET
+// marks every screen pixel inside the spawn decode band whose raw color
+// carries the bright carrier hue — a strobe miss cannot survive it. Outside
+// the band no live dots exist by construction (stream.rs spawn gate), so
+// grass/leaves far away keep their pixels; inside it a false positive only
+// repaints a texel from its own surroundings (self-repairing).
 
-uniform sampler2D HeightSampler; // clod_h_b — fresh HI words (this frame)
-uniform sampler2D ColBufSampler; // clod_c_b — fresh LO words (this frame)
-uniform sampler2D RotSampler;    // clod_rot_a (camera channel)
+uniform sampler2D HeightSampler;  // clod_h_b — fresh HI words (this frame)
+uniform sampler2D ColBufSampler;  // clod_c_b — fresh LO words (this frame)
+uniform sampler2D Height2Sampler; // clod_h_a — round-1 ping-pong twin (v5.3.2)
+uniform sampler2D ColBuf2Sampler; // clod_c_a — round-1 ping-pong twin (v5.3.2)
+uniform sampler2D InSampler;      // minecraft:main — per-pixel color net (v5.3.2)
+uniform sampler2D RotSampler;     // clod_rot_a (camera channel)
 
 // x = origin_x, y = origin_z, z = HIGH layer y, w = LOW layer y
 layout(std140) uniform ClodGrid {
@@ -73,6 +88,13 @@ void main() {
 
     float marked = 0.0;
     float radius = 4.0;
+    // v5.3.2a: per-plane crossing distances for the color-net band gate.
+    // A HI dot seen slightly upward crosses the LO plane a few meters from
+    // the eye (the LO plane rides 2 m above it) — the NEAREST crossing says
+    // nothing about which plane the dot lives on, so the gate must accept
+    // EITHER plane inside the spawn decode band.
+    float tHi = 1.0e9;
+    float tLo = 1.0e9;
 
     // Two planes: HI word on the high layer, LO word on the low layer.
     for (int sel = 0; sel < 2; ++sel) {
@@ -83,6 +105,12 @@ void main() {
         float t = (planeY - cam.y) / dir.y;
         if (t < 2.0 || t > 4096.0) {
             continue; // plane behind the camera or absurdly far
+        }
+        t = clamp(t, 2.0, 4096.0);
+        if (sel == 0) {
+            tHi = min(tHi, t);
+        } else {
+            tLo = min(tLo, t);
         }
         vec2 X = cam.xz + dir.xz * t;
         vec2 cellF = (X - GridInfo.xy) / cell;
@@ -95,10 +123,20 @@ void main() {
                 }
                 vec4 b = sel == 0 ? texelFetch(HeightSampler, c, 0)
                                   : texelFetch(ColBufSampler, c, 0);
-                if (b.g < 0.5) {
+                vec4 b2 = sel == 0 ? texelFetch(Height2Sampler, c, 0)
+                                   : texelFetch(ColBuf2Sampler, c, 0);
+                if (b.g < 0.5 && b2.g < 0.5) {
                     continue; // word not strobed this frame: no live dots
                 }
-                uint byte = uint(floor(b.b * 255.0 + 0.5));
+                // v5.3.2: merge both rounds' fresh bytes (they are identical
+                // for a steady frame; OR covers pipeline edge cases).
+                uint byte = 0u;
+                if (b.g >= 0.5) {
+                    byte |= uint(floor(b.b * 255.0 + 0.5));
+                }
+                if (b2.g >= 0.5) {
+                    byte |= uint(floor(b2.b * 255.0 + 0.5));
+                }
                 vec2 center = GridInfo.xy + (vec2(c) + 0.5) * cell;
                 for (int s = 0; s < 4; ++s) {
                     uint qx = (byte >> uint(6 - 2 * s)) & 3u;
@@ -141,6 +179,24 @@ void main() {
         }
         if (marked > 0.5) {
             break;
+        }
+    }
+
+    // v5.3.2 COLOR NET — the strobe-miss safety net (see header). Same hue
+    // gate as the capture strobe's raw branch.
+    // v5.3.2b TWO TIERS: in-band dots get the roomy 3px disc; OUT-OF-BAND
+    // carrier hue still gets a 2px disc. Out-of-band green exists: stale
+    // dots from a pre-teleport camera keep rendering (and rising) for their
+    // whole 3-5 s lifetime against the NEW view — undecodable, unprojectable,
+    // but plainly visible (measured live: 2-61 px/frame right after hops).
+    // The fill is self-repairing, so the wider vegetation false-positive
+    // surface costs nothing visible.
+    bool bandOK = (tHi >= 24.0 && tHi <= 128.0) || (tLo >= 24.0 && tLo <= 128.0);
+    if (marked < 0.5) {
+        vec3 raw = texture(InSampler, texCoord).rgb;
+        if (raw.g > 0.45 && raw.g > raw.r + 0.08 && raw.g > raw.b + 0.08) {
+            marked = 1.0;
+            radius = bandOK ? 3.0 : 2.0;
         }
     }
 
