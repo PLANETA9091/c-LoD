@@ -134,6 +134,7 @@ pub fn tick(state: &Arc<State>, env: Env) {
         ));
     }
     ensure_boot(state, env);
+    arm_from_config(state);
     stream_scan(state, env);
     poll_forced(state, env);
     stream_step(state, env);
@@ -267,10 +268,11 @@ fn stream_scan(state: &Arc<State>, env: Env) {
         return;
     }
     let world = unsafe { as_obj(world_handle) };
-    let players = jni::players(env);
-    if players.is_empty() {
-        return;
-    }
+    // v5.6: pre-join warm scan. With nobody online we still sample cells
+    // whose chunks are ALREADY loaded (spawn area warm-up before the first
+    // join) — but the async force frontier stays player-gated: no tickets
+    // are churned on an idle server (v5.0.4 crash mitigation).
+    let allow_force = !jni::players(env).is_empty();
     let budget = state.cfg.scan_budget;
     let (side, ox, oz, cell) = {
         let s = state.stream.lock().unwrap();
@@ -298,7 +300,14 @@ fn stream_scan(state: &Arc<State>, env: Env) {
             let wx = ox + f64::from(cx) * f64::from(cell);
             let wz = oz + f64::from(cz) * f64::from(cell);
             scan_cell(
-                state, env, world, cx as u32, cz as u32, wx as i32, wz as i32,
+                state,
+                env,
+                world,
+                cx as u32,
+                cz as u32,
+                wx as i32,
+                wz as i32,
+                allow_force,
             );
             done += 1;
             done >= budget
@@ -322,7 +331,10 @@ fn stream_scan(state: &Arc<State>, env: Env) {
 }
 
 /// Sample one world column into the disk store (or queue its chunk for the
-/// async force-load frontier when unloaded).
+/// async force-load frontier when unloaded). `allow_force=false` (idle,
+/// nobody online) makes the cell silently skip instead of queueing a
+/// generation ticket — the idle server never churns the chunk system.
+#[allow(clippy::too_many_arguments)] // disk coords + world coords + gate
 fn scan_cell(
     state: &Arc<State>,
     env: Env,
@@ -331,6 +343,7 @@ fn scan_cell(
     cz: u32,
     wx: i32,
     wz: i32,
+    allow_force: bool,
 ) {
     if let Some((y, liquid, material, biome)) = jni::sample_surface(env, world, wx, wz) {
         let rgb = crate::palette::surface_color(&material, &biome, liquid);
@@ -345,7 +358,7 @@ fn scan_cell(
                 rgb,
             },
         );
-    } else {
+    } else if allow_force {
         force_chunk_for(state, env, world, wx >> 4, wz >> 4);
     }
 }
@@ -412,7 +425,7 @@ fn sample_chunk(
             if valid {
                 continue;
             }
-            scan_cell(state, env, world, ccx, ccz, wx, wz);
+            scan_cell(state, env, world, ccx, ccz, wx, wz, true);
             samples += 1;
         }
     }
@@ -679,6 +692,42 @@ fn manage_players(state: &Arc<State>, env: Env) {
         .retain(|k, _| seen.contains(k));
 }
 
+/// v5.6: with an explicit config center the disk arms BEFORE the first
+/// player joins — pure Rust state, no JNI, no tickets. Headless boots
+/// (CI, ops) get a pre-armed disk and the "sky-grid stream armed" marker
+/// without anybody online; the player-anchored path (no config center)
+/// is unchanged.
+fn arm_from_config(state: &Arc<State>) {
+    if state.stream_armed.load(Ordering::SeqCst) != 0 {
+        return;
+    }
+    if state.phase.load(Ordering::SeqCst) != PHASE_LIVE {
+        return;
+    }
+    // The scan/stream world must already be resolved (boot step 1).
+    if *state.world_obj.lock().unwrap() == 0 {
+        return;
+    }
+    if let (Some(x), Some(z)) = (state.cfg.center_x, state.cfg.center_z) {
+        arm_stream(state, x, z);
+    }
+}
+
+/// Fix the disk origin once and log the arming marker (single writer).
+fn arm_stream(state: &Arc<State>, ox: f64, oz: f64) {
+    let (side, cells) = {
+        let mut s = state.stream.lock().unwrap();
+        *s = Streamer::new(ox, oz, state.cfg.region_blocks, state.cfg.cell_size);
+        (s.side, s.cells())
+    };
+    let lap_ticks = cells / ((state.cfg.particles_per_tick as u64) / 8).max(1);
+    state.stream_armed.store(1, Ordering::SeqCst);
+    crate::log_info(&format!(
+        "c-LoD sky-grid stream armed: {side}x{side} cells at ({ox:.0},{oz:.0}), {} particles/tick, {lap_ticks} ticks/lap",
+        state.cfg.particles_per_tick
+    ));
+}
+
 /// The v5 streaming step: fix the disk origin once (config center or the
 /// first player), then spawn the next batch of dust particles over the two
 /// sky planes — one force ClientboundLevelParticlesPacket per player per
@@ -692,30 +741,17 @@ fn stream_step(state: &Arc<State>, env: Env) {
         return;
     }
 
-    // Arm once: fix the disk origin.
+    // Arm once (player-anchored path — only when no config center exists;
+    // a configured center already armed in arm_from_config).
     if state.stream_armed.load(Ordering::SeqCst) == 0 {
-        let (ox, oz) = if let (Some(x), Some(z)) = (state.cfg.center_x, state.cfg.center_z) {
-            (x, z)
-        } else {
-            match players.first() {
-                Some(p) => (
-                    (p.bx as f64) - f64::from(state.cfg.region_blocks) * 0.5,
-                    (p.bz as f64) - f64::from(state.cfg.region_blocks) * 0.5,
-                ),
-                None => return, // no anchor yet
-            }
+        let (ox, oz) = match players.first() {
+            Some(p) => (
+                (p.bx as f64) - f64::from(state.cfg.region_blocks) * 0.5,
+                (p.bz as f64) - f64::from(state.cfg.region_blocks) * 0.5,
+            ),
+            None => return, // no anchor yet
         };
-        let (side, cells) = {
-            let mut s = state.stream.lock().unwrap();
-            *s = Streamer::new(ox, oz, state.cfg.region_blocks, state.cfg.cell_size);
-            (s.side, s.cells())
-        };
-        let lap_ticks = cells / ((state.cfg.particles_per_tick as u64) / 8).max(1);
-        state.stream_armed.store(1, Ordering::SeqCst);
-        crate::log_info(&format!(
-            "c-LoD sky-grid stream armed: {side}x{side} cells at ({ox:.0},{oz:.0}), {} particles/tick, {lap_ticks} ticks/lap",
-            state.cfg.particles_per_tick
-        ));
+        arm_stream(state, ox, oz);
     }
 
     // Spawn the next batch to every player (the disk is shared).
