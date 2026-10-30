@@ -209,3 +209,37 @@ Stage Summary:
 - No-regression: полный стелс-протокол на v5.5 — top-down 0/0, level 196→0 (resid 0.0000%), спин+хопы 5/5 кадров 0 зелёных px, финальная A/B 320→0; пак байт-в-байт adeb4d16 (фронтир — только серверная сторона); TPS 20.0; 48/48 тестов, clippy 0, fmt 0.
 Stage Summary:
 - v5.5: скан разогнан ×2.3 на 2-CPU стенде с конфигурируемыми ручками для реальных хостов; невидимость и скорость стрима не тронуты (доказано кадрами). Бэклог: CPU-стена 2-ядерного стенда (клиент llvmpipe ест ядро), краш scan_cell на idle (смягчён), дельта-фидбек от клиента (нет канала — vanilla).
+
+---
+Task ID: 13 (реконструкция по коммитам — запись утеряна при сбросе песочницы)
+Agent: main
+Task: v5.4/v5.5/v5.6 — delta-zone scheduler, gen-frontier, pre-join arm; краш-форензика ЗАКРЫТА; CI полностью зелёный
+
+Work Log:
+- v5.4 DELTA-ZONE (59fbdc7): стрим платит только за декодируемые клетки и реальные правки (не платит за пустые/уже закрашенные/вне окна клетки).
+- v5.5 GEN-FRONTIER (862144b): скан догоняет стрим (замер ×2.3) — см. Task 12.
+- b675043/b7c9ec4: чин CI-YAML (heredoc внутри run-блока, кавычки имён с ':' и '#') + v5.6 PRE-JOIN ARM: диск армится (и тёпло сканируется) ДО первого захода игрока — headless CI теперь гоняет полный boot-путь без игрока.
+- 5d58220: TESTS.md — полная карта тестов (7 слоёв: 48 Rust-тестов, статик-гейты, pack integrity, boot-гейты G1–G10, CI e2e-live ×2 бута, реальный клиент, архив доказательств).
+- 841d5a0: фикс e2e-live ассерта — 13 записей в паке с v5.3.2 (dust_mask/dust_eater).
+- 5bf2451 = e2e v5.6 живьём: арм за 32 с до первого join, тёплый диск 54874/65536 на тике 200, 1M+ частиц / 0 failed, TPS 20.0, 0 carrier px на горизонтом кадре pitch -10.
+- КРАШ-ФОРЕНЗИКА ЗАКРЫТА: hs_err_pid16818 поймал «idle crash» в моменте — SIGSEGV pc=0 в Signal.dispatch на JVM, находящейся в середине shutdown, прибитой TERM+KILL-шквалом старого boot-скрипта (18m39s после ухода игрока = teardown сессии, НЕ idle). Одиночный TERM / двойной TERM / 18.5-мин idle soak — чисто на v5.6. Дисциплина shutdown (TERM → wait → KILL последним) в boot_server.sh и обоих CI-стоп-блоках.
+- Доказательства: docs/e2e-v5.6-prejoin/.
+
+Stage Summary:
+- v5.6: первый полностью зелёный CI с 10-27; краш из бэклога Task 8 закрыт атрибуцией (не баг модуля). Бэклог: CPU-стена 2-ядерного стенда (не модуль), дельта-фидбек от клиента (нет канала — vanilla).
+
+---
+Task ID: 14
+Agent: main
+Task: Диспетчеризация GitHub: закрытие устаревшего PR #1, синхронизация версий/README, все тесты — через GitHub CI
+
+Work Log:
+- Состояние после сброса: репо цел (master f356730 → fetch до 5bf2451), тулчейн/стенд отсутствуют. origin ушёл вперёд: v5.3.0…v5.6 (см. Task 13), плюс эпоха-ветки looksbetter/good-look/fix/looks-better/restore-looksbetter (v4.4.x) и conceal-wip (v5.2.3 dust_conceal, явно помечен «kept as backup, not merged»).
+- PR #1 «Fix LOD spikes/curtains and empty bands (atlas sampling + hole fill)» ЗАКРЫТ как not_planned с подробным комментарием: ветка правит src/atlas.rs и src/png.rs, удалённые с master в v5.0 (SKY-GRID: ноль текстур, пак 13 записей без PNG, ассерт в pack_builds). Его два корня приземлились иначе: texelFetch/nearest + void→-1e8 + ScanBox — v4.2; «пустые клетки» устранены архитектурно (незасканированная клетка просто не стримится). Комментарий: PR #1#issuecomment-6532284205.
+- Версии синхронизированы с фактическим v5.6: Cargo.toml 5.5.0→5.6.0, Cargo.lock 5.2.2→5.6.0, module.json 5.3.2→5.6.0 (влияет на имя CRUSSTY-бандла в CI packaging).
+- README переписан под v5.6: новая диаграмма (стрим частиц вместо атласа, 9 проходов цепи, stealth/delta-zone/frontier/pre-join arm), таблица фактов дополнена reversed-Z + NMS-мостом частиц, раздел «The bit-stream in one paragraph», конфиг-таблица из живого config.rs (atlas_size/scan_deadline_secs/atlas_cache/atlas_path удалены — их нет с v5.0), раздел «Measured, not promised» с реальными числами e2e, честные ограничения v5.6.
+- docs/worklog.md дополнен Task 13 (реконструкция v5.6) и этим Task 14.
+- Все тесты — на GitHub CI (требование протокола бэкапа): fmt/clippy/48 тестов/glslang/pack-integrity/3 ОС-сборки/бандл/e2e-live; локальный прогон не требуется.
+
+Stage Summary:
+- GitHub приведён в порядок: PR #1 закрыт с разбором, версии 5.6.0 везде, README честно описывает стриминговую архитектуру, worklog полон. CI на новом пуше — единственный источник истины по тестам.
