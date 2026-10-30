@@ -706,27 +706,60 @@ fn stream_step(state: &Arc<State>, env: Env) {
     }
 
     // Spawn the next batch to every player (the disk is shared).
-    // v5.3.3: the first player's live camera drives the cone-priority
-    // phase — decode-band cells inside the frustum stream FIRST, so the
-    // visible zone refills within seconds of any turn (was: half a lap).
-    let view = players.first().map(|p| crate::stream::ViewHint {
-        eye: [
-            f64::from(p.bx) + 0.5,
-            f64::from(p.by) + 1.62,
-            f64::from(p.bz) + 0.5,
-        ],
-        look: crate::stream::look_dir(p.yaw, p.pitch),
-        now: state.tick_no.load(Ordering::Relaxed),
-    });
+    // v5.4 DELTA-ZONE: every player's live camera is a view — views[0]
+    // drives the cone-priority phase, ALL views define the decodable set
+    // (dirty phase + zone sweep never spend budget outside it).
+    let views: Vec<crate::stream::ViewHint> = players
+        .iter()
+        .map(|p| crate::stream::ViewHint {
+            eye: [
+                f64::from(p.bx) + 0.5,
+                f64::from(p.by) + 1.62,
+                f64::from(p.bz) + 0.5,
+            ],
+            look: crate::stream::look_dir(p.yaw, p.pitch),
+            now: state.tick_no.load(Ordering::Relaxed),
+        })
+        .collect();
     let batch: Vec<crate::stream::Spawn> = {
         let mut s = state.stream.lock().unwrap();
-        s.tick_batch(state.cfg.particles_per_tick as usize, view.as_ref()).to_vec()
+        s.tick_batch(state.cfg.particles_per_tick as usize, &views).to_vec()
     };
+    // Rate-limited diagnostics. v5.4: logged EVERY 100 ticks even when the
+    // batch is empty — the idle collapse (batch -> 0 on a painted, unchanged
+    // zone) is a headline feature and must stay visible in the log.
+    let tick = state.tick_no.load(Ordering::Relaxed);
+    if tick.is_multiple_of(100) {
+        let (valid, laps, total_cells, cone_c, zone_c, dirty_c, dirty_q) = {
+            let s = state.stream.lock().unwrap();
+            (
+                s.valid_cells(),
+                s.laps,
+                s.cells(),
+                s.cone_cells,
+                s.zone_cells,
+                s.dirty_streams,
+                s.dirty_pending,
+            )
+        };
+        // v5.2.2: /clod-pack.info serves LIVE scan counters (it used to
+        // report the boot-time cells=0 forever).
+        state.server.set_meta(valid, total_cells);
+        let p0 = players.first();
+        crate::log_info(&format!(
+            "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}), batch {} ({} players), spawned {} / failed {}, cam0 {}",
+            batch.len(),
+            players.len(),
+            jni::STREAM_SPAWNED.load(Ordering::Relaxed),
+            jni::STREAM_FAILED.load(Ordering::Relaxed),
+            p0.map(|p| format!("yaw {:.0} pitch {:.0}", p.yaw, p.pitch))
+                .unwrap_or_else(|| "none".into()),
+        ));
+    }
     if batch.is_empty() {
         return;
     }
     let mut spawned = 0u64;
-    let mut culled = 0u64;
     for p in &players {
         let Some(handle) = jni::player_by_uuid(env, &p.uuid) else {
             continue;
@@ -753,7 +786,6 @@ fn stream_step(state: &Arc<State>, env: Env) {
         let mut n_cone = 0u64;
         for sp in &batch {
             if !crate::stream::spawn_visible(sp, [px, py, pz], look, sky_visible, cos_half) {
-                culled += 1;
                 if !sky_visible {
                     continue;
                 }
@@ -784,28 +816,6 @@ fn stream_step(state: &Arc<State>, env: Env) {
     state
         .streamed_cells
         .fetch_add(spawned / 8 / players.len().max(1) as u64, Ordering::Relaxed);
-
-    // Rate-limited diagnostics.
-    let tick = state.tick_no.load(Ordering::Relaxed);
-    if tick.is_multiple_of(100) {
-        let (valid, laps, total_cells) = {
-            let s = state.stream.lock().unwrap();
-            (s.valid_cells(), s.laps, s.cells())
-        };
-        // v5.2.2: /clod-pack.info serves LIVE scan counters (it used to
-        // report the boot-time cells=0 forever).
-        state.server.set_meta(valid, total_cells);
-        let p0 = players.first();
-        crate::log_info(&format!(
-            "stream: tick {tick} {valid}/{total_cells} cells, lap {}, +{spawned} particles ({} players, culled {culled}), spawned {} / failed {}, cam0 {}",
-            laps,
-            players.len(),
-            jni::STREAM_SPAWNED.load(Ordering::Relaxed),
-            jni::STREAM_FAILED.load(Ordering::Relaxed),
-            p0.map(|p| format!("yaw {:.0} pitch {:.0}", p.yaw, p.pitch))
-                .unwrap_or_else(|| "none".into()),
-        ));
-    }
 }
 
 pub fn pack_url(state: &Arc<State>) -> String {
