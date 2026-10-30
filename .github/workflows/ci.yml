@@ -165,7 +165,7 @@ jobs:
             echo 'server-port=25565'
             echo 'motd=c-LoD CI'
           } > dist/server.properties
-      - name: Boot #1 (fresh world, sky-grid streaming config)
+      - name: "Boot #1 (fresh world, sky-grid streaming config)"
         working-directory: dist
         env:
           CLOD_OPTS: "tick_ms=200;region_blocks=512;cell_size=2;particles_per_tick=1024;http_port=8199;center_x=-930;center_z=796"
@@ -187,21 +187,21 @@ jobs:
           curl -s -o pack1.zip -w "HTTP %{http_code}\n" http://127.0.0.1:8199/clod-pack.zip
           SIZE=$(stat -c%s pack1.zip); test "$SIZE" -gt 1024 || { echo "pack too small: $SIZE"; exit 1; }
           python3 - <<'EOF'
-import zipfile
-z = zipfile.ZipFile('pack1.zip')
-names = z.namelist()
-assert not [n for n in names if n.endswith('.png') or 'textures/' in n], f"TEXTURES IN PACK: {names}"
-assert len(names) == 12, f"unexpected entry count {len(names)}: {names}"
-chain = z.read('assets/clod/post_effect/lod_terrain.json').decode()
-assert 'clod:post/capture' in chain and 'clod_h_b' in chain and 'clod_c_b' in chain
-assert 'location' not in chain, "texture-input found in chain"
-print(f"pack verified: {len(names)} entries, zero textures, capture chain OK")
-EOF
+          import zipfile
+          z = zipfile.ZipFile('pack1.zip')
+          names = z.namelist()
+          assert not [n for n in names if n.endswith('.png') or 'textures/' in n], f"TEXTURES IN PACK: {names}"
+          assert len(names) == 12, f"unexpected entry count {len(names)}: {names}"
+          chain = z.read('assets/clod/post_effect/lod_terrain.json').decode()
+          assert 'clod:post/capture' in chain and 'clod_h_b' in chain and 'clod_c_b' in chain
+          assert 'location' not in chain, "texture-input found in chain"
+          print(f"pack verified: {len(names)} entries, zero textures, capture chain OK")
+          EOF
           echo "--- stopping boot #1 ---"
           kill $SRV 2>/dev/null || true; sleep 3
           pkill -9 -f "launcher.jar" || true; sleep 2
           pkill -9 -f "paper-26.3" || true; true
-      - name: Boot #2 (restart — the pack SHA-1 must reproduce exactly)
+      - name: "Boot #2 (restart — the pack SHA-1 must reproduce exactly)"
         working-directory: dist
         env:
           CLOD_OPTS: "tick_ms=200;region_blocks=512;cell_size=2;particles_per_tick=1024;http_port=8199;center_x=-930;center_z=796"
@@ -225,7 +225,7 @@ EOF
           kill $SRV 2>/dev/null || true; sleep 3
           pkill -9 -f "launcher.jar" || true; sleep 2
           pkill -9 -f "paper-26.3" || true; true
-      - name: Pack SHA-1 stability across restarts (v5: deterministic, no snapshot)
+      - name: "Pack SHA-1 stability across restarts (v5: deterministic, no snapshot)"
         working-directory: dist
         run: |
           # v5: the pack is byte-deterministic — no atlas snapshot at all.
