@@ -145,6 +145,10 @@ pub struct Cell {
     pub height: i16,
     pub water: bool,
     pub valid: bool,
+    /// SEEDGEN v5.7: filled by native off-thread generation (noise+surface,
+    /// no features/carvers). The loaded-chunk sampler upgrades provisional
+    /// cells from the real chunk when the server generates it.
+    pub provisional: bool,
     /// Surface albedo (palette.rs).
     pub rgb: [u8; 3],
 }
@@ -598,6 +602,7 @@ mod tests {
             height: h,
             water,
             valid: true,
+            provisional: false,
             rgb,
         }
     }

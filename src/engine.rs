@@ -60,6 +60,16 @@ pub struct State {
     pub idle_ticks: AtomicU32,
     /// Set once the streamer origin was fixed and particles are flying.
     pub stream_armed: AtomicU8,
+    /// SEEDGEN (v5.7): off-thread native generation of never-generated
+    /// chunks (noise+surface per column, no chunk-system tickets). None
+    /// until the first LIVE tick after the world is known.
+    pub seedgen: Mutex<Option<Arc<crate::seedgen::Seedgen>>>,
+    /// Provisional cells upgraded from a real generated chunk since boot.
+    pub prov_upgraded: AtomicU64,
+    /// Of those, how many changed the encoded words (fidelity metric: the
+    /// delta between native noise+surface and the full generated chunk —
+    /// trees, carvers, structures).
+    pub prov_diffs: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -116,6 +126,9 @@ impl State {
             streamed_cells: AtomicU64::new(0),
             idle_ticks: AtomicU32::new(0),
             stream_armed: AtomicU8::new(0),
+            seedgen: Mutex::new(None),
+            prov_upgraded: AtomicU64::new(0),
+            prov_diffs: AtomicU64::new(0),
         })
     }
 }
@@ -153,6 +166,7 @@ pub fn tick(state: &Arc<State>, env: Env) {
 /// One-time boot: JNI surface + the shader-only pack (built IMMEDIATELY — it
 /// holds no world data, so there is nothing to wait for) + effect keys.
 fn ensure_boot(state: &Arc<State>, env: Env) {
+    eprintln!("[c-LoD] EB: enter, native_gen={}", state.cfg.native_gen);
     if BRIDGE_OK.load(Ordering::SeqCst) != 1 {
         if jni::warmup(env) && jni::nms_warmup(env) {
             BRIDGE_OK.store(1, Ordering::SeqCst);
@@ -216,6 +230,33 @@ fn ensure_boot(state: &Arc<State>, env: Env) {
             *w = g;
             *state.world_name.lock().unwrap() = name.clone();
             crate::log_info(&format!("c-LoD streaming world: {name}"));
+        }
+    }
+    drop(w);
+
+    // SEEDGEN (v5.7): arm the native generator once the world is known.
+    // The bootstrap is a no-op after the first attempt (success or failure —
+    // a failed resolve keeps the ticket frontier in charge).
+    eprintln!(
+        "[c-LoD] EB: seedgen block, native_gen={}",
+        state.cfg.native_gen
+    );
+    if state.cfg.native_gen {
+        let world_handle = *state.world_obj.lock().unwrap();
+        if world_handle != 0 {
+            let need_arm = {
+                let mut g = state.seedgen.lock().unwrap();
+                if g.is_none() {
+                    *g = Some(Arc::new(crate::seedgen::Seedgen::new()));
+                    true
+                } else {
+                    !g.as_ref().unwrap().ready() && !g.as_ref().unwrap().tried()
+                }
+            };
+            if need_arm {
+                let world = unsafe { as_obj(world_handle) };
+                crate::seedgen::bootstrap(state, env, world);
+            }
         }
     }
 }
@@ -347,17 +388,35 @@ fn scan_cell(
 ) {
     if let Some((y, liquid, material, biome)) = jni::sample_surface(env, world, wx, wz) {
         let rgb = crate::palette::surface_color(&material, &biome, liquid);
-        let mut s = state.stream.lock().unwrap();
-        s.set_cell(
-            cx,
-            cz,
-            Cell {
-                height: y.clamp(-64, 1023) as i16,
-                water: liquid,
-                valid: true,
-                rgb,
-            },
-        );
+        let cell = Cell {
+            height: y.clamp(-64, 1023) as i16,
+            water: liquid,
+            valid: true,
+            provisional: false,
+            rgb,
+        };
+        {
+            let mut s = state.stream.lock().unwrap();
+            // SEEDGEN fidelity: a real chunk replacing a native provisional
+            // cell — count the upgrade and whether the encoded words moved.
+            let prev = s.get(cx, cz);
+            let was_prov = prev.map(|c| c.valid && c.provisional).unwrap_or(false);
+            s.set_cell(cx, cz, cell);
+            if was_prov {
+                state.prov_upgraded.fetch_add(1, Ordering::Relaxed);
+                if let Some(p) = prev {
+                    if Streamer::encode_words(&p) != Streamer::encode_words(&cell) {
+                        state.prov_diffs.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            }
+        }
+    } else if state.cfg.native_gen && crate::seedgen::enqueue(state, wx >> 4, wz >> 4) {
+        // SEEDGEN (v5.7): the chunk fills on OUR worker threads — vanilla
+        // noise+surface per column, no chunk-system tickets, zero TPS
+        // impact, pre-join by construction. Cells land provisional; the
+        // loaded-chunk sampler upgrades them when the server generates the
+        // real chunk (trees/carvers/structures arrive with that upgrade).
     } else if allow_force {
         force_chunk_for(state, env, world, wx >> 4, wz >> 4);
     }
@@ -420,7 +479,9 @@ fn sample_chunk(
             };
             let valid = {
                 let s = state.stream.lock().unwrap();
-                s.get(ccx, ccz).map(|c| c.valid).unwrap_or(false)
+                s.get(ccx, ccz)
+                    .map(|c| c.valid && !c.provisional)
+                    .unwrap_or(false)
             };
             if valid {
                 continue;
@@ -728,6 +789,57 @@ fn arm_stream(state: &Arc<State>, ox: f64, oz: f64) {
     ));
 }
 
+/// Rate-limited stream diagnostics + live /clod-pack.info counters.
+/// Runs with AND without players (v5.7: the playerless pre-join arm +
+/// SEEDGEN fill must stay visible to ops).
+fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
+    let tick = state.tick_no.load(Ordering::Relaxed);
+    if !tick.is_multiple_of(100) {
+        return;
+    }
+    let (valid, laps, total_cells, cone_c, zone_c, dirty_c, dirty_q) = {
+        let s = state.stream.lock().unwrap();
+        (
+            s.valid_cells(),
+            s.laps,
+            s.cells(),
+            s.cone_cells,
+            s.zone_cells,
+            s.dirty_streams,
+            s.dirty_pending,
+        )
+    };
+    // v5.5 frontier diagnostics: wish = in-flight FORCED tickets,
+    // forced = chunks that completed gen and got sampled.
+    let wish_n = state.gen_wish.lock().unwrap().len();
+    let forced_n = state.forced_chunks.load(Ordering::Relaxed);
+    // v5.7 SEEDGEN diagnostics.
+    let (nat_c, nat_ch, nat_f, nat_w, nat_q) = {
+        let g = state.seedgen.lock().unwrap();
+        match g.as_ref() {
+            Some(sg) if sg.ready() => (
+                sg.cells.load(Ordering::Relaxed),
+                sg.chunks.load(Ordering::Relaxed),
+                sg.fails.load(Ordering::Relaxed),
+                sg.workers.load(Ordering::Relaxed),
+                sg.inflight_len(),
+            ),
+            _ => (0, 0, 0, 0, 0),
+        }
+    };
+    // v5.2.2: /clod-pack.info serves LIVE scan counters (it used to
+    // report the boot-time cells=0 forever).
+    state.server.set_meta(valid, total_cells);
+    let p0 = players.first();
+    crate::log_info(&format!(
+        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}), spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q})",
+        jni::STREAM_SPAWNED.load(Ordering::Relaxed),
+        jni::STREAM_FAILED.load(Ordering::Relaxed),
+        p0.map(|p| format!("yaw {:.0} pitch {:.0}", p.yaw, p.pitch))
+            .unwrap_or_else(|| "none".into()),
+    ));
+}
+
 /// The v5 streaming step: fix the disk origin once (config center or the
 /// first player), then spawn the next batch of dust particles over the two
 /// sky planes — one force ClientboundLevelParticlesPacket per player per
@@ -737,7 +849,12 @@ fn stream_step(state: &Arc<State>, env: Env) {
         return;
     }
     let players = jni::players(env);
+
+    // v5.7: the rate-limited diag (and the live /clod-pack.info counters)
+    // must ALSO run with nobody online — the pre-join arm + SEEDGEN fill
+    // the disk playerless, and ops watch exactly this line for progress.
     if players.is_empty() {
+        stream_diag(state, &[]);
         return;
     }
 
@@ -775,41 +892,7 @@ fn stream_step(state: &Arc<State>, env: Env) {
         s.tick_batch(state.cfg.particles_per_tick as usize, &views)
             .to_vec()
     };
-    // Rate-limited diagnostics. v5.4: logged EVERY 100 ticks even when the
-    // batch is empty — the idle collapse (batch -> 0 on a painted, unchanged
-    // zone) is a headline feature and must stay visible in the log.
-    let tick = state.tick_no.load(Ordering::Relaxed);
-    if tick.is_multiple_of(100) {
-        let (valid, laps, total_cells, cone_c, zone_c, dirty_c, dirty_q) = {
-            let s = state.stream.lock().unwrap();
-            (
-                s.valid_cells(),
-                s.laps,
-                s.cells(),
-                s.cone_cells,
-                s.zone_cells,
-                s.dirty_streams,
-                s.dirty_pending,
-            )
-        };
-        // v5.5 frontier diagnostics: wish = in-flight FORCED tickets,
-        // forced = chunks that completed gen and got sampled.
-        let wish_n = state.gen_wish.lock().unwrap().len();
-        let forced_n = state.forced_chunks.load(Ordering::Relaxed);
-        // v5.2.2: /clod-pack.info serves LIVE scan counters (it used to
-        // report the boot-time cells=0 forever).
-        state.server.set_meta(valid, total_cells);
-        let p0 = players.first();
-        crate::log_info(&format!(
-            "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}), batch {} ({} players), spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}",
-            batch.len(),
-            players.len(),
-            jni::STREAM_SPAWNED.load(Ordering::Relaxed),
-            jni::STREAM_FAILED.load(Ordering::Relaxed),
-            p0.map(|p| format!("yaw {:.0} pitch {:.0}", p.yaw, p.pitch))
-                .unwrap_or_else(|| "none".into()),
-        ));
-    }
+    stream_diag(state, &players);
     if batch.is_empty() {
         return;
     }

@@ -25,6 +25,7 @@ mod http;
 mod jni;
 mod packgen;
 mod palette;
+mod seedgen;
 mod sha1;
 mod stream;
 mod zipw;

@@ -73,6 +73,13 @@ pub struct Config {
     pub color_veil: [f32; 3],
     /// Upper bound on terrain height used to cull rays early.
     pub max_height: i32,
+    /// SEEDGEN v5.7: generate chunks the server never made, on OUR worker
+    /// threads (vanilla noise+surface per column — no tickets, no TPS cost).
+    /// When false (or when the NMS surface fails to resolve) the pre-5.7
+    /// FORCED-ticket frontier handles unloaded chunks.
+    pub native_gen: bool,
+    /// SEEDGEN worker thread count. 0 = auto (cores-1, clamped 1..4).
+    pub native_threads: i32,
 }
 
 impl Default for Config {
@@ -105,6 +112,8 @@ impl Default for Config {
             snow_line: 0.78,
             color_veil: [0.62, 0.74, 0.86],
             max_height: 320,
+            native_gen: true,
+            native_threads: 0,
         }
     }
 }
@@ -218,6 +227,12 @@ impl Config {
         }
         if let Some(v) = get("max_height").and_then(|v| v.parse::<i32>().ok()) {
             cfg.max_height = v.clamp(64, 1024);
+        }
+        if let Some(v) = get("native_gen") {
+            cfg.native_gen = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
+        if let Some(v) = get("native_threads").and_then(|v| v.parse::<i32>().ok()) {
+            cfg.native_threads = v.clamp(0, 16);
         }
         cfg
     }

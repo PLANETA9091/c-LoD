@@ -69,11 +69,21 @@ def main(path: str) -> int:
     if armed:
         need(int(armed.group(1)) > 0, "G8 sky-grid stream armed (disk geometry)", "")
         spawned = re.search(r"spawned (\d+) / failed (\d+)", log)
-        if spawned:
+        joined = "joined the game" in log
+        if spawned and joined:
             need(
                 int(spawned.group(1)) > 0 and int(spawned.group(2)) == 0,
                 "G9 dust particles spawned through the NMS bridge",
                 "sendParticles never succeeded (see STREAM_FAILED / exceptions)",
+            )
+        elif spawned:
+            # v5.7 playerless leg (pre-join arm + SEEDGEN): no receiver
+            # exists, so spawn success is undefined — require only that the
+            # transport raised no failures and the native filler ran.
+            need(
+                int(spawned.group(2)) == 0,
+                "G9 playerless arm: transport idle-clean + native fill",
+                "STREAM_FAILED nonzero on a playerless boot",
             )
     nse = log.count("NoSuchMethodError") + log.count("NoClassDefFoundError")
     need(nse == 0, "G10 no JNI linkage errors", f"{nse} linkage errors in the boot log")

@@ -8,8 +8,11 @@ No client mods. **No Display entities. No textures in the pack.** The vanilla cl
  ┌─────────────────────────── SERVER (c-LoD module, Rust) ───────────────────────────┐
  │                                                                                   │
  │  heightmap scan (JNI, budgeted per tick)                                          │
- │    FORCED tickets (vanilla /forceload semantics) generate chunks off-thread       │
- │    gen_budget / gen_wish frontier (v5.5): the scan catches up with the stream     │
+ │    SEEDGEN (v5.7): chunks the server never made generate NATIVELY on our          │
+ │      own daemon threads — vanilla NoiseChunk + MaterialSystem per column,         │
+ │      no tickets, no chunk-system contention, zero TPS impact; cells land          │
+ │      provisional and upgrade from the real chunk once the server makes it         │
+ │    FORCED tickets stay as the fallback frontier (gen_budget / gen_wish, v5.5)     │
  │    delta-zone scheduler (v5.4): the stream pays only for decodable cells + edits  │
  │        │                                                                          │
  │        ▼                                                                          │
@@ -113,6 +116,8 @@ Options string passed through the CRUSSTY runtime (`key=value;key=value`). Every
 | `color_low` / `color_high` / `color_water` / `color_veil` | defaults | Palette, `r,g,b` floats or 0–255 |
 | `snow_line` | `0.78` | Snow blend point (normalized elevation) |
 | `max_height` | `320` | Terrain ceiling used for ray culling |
+| `native_gen` | `true` | SEEDGEN: generate never-generated chunks natively on our own threads (false = legacy FORCED-ticket frontier) |
+| `native_threads` | `0` | SEEDGEN worker count; 0 = auto (cores−1, clamped 1–4) |
 
 Post-effect ids installed by the pack: **`clod:lod_terrain`**, **`clod:atmosphere`** — exactly the identifiers the vanilla `/posteffect` command accepts, so admins can also toggle them by hand:
 
@@ -129,6 +134,7 @@ All numbers from the real 2-CPU e2e stand (Paper 26.3-207 + genuine vanilla clie
 - **Network**: the spawn gate paces the stream to what the camera can actually decode — 33–800 packets/tick observed vs 2048 constant.
 - **Scan throughput** (v5.5 gen-frontier): 35 → 80 cells/s sustained on 2 cores (best 896/s), a warm world re-scans ~49k cells in seconds. A vantage tour accelerates the scan ~15× (teleports load chunks, the ring sweep samples them instantly).
 - **Pre-join arm** (v5.6): the disk arms and warm-scans before the first player joins — 32 s ahead of the join, 54874/65536 cells warm at tick 200, 0 carrier pixels on the first horizon frame.
+- **SEEDGEN cold-world fill** (v5.7): the full 512×512-cell disk (1024 chunks the server had NEVER generated) filled natively in ~23 s on one worker of a 2-core box — ~2,750 cells/s vs ~80 cells/s for the v5.5 ticket frontier (**~35×**), zero failures, zero tickets, TPS untouched; with `native_threads` workers it scales by cores.
 - **One push, forever**: the pack SHA-1 is byte-deterministic across restarts; clients never re-download.
 
 ## Development
@@ -145,7 +151,7 @@ The full verification pyramid — CI layers, boot gates G1–G10, the real-clien
 ## Honest limitations (v5.6)
 
 - **The camera channel needs sky in the leftmost screen columns.** Facing a wall of terrain (or being fully indoors) the chain holds its last estimate with a slow decay — the LOD fades out instead of popping, and the atmosphere chain keeps working (it never needs rotation). Any sky row in the leftmost 8 columns re-locks the basis within one frame.
-- **A cold world starts empty.** The LOD dome grows in as the scan→stream→decode pipeline laps the disk; until then the horizon is vanilla. The pre-join arm (v5.6) plus the gen-frontier knobs make this fast on real hosts, but a fresh 512-block disk still needs minutes on a small VPS.
+- **A cold world starts nearly empty — for seconds, not minutes.** SEEDGEN (v5.7) fills never-generated chunks natively at ~35× the ticket frontier, so a fresh 512-block disk completes in well under a minute on a small VPS. Generated cells are `provisional`: terrain-exact, but trees/carvers/structures only arrive when the server generates the real chunk (the loaded-chunk sampler upgrades them then).
 - **The carrier is physics, not magic.** Dust particles are real entities on the wire: the stealth gate erases them from every conventional viewpoint, but a client parked at an extreme vantage can still spot sparse dots.
 - **No client→server feedback channel exists on vanilla 26.3** — the server paces the stream blind (FOV cone + decode band + delta-zone scheduler approximate what a real ACK channel would give).
 

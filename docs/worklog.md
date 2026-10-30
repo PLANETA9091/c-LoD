@@ -243,3 +243,24 @@ Work Log:
 
 Stage Summary:
 - GitHub приведён в порядок: PR #1 закрыт с разбором, версии 5.6.0 везде, README честно описывает стриминговую архитектуру, worklog полон. CI на новом пуше — единственный источник истины по тестам.
+
+---
+Task ID: 15
+Agent: main
+Task: v5.7 SEEDGEN — нативная генерация never-generated чанков вне чанк-системы (рецепт Voxy seedgen на 26.3)
+
+Work Log:
+- Задача пользователя: «генерировать чанки, которые сервер даже не генерировал, супер-быстро, как seedgen у Voxy».
+- Форензика paper-26.3 (mojang-mapped): полный рецепт iterateNoiseColumn снят с байткода — DensityVolume(1,h,1,x,minY,z) → NoiseChunk(rs, NULL-Beardifier, settings, fluidPicker, Blender.empty(), vol) → cachingSamplers().get(finalDensity).sampleVolume(volume) → y-loop: aquifer.computeSubstance(x,y,z,d) ?? defaultBlock, predicate Heightmap.Types.MOTION_BLOCKING.isOpaque() → hit y. ВАЖНО: 26.3 getBaseHeight/getBaseColumn НЕ применяет surface rules — материал верхней поверхности берём сами: MaterialSystem.topMaterial(rule, rs, ctx, biomeFn, chunk, samplers, pos, steep=false) с одноразовым ProtoChunk (пустая heightmap → градиент 0 → flat-семантика; крутые склоны теряются, апгрейд с реального чанка возвращает).
+- Краш-расследование №1: SIGSEGV в jni_GetMethodID — bind_method звался на ЭКЗЕМПЛЯРЕ (level/cc/gen/settings/...) вместо класса. Все байндинги переведены на классы (get_object_class / load_cls).
+- Краш-расследование №2 (ложный след 40 минут): «маркеры не печатаются, бинарь старый» — cp писал в dist/ РЕПО, а стенд читает ~/mc-test/dist (setup_server.sh копирует из target). Деплой на стенд всегда: cp target/release/liblod.so ~/mc-test/dist/modules/lod/.
+- NPE-фикс: WorldGenerationContext.of(accessor) хранит level=null, а Paper-правило OptionallyFlatBedrockCondition зовёт .level() при компиляции правила → NPE на каждой колонке. Фикс: 3-арговый конструктор (ChunkGenerator, LevelHeightAccessor, Level) с живым ServerLevel.
+- biomeFn для topMaterial БЕЗ хелпер-класса: MethodHandles.lookup().unreflect(BiomeManager.getBiome).bindTo(mgr) → MethodHandleProxies.asInterfaceInstance(Function.class, mh) — чистый JDK, ноль сборочных зависимостей.
+- Реализация src/seedgen.rs (~1100 строк): SeedQueue (dedup/condvar), SeedIds (глобальные refs + method ids), bootstrap на main-потоке (одна попытка), воркеры-демоны (AttachCurrentThreadAsDaemon), чанк-батчинг: ОДИН NoiseChunk на 16x16x384 объём, 64 колонны-клетки читают общий ScopedDensityBuffer; per-column local frame; buf.close()/nc.close() на всех путях (пулы буферов!).
+- Интеграция: scan_cell при незагруженном чанке → seedgen::enqueue (fallback — тикет-фронтир); клетки пишутся provisional=true; sample_chunk апгрейдит provisional с загруженных чанков (деревья/карверы/структуры доезжают с реальной генерацией; счётчики prov_upgraded/prov_diffs — фиделити-метрика). stream_diag вынесен из-под player-гейта (playerless-заполнение видно в логе и /clod-pack.info). G9 в gates.py стал playerless-aware. Конфиг: native_gen=true, native_threads=0 (auto, 1..4).
+- ЖИВАЯ ВЕРИФИКАЦИЯ (2-CPU стенд, свежий мир, НОЛЬ игроков): tick 100 → 188/65536; tick 200 → 65536/65536 (100%!), native 1024 чанка, fail 0, queue 0. Между тиками 100→200 = 23 с стеночных → ~2750 клеток/с ОДНИМ воркером против ~80 клеток/с тикет-фронтира v5.5 = ×35. Все гейты зелёные (G1-G10 playerless).
+- Осторожно с числами: 1 воркер на 2-ядерной коробке при idle-тиках; на реальном хосте native_threads масштабирует по ядрам; шум-математика ~1 чанк/25мс на ядро.
+- Инструментарий: scripts/bench/seedgen_rate.py (парсер заполнения), run_seedgen_leg.sh (playerless-нога A/B).
+
+Stage Summary:
+- v5.7 SEEDGEN: холодный мир заполняется на 100% за десятки секунд без единого тикета и без TPS-цены; клетки provisional и само-апгрейдятся до полной фиделити при реальной генерации. Бэклог: хелпер-класс для y-loop (срезать ~1500 JNI-операций/колонку → ещё ×5-10), features (деревья) в нативном генераторе, A/B-нога тикетов для отчёта.

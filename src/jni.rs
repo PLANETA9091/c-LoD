@@ -41,15 +41,15 @@ use std::sync::{Mutex, OnceLock};
 
 type Env<'a> = &'a JniEnv;
 
-fn jv(o: jobject) -> jvalue {
+pub(crate) fn jv(o: jobject) -> jvalue {
     jvalue { l: o }
 }
 
-fn jz(v: bool) -> jvalue {
+pub(crate) fn jz(v: bool) -> jvalue {
     jvalue { z: v as jboolean }
 }
 
-fn ji(v: i32) -> jvalue {
+pub(crate) fn ji(v: i32) -> jvalue {
     jvalue { i: v as jint }
 }
 
@@ -59,13 +59,13 @@ fn jf(v: f32) -> jvalue {
     }
 }
 
-fn jd(v: f64) -> jvalue {
+pub(crate) fn jd(v: f64) -> jvalue {
     jvalue {
         d: v as jvmti_bindings::jni::jdouble,
     }
 }
 
-fn jobj(o: jobject) -> Option<jobject> {
+pub(crate) fn jobj(o: jobject) -> Option<jobject> {
     if o.is_null() {
         None
     } else {
@@ -73,13 +73,13 @@ fn jobj(o: jobject) -> Option<jobject> {
     }
 }
 
-fn clear_if_pending(env: Env) {
+pub(crate) fn clear_if_pending(env: Env) {
     if env.exception_check() {
         env.exception_clear();
     }
 }
 
-fn jstr(env: Env, o: jobject) -> Option<String> {
+pub(crate) fn jstr(env: Env, o: jobject) -> Option<String> {
     jobj(o).and_then(|o| env.get_string_utf(o as jstring))
 }
 
@@ -370,7 +370,7 @@ fn enum_name_ids(
 /// Bind a virtual method through the probe-then-globalize sequence that
 /// works under this agent (see resolve(): local-ref GetMethodID fails
 /// silently until the class was forced to link by a local probe).
-fn bind_method(
+pub(crate) fn bind_method(
     env: Env,
     local_cls: jobject,
     global_cls: jobject,
@@ -1350,7 +1350,7 @@ unsafe impl Sync for SendNms {}
 static NMS: OnceLock<Option<SendNms>> = OnceLock::new();
 /// Raw pointer cache of the CraftServer classloader (global ref), resolved
 /// together with the NMS surface. Main-thread-only.
-static LOADER: Mutex<usize> = Mutex::new(0);
+pub(crate) static LOADER: Mutex<usize> = Mutex::new(0);
 
 /// Stream diagnostics: dust spawns handed to ServerLevel + failures.
 pub static STREAM_SPAWNED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
