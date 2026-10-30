@@ -31,6 +31,14 @@ pub struct Config {
     pub cell_size: i32,
     /// Heightmap cells scanned per engine tick (main-thread JNI budget).
     pub scan_budget: u32,
+    /// v5.5 frontier: NEW chunk-gen requests admitted per engine tick. The
+    /// old fixed 4 starved the chunk system's worker pool whenever a full
+    /// ring's worth of chunks wanted generating at once.
+    pub gen_budget: u32,
+    /// v5.5 frontier: cap on chunks with an in-flight FORCED ticket. The
+    /// old fixed 96 could leave generation workers idle between ring arcs;
+    /// a deep window keeps every worker fed while the ledger drips through.
+    pub gen_wish: u32,
     /// v5 sky-grid pacing: dust particles spawned per engine tick (each
     /// cell costs 4 height + 4 color particles).
     pub particles_per_tick: u32,
@@ -78,6 +86,8 @@ impl Default for Config {
             region_blocks: 512,
             cell_size: 2,
             scan_budget: 4096,
+            gen_budget: 16,
+            gen_wish: 512,
             particles_per_tick: 2048,
             center_x: None,
             center_z: None,
@@ -140,6 +150,12 @@ impl Config {
         }
         if let Some(v) = get("scan_budget").and_then(|v| v.parse::<u32>().ok()) {
             cfg.scan_budget = v.clamp(64, 65536);
+        }
+        if let Some(v) = get("gen_budget").and_then(|v| v.parse::<u32>().ok()) {
+            cfg.gen_budget = v.clamp(1, 256);
+        }
+        if let Some(v) = get("gen_wish").and_then(|v| v.parse::<u32>().ok()) {
+            cfg.gen_wish = v.clamp(32, 4096);
         }
         if let Some(v) = get("particles_per_tick")
             .or_else(|| get("stream_budget"))
@@ -233,6 +249,8 @@ mod tests {
         assert_eq!(c.region_blocks, 512);
         assert_eq!(c.cell_size, 2);
         assert_eq!(c.particles_per_tick, 2048);
+        assert_eq!(c.gen_budget, 16, "v5.5 frontier admission default");
+        assert_eq!(c.gen_wish, 512, "v5.5 in-flight window default");
         assert!(c.center_x.is_none());
         assert_eq!(c.fov, 70.0);
     }
@@ -251,6 +269,20 @@ mod tests {
         assert_eq!(c.particles_per_tick, 4096);
         assert_eq!(c.center_x, Some(-930.5));
         assert_eq!(c.center_z, Some(796.0));
+    }
+
+    #[test]
+    fn frontier_knobs_parse_and_clamp() {
+        let c = Config::parse("gen_budget=64;gen_wish=1024");
+        assert_eq!(c.gen_budget, 64);
+        assert_eq!(c.gen_wish, 1024);
+        // Clamps: 0 admission would deadlock the frontier, a giant window
+        // would churn thousands of tickets.
+        let c = Config::parse("gen_budget=0;gen_wish=100000");
+        assert_eq!(c.gen_budget, 1);
+        assert_eq!(c.gen_wish, 4096);
+        let c = Config::parse("gen_wish=10");
+        assert_eq!(c.gen_wish, 32);
     }
 
     #[test]

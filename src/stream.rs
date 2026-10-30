@@ -517,7 +517,8 @@ impl Streamer {
                 Some((ceye, clook, _)) => {
                     let dx = ceye[0] - v.eye[0];
                     let dz = ceye[2] - v.eye[2];
-                    dx * dx + dz * dz > 64.0 || dot3(ceye, clook, v.look) < 0.9962 // > ~5 deg
+                    dx * dx + dz * dz > 64.0 || dot3(ceye, clook, v.look) < 0.9962
+                    // > ~5 deg
                 }
                 None => true,
             };
@@ -721,25 +722,49 @@ mod tests {
     fn spawn_visible_gate_band_and_cone() {
         let cos_half = cos_half_cone();
         // Eye at the origin looking south (+Z); dot 50 blocks ahead: visible.
-        let s = Spawn { x: 0.0, y: 80.0, z: 50.0 };
+        let s = Spawn {
+            x: 0.0,
+            y: 80.0,
+            z: 50.0,
+        };
         let eye = [0.0, 80.0, 0.0];
         let look = look_dir(0.0, 0.0);
         assert!(spawn_visible(&s, eye, look, true, cos_half));
         // Same dot BEHIND the camera: outside the cone.
-        let s = Spawn { x: 0.0, y: 80.0, z: -50.0 };
+        let s = Spawn {
+            x: 0.0,
+            y: 80.0,
+            z: -50.0,
+        };
         assert!(!spawn_visible(&s, eye, look, true, cos_half));
         // Inside the cone but too close (inside the 28-block cull bubble).
-        let s = Spawn { x: 0.0, y: 80.0, z: 20.0 };
+        let s = Spawn {
+            x: 0.0,
+            y: 80.0,
+            z: 20.0,
+        };
         assert!(!spawn_visible(&s, eye, look, true, cos_half));
         // Inside the cone but beyond the 112-block decode zone: permanent
         // undecodable garbage — never spawned.
-        let s = Spawn { x: 0.0, y: 80.0, z: 200.0 };
+        let s = Spawn {
+            x: 0.0,
+            y: 80.0,
+            z: 200.0,
+        };
         assert!(!spawn_visible(&s, eye, look, true, cos_half));
         // Sky-blind view: nothing spawns at all, cone or not.
-        let s = Spawn { x: 0.0, y: 80.0, z: 50.0 };
+        let s = Spawn {
+            x: 0.0,
+            y: 80.0,
+            z: 50.0,
+        };
         assert!(!spawn_visible(&s, eye, look, false, cos_half));
         // Sideways dot at the cone edge: 90 degrees off the look axis.
-        let s = Spawn { x: 50.0, y: 80.0, z: 0.0 };
+        let s = Spawn {
+            x: 50.0,
+            y: 80.0,
+            z: 0.0,
+        };
         assert!(!spawn_visible(&s, eye, look, true, cos_half));
     }
 
@@ -750,7 +775,11 @@ mod tests {
         // in frame): the band test is 3D, not horizontal.
         let cos_half = cos_half_cone();
         let eye = [0.0, 130.0, 0.0];
-        let s = Spawn { x: 0.0, y: 80.0, z: 0.0 };
+        let s = Spawn {
+            x: 0.0,
+            y: 80.0,
+            z: 0.0,
+        };
         let look = look_dir(0.0, 0.0); // level — dots below are OUTSIDE the cone
         assert!(!spawn_visible(&s, eye, look, true, cos_half));
         let look = look_dir(0.0, 40.0); // pitched down 40, sky still in view
@@ -819,14 +848,16 @@ mod tests {
             let dz = sp.z - v.eye[2];
             let d2 = dx * dx + dy * dy + dz * dz;
             let inv = 1.0 / d2.sqrt();
-            let in_cone = (dx * v.look[0] + dy * v.look[1] + dz * v.look[2]) * inv
-                > cos_half_cone() - 0.02;
+            let in_cone =
+                (dx * v.look[0] + dy * v.look[1] + dz * v.look[2]) * inv > cos_half_cone() - 0.02;
             let in_band = d2 > (CULL_RADIUS - 4.0) * (CULL_RADIUS - 4.0)
                 && d2 <= (ZONE_FAR + 4.0) * (ZONE_FAR + 4.0);
             assert!(
                 in_band && in_cone,
                 "cone spawn ({},{},{}) outside frustum/band",
-                sp.x, sp.y, sp.z
+                sp.x,
+                sp.y,
+                sp.z
             );
         }
     }
@@ -848,9 +879,8 @@ mod tests {
             .chunks(8)
             .map(|c| (c[0].x.floor() as i64, c[0].z.floor() as i64))
             .collect();
-        let first_cone: Vec<(i64, i64)> = first_cells
-            [..first_cells.len().min(s.cone_cells as usize)]
-            .to_vec();
+        let first_cone: Vec<(i64, i64)> =
+            first_cells[..first_cells.len().min(s.cone_cells as usize)].to_vec();
         // Immediate next tick with the SAME view: no cone cell repeats.
         let v2 = vhint(128.0, 128.0, 0.0, 0.0, 101);
         let second: Vec<Spawn> = s.tick_batch(2048, &[v2]).to_vec();
@@ -868,10 +898,9 @@ mod tests {
         let third: Vec<Spawn> = s.tick_batch(2048, &[v3]).to_vec();
         let third_cone = &third[..third.len().min((s.cone_cells - before) as usize * 8)];
         assert!(
-            third_cone.iter().any(|sp| first_cone.contains(&(
-                sp.x.floor() as i64,
-                sp.z.floor() as i64
-            ))),
+            third_cone
+                .iter()
+                .any(|sp| first_cone.contains(&(sp.x.floor() as i64, sp.z.floor() as i64))),
             "stale cone cells must refresh after the age gate"
         );
     }
@@ -907,7 +936,9 @@ mod tests {
             assert!(
                 in_band && in_cone,
                 "spawn ({},{},{}) not in the west cone band",
-                sp.x, sp.y, sp.z
+                sp.x,
+                sp.y,
+                sp.z
             );
         }
     }
@@ -943,9 +974,14 @@ mod tests {
         // The edit rides the FRONT of the batch (phase 0 first); the rest of
         // the budget still flows to the cone/sweep as usual.
         for sp in &b[..8] {
-            assert!((sp.x - (wx + 1.0)).abs() < 2.1 && (sp.z - (wz + 1.0)).abs() < 2.1,
+            assert!(
+                (sp.x - (wx + 1.0)).abs() < 2.1 && (sp.z - (wz + 1.0)).abs() < 2.1,
                 "dirty cell must be the first batch: spawn at {},{} vs cell {} {}",
-                sp.x, sp.z, wx, wz);
+                sp.x,
+                sp.z,
+                wx,
+                wz
+            );
         }
     }
 
@@ -1000,9 +1036,13 @@ mod tests {
                     > cos_half_cone() - 0.02;
                 let in_band = d2 > (CULL_RADIUS - 4.0) * (CULL_RADIUS - 4.0)
                     && d2 <= (ZONE_FAR + 4.0) * (ZONE_FAR + 4.0);
-                assert!(in_band && in_cone,
+                assert!(
+                    in_band && in_cone,
                     "tick {tick}: spawn ({},{},{}) outside every decodable zone",
-                    sp.x, sp.y, sp.z);
+                    sp.x,
+                    sp.y,
+                    sp.z
+                );
             }
         }
         // Steady state (v5.4 DELTA-ZONE): the painted, unchanged zone
@@ -1059,7 +1099,8 @@ mod tests {
         assert_eq!(s.dirty_streams, before + 1);
         assert_eq!(s.dirty_pending, 0);
         let (wx, wz) = s.cell_origin(66, 20);
-        assert!(b.iter().any(|sp| (sp.x - (wx + 1.0)).abs() < 2.1
-            && (sp.z - (wz + 1.0)).abs() < 2.1));
+        assert!(b
+            .iter()
+            .any(|sp| (sp.x - (wx + 1.0)).abs() < 2.1 && (sp.z - (wz + 1.0)).abs() < 2.1));
     }
 }

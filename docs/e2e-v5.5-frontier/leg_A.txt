@@ -1,0 +1,17 @@
+=== leg A workers=auto io=auto measure=360s ===
+   3200    6898      64    6.4         0
+   3300    6898       0    0.0         0
+   3400    6898       0    0.0         0
+   3500    6898       0    0.0         0
+   3600    6898       0    0.0         0
+   3700    6898       0    0.0         0
+----------------------------------------------
+frontier: 6898/65536 (10.5%) | overall 19.7 cells/s | best window 172.8 cells/s | failed 0
+--- tps ---
+> >   [17:27:32 INFO]: [33mTPS from last 1m, 5m, 15m: [0m[92m20.0[0m, [92m20.0[0m, [92m19.9[0m
+> [c-LoD] engine tick alive: tick 3800
+[c-LoD] stream: tick 3800 6898/65536 cells, lap 3613, cone 0 zone 0 dirty 0 (q 0), batch 0 (1 players), spawned 0 / failed 0, cam0 yaw 0 pitch 0
+--- forced/wish counters ---
+stream: tick 3700 6898/65536 cells
+stream: tick 3800 6898/65536 cells
+stream: tick 3800 6898/65536 cells

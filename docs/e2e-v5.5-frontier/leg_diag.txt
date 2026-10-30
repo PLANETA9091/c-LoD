@@ -1,0 +1,17 @@
+=== leg diag workers=auto io=auto measure=180s ===
+   1400    5996     128   12.8         0
+   1500    5996       0    0.0         0
+   1600    5996       0    0.0         0
+   1700    5996       0    0.0         0
+   1800    5996       0    0.0         0
+   1900    5996       0    0.0         0
+----------------------------------------------
+frontier: 5996/65536 (9.1%) | overall 35.3 cells/s | best window 276.0 cells/s | failed 0
+--- tps ---
+> >   [17:32:40 INFO]: [33mTPS from last 1m, 5m, 15m: [0m[92m20.0[0m, [92m19.8[0m, [92m19.8[0m
+> [c-LoD] engine tick alive: tick 2000
+  [17:32:40 INFO]: [c-LoD] engine tick alive: tick 2000
+--- forced/wish counters ---
+stream: tick 1900 5996/65536 cells
+stream: tick 2000 5996/65536 cells
+stream: tick 2000 5996/65536 cells

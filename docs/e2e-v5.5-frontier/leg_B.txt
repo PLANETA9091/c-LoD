@@ -1,0 +1,16 @@
+=== leg B workers=auto io=auto measure=180s ===
+   1500   13669       0    0.0         0
+   1600   13669       0    0.0         0
+   1700   13669       0    0.0         0
+   1800   13669       0    0.0         0
+   1900   13669       0    0.0         0
+   2000   13669       0    0.0         0
+----------------------------------------------
+frontier: 13669/65536 (20.9%) | overall 72.5 cells/s | best window 755.2 cells/s | failed 0
+--- tps ---
+> >   [17:37:07 INFO]: [33mTPS from last 1m, 5m, 15m: [0m[92m20.0[0m, [92m19.4[0m, [92m19.4[0m
+> 
+--- forced/wish counters ---
+stream: tick 1900 13669/65536 cells
+stream: tick 2000 13669/65536 cells
+stream: tick 2000 13669/65536 cells

@@ -14,9 +14,32 @@ export CLOD_OPTS="tick_ms=100;region_blocks=512;cell_size=2;particles_per_tick=2
 # host OOM-killer targets the fattest RSS — stay small and fast
 export DIST_JAVA_OPTS="-Xms256M -Xmx700M -XX:MaxMetaspaceSize=256M -XX:MaxDirectMemorySize=128M -XX:+UseG1GC"
 
+# v5.5 frontier: chunk-system thread tuning (measured A/B on the 2-CPU bench:
+# auto=1 gen worker -> 35 cells/s, workers=4 -> 72 cells/s, workers=6 -> 80
+# cells/s with a deeper 5m TPS dip; 4/2 is the balanced default). Override or
+# disable (empty) via env. The patcher no-ops until Paper writes the config
+# (first boot), so the very first boot runs auto — that is the baseline.
+export PAPER_WORKERS="${PAPER_WORKERS:-4}"
+export PAPER_IO="${PAPER_IO:-2}"
+
 pkill -f launcher.jar 2>/dev/null || true
-pkill -f paper-26.3 2>/dev/null || true
+pkill -f 'dev.dist.launcher.Main' 2>/dev/null || true
+pkill -f 'paper-26.3' 2>/dev/null || true
+pkill -f 'libcrussty_runtime' 2>/dev/null || true
+# v5.5: the port-8199 holder is the Paper JVM (rewritten argv) — wait until
+# the port is actually FREE or the pack HTTP bind fails (os error 98) and
+# the session is pack-less (found live in the v5.5 verification boot).
+for i in $(seq 1 10); do
+  if ! (exec 3<>/dev/tcp/127.0.0.1/8199) 2>/dev/null; then break; fi
+  exec 3>&- 2>/dev/null || true
+  pkill -9 -f 'paper-26.3' 2>/dev/null || true
+  sleep 1
+done
 sleep 1
+
+# v5.5 frontier: optional chunk-system thread tuning (A/B via env).
+# PAPER_WORKERS=4 PAPER_IO=2 boot_server.sh  ->  patched boot.
+python3 /home/z/my-project/c-LoD/scripts/bench/patch_paper_cfg.py "$D"
 
 rm -f /tmp/server.in /tmp/server.log
 mkfifo /tmp/server.in
@@ -35,6 +58,15 @@ for i in $(seq 1 150); do
 done
 grep -q "pack finalized (ONE-TIME, static)" /tmp/server.log || { echo "TIMEOUT waiting for the boot pack"; tail -40 /tmp/server.log; exit 1; }
 sleep 2
+# v5.5 HTTP gate: the pack must actually be SERVED (a failed bind above
+# otherwise surfaces only as a silent client download failure).
+HTTP_OK=0
+for i in $(seq 1 10); do
+  if curl -sf -o /dev/null http://127.0.0.1:8199/clod-pack.zip; then HTTP_OK=1; break; fi
+  sleep 1
+done
+[ "$HTTP_OK" = "1" ] || { echo "HTTP GATE FAILED: pack not served on 8199"; grep -i "http server" /tmp/server.log; exit 1; }
+echo "http gate: pack served OK"
 echo "=== gates ==="
 python3 /home/z/my-project/c-LoD/scripts/e2e/gates.py /tmp/server.log
 echo "=== server is up (stdin: /tmp/server.in, log: /tmp/server.log) ==="

@@ -229,20 +229,26 @@ unsafe fn as_obj(handle: usize) -> jvmti_bindings::jni::jobject {
     handle as jvmti_bindings::jni::jobject
 }
 
-/// Cap on chunks queued for async generation per engine tick (see v4.4 notes:
-/// the generation flood starves the tick loop above these numbers; v5.0.2
-/// keeps it as a politeness bound for the moonrise ticket requests too).
-const FORCE_BUDGET_PER_TICK: usize = 4;
-/// Cap on chunks with an in-flight CHUNK_LOAD ticket (async gen backlog).
-const GEN_MAX_WISH: usize = 96;
 /// Re-issue a ticket that produced a loaded chunk within this many ticks
 /// (moonrise retries internally; this guards against lost tickets).
 const GEN_REISSUE_TICKS: u64 = 200;
 
+/// v5.5 fallback sampling cap for one poll tick (config-independent JNI
+/// ceiling; the frontier knobs live in Config now).
+const POLL_MAX_SAMPLES: usize = 256;
+
 /// Pure admission gate for the gen-wish ledger (unit-tested): duplicate chunk
-/// rejected, backlog capped, per-tick request budget enforced.
-fn wish_admit(wish: &HashMap<(i32, i32), u64>, cx: i32, cz: i32, now: u64, budget: usize) -> bool {
-    if wish.contains_key(&(cx, cz)) || wish.len() >= GEN_MAX_WISH {
+/// rejected, backlog capped, per-tick request budget enforced. v5.5: the
+/// window cap is a parameter (cfg.gen_wish) instead of a fixed constant.
+fn wish_admit(
+    wish: &HashMap<(i32, i32), u64>,
+    cx: i32,
+    cz: i32,
+    now: u64,
+    budget: usize,
+    max_wish: usize,
+) -> bool {
+    if wish.contains_key(&(cx, cz)) || wish.len() >= max_wish {
         return false;
     }
     let fresh = wish.values().filter(|t| **t == now).count();
@@ -354,7 +360,14 @@ fn force_chunk_for(
     let now = state.tick_no.load(Ordering::SeqCst);
     {
         let wish = state.gen_wish.lock().unwrap();
-        if !wish_admit(&wish, cx, cz, now, FORCE_BUDGET_PER_TICK) {
+        if !wish_admit(
+            &wish,
+            cx,
+            cz,
+            now,
+            state.cfg.gen_budget as usize,
+            state.cfg.gen_wish as usize,
+        ) {
             return;
         }
     }
@@ -410,7 +423,7 @@ fn sample_chunk(
 /// are sampled + released; stuck tickets are re-issued. NON-BLOCKING by
 /// construction — no call here may sync-generate.
 fn poll_forced(state: &Arc<State>, env: Env) {
-    const MAX_SAMPLES: usize = 128;
+    const MAX_SAMPLES: usize = POLL_MAX_SAMPLES;
     // Player gate: with nobody online the frontier must not churn tickets —
     // the long-idle ticket re-issue loop was implicated in a native crash
     // (SIGSEGV in scan_cell ~9 min after the last player left). Chunks with
@@ -723,7 +736,8 @@ fn stream_step(state: &Arc<State>, env: Env) {
         .collect();
     let batch: Vec<crate::stream::Spawn> = {
         let mut s = state.stream.lock().unwrap();
-        s.tick_batch(state.cfg.particles_per_tick as usize, &views).to_vec()
+        s.tick_batch(state.cfg.particles_per_tick as usize, &views)
+            .to_vec()
     };
     // Rate-limited diagnostics. v5.4: logged EVERY 100 ticks even when the
     // batch is empty — the idle collapse (batch -> 0 on a painted, unchanged
@@ -742,12 +756,16 @@ fn stream_step(state: &Arc<State>, env: Env) {
                 s.dirty_pending,
             )
         };
+        // v5.5 frontier diagnostics: wish = in-flight FORCED tickets,
+        // forced = chunks that completed gen and got sampled.
+        let wish_n = state.gen_wish.lock().unwrap().len();
+        let forced_n = state.forced_chunks.load(Ordering::Relaxed);
         // v5.2.2: /clod-pack.info serves LIVE scan counters (it used to
         // report the boot-time cells=0 forever).
         state.server.set_meta(valid, total_cells);
         let p0 = players.first();
         crate::log_info(&format!(
-            "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}), batch {} ({} players), spawned {} / failed {}, cam0 {}",
+            "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}), batch {} ({} players), spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}",
             batch.len(),
             players.len(),
             jni::STREAM_SPAWNED.load(Ordering::Relaxed),
@@ -845,6 +863,13 @@ fn detect_base_url(port: u16) -> String {
 mod tests {
     use super::*;
 
+    /// v5.5: the frontier admission budget and window moved into Config
+    /// (cfg.gen_budget / cfg.gen_wish, defaults 16 / 512). The old fixed
+    /// constants live on only as test fixtures.
+    const FORCE_BUDGET_PER_TICK: usize = 4;
+    /// Cap on chunks with an in-flight CHUNK_LOAD ticket (async gen backlog).
+    const GEN_MAX_WISH: usize = 96;
+
     #[test]
     fn pack_url_uses_base() {
         let st = State::new(Config::parse("pack_base_url=http://x.example;http_port=1"));
@@ -923,22 +948,23 @@ mod tests {
     #[test]
     fn wish_admit_gates_duplicates_backlog_and_budget() {
         let mut wish: HashMap<(i32, i32), u64> = HashMap::new();
-        // Fresh chunk on a fresh tick: admitted.
-        assert!(wish_admit(&wish, 3, 5, 100, FORCE_BUDGET_PER_TICK));
+        let win = GEN_MAX_WISH; // window comfortably above the test volume
+                                // Fresh chunk on a fresh tick: admitted.
+        assert!(wish_admit(&wish, 3, 5, 100, FORCE_BUDGET_PER_TICK, win));
         wish.insert((3, 5), 100);
         // Same chunk again (in-flight ticket): rejected.
-        assert!(!wish_admit(&wish, 3, 5, 100, FORCE_BUDGET_PER_TICK));
+        assert!(!wish_admit(&wish, 3, 5, 100, FORCE_BUDGET_PER_TICK, win));
         // Another chunk, same tick, budget (4) not yet exhausted: admitted.
-        assert!(wish_admit(&wish, 7, 1, 100, FORCE_BUDGET_PER_TICK));
+        assert!(wish_admit(&wish, 7, 1, 100, FORCE_BUDGET_PER_TICK, win));
         wish.insert((7, 1), 100);
-        assert!(wish_admit(&wish, 7, 2, 100, FORCE_BUDGET_PER_TICK));
+        assert!(wish_admit(&wish, 7, 2, 100, FORCE_BUDGET_PER_TICK, win));
         wish.insert((7, 2), 100);
-        assert!(wish_admit(&wish, 7, 3, 100, FORCE_BUDGET_PER_TICK));
+        assert!(wish_admit(&wish, 7, 3, 100, FORCE_BUDGET_PER_TICK, win));
         wish.insert((7, 3), 100);
         // Budget for THIS tick exhausted: rejected...
-        assert!(!wish_admit(&wish, 7, 4, 100, FORCE_BUDGET_PER_TICK));
+        assert!(!wish_admit(&wish, 7, 4, 100, FORCE_BUDGET_PER_TICK, win));
         // ...but the same chunk is fine on the NEXT tick.
-        assert!(wish_admit(&wish, 7, 4, 101, FORCE_BUDGET_PER_TICK));
+        assert!(wish_admit(&wish, 7, 4, 101, FORCE_BUDGET_PER_TICK, win));
     }
 
     #[test]
@@ -946,12 +972,46 @@ mod tests {
         let mut wish: HashMap<(i32, i32), u64> = HashMap::new();
         for i in 0..GEN_MAX_WISH {
             let key = (i as i32, (i as i32 * 7) % 13);
-            assert!(wish_admit(&wish, key.0, key.1, 1, FORCE_BUDGET_PER_TICK));
+            assert!(wish_admit(
+                &wish,
+                key.0,
+                key.1,
+                1,
+                FORCE_BUDGET_PER_TICK,
+                GEN_MAX_WISH
+            ));
             wish.insert(key, i as u64);
         }
         assert_eq!(wish.len(), GEN_MAX_WISH);
         // Ledger full: ANY new chunk is rejected regardless of tick/budget.
-        assert!(!wish_admit(&wish, -1, -1, 99, FORCE_BUDGET_PER_TICK));
+        assert!(!wish_admit(
+            &wish,
+            -1,
+            -1,
+            99,
+            FORCE_BUDGET_PER_TICK,
+            GEN_MAX_WISH
+        ));
+    }
+
+    #[test]
+    fn wish_admit_takes_the_v55_window_from_cfg() {
+        // The admission gate must honor a window OTHER than the legacy 96:
+        // the v5.5 default is cfg-driven (512), and small windows (32) must
+        // cap just the same.
+        for window in [32usize, 512] {
+            let mut wish: HashMap<(i32, i32), u64> = HashMap::new();
+            for i in 0..window {
+                let key = (i as i32, (i as i32 * 5) % 17);
+                assert!(
+                    wish_admit(&wish, key.0, key.1, 1, 16, window),
+                    "chunk {i} must fit in window {window}"
+                );
+                wish.insert(key, i as u64);
+            }
+            assert_eq!(wish.len(), window);
+            assert!(!wish_admit(&wish, -9, -9, 7, 16, window));
+        }
     }
 
     #[test]
