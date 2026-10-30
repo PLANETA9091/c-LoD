@@ -706,9 +706,21 @@ fn stream_step(state: &Arc<State>, env: Env) {
     }
 
     // Spawn the next batch to every player (the disk is shared).
+    // v5.3.3: the first player's live camera drives the cone-priority
+    // phase — decode-band cells inside the frustum stream FIRST, so the
+    // visible zone refills within seconds of any turn (was: half a lap).
+    let view = players.first().map(|p| crate::stream::ViewHint {
+        eye: [
+            f64::from(p.bx) + 0.5,
+            f64::from(p.by) + 1.62,
+            f64::from(p.bz) + 0.5,
+        ],
+        look: crate::stream::look_dir(p.yaw, p.pitch),
+        now: state.tick_no.load(Ordering::Relaxed),
+    });
     let batch: Vec<crate::stream::Spawn> = {
         let mut s = state.stream.lock().unwrap();
-        s.tick_batch(state.cfg.particles_per_tick as usize).to_vec()
+        s.tick_batch(state.cfg.particles_per_tick as usize, view.as_ref()).to_vec()
     };
     if batch.is_empty() {
         return;

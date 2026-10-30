@@ -159,6 +159,29 @@ pub struct Spawn {
     pub z: f64,
 }
 
+/// v5.3.3 cone-priority view hint (the SPEED half of the stealth transport).
+/// v5.3.1/v5.3.2 made every spawned dot decodable and erasable, but the
+/// batch still walked the disk row-major: after a 180° turn the cells now
+/// inside the frustum meet the cursor only half a lap later (~2-8 s of dead
+/// sky). The scheduler fixes exactly that: cells inside the decode band AND
+/// the frustum cone stream FIRST (stalest first, near-first), so the visible
+/// zone refills within seconds of any turn — DH-class subjective fill speed
+/// at the same particle budget. The per-player spawn gate keeps filtering
+/// the legacy lap untouched (other players, view=None).
+#[derive(Clone, Copy, Debug)]
+pub struct ViewHint {
+    /// Player eye position (world, blocks; by + 1.62).
+    pub eye: [f64; 3],
+    /// Unit look vector (stream::look_dir of the live yaw/pitch).
+    pub look: [f64; 3],
+    /// Engine tick of this call (age bookkeeping).
+    pub now: u64,
+}
+
+/// A cone cell is re-streamed at most once per this many ticks when the
+/// view is live (fresh cells self-heal through the legacy lap instead).
+pub const VIEW_REFRESH_TICKS: u64 = 60;
+
 /// The whole streaming state (server side): one fixed disk of cells plus
 /// the phase cursor of the particle stream.
 pub struct Streamer {
@@ -178,21 +201,35 @@ pub struct Streamer {
     pub streamed_cells: u64,
     /// Laps completed over the whole disk.
     pub laps: u64,
+    /// v5.3.3: engine tick each cell was last streamed at (0 = never).
+    last_stream: Vec<u64>,
+    /// Internal tick counter when no engine tick is supplied.
+    tick_counter: u64,
+    /// Cached cone cells (near-first) + the eye/look they were built for;
+    /// rebuilt only when the eye moves > 8 blocks or the look turns > 5 deg.
+    view_cache: Option<([f64; 3], [f64; 3], Vec<u32>)>,
+    /// Cone-phase cells streamed since boot (diagnostics).
+    pub cone_cells: u64,
 }
 
 impl Streamer {
     pub fn new(origin_x: f64, origin_z: f64, region_blocks: i32, cell_size: i32) -> Self {
         let side = (region_blocks / cell_size).max(1) as u32;
+        let n = side as usize * side as usize;
         Streamer {
             origin_x,
             origin_z,
             cell_size,
             side,
-            cells: vec![Cell::default(); side as usize * side as usize],
+            cells: vec![Cell::default(); n],
             cursor: 0,
             batch: Vec::with_capacity(4096),
             streamed_cells: 0,
             laps: 0,
+            last_stream: vec![0; n],
+            tick_counter: 0,
+            view_cache: None,
+            cone_cells: 0,
         }
     }
 
@@ -248,39 +285,152 @@ impl Streamer {
         }
     }
 
-    /// Advance the stream by one engine tick: fill the batch with at most
-    /// `budget` dust spawns (valid cells only, row-major cursor).
-    pub fn tick_batch(&mut self, budget: usize) -> &[Spawn] {
+    /// Rebuild the cone cache (v5.3.3): every valid cell whose HI or LO
+    /// probe point sits inside the decode band [CULL_RADIUS, ZONE_FAR] (3D
+    /// from the eye) AND inside the frustum cone. Sorted near-first. Rebuilt
+    /// only when the eye moved > 8 blocks or the look turned > 5 deg. The
+    /// test is the per-player spawn gate geometry (cos_half_cone), so every
+    /// cone-phase spawn passes the gate — no budget is wasted on culled dots.
+    fn rebuild_view_cache(&mut self, eye: [f64; 3], look: [f64; 3]) {
+        let side = self.side;
+        let cell = self.cell_size as f64;
+        let cos_half = cos_half_cone();
+        let mut list: Vec<(f32, u32)> = Vec::new();
+        for cz in 0..side {
+            for cx in 0..side {
+                let idx = cz * side + cx;
+                if !self.cells[idx as usize].valid {
+                    continue;
+                }
+                let (wx, wz) = self.cell_origin(cx, cz);
+                let cxw = wx + cell * 0.5;
+                let czw = wz + cell * 0.5;
+                // The cell always streams HI+LO together, so BOTH plane probe
+                // points must sit inside the band and the frustum — otherwise
+                // the gate would cull the other plane's spawns as waste.
+                let mut all_ok = true;
+                let mut best = f64::INFINITY;
+                for &py in &LAYER_Y {
+                    let dx = cxw - eye[0];
+                    let dy = py - eye[1];
+                    let dz = czw - eye[2];
+                    let d2 = dx * dx + dy * dy + dz * dz;
+                    if d2 < best {
+                        best = d2;
+                    }
+                    // Decode band with a 2-block safety margin on both ends
+                    // so the sub-cell offsets stay inside it, plus the exact
+                    // spawn-gate frustum test.
+                    if d2 <= (CULL_RADIUS + 2.0) * (CULL_RADIUS + 2.0)
+                        || d2 > (ZONE_FAR - 2.0) * (ZONE_FAR - 2.0)
+                    {
+                        all_ok = false;
+                        break;
+                    }
+                    let inv = 1.0 / d2.sqrt();
+                    if (dx * look[0] + dy * look[1] + dz * look[2]) * inv <= cos_half {
+                        all_ok = false;
+                        break;
+                    }
+                }
+                if all_ok {
+                    list.push((best as f32, idx));
+                }
+            }
+        }
+        list.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        self.view_cache = Some((eye, look, list.into_iter().map(|(_, i)| i).collect()));
+    }
+
+    /// Spawn the particle batch of one cell (4 HI-plane + 4 LO-plane spawns).
+    fn push_cell_spawns(&mut self, idx: u32, sub: f64, now: u64) {
+        let side = self.side as usize;
+        let cx = (idx as usize % side) as u32;
+        let cz = (idx as usize / side) as u32;
+        let Some(cell) = self.get(cx, cz) else {
+            return;
+        };
+        if !cell.valid {
+            return;
+        }
+        let (wx, wz) = self.cell_origin(cx, cz);
+        let cxw = wx + self.cell_size as f64 * 0.5;
+        let czw = wz + self.cell_size as f64 * 0.5;
+        let (hword, cword) = Self::encode_words(&cell);
+        // v5.1: the HI word rides ONLY the high layer and the LO word
+        // ONLY the low layer — the villager-sparkle carrier has one hue,
+        // so the capture pass tells words apart by plane height.
+        Self::word_spawns(hword, cxw, czw, sub, LAYER_Y[1], &mut self.batch);
+        Self::word_spawns(cword, cxw, czw, sub, LAYER_Y[0], &mut self.batch);
+        self.last_stream[idx as usize] = now;
+        self.streamed_cells += 1;
+    }
+
+    /// Advance the stream by one engine tick. v5.3.3: with a live view the
+    /// first half of the budget goes to the cone phase — decode-band cells
+    /// inside the frustum stream first (never/stalest, near-first), so the
+    /// visible zone refills within seconds of a turn. The legacy row-major
+    /// lap keeps flowing for the rest (other players' cones, view=None,
+    /// self-heal); the per-player spawn gate still filters every spawn.
+    pub fn tick_batch(&mut self, budget: usize, view: Option<&ViewHint>) -> &[Spawn] {
         self.batch.clear();
         let total = self.side as u64 * self.side as u64;
         if total == 0 {
             return &self.batch;
         }
+        self.tick_counter = self.tick_counter.wrapping_add(1);
+        let now = view.map(|v| v.now).unwrap_or(self.tick_counter);
         let sub = self.cell_size as f64 / SUB_PER_CELL;
         let budget = budget.max(8);
+
+        // ---- phase 1: cone priority (v5.3.3) -------------------------------
+        if let Some(v) = view {
+            let rebuild = match self.view_cache {
+                Some((ceye, clook, _)) => {
+                    let dx = ceye[0] - v.eye[0];
+                    let dz = ceye[2] - v.eye[2];
+                    dx * dx + dz * dz > 64.0 || dot3(ceye, clook, v.look) < 0.9962 // > ~5 deg
+                }
+                None => true,
+            };
+            if rebuild {
+                self.rebuild_view_cache(v.eye, v.look);
+            }
+            let half_budget = budget / 2;
+            // Clone the index list: spawning mutates self, the cached slice
+            // cannot be borrowed across push_cell_spawns.
+            let list: Vec<u32> = self
+                .view_cache
+                .as_ref()
+                .map(|(_, _, l)| l.clone())
+                .unwrap_or_default();
+            for idx_u32 in list {
+                if self.batch.len() >= half_budget {
+                    break;
+                }
+                let idx = idx_u32 as usize;
+                if now.wrapping_sub(self.last_stream[idx]) < VIEW_REFRESH_TICKS {
+                    continue; // fresh enough — the client still holds it
+                }
+                self.push_cell_spawns(idx_u32, sub, now);
+                self.cone_cells += 1;
+            }
+        }
+
+        // ---- phase 2: legacy row-major lap ---------------------------------
         let mut steps = 0u64;
         while self.batch.len() < budget && steps < total {
             let t = self.cursor % total;
             self.cursor += 1;
             steps += 1;
-            let cx = (t % self.side as u64) as u32;
-            let cz = (t / self.side as u64) as u32;
-            let Some(cell) = self.get(cx, cz) else {
+            let idx = t as usize;
+            if !self.cells[idx].valid {
                 continue;
-            };
-            if !cell.valid {
-                continue; // void cells stream nothing — budget goes to data
             }
-            let (wx, wz) = self.cell_origin(cx, cz);
-            let cxw = wx + self.cell_size as f64 * 0.5;
-            let czw = wz + self.cell_size as f64 * 0.5;
-            let (hword, cword) = Self::encode_words(&cell);
-            // v5.1: the HI word rides ONLY the high layer and the LO word
-            // ONLY the low layer — the villager-sparkle carrier has one hue,
-            // so the capture pass tells words apart by plane height.
-            Self::word_spawns(hword, cxw, czw, sub, LAYER_Y[1], &mut self.batch);
-            Self::word_spawns(cword, cxw, czw, sub, LAYER_Y[0], &mut self.batch);
-            self.streamed_cells += 1;
+            if self.last_stream[idx] == now {
+                continue; // already streamed this tick by the cone phase
+            }
+            self.push_cell_spawns(t as u32, sub, now);
         }
         if self.cursor >= total {
             self.cursor %= total;
@@ -288,6 +438,11 @@ impl Streamer {
         }
         &self.batch
     }
+}
+
+/// Cosine between two unit-ish vectors (look vectors are unit).
+fn dot3(_a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> f64 {
+    b[0] * c[0] + b[1] * c[1] + b[2] * c[2]
 }
 
 #[cfg(test)]
@@ -361,17 +516,17 @@ mod tests {
             }
         }
         // 2048 particles / tick = 256 cells (4 height + 4 color = 8/cell).
-        let b: Vec<Spawn> = s.tick_batch(2048).to_vec();
+        let b: Vec<Spawn> = s.tick_batch(2048, None).to_vec();
         assert_eq!(b.len(), 2048);
         assert_eq!(s.streamed_cells, 256);
         // Full lap: 16384 cells / 256 per tick = 64 ticks.
         for _ in 0..63 {
-            s.tick_batch(2048);
+            s.tick_batch(2048, None);
         }
         assert_eq!(s.laps, 1);
         assert_eq!(s.streamed_cells, 16384);
         // Cursor wrapped: the next batch starts from cell 0 again.
-        let b: Vec<Spawn> = s.tick_batch(16).to_vec();
+        let b: Vec<Spawn> = s.tick_batch(16, None).to_vec();
         assert_eq!(b.len(), 16);
         let first = &b[0];
         let (wx, _wz) = s.cell_origin(0, 0);
@@ -384,7 +539,7 @@ mod tests {
         // Only 2 valid cells on the disk.
         s.set_cell(0, 0, cell(70, false, [90, 90, 90]));
         s.set_cell(15, 15, cell(80, true, [0, 0, 200]));
-        let b: Vec<Spawn> = s.tick_batch(2048).to_vec();
+        let b: Vec<Spawn> = s.tick_batch(2048, None).to_vec();
         // 2 cells x (4 height + 4 color) particles each.
         assert_eq!(b.len(), 16);
         assert_eq!(s.streamed_cells, 2);
@@ -463,7 +618,7 @@ mod tests {
     fn batch_positions_on_sub_lattice() {
         let mut s = Streamer::new(100.0, -40.0, 64, 4);
         s.set_cell(3, 5, cell(70, false, [200, 100, 50]));
-        let b: Vec<Spawn> = s.tick_batch(2048).to_vec();
+        let b: Vec<Spawn> = s.tick_batch(2048, None).to_vec();
         assert_eq!(b.len(), 8);
         let sub = 4.0 / SUB_PER_CELL; // 1.0
         let (wx, wz) = s.cell_origin(3, 5);
@@ -483,5 +638,134 @@ mod tests {
         assert_eq!(b[3].y, LAYER_Y[1]);
         assert_eq!(b[4].y, LAYER_Y[0]);
         assert_eq!(b[7].y, LAYER_Y[0]);
+    }
+
+    fn vhint(x: f64, z: f64, yaw_deg: f64, pitch_deg: f64, now: u64) -> ViewHint {
+        ViewHint {
+            eye: [x, 64.0 + 1.62, z],
+            look: look_dir(yaw_deg as f32, pitch_deg as f32),
+            now,
+        }
+    }
+
+    /// v5.3.3: cone-phase spawns precede the legacy lap and stay inside the
+    /// decode band + frustum (the per-player gate will pass them).
+    #[test]
+    fn cone_phase_streams_first_and_in_band() {
+        let mut s = Streamer::new(0.0, 0.0, 256, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]));
+            }
+        }
+        // Player at the disk center, looking +Z, level pitch.
+        let v = vhint(128.0, 128.0, 0.0, 0.0, 100);
+        let b: Vec<Spawn> = s.tick_batch(2048, Some(&v)).to_vec();
+        assert!(!b.is_empty());
+        // The cone phase fills at least a quarter of the budget immediately
+        // (row-major cells are far away and mostly out of the frustum).
+        let half = b.len() / 2;
+        assert!(s.cone_cells > 0, "cone phase must stream cells");
+        for sp in &b[..half.min(b.len())] {
+            // Every cone-phase spawn must pass the EXACT per-player spawn
+            // gate geometry (decode band + frustum): the scheduler tested the
+            // cell probe points, the 2-block band margin covers the sub-cell
+            // offsets, so nothing may fall outside.
+            let dx = sp.x - v.eye[0];
+            let dy = sp.y - v.eye[1];
+            let dz = sp.z - v.eye[2];
+            let d2 = dx * dx + dy * dy + dz * dz;
+            let inv = 1.0 / d2.sqrt();
+            let in_cone = (dx * v.look[0] + dy * v.look[1] + dz * v.look[2]) * inv
+                > cos_half_cone() - 0.02;
+            let in_band = d2 > (CULL_RADIUS - 4.0) * (CULL_RADIUS - 4.0)
+                && d2 <= (ZONE_FAR + 4.0) * (ZONE_FAR + 4.0);
+            assert!(
+                in_band && in_cone,
+                "cone spawn ({},{},{}) outside frustum/band",
+                sp.x, sp.y, sp.z
+            );
+        }
+    }
+
+    /// The age gate: cone cells stream once, then hold for
+    /// VIEW_REFRESH_TICKS with an unchanged view.
+    #[test]
+    fn cone_age_gate_holds_fresh_cells() {
+        let mut s = Streamer::new(0.0, 0.0, 256, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]));
+            }
+        }
+        let v = vhint(128.0, 128.0, 0.0, 0.0, 100);
+        let first: Vec<Spawn> = s.tick_batch(2048, Some(&v)).to_vec();
+        // Cell identity via floor: sub-cell offsets never cross the border.
+        let first_cells: Vec<(i64, i64)> = first
+            .chunks(8)
+            .map(|c| (c[0].x.floor() as i64, c[0].z.floor() as i64))
+            .collect();
+        let first_cone: Vec<(i64, i64)> = first_cells
+            [..first_cells.len().min(s.cone_cells as usize)]
+            .to_vec();
+        // Immediate next tick with the SAME view: no cone cell repeats.
+        let v2 = vhint(128.0, 128.0, 0.0, 0.0, 101);
+        let second: Vec<Spawn> = s.tick_batch(2048, Some(&v2)).to_vec();
+        for sp in second.chunks(8).take(s.cone_cells as usize) {
+            let key = (sp[0].x.floor() as i64, sp[0].z.floor() as i64);
+            assert!(
+                !first_cone.contains(&key),
+                "cone cell {:?} re-streamed before VIEW_REFRESH_TICKS",
+                key
+            );
+        }
+        // After the age gate the stale cone cells refresh again.
+        let v3 = vhint(128.0, 128.0, 0.0, 0.0, 100 + VIEW_REFRESH_TICKS);
+        let before = s.cone_cells;
+        let third: Vec<Spawn> = s.tick_batch(2048, Some(&v3)).to_vec();
+        let third_cone = &third[..third.len().min((s.cone_cells - before) as usize * 8)];
+        assert!(
+            third_cone.iter().any(|sp| first_cone.contains(&(
+                sp.x.floor() as i64,
+                sp.z.floor() as i64
+            ))),
+            "stale cone cells must refresh after the age gate"
+        );
+    }
+
+    /// Turning the camera rebuilds the cache: the new cone streams first.
+    #[test]
+    fn cone_follows_the_turn() {
+        let mut s = Streamer::new(0.0, 0.0, 256, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]));
+            }
+        }
+        // Face +Z first, then turn to -X (vanilla yaw 90).
+        let v = vhint(128.0, 128.0, 0.0, 0.0, 10);
+        let _ = s.tick_batch(2048, Some(&v));
+        let v2 = vhint(128.0, 128.0, 90.0, 0.0, 200);
+        let b: Vec<Spawn> = s.tick_batch(2048, Some(&v2)).to_vec();
+        assert!(s.cone_cells > 0);
+        // Cone-phase spawns of THIS tick (the front of the batch) must lie
+        // in the west frustum band (or the near bubble).
+        let cone_spawns = (s.cone_cells.min(128) * 8) as usize;
+        for sp in &b[..cone_spawns.min(b.len())] {
+            let dx = sp.x - v2.eye[0];
+            let dy = sp.y - v2.eye[1];
+            let dz = sp.z - v2.eye[2];
+            let d2 = dx * dx + dy * dy + dz * dz;
+            let inv = 1.0 / d2.sqrt();
+            let in_cone = (dx * v2.look[0] + dy * v2.look[1] + dz * v2.look[2]) * inv
+                > cos_half_cone() - 0.02;
+            let in_band = d2 > (CULL_RADIUS - 4.0) * (CULL_RADIUS - 4.0)
+                && d2 <= (ZONE_FAR + 4.0) * (ZONE_FAR + 4.0);
+            assert!(
+                in_band && in_cone,
+                "spawn ({},{},{}) not in the west cone band",
+                sp.x, sp.y, sp.z
+            );
+        }
     }
 }
