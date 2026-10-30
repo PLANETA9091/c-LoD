@@ -191,11 +191,16 @@ jobs:
           z = zipfile.ZipFile('pack1.zip')
           names = z.namelist()
           assert not [n for n in names if n.endswith('.png') or 'textures/' in n], f"TEXTURES IN PACK: {names}"
-          assert len(names) == 12, f"unexpected entry count {len(names)}: {names}"
+          # 13 entries since v5.3.2: mcmeta, 2 chains, col_scan, rot_solve,
+          # rot_copy, capture, dust_mask (zero-residual pass), lod_terrain,
+          # clod_blit, atmosphere, sky.vsh, sky.fsh.
+          assert len(names) == 13, f"unexpected entry count {len(names)}: {names}"
+          assert 'assets/clod/shaders/post/dust_mask.fsh' in names, "dust_mask (dust_eater) missing"
           chain = z.read('assets/clod/post_effect/lod_terrain.json').decode()
           assert 'clod:post/capture' in chain and 'clod_h_b' in chain and 'clod_c_b' in chain
+          assert 'clod:post/dust_mask' in chain, "dust_eater pass missing from the chain"
           assert 'location' not in chain, "texture-input found in chain"
-          print(f"pack verified: {len(names)} entries, zero textures, capture chain OK")
+          print(f"pack verified: {len(names)} entries, zero textures, capture+dust_mask chain OK")
           EOF
           echo "--- stopping boot #1 ---"
           kill $SRV 2>/dev/null || true; sleep 3
