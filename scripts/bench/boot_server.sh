@@ -22,9 +22,24 @@ export DIST_JAVA_OPTS="-Xms256M -Xmx700M -XX:MaxMetaspaceSize=256M -XX:MaxDirect
 export PAPER_WORKERS="${PAPER_WORKERS:-4}"
 export PAPER_IO="${PAPER_IO:-2}"
 
+# v5.6 SHUTDOWN DISCIPLINE (crash forensics 2026-10-30, hs_err_pid16818):
+# a TERM-then-KILL barrage ("pkill; sleep 1; pkill -9") hit the JVM mid-
+# shutdown and SIGSEGV'd the Signal Dispatcher (pc=0, hs_err at 18m39s idle).
+# A single clean TERM shuts down cleanly; the historical "idle crash" was the
+# session-teardown signal storm, not idle itself. So: TERM once, WAIT for the
+# JVM to exit on its own (chunk-save takes seconds), KILL only as last resort.
+graceful_stop() {
+  for sigpid in $(pgrep -f 'paper-26.3' 2>/dev/null); do kill -TERM "$sigpid" 2>/dev/null || true; done
+  for i in $(seq 1 30); do
+    pgrep -f 'paper-26.3' >/dev/null 2>&1 || return 0
+    sleep 1
+  done
+  pkill -9 -f 'paper-26.3' 2>/dev/null || true
+  sleep 1
+}
+graceful_stop
 pkill -f launcher.jar 2>/dev/null || true
 pkill -f 'dev.dist.launcher.Main' 2>/dev/null || true
-pkill -f 'paper-26.3' 2>/dev/null || true
 pkill -f 'libcrussty_runtime' 2>/dev/null || true
 # v5.5: the port-8199 holder is the Paper JVM (rewritten argv) — wait until
 # the port is actually FREE or the pack HTTP bind fails (os error 98) and
@@ -32,7 +47,6 @@ pkill -f 'libcrussty_runtime' 2>/dev/null || true
 for i in $(seq 1 10); do
   if ! (exec 3<>/dev/tcp/127.0.0.1/8199) 2>/dev/null; then break; fi
   exec 3>&- 2>/dev/null || true
-  pkill -9 -f 'paper-26.3' 2>/dev/null || true
   sleep 1
 done
 sleep 1

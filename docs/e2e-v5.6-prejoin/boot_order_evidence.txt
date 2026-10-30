@@ -1,0 +1,13 @@
+=== v5.6 PRE-JOIN ARM live evidence (boot 18:31:58, player joins 18:32:30) ===
+  [18:31:58 INFO]: [c-LoD] c-LoD pack finalized (ONE-TIME, static): shader-only, 69998 bytes, sha1 adeb4d166a5c95edf6bd100da10559d8bf5c909b — no atlas, no textures, one push per join
+  [18:31:58 INFO]: [c-LoD] c-LoD sky-grid stream armed: 256x256 cells at (0,64), 2048 particles/tick, 256 ticks/lap
+>   [18:32:30 INFO]: System chat: [93mStepan joined the game[0m
+> [c-LoD] pack pushed to d1652ad9-77ce-3200-9642-f973c97adf36 (http://21.0.12.126:8199/clod-pack.zip): 69998 bytes, sha1 adeb4d166a5c95edf6bd100da10559d8bf5c909b — the ONE push this session
+
+=== warm-disk scan growth (stream: lines) ===
+> [c-LoD] stream: tick 200 54874/65536 cells, lap 65, cone 1820 zone 1867 dirty 0 (q 0), batch 0 (1 players), spawned 29456 / failed 0, cam0 yaw -90 pitch -8, wish 156 forced 734
+  [18:38:58 INFO]: [c-LoD] stream: tick 4000 61676/65536 cells, lap 3853, cone 121666 zone 5263 dirty 0 (q 0), batch 0 (1 players), spawned 1012870 / failed 0, cam0 yaw -90 pitch -10, wish 124 forced 867
+
+=== single clean SIGTERM experiment: graceful exit 143, ZERO new hs_err ===
+=== double simultaneous TERM (launcher+paper barrage): clean exit, ZERO new hs_err ===
+=== the only hs_err: v5.5 server killed by TERM+KILL barrage mid-shutdown (see hs_err_pid16818) ===

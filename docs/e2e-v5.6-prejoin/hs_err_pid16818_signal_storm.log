@@ -1,0 +1,349 @@
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x0000000000000000, pid=16818, tid=16834
+#
+# JRE version: OpenJDK Runtime Environment Temurin-25.0.5+8 (25.0.5+8) (build 25.0.5+8-LTS)
+# Java VM: OpenJDK 64-Bit Server VM Temurin-25.0.5+8 (25.0.5+8-LTS, mixed mode, sharing, tiered, compressed oops, compressed class ptrs, g1 gc, linux-amd64)
+# Problematic frame:
+# 
+[error occurred during error reporting (printing problematic frame), id 0xb, SIGSEGV (0xb) at pc=0x00007f2eb8f87a9e]
+# No core dump will be written. Core dumps have been disabled. To enable core dumping, try "ulimit -c unlimited" before starting Java again
+#
+# If you would like to submit a bug report, please visit:
+#   https://github.com/adoptium/adoptium-support/issues
+# The crash happened outside the Java Virtual Machine in native code.
+# See problematic frame for where to report the bug.
+#
+
+---------------  S U M M A R Y ------------
+
+Command Line: -agentpath:/home/z/mc-test/dist/libcrussty_runtime.so=modules=/home/z/mc-test/dist/modules;versions=/home/z/mc-test/dist/versions;kernel=paper-26.3.jar -Xms256M -Xmx700M -XX:MaxMetaspaceSize=256M -XX:MaxDirectMemorySize=128M -XX:+UseG1GC -Ddist.root=/home/z/mc-test/dist /home/z/mc-test/dist/versions/paper-26.3.jar --nogui
+
+Host: Intel(R) Xeon(R) Processor, 2 cores, 3G, Debian GNU/Linux 13 (trixie)
+Time: Fri Oct 30 18:25:52 2026 UTC elapsed time: 2452.064693 seconds (0d 0h 40m 52s)
+
+---------------  T H R E A D  ---------------
+
+Current thread (0x00007f2eb00e2500):  JavaThread "Signal Dispatcher" daemon [_thread_in_native, id=16834, stack(0x00007f2eb524b000,0x00007f2eb534b000) (1024K)]
+
+Stack: [0x00007f2eb524b000,0x00007f2eb534b000],  sp=0x00007f2eb53478d8,  free space=1010k
+Native frames: (J=compiled Java code, j=interpreted, Vv=VM code, C=native code)
+
+[error occurred during error reporting (printing native stack (with source info)), id 0xb, SIGSEGV (0xb) at pc=0x00007f2eb8f87a9e]
+
+Retrying call stack printing without source information...
+
+[error occurred during error reporting (retry printing native stack (no source info)), id 0xb, SIGSEGV (0xb) at pc=0x00007f2eb8fa0798]
+Java frames: (J=compiled Java code, j=interpreted, Vv=VM code)
+j  jdk.internal.misc.Signal.dispatch(I)V+25 java.base@25.0.5
+v  ~StubRoutines::call_stub 0x00007f2e9f9d9fa6
+
+siginfo: si_signo: 11 (SIGSEGV), si_code: 1 (SEGV_MAPERR), si_addr: 0x0000000000000000
+
+Registers:
+RAX=0x00000000efab79db, RBX=0xffffffffffffffff, RCX=0x0000000000000351, RDX=0x00007f2eb00e2f90
+RSP=0x00007f2eb53478d0, RBP=0x00007f2eb53479e0, RSI=0x00007f2e6c0491e0, RDI=0xffffffffffffffff
+R8 =0x00007f2eb5347a48, R9 =0x00007f2eb5347a78, R10=0x00000000ff646f6c, R11=0x00000000000000ff
+R12=0x0000000000000000, R13=0x00007f2eb729f9d0, R14=0x00007f2e6c0491e0, R15=0xffffffffffffffff
+RIP=0x0000000000000000, EFLAGS=0x0000000000010297, CSGSFS=0x002b000000000033, ERR=0x0000000000000014
+  TRAPNO=0x000000000000000e
+
+XMM[0]=0x0000000000000000 0x00000000000000ff
+XMM[1]=0x7070707070707070 0x7070707070707070
+XMM[2]=0xffffffffffffffff 0xffffffffffffffff
+XMM[3]=0xffffffffffffffff 0xffffffffffffff70
+XMM[4]=0x0000000000000001 0x0000000000000000
+XMM[5]=0x0000000000000000 0x0000000000000008
+XMM[6]=0x0000000000000000 0x0000000000000000
+XMM[7]=0x0000000000000001 0x0000000000000000
+XMM[8]=0x0000000000000001 0x0000000000000000
+XMM[9]=0x0000000000000005 0x0000000000000005
+XMM[10]=0x0000000000000002 0x0000000000000002
+XMM[11]=0xffffffffffffffff 0xffffffffffffffff
+XMM[12]=0x0000000000000001 0x0000000000000001
+XMM[13]=0x0000000000000000 0x0000000000000000
+XMM[14]=0x0000000000000000 0x0000000000000000
+XMM[15]=0x0000000000000000 0x0000000000000000
+  MXCSR=0x00001fa2
+
+
+Register to memory mapping:
+
+RAX=0x00000000efab79db is an unknown heap location
+RBX=0xffffffffffffffff is an unknown value
+RCX=0x0000000000000351 is an unknown value
+RDX=0x00007f2eb00e2f90 points into unknown readable memory: 0x45000000bebafeca | ca fe ba be 00 00 00 45
+RSP=0x00007f2eb53478d0 is pointing into the stack for thread: 0x00007f2eb00e2500
+RBP=0x00007f2eb53479e0 is pointing into the stack for thread: 0x00007f2eb00e2500
+RSI=0x00007f2e6c0491e0 points into unknown readable memory: 0x0000000000000040 | 40 00 00 00 00 00 00 00
+RDI=0xffffffffffffffff is an unknown value
+R8 =0x00007f2eb5347a48 is pointing into the stack for thread: 0x00007f2eb00e2500
+R9 =0x00007f2eb5347a78 is pointing into the stack for thread: 0x00007f2eb00e2500
+R10=0x00000000ff646f6c is pointing into object: [Ljdk.internal.vm.FillerElement; 
+{0x00000000ff600148} - klass: {type array int} - flags: is_cloneable_fast 
+
+ - length: 90450
+ -   0: 0x173b08 1522440
+ -   1: 0x7 7
+ -   2: 0x0 0
+ -   3: 0x740c0c 7605260
+ -   4: 0xa1a2303 169485059
+ -   5: 0xa41e9316 -1541500138
+ -   6: 0x232d1aa 36884906
+ -   7: 0x1f411edc 524361436
+ -   8: 0x68805220 1753240096
+ -   9: 0x0 0
+ -  10: 0x1 1
+ -  11: 0x0 0
+ -  12: 0x173b08 1522440
+ -  13: 0x6 6
+ -  14: 0x740c0c 7605260
+ -  15: 0xa1a2303 169485059
+ -  16: 0xa41e9316 -1541500138
+ -  17: 0x232d1aa 36884906
+ -  18: 0x1f411edc 524361436
+ -  19: 0x68805220 1753240096
+ -  20: 0x1 1
+ -  21: 0x0 0
+ -  22: 0x1d4888 1919112
+ -  23: 0x1 1
+ -  24: 0x0 0
+ -  25: 0x0 0
+ -  26: 0x0 0
+ -  27: 0x0 0
+ -  28: 0xff600180 -10485376
+ -  29: 0x0 0
+ -  30: 0x1 1
+ -  31: 0x0 0
+ -  32: 0x173b08 1522440
+ -  33: 0x7 7
+ -  34: 0x0 0
+ -  35: 0x8c9840 9214016
+ -  36: 0x5cc464a3 1556374691
+ -  37: 0x1dec1b12 502012690
+ -  38: 0x67420124 1732378916
+ -  39: 0xfd191e29 -48685527
+ -  40: 0x161b7f52 370900818
+ -  41: 0x0 0
+ -  42: 0x1 1
+ -  43: 0x0 0
+ -  44: 0x173b08 1522440
+ -  45: 0x6 6
+ -  46: 0x8c9840 9214016
+ -  47: 0x5cc464a3 1556374691
+ -  48: 0x1dec1b12 502012690
+ -  49: 0x67420124 1732378916
+ -  50: 0xfd191e29 -48685527
+ -  51: 0x161b7f52 370900818
+ -  52: 0x1 1
+ -  53: 0x0 0
+ -  54: 0x1d4888 1919112
+ -  55: 0x1 1
+ -  56: 0x0 0
+ -  57: 0x0 0
+ -  58: 0x0 0
+ -  59: 0x0 0
+ -  60: 0xff600200 -10485248
+ -  61: 0x0 0
+ -  62: 0x1 1
+ -  63: 0x0 0
+ -  64: 0x173b08 1522440
+ -  65: 0x7 7
+ -  66: 0x0 0
+ -  67: 0xcd8ff 841983
+ -  68: 0x51c84e35 1372081717
+ -  69: 0x4077981c 1081579548
+ -  70: 0xa76677fe -1486456834
+ -  71: 0xaada8edd -1428517155
+ -  72: 0xa09f8566 -1600158362
+ -  73: 0x0 0
+ -  74: 0x1 1
+ -  75: 0x0 0
+ -  76: 0x173b08 1522440
+ -  77: 0x6 6
+ -  78: 0xcd8ff 841983
+ -  79: 0x51c84e35 1372081717
+ -  80: 0x4077981c 1081579548
+ -  81: 0xa76677fe -1486456834
+ -  82: 0xaada8edd -1428517155
+ -  83: 0xa09f8566 -1600158362
+ -  84: 0x1 1
+ -  85: 0x0 0
+ -  86: 0x1d4888 1919112
+ -  87: 0x1 1
+ -  88: 0x0 0
+ -  89: 0x0 0
+ -  90: 0x0 0
+ -  91: 0x0 0
+ -  92: 0xff600280 -10485120
+ -  93: 0x0 0
+ -  94: 0x1 1
+ -  95: 0x0 0
+ -  96: 0x173b08 1522440
+ -  97: 0x7 7
+ -  98: 0x0 0
+ -  99: 0x1c55371 29709169
+ - 100: 0x971f794d -1759545011
+ - 101: 0xc28eda9c -1030825316
+ - 102: 0xae090bdf -1375138849
+ - 103: 0xcb0fb500 -888163072
+ - 104: 0x28e60f96 686165910
+ - 105: 0x0 0
+ - 106: 0x1 1
+ - 107: 0x0 0
+ - 108: 0x173b08 1522440
+ - 109: 0x6 6
+ - 110: 0x1c55371 29709169
+ - 111: 0x971f794d -1759545011
+ - 112: 0xc28eda9c -1030825316
+ - 113: 0xae090bdf -1375138849
+ - 114: 0xcb0fb500 -888163072
+ - 115: 0x28e60f96 686165910
+ - 116: 0x1 1
+ - 117: 0x0 0
+ - 118: 0x1d4888 1919112
+ - 119: 0x1 1
+ - 120: 0x0 0
+ - 121: 0x0 0
+ - 122: 0x0 0
+ - 123: 0x0 0
+ - 124: 0xff600300 -10484992
+ - 125: 0x0 0
+ - 126: 0x1 1
+ - 127: 0x0 0
+ - 128: 0x173b08 1522440
+ - 129: 0x7 7
+ - 130: 0x0 0
+ - 131: 0x1f09cb9 32545977
+ - 132: 0xe8426036 -398303178
+ - 133: 0xb310c35b -1290747045
+ - 134: 0xb2b7b655 -1296583083
+ - 135: 0x730fe18 120651288
+ - 136: 0x4f3fe2a0 1329586848
+ - 137: 0x0 0
+ - 138: 0x1 1
+ - 139: 0x0 0
+ - 140: 0x173b08 1522440
+ - 141: 0x6 6
+ - 142: 0x1f09cb9 32545977
+ - 143: 0xe8426036 -398303178
+ - 144: 0xb310c35b -1290747045
+ - 145: 0xb2b7b655 -1296583083
+ - 146: 0x730fe18 120651288
+ - 147: 0x4f3fe2a0 1329586848
+ - 148: 0x1 1
+ - 149: 0x0 0
+ - 150: 0x1d4888 1919112
+ - 151: 0x1 1
+ - 152: 0x0 0
+ - 153: 0x0 0
+ - 154: 0x0 0
+ - 155: 0x0 0
+ - 156: 0xff600380 -10484864
+ - 157: 0x0 0
+ - 158: 0x1 1
+ - 159: 0x0 0
+ - 160: 0x173b08 1522440
+ - 161: 0x7 7
+ - 162: 0x0 0
+ - 163: 0x24070af 37777583
+ - 164: 0x6789a850 1737074768
+ - 165: 0x78178f43 2014809923
+ - 166: 0x77952bf8 2006264824
+ - 167: 0x291a3129 689582377
+ - 168: 0xad4795a2 -1387817566
+ - 169: 0x0 0
+ - 170: 0x1 1
+ - 171: 0x0 0
+ - 172: 0x173b08 1522440
+ - 173: 0x6 6
+ - 174: 0x24070af 37777583
+ - 175: 0x6789a850 1737074768
+ - 176: 0x78178f43 2014809923
+ - 177: 0x77952bf8 2006264824
+ - 178: 0x291a3129 689582377
+ - 179: 0xad4795a2 -1387817566
+ - 180: 0x1 1
+ - 181: 0x0 0
+ - 182: 0x1d4888 1919112
+ - 183: 0x1 1
+ - 184: 0x0 0
+ - 185: 0x0 0
+ - 186: 0x0 0
+ - 187: 0x0 0
+ - 188: 0xff600400 -10484736
+ - 189: 0x0 0
+ - 190: 0x1 1
+ - 191: 0x0 0
+ - 192: 0x173b08 1522440
+ - 193: 0x7 7
+ - 194: 0x0 0
+ - 195: 0x29d5445 43865157
+ - 196: 0xd62cca50 -701707696
+ - 197: 0x9f1ef3ac -1625361492
+ - 198: 0x15bf1aa8 364845736
+ - 199: 0xde27ad0c -567825140
+ - 200: 0x9a241cf4 -1708909324
+ - 201: 0x0 0
+ - 202: 0x1 1
+ - 203: 0x0 0
+ - 204: 0x173b08 1522440
+ - 205: 0x6 6
+ - 206: 0x29d5445 43865157
+ - 207: 0xd62cca50 -701707696
+ - 208: 0x9f1ef3ac -1625361492
+ - 209: 0x15bf1aa8 364845736
+ - 210: 0xde27ad0c -567825140
+ - 211: 0x9a241cf4 -1708909324
+ - 212: 0x1 1
+ - 213: 0x0 0
+ - 214: 0x1d4888 1919112
+ - 215: 0x1 1
+ - 216: 0x0 0
+ - 217: 0x0 0
+ - 218: 0x0 0
+ - 219: 0x0 0
+ - 220: 0xff600480 -10484608
+ - 221: 0x0 0
+ - 222: 0x1 1
+ - 223: 0x0 0
+ - 224: 0x173b08 1522440
+ - 225: 0x7 7
+ - 226: 0x0 0
+ - 227: 0x284ddfc 42262012
+ - 228: 0x2e6f92a9 779063977
+ - 229: 0xd381fe88 -746455416
+ - 230: 0xab15f373 -1424624781
+ - 231: 0x48a4d71 76172657
+ - 232: 0xb3c75b0a -1278780662
+ - 233: 0x0 0
+ - 234: 0x1 1
+ - 235: 0x0 0
+ - 236: 0x173b08 1522440
+ - 237: 0x6 6
+ - 238: 0x284ddfc 42262012
+ - 239: 0x2e6f92a9 779063977
+ - 240: 0xd381fe88 -746455416
+ - 241: 0xab15f373 -1424624781
+ - 242: 0x48a4d71 76172657
+ - 243: 0xb3c75b0a -1278780662
+ - 244: 0x1 1
+ - 245: 0x0 0
+ - 246: 0x1d4888 1919112
+ - 247: 0x1 1
+ - 248: 0x0 0
+ - 249: 0x0 0
+ - 250: 0x0 0
+ - 251: 0x0 0
+ - 252: 0xff600500 -10484480
+ - 253: 0x0 0
+ - 254: 0x1 1
+ - 255: 0x0 0
+ - <90194 more elements, increase MaxElementPrintSize to print>
+R11=0x00000000000000ff is an unknown value
+R12=0x0 is null
+R13=0x00007f2eb729f9d0: <offset 0x00000000000a29d0> in /home/z/mc-test/dist/libcrussty_runtime.so at 0x00007f2eb71fd000
+R14=0x00007f2e6c0491e0 points into unknown readable memory: 0x0000000000000040 | 40 00 00 00 00 00 00 00
+R15=0xffffffffffffffff is an unknown value
+

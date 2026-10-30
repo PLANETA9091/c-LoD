@@ -204,8 +204,13 @@ jobs:
           EOF
           echo "--- stopping boot #1 ---"
           kill $SRV 2>/dev/null || true; sleep 3
-          pkill -9 -f "launcher.jar" || true; sleep 2
-          pkill -9 -f "paper-26.3" || true; true
+          # v5.6 shutdown discipline: TERM the JVM, WAIT for a graceful exit
+          # (chunk-save takes seconds; a TERM+KILL barrage SIGSEGV'd the
+          # Signal Dispatcher mid-shutdown — hs_err_pid16818 forensics).
+          for pid in $(pgrep -f 'paper-26.3' || true); do kill -TERM "$pid" 2>/dev/null || true; done
+          for i in $(seq 1 30); do pgrep -f 'paper-26.3' >/dev/null || break; sleep 1; done
+          pkill -9 -f "paper-26.3" 2>/dev/null || true
+          pkill -9 -f "launcher.jar" 2>/dev/null || true; true
       - name: "Boot #2 (restart — the pack SHA-1 must reproduce exactly)"
         working-directory: dist
         env:
@@ -228,8 +233,10 @@ jobs:
           python3 ../scripts/e2e/gates.py boot2.log
           echo "--- stopping boot #2 ---"
           kill $SRV 2>/dev/null || true; sleep 3
-          pkill -9 -f "launcher.jar" || true; sleep 2
-          pkill -9 -f "paper-26.3" || true; true
+          for pid in $(pgrep -f 'paper-26.3' || true); do kill -TERM "$pid" 2>/dev/null || true; done
+          for i in $(seq 1 30); do pgrep -f 'paper-26.3' >/dev/null || break; sleep 1; done
+          pkill -9 -f "paper-26.3" 2>/dev/null || true
+          pkill -9 -f "launcher.jar" 2>/dev/null || true; true
       - name: "Pack SHA-1 stability across restarts (v5: deterministic, no snapshot)"
         working-directory: dist
         run: |
