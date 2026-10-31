@@ -210,7 +210,34 @@ done
 note "stream live: cells=$CELLS (the fill below re-streams its columns via the event push, so full scan completion is not required)"
 sum "- stream live: cells=$CELLS"
 
-# ---- 4. stable baseline (the scan keeps painting late cells; retry) ---------
+# ---- 3b. paint-settle note (the wait itself runs after the first tp, §4) -----
+# v6.4.2 FIX (run 41237303358): a fresh client receives the WHOLE disk over
+# its first minutes; the baseline tries fired mid-wave and drifted ~118k px
+# per 12s (the A/B would lie — "no stable baseline after 3 tries"), even
+# though the wire went quiet by tick 700. The settle loop lives in §4,
+# after the first tp to the vantage (at spawn the wire is quiet because
+# nothing decodes — waiting there would prove nothing).
+
+# ---- 4. baseline: tp to the vantage FIRST, then wait for the paint wave -----
+# The wave starts when the camera enters the disk — the settle wait below is
+# meaningless at spawn (the wire is quiet there because nothing decodes).
+srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"
+LAST_WIRE=-1
+SETTLED=0
+for _ in $(seq 1 21); do
+  W=$(grep -oE 'wire bundle [0-9]+p' /tmp/server.log 2>/dev/null | tail -1 | grep -o '[0-9]*' | tail -1)
+  W="${W:-0}"
+  if [ "$LAST_WIRE" -ge 0 ] && [ $((W - LAST_WIRE)) -lt "${WIRE_QUIET:-2000}" ] 2>/dev/null; then
+    SETTLED=1
+    break
+  fi
+  LAST_WIRE="$W"
+  sleep 20
+done
+note "paint settled=$SETTLED (wire ${LAST_WIRE}p)"
+sum "- paint settled=$SETTLED (wire ${LAST_WIRE}p)"
+
+# ---- 4a. stable baseline (the scan keeps painting late cells; retry) ---------
 DRIFT=999999
 for t in 1 2 3; do
   srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"

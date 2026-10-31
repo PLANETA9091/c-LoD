@@ -199,6 +199,8 @@ pub fn step(state: &Arc<State>, env: Env) {
 
 /// Define `clod.ClodEdits` through the stashed app loader (the seedgen
 /// pattern: ClassLoader.defineClass bypasses the protected modifier).
+/// v6.4.2: every failure logs WHICH step died and dumps the pending JVM
+/// exception (if any) — the CI run of 2026-10-31 retried 600 times blind.
 fn define(env: Env) -> Option<EditChannel> {
     const HELPER: &[u8] = include_bytes!("../java/ClodEdits.class");
     let loader = crate::seedgen::loader_obj();
@@ -206,14 +208,27 @@ fn define(env: Env) -> Option<EditChannel> {
         eprintln!("[c-LoD] edits helper: loader stash empty");
         return None;
     }
-    let class_cls = cplug_sdk::classes::find_class("java/lang/Class")?.as_jclass();
-    let m_define = env.get_method_id(
+    let Some(class_cls) = cplug_sdk::classes::find_class("java/lang/Class") else {
+        crate::log_info("edit events: define failed at find_class(java/lang/Class)");
+        return None;
+    };
+    let class_cls = class_cls.as_jclass();
+    let Some(m_define) = env.get_method_id(
         class_cls,
         "defineClass",
         "(Ljava/lang/String;[BII)Ljava/lang/Class;",
-    )?;
-    let name = env.new_string_utf("clod.ClodEdits")?;
-    let arr = env.new_byte_array(HELPER.len() as i32)?;
+    ) else {
+        crate::log_info("edit events: define failed at get_method_id(defineClass)");
+        return None;
+    };
+    let Some(name) = env.new_string_utf("clod.ClodEdits") else {
+        crate::log_info("edit events: define failed at new_string_utf");
+        return None;
+    };
+    let Some(arr) = env.new_byte_array(HELPER.len() as i32) else {
+        crate::log_info("edit events: define failed at new_byte_array");
+        return None;
+    };
     let bytes: &[i8] =
         unsafe { std::slice::from_raw_parts(HELPER.as_ptr() as *const i8, HELPER.len()) };
     env.set_byte_array_region(arr, 0, HELPER.len() as i32, bytes);
@@ -223,12 +238,32 @@ fn define(env: Env) -> Option<EditChannel> {
         m_define,
         &[jv(name), jv(arr as jobject), ji(0), ji(HELPER.len() as i32)],
     );
+    if env.exception_check() {
+        // defineClass throwing (VerifyError / ClassFormatError / loader
+        // refusal) — describe prints the JVM stack, which IS the reason.
+        crate::log_info("edit events: defineClass threw — JVM stack follows on stderr");
+        env.exception_describe();
+    }
     clear_if_pending(env);
-    let cls = jobj(cls_o)?;
+    let Some(cls) = jobj(cls_o) else {
+        crate::log_info("edit events: define failed — defineClass returned null");
+        return None;
+    };
     let cls = env.new_global_ref(cls) as jobject;
-    let m_try_init = env.get_static_method_id(cls, "tryInit", "(Ljava/lang/Object;)I")?;
-    let f_head = env.get_static_field_id(cls, "head", "I")?;
-    let f_ring = env.get_static_field_id(cls, "RING", "[J")?;
+    let Some(m_try_init) = env.get_static_method_id(cls, "tryInit", "(Ljava/lang/Object;)I") else {
+        crate::log_info(
+            "edit events: define failed at get_static_method_id(tryInit) — class resolution broke",
+        );
+        return None;
+    };
+    let Some(f_head) = env.get_static_field_id(cls, "head", "I") else {
+        crate::log_info("edit events: define failed at get_static_field_id(head)");
+        return None;
+    };
+    let Some(f_ring) = env.get_static_field_id(cls, "RING", "[J") else {
+        crate::log_info("edit events: define failed at get_static_field_id(RING)");
+        return None;
+    };
     Some(EditChannel {
         cls: cls as usize,
         m_try_init: m_try_init as usize,
