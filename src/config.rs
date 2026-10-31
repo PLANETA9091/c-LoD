@@ -84,6 +84,12 @@ pub struct Config {
     /// amortized over N chunks; the noise walk still runs per chunk inside
     /// the JVM). 1 = one crossing per chunk (the v5.8 shape).
     pub seedgen_batch: i32,
+    /// v6.0 NATIVE DUST WIRE: deliver the per-tick dust batch as ONE
+    /// ClientboundBundlePacket per player built from cached packets (zero
+    /// Java objects per particle in the steady state). When false — or when
+    /// the bundle surface fails to resolve — the proven v5 per-particle
+    /// path handles delivery.
+    pub native_dust: bool,
 }
 
 impl Default for Config {
@@ -119,6 +125,7 @@ impl Default for Config {
             native_gen: true,
             native_threads: 0,
             seedgen_batch: 8,
+            native_dust: true,
         }
     }
 }
@@ -242,6 +249,9 @@ impl Config {
         if let Some(v) = get("seedgen_batch").and_then(|v| v.parse::<i32>().ok()) {
             cfg.seedgen_batch = v.clamp(1, 64);
         }
+        if let Some(v) = get("native_dust") {
+            cfg.native_dust = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
         cfg
     }
 }
@@ -321,6 +331,16 @@ mod tests {
         assert_eq!(c.seedgen_batch, 1, "batch 0/1 mean the single-chunk shape");
         let c = Config::default();
         assert_eq!(c.seedgen_batch, 8, "v5.9 batch default");
+    }
+
+    #[test]
+    fn native_dust_knob() {
+        let c = Config::parse("");
+        assert!(c.native_dust, "v6.0 wire defaults ON");
+        let c = Config::parse("native_dust=false");
+        assert!(!c.native_dust, "legacy per-particle path selectable");
+        let c = Config::parse("native_dust=1");
+        assert!(c.native_dust);
     }
 
     #[test]

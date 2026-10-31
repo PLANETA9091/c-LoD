@@ -1341,6 +1341,19 @@ pub struct Nms {
     /// ServerPlayer.connection field + ServerGamePacketListenerImpl.send
     f_connection: jfieldID,
     m_send: jmethodID,
+    /// v6.0 NATIVE DUST WIRE: ClientboundBundlePacket(Iterable) — the whole
+    /// per-tick batch travels as ONE vanilla packet (one frame, one encode,
+    /// one Netty write per player) instead of one packet per particle.
+    /// OPTIONAL: unresolvable -> wire_ready() == false -> the proven
+    /// per-particle path keeps running (zero regression).
+    bundle_cls: Option<jobject>,
+    m_bundle_new: Option<jmethodID>,
+    /// java.util.ArrayList surface for the per-player bundle payloads.
+    arraylist_cls: jobject,
+    m_al_new: jmethodID,
+    m_al_add: jmethodID,
+    /// List.subList for >1024-packet bundles (client bundle-size guards).
+    m_al_sublist: jmethodID,
 }
 
 struct SendNms(Nms);
@@ -1355,6 +1368,12 @@ pub(crate) static LOADER: Mutex<usize> = Mutex::new(0);
 /// Stream diagnostics: dust spawns handed to ServerLevel + failures.
 pub static STREAM_SPAWNED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub static STREAM_FAILED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// v6.0 wire diagnostics: packets delivered through bundles / bundles sent /
+/// failed sends (a failure falls back to the legacy per-particle path for
+/// that player this tick).
+pub static WIRE_SPAWNED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static WIRE_BUNDLES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static WIRE_FAILED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Resolve the NMS surface once (main thread). Returns true when usable.
 pub fn nms_warmup(env: Env) -> bool {
@@ -1483,12 +1502,54 @@ fn resolve_nms(env: Env) -> Option<Nms> {
             "(Lnet/minecraft/network/protocol/Packet;)V",
         )
     );
+    // --- v6.0 NATIVE DUST WIRE surface -------------------------------------
+    // ArrayList is JDK — always present, hard resolve (step!).
+    let arraylist_cls = step!("arraylist_cls", load("java.util.ArrayList"));
+    let m_al_new = step!(
+        "m_al_new",
+        env.get_method_id(arraylist_cls, "<init>", "(I)V")
+    );
+    let m_al_add = step!(
+        "m_al_add",
+        env.get_method_id(arraylist_cls, "add", "(Ljava/lang/Object;)Z")
+    );
+    let m_al_sublist = step!(
+        "m_al_sublist",
+        env.get_method_id(arraylist_cls, "subList", "(II)Ljava/util/List;")
+    );
+    // The bundle packet is OPTIONAL: its ctor signature drifted across
+    // versions, so try the ladder and degrade to the legacy transport.
+    let bundle_cls = load("net.minecraft.network.protocol.game.ClientboundBundlePacket");
+    let m_bundle_new = bundle_cls.and_then(|cls| {
+        let mut found = None;
+        for sig in [
+            "(Ljava/lang/Iterable;)V",
+            "(Ljava/util/Collection;)V",
+            "(Ljava/util/List;)V",
+        ] {
+            if let Some(mid) = env.get_method_id(cls, "<init>", sig) {
+                found = Some(mid);
+                break;
+            }
+            clear_if_pending(env);
+        }
+        if found.is_none() {
+            eprintln!("[c-LoD] NMS: ClientboundBundlePacket ctor unresolved — wire stays legacy");
+        }
+        found
+    });
     Some(Nms {
         happy_villager,
         particle_packet_cls,
         m_particle_packet_new,
         f_connection,
         m_send,
+        bundle_cls,
+        m_bundle_new,
+        arraylist_cls,
+        m_al_new,
+        m_al_add,
+        m_al_sublist,
     })
 }
 
@@ -1531,31 +1592,22 @@ unsafe fn get_handle(env: Env, player: jobject) -> Option<jobject> {
     jobj(env.call_object_method(player, mid, &[]))
 }
 
-/// Spawn ONE FORCE villager-sparkle particle for ONE player: build a
-/// ClientboundLevelParticlesPacket (overrideLimiter = true — the particle
-/// survives the client's particle setting AND its render-distance clip,
-/// exactly like `/particle ... force`) and push it straight into the
-/// connection. This IS the LOD transport (SKY-GRID BIT-STREAM).
+/// Build ONE force villager-sparkle ClientboundLevelParticlesPacket
+/// (overrideLimiter = true — the particle survives the client's particle
+/// setting AND its render-distance clip, exactly like `/particle ... force`).
+/// This IS the LOD transport payload (SKY-GRID BIT-STREAM).
 ///
 /// happy_villager replaces the v5.0 dust carrier: dust quads render with
 /// degenerate UVs on every 26.3 software backend (verified live on GL
 /// llvmpipe AND Vulkan lavapipe — dust stays 1-2 px while explosions and
 /// town-sparkles render full-size).
 ///
+/// Returns a LOCAL ref. Main thread only.
+///
 /// # Safety
-/// Main thread only; `player` must be a live CraftPlayer local ref.
-pub unsafe fn spawn_particle(env: Env, player: jobject, x: f64, y: f64, z: f64) -> bool {
-    let Some(n) = nms() else {
-        return false;
-    };
-    let Some(handle) = get_handle(env, player) else {
-        clear_if_pending(env);
-        return false;
-    };
-    let Some(conn) = jobj(env.get_object_field(handle, n.f_connection)) else {
-        clear_if_pending(env);
-        return false;
-    };
+/// Main thread only; NMS surface must be resolved.
+pub unsafe fn build_particle_packet(env: Env, x: f64, y: f64, z: f64) -> Option<jobject> {
+    let n = nms()?;
     // SimpleParticleType is a process-lifetime JVM static — borrow it directly.
     let opts = n.happy_villager;
     // (options, overrideLimiter=true, alwaysShow=true, x, y, z,
@@ -1574,10 +1626,131 @@ pub unsafe fn spawn_particle(env: Env, player: jobject, x: f64, y: f64, z: f64) 
         jf(0.0),
         ji(0),
     ];
+    let pkt = env
+        .new_object(n.particle_packet_cls, n.m_particle_packet_new, &args)
+        .unwrap_or(std::ptr::null_mut());
+    clear_if_pending(env);
+    jobj(pkt)
+}
+
+/// Promote a local ref to a fresh global ref and release the local one.
+///
+/// # Safety
+/// Main thread only; `local` must be a valid local ref.
+pub unsafe fn globalize(env: Env, local: jobject) -> usize {
+    let g = env.new_global_ref(local);
+    env.delete_local_ref(local);
+    g as usize
+}
+
+/// Release a global ref (stored as a usize handle; 0 is a no-op).
+///
+/// # Safety
+/// Main thread only; the handle must not be used afterwards.
+pub unsafe fn free_global(env: Env, handle: usize) {
+    if handle != 0 {
+        env.delete_global_ref(handle as jobject);
+    }
+}
+
+/// v6.0 wire readiness: the bundle surface resolved at warmup.
+pub fn wire_ready() -> bool {
+    nms().is_some_and(|n| n.m_bundle_new.is_some())
+}
+
+/// Fresh ArrayList(cap) — LOCAL ref; main thread only.
+pub fn new_array_list(env: Env, cap: i32) -> Option<jobject> {
+    let n = nms()?;
+    let list = env
+        .new_object(n.arraylist_cls, n.m_al_new, &[ji(cap)])
+        .unwrap_or(std::ptr::null_mut());
+    clear_if_pending(env);
+    jobj(list)
+}
+
+/// list.add(pkt) — main thread only.
+pub fn list_add(env: Env, list: jobject, pkt: jobject) -> bool {
+    let Some(n) = nms() else { return false };
+    let added = env.call_boolean_method(list, n.m_al_add, &[jv(pkt)]);
+    clear_if_pending(env);
+    added
+}
+
+/// ClientboundBundlePacket over ONE vanilla `send` — the v6.0 wire step:
+/// the whole per-tick batch travels as a single packet (single frame,
+/// single encode, single Netty write per player). `list` must be a
+/// java.util.List of ClientboundLevelParticlesPacket.
+///
+/// # Safety
+/// Main thread only; `player` must be a live CraftPlayer local ref.
+pub unsafe fn bundle_send(env: Env, player: jobject, list: jobject) -> bool {
+    let Some(n) = nms() else {
+        return false;
+    };
+    let Some(mid) = n.m_bundle_new else {
+        return false;
+    };
+    let Some(handle) = get_handle(env, player) else {
+        clear_if_pending(env);
+        return false;
+    };
+    let Some(conn) = jobj(env.get_object_field(handle, n.f_connection)) else {
+        clear_if_pending(env);
+        return false;
+    };
     let Some(pkt) = jobj(
-        env.new_object(n.particle_packet_cls, n.m_particle_packet_new, &args)
+        env.new_object(n.bundle_cls.unwrap(), mid, &[jv(list)])
             .unwrap_or(std::ptr::null_mut()),
     ) else {
+        clear_if_pending(env);
+        WIRE_FAILED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return false;
+    };
+    env.call_void_method(conn, n.m_send, &[jv(pkt)]);
+    clear_if_pending(env);
+    if env.exception_check() {
+        env.exception_clear();
+        WIRE_FAILED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return false;
+    }
+    WIRE_BUNDLES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    true
+}
+
+/// list.subList(from, to) — LOCAL ref (a view over `list`; used to keep
+/// bundles under the client-side bundle-size guards). Main thread only.
+pub fn list_sublist(env: Env, list: jobject, from: i32, to: i32) -> Option<jobject> {
+    let n = nms()?;
+    let sub = env.call_object_method(list, n.m_al_sublist, &[ji(from), ji(to)]);
+    clear_if_pending(env);
+    jobj(sub)
+}
+
+/// Spawn ONE FORCE villager-sparkle particle for ONE player: build a
+/// ClientboundLevelParticlesPacket (overrideLimiter = true — the particle
+/// survives the client's particle setting AND its render-distance clip,
+/// exactly like `/particle ... force`) and push it straight into the
+/// connection. This IS the LOD transport (SKY-GRID BIT-STREAM).
+///
+/// v6.0: the LEGACY per-particle delivery path, kept as the automatic
+/// fallback whenever the bundle wire is unavailable (resolve failure,
+/// `native_dust=false`, or a failed bundle send for this player/tick).
+///
+/// # Safety
+/// Main thread only; `player` must be a live CraftPlayer local ref.
+pub unsafe fn spawn_particle(env: Env, player: jobject, x: f64, y: f64, z: f64) -> bool {
+    let Some(n) = nms() else {
+        return false;
+    };
+    let Some(handle) = get_handle(env, player) else {
+        clear_if_pending(env);
+        return false;
+    };
+    let Some(conn) = jobj(env.get_object_field(handle, n.f_connection)) else {
+        clear_if_pending(env);
+        return false;
+    };
+    let Some(pkt) = build_particle_packet(env, x, y, z) else {
         clear_if_pending(env);
         STREAM_FAILED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         return false;

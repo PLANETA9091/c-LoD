@@ -28,6 +28,7 @@ mod palette;
 mod seedgen;
 mod sha1;
 mod stream;
+mod wire;
 mod zipw;
 
 use cplug_abi::{CPluginApi, JavaVmPtr};
@@ -73,7 +74,7 @@ pub unsafe extern "C" fn cplugin_init(
         cfg.region_blocks, cfg.cell_size, cfg.http_port, cfg.fov, cfg.particles_per_tick
     ));
     log_info(
-        "c-LoD v5.0: SKY-GRID BIT-STREAM — shader-only pack pushed once, world data rides dust particles",
+        "c-LoD v6.0: NATIVE DUST WIRE — shader-only pack pushed once, world data rides cached dust packets in one bundle per player",
     );
 
     let st = engine::State::new(cfg);

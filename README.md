@@ -32,7 +32,12 @@ No client mods. **No Display entities. No textures in the pack.** The vanilla cl
  │  embedded HTTP: GET /clod-pack.zip | /clod-pack.sha1 | /clod-pack.info            │
  └────────────┬─────────────────────────────────────────────────────┬────────────────┘
               │  ClientboundPostEffectsPacket                        │  pack download (once)
-              ▼                                        ServerLevel.sendParticles (NMS bridge)
+              ▼
+   v6.0 NATIVE DUST WIRE: the per-tick batch rides ONE vanilla
+   ClientboundBundlePacket per player — one frame, one encode, one
+   Netty write; particle packets are built once per position and
+   cached (src/wire.rs), so the steady state allocates nothing.
+
  ┌──────────────────────────── VANILLA CLIENT 26.3 ──────────────────────────────────┐
  │  CAMERA CHANNEL:                                                                  │
  │  sky.fsh override — vanilla sky program + payload: the sky stage is the only       │
@@ -74,7 +79,7 @@ Every piece below was verified against the **unobfuscated 26.3 client jar** (Moj
 | 26.3 device depth is `d = depth_near / eyeZ` (reversed-Z, infinite far, sky reads 0.0) — dust particles are opaque and write depth, so the capture strobe accepts only dots backed by geometry | `Minecraft` render globals, verified live on the e2e stand |
 | Uniform types `float/int/ivec3/vec2/vec3/vec4/matrix4x4` become `std140` UBOs from JSON; a `vec4` value must be a 4-element list | `UniformValue$Type` |
 | Paper API: `Player#postEffects()` → `PlayerPostEffects.add/remove(Key)`, `Player.setResourcePack(UUID,url,sha1,prompt,force)` | Paper 26.3 javadoc |
-| Server-side particles: `CraftWorld.getHandle()` → `ServerLevel.sendParticles` + `ParticleTypes.DUST` (`DustParticleOptions.<init>(IF)V`) through a native JNI bridge — no Bukkit reflection per spawn | `org.bukkit.craftbukkit.entity.CraftWorld`, verified: 0 JNI linkage errors |
+| Server-side particles: `CraftPlayer.getHandle()` → `ClientboundLevelParticlesPacket(options, force=true, …)` straight into `ServerGamePacketListenerImpl.send` (live-verified since v5.1); v6.0 wraps the whole per-tick batch into one `ClientboundBundlePacket` per player — vanilla wire, vanilla codec, ctor resolved by a signature ladder with automatic legacy fallback | `net.minecraft.network.protocol.game.ClientboundBundlePacket` |
 
 On 26.3's reversed-Z depth, the sky reads `device depth == 0.0`. The **view basis travels through the frame itself**: the sky shader computes `yaw/pitch/fov` from `ModelViewMat`/`ProjMat` and packs them into the invisible alpha of the leftmost sky columns; the chain scans for the topmost intact row (magic + checksum), so any occlusion self-heals frame-exact — **no sun, no moon, no time-of-day requirement, no warm-up**, and the real per-client FOV (spyglass zoom included) rides along for free.
 
@@ -122,6 +127,7 @@ Options string passed through the CRUSSTY runtime (`key=value;key=value`). Every
 | `native_gen` | `true` | SEEDGEN: generate never-generated chunks natively on our own threads (false = legacy FORCED-ticket frontier) |
 | `native_threads` | `0` | SEEDGEN worker count; 0 = auto (cores−1, clamped 1–8) |
 | `seedgen_batch` | `8` | SEEDGEN v5.9: chunks per JNI batch call (1 = one crossing per chunk, the v5.8 shape) |
+| `native_dust` | `true` | v6.0 NATIVE DUST WIRE: the per-tick dust batch rides ONE `ClientboundBundlePacket` per player built from cached packets (false = the v5 per-particle path) |
 
 Post-effect ids installed by the pack: **`clod:lod_terrain`**, **`clod:atmosphere`** — exactly the identifiers the vanilla `/posteffect` command accepts, so admins can also toggle them by hand:
 
@@ -139,12 +145,13 @@ All numbers from the real 2-CPU e2e stand (Paper 26.3-207 + genuine vanilla clie
 - **Scan throughput** (v5.5 gen-frontier): 35 → 80 cells/s sustained on 2 cores (best 896/s), a warm world re-scans ~49k cells in seconds. A vantage tour accelerates the scan ~15× (teleports load chunks, the ring sweep samples them instantly).
 - **Pre-join arm** (v5.6): the disk arms and warm-scans before the first player joins — 32 s ahead of the join, 54874/65536 cells warm at tick 200, 0 carrier pixels on the first horizon frame.
 - **SEEDGEN cold-world fill** (v5.7): the full 512×512-cell disk (1024 chunks the server had NEVER generated) filled natively in ~23 s on one worker of a 2-core box — ~2,750 cells/s vs ~80 cells/s for the v5.5 ticket frontier (**~35×**), zero failures, zero tickets, TPS untouched; with `native_threads` workers it scales by cores. v5.8 moved the whole per-chunk noise walk inside the JVM (`java/ClodSeedgen`, one JNI call per chunk instead of ~1500 per column). v5.9 shaves the rest of the overhead: one JNI call per **batch** of chunks (`seedgen_batch`, default 8), intern tables versioned in the payload header (they used to be re-read one JNI call per string every chunk), per-worker identity caches for the per-cell material/biome interning, and an affine-stride y-walk verified per column against the exact v5.8 calls (the preflight proves both paths bit-identical). The per-column v5.7 path stays as an automatic fallback; the CI stand re-measures the fill rate on every master push.
+- **Native dust wire** (v6.0): the stream itself stopped paying per-particle Java tax. The legacy path crossed the JNI boundary **four times per particle per player** (getHandle + connection field + NMS record constructor + vanilla send → one Netty write each). The v6.0 wire builds each unique particle packet **once** (positions are exact lattice points — `src/wire.rs` keys them by their exact i64 lattice coordinates), caches it as a global ref, and ships the whole gated batch as **one `ClientboundBundlePacket` per player** — a single vanilla frame, a single encode, a single Netty write per player per tick. Steady state after the first lap: ~100% cache hits, **zero Java objects per particle**; the client decodes byte-identical packets (same constructor, same arguments), only the envelope changed. Delivery keeps the full v5.3.1 stealth gate, chunked at 1024 packets per bundle, and falls back to the per-particle path automatically (config `native_dust`, or ≥3 consecutive bundle failures for a player).
 - **One push, forever**: the pack SHA-1 is byte-deterministic across restarts; clients never re-download.
 
 ## Development
 
 ```bash
-cargo test --release          # 61 unit tests (stream/engine/config/packgen/palette/sha1/http/zipw/seedgen)
+cargo test --release          # 65 unit tests (stream/engine/config/packgen/palette/sha1/http/zipw/seedgen/wire)
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 bash scripts/check_glsl.sh    # glslangValidator: every shader + both chain JSONs
@@ -152,11 +159,12 @@ bash scripts/check_glsl.sh    # glslangValidator: every shader + both chain JSON
 
 The full verification pyramid — CI layers, boot gates G1–G10, the real-client harness and the evidence archive — is mapped in [TESTS.md](TESTS.md). CI runs rustfmt, clippy (`-D warnings`), the full test suite, a bytecode-freshness check for the embedded seedgen helper (`java/ClodSeedgen.class` recompiled and diffed against the commit), glslang validation, the pack-integrity assertions (12→13 entries, **zero** `.png`/`textures/`, capture chain present, no texture inputs), release builds on Linux/macOS/Windows, the CRUSSTY module bundle — and an **e2e live-server job** on `master`: a real Paper 26.3 kernel on Temurin 25 with the CRUSSTY runtime built from source, two boots (fresh world + restart) asserting the pack fetch, the gates and byte-exact SHA-1 reproduction.
 
-## Honest limitations (v5.6)
+## Honest limitations (v6.0)
 
 - **The camera channel needs sky in the leftmost screen columns.** Facing a wall of terrain (or being fully indoors) the chain holds its last estimate with a slow decay — the LOD fades out instead of popping, and the atmosphere chain keeps working (it never needs rotation). Any sky row in the leftmost 8 columns re-locks the basis within one frame.
 - **A cold world starts nearly empty — for seconds, not minutes.** SEEDGEN (v5.7) fills never-generated chunks natively at ~35× the ticket frontier, and v5.8/v5.9 keep shaving the per-chunk overhead (walk inside the JVM → batched JNI → versioned tables + identity caches + stride math), so a fresh 512-block disk completes in well under a minute on a small VPS. Generated cells are `provisional`: terrain-exact, but trees/carvers/structures only arrive when the server generates the real chunk (the loaded-chunk sampler upgrades them then). The helper degrades gracefully: bytecode that fails to define or throws on the host's Paper build falls back to the per-column v5.7 path automatically.
 - **The carrier is physics, not magic.** Dust particles are real entities on the wire: the stealth gate erases them from every conventional viewpoint, but a client parked at an extreme vantage can still spot sparse dots.
+- **The bundle wire leans on vanilla bundle decoding.** If a future 26.3.x changes `ClientboundBundlePacket` (name, constructor shape, or client-side bundle guards), the wire surface stops resolving and delivery falls back to the proven per-particle path automatically — the LOD keeps working at the v5 cost profile.
 - **No client→server feedback channel exists on vanilla 26.3** — the server paces the stream blind (FOV cone + decode band + delta-zone scheduler approximate what a real ACK channel would give).
 
 ## License

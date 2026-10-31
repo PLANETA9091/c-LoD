@@ -70,6 +70,10 @@ pub struct State {
     /// delta between native noise+surface and the full generated chunk —
     /// trees, carvers, structures).
     pub prov_diffs: AtomicU64,
+    /// v6.0 NATIVE DUST WIRE: the shared cache of prebuilt particle packets
+    /// (one object per unique spawn position, global refs, LRU-bounded).
+    /// Main-thread-only content behind a Mutex to match the State style.
+    pub pkt_cache: Mutex<crate::wire::PacketCache>,
 }
 
 #[derive(Clone)]
@@ -94,6 +98,10 @@ pub struct PlayerState {
     /// must land AFTER the client finished the join screens, or the pack
     /// prompt screen gets swallowed by the loading terrain screen).
     pub joined_tick: u64,
+    /// v6.0: consecutive wire (bundle) delivery failures. At
+    /// WIRE_FAIL_LIMIT the player sticks to the legacy per-particle path
+    /// (a flaky channel must not cost a JNI storm every tick).
+    pub wire_fails: u32,
 }
 
 /// Engine ticks between the join and the single pack push.
@@ -129,6 +137,7 @@ impl State {
             seedgen: Mutex::new(None),
             prov_upgraded: AtomicU64::new(0),
             prov_diffs: AtomicU64::new(0),
+            pkt_cache: Mutex::new(crate::wire::PacketCache::new()),
         })
     }
 }
@@ -824,12 +833,22 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     } else {
         format!("on (fails {nat_h})")
     };
+    // v6.0 wire diagnostics: bundles sent / packets carried / failures.
+    let wire_s = jni::WIRE_SPAWNED.load(Ordering::Relaxed);
+    let wire_b = jni::WIRE_BUNDLES.load(Ordering::Relaxed);
+    let wire_f = jni::WIRE_FAILED.load(Ordering::Relaxed);
+    let wire_mode = if state.cfg.native_dust && jni::wire_ready() {
+        "bundle"
+    } else {
+        "legacy"
+    };
+    let cache_stat = state.pkt_cache.lock().unwrap().stat();
     // v5.2.2: /clod-pack.info serves LIVE scan counters (it used to
     // report the boot-time cells=0 forever).
     state.server.set_meta(valid, total_cells);
     let p0 = players.first();
     crate::log_info(&format!(
-        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}), spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}",
+        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}), spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} {cache_stat}",
         jni::STREAM_SPAWNED.load(Ordering::Relaxed),
         jni::STREAM_FAILED.load(Ordering::Relaxed),
         p0.map(|p| format!("yaw {:.0} pitch {:.0}", p.yaw, p.pitch))
@@ -837,10 +856,11 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     ));
 }
 
-/// The v5 streaming step: fix the disk origin once (config center or the
-/// first player), then spawn the next batch of dust particles over the two
-/// sky planes — one force ClientboundLevelParticlesPacket per player per
-/// particle (overrideLimiter: survives particle settings + render clip).
+/// The v5/v6 streaming step: fix the disk origin once (config center or the
+/// first player), then deliver the next batch of dust particles over the two
+/// sky planes. v6.0 delivery per player: ONE ClientboundBundlePacket built
+/// from cached packets (the native wire), or the legacy one-packet-per-
+/// particle loop as the automatic fallback.
 fn stream_step(state: &Arc<State>, env: Env) {
     if state.phase.load(Ordering::SeqCst) != PHASE_LIVE {
         return;
@@ -893,6 +913,13 @@ fn stream_step(state: &Arc<State>, env: Env) {
     if batch.is_empty() {
         return;
     }
+    // v6.0 NATIVE DUST WIRE: the per-tick batch rides ONE
+    // ClientboundBundlePacket per player (single frame, single encode,
+    // single Netty write) built from cached packet objects — zero Java
+    // objects per particle in the steady state. Any failure (surface
+    // unresolved, config off, flaky channel) drops that player to the
+    // legacy per-particle loop below — the transport never degrades.
+    let native = state.cfg.native_dust && jni::wire_ready();
     let mut spawned = 0u64;
     for p in &players {
         let Some(handle) = jni::player_by_uuid(env, &p.uuid) else {
@@ -918,26 +945,90 @@ fn stream_step(state: &Arc<State>, env: Env) {
         let mut n_near = 0u64;
         let mut n_far = 0u64;
         let mut n_cone = 0u64;
-        for sp in &batch {
-            if !crate::stream::spawn_visible(sp, [px, py, pz], look, sky_visible, cos_half) {
-                if !sky_visible {
+        let fails = state
+            .per_player
+            .lock()
+            .unwrap()
+            .get(&p.uuid)
+            .map(|st| st.wire_fails)
+            .unwrap_or(0);
+        let mut wire_spawned = 0u64;
+        let mut wire_used = false;
+        if native && fails < WIRE_FAIL_LIMIT {
+            match wire_deliver(
+                state,
+                env,
+                handle,
+                &batch,
+                px,
+                py,
+                pz,
+                look,
+                sky_visible,
+                cos_half,
+                &mut n_near,
+                &mut n_far,
+                &mut n_cone,
+            ) {
+                Some(n) => {
+                    wire_spawned = n;
+                    wire_used = true;
+                    state
+                        .per_player
+                        .lock()
+                        .unwrap()
+                        .entry(p.uuid.clone())
+                        .or_default()
+                        .wire_fails = 0;
+                }
+                None => {
+                    state
+                        .per_player
+                        .lock()
+                        .unwrap()
+                        .entry(p.uuid.clone())
+                        .or_default()
+                        .wire_fails += 1;
+                    let now_fails = state
+                        .per_player
+                        .lock()
+                        .unwrap()
+                        .get(&p.uuid)
+                        .map(|st| st.wire_fails)
+                        .unwrap_or(0);
+                    if now_fails == WIRE_FAIL_LIMIT {
+                        crate::log_info(&format!(
+                            "wire: {} hit {} consecutive bundle failures — legacy per-particle path for this player",
+                            p.uuid, WIRE_FAIL_LIMIT
+                        ));
+                    }
+                }
+            }
+        }
+        if wire_used {
+            spawned += wire_spawned;
+        } else {
+            for sp in &batch {
+                if !crate::stream::spawn_visible(sp, [px, py, pz], look, sky_visible, cos_half) {
+                    if !sky_visible {
+                        continue;
+                    }
+                    let dx = sp.x - px;
+                    let dy = sp.y - py;
+                    let dz = sp.z - pz;
+                    let d2 = dx * dx + dy * dy + dz * dz;
+                    if d2 <= crate::stream::CULL_RADIUS * crate::stream::CULL_RADIUS {
+                        n_near += 1;
+                    } else if d2 > crate::stream::ZONE_FAR * crate::stream::ZONE_FAR {
+                        n_far += 1;
+                    } else {
+                        n_cone += 1;
+                    }
                     continue;
                 }
-                let dx = sp.x - px;
-                let dy = sp.y - py;
-                let dz = sp.z - pz;
-                let d2 = dx * dx + dy * dy + dz * dz;
-                if d2 <= crate::stream::CULL_RADIUS * crate::stream::CULL_RADIUS {
-                    n_near += 1;
-                } else if d2 > crate::stream::ZONE_FAR * crate::stream::ZONE_FAR {
-                    n_far += 1;
-                } else {
-                    n_cone += 1;
+                if unsafe { jni::spawn_particle(env, handle, sp.x, sp.y, sp.z) } {
+                    spawned += 1;
                 }
-                continue;
-            }
-            if unsafe { jni::spawn_particle(env, handle, sp.x, sp.y, sp.z) } {
-                spawned += 1;
             }
         }
         if state.tick_no.load(Ordering::Relaxed).is_multiple_of(100) {
@@ -950,6 +1041,104 @@ fn stream_step(state: &Arc<State>, env: Env) {
     state
         .streamed_cells
         .fetch_add(spawned / 8 / players.len().max(1) as u64, Ordering::Relaxed);
+}
+
+/// v6.0 wire failure stickiness: after this many consecutive bundle
+/// failures a player stays on the legacy path (predictable, no retry
+/// storms against a broken channel).
+const WIRE_FAIL_LIMIT: u32 = 3;
+/// Per-bundle packet cap. Vanilla's delimiter-era clients guarded bundle
+/// sizes; the wire chunks large batches at 1024 to stay far below any
+/// client-side guard while keeping the envelope cost negligible.
+const WIRE_BUNDLE_MAX: i32 = 1024;
+
+/// v6.0 NATIVE DUST WIRE delivery for one player: fill a fresh ArrayList
+/// with the gated batch's cached packets and send them as (chunked)
+/// ClientboundBundlePackets — one vanilla `send` per chunk instead of one
+/// per particle.
+///
+/// The ArrayList is created per tick and handed to the bundle record: the
+/// list is NEVER mutated after the send (no clear/reuse), so the bundle
+/// stays intact even when Netty encodes it later on the event loop.
+///
+/// Returns Some(packets delivered) on success, None when the caller must
+/// fall back to the legacy per-particle loop for this player.
+///
+/// NOTE: when the fallback happens mid-fill, the gate-breakdown diag
+/// buckets (n_near/n_far/n_cone) were already partially counted by this
+/// walk and are counted again by the legacy loop — cosmetic-only, the
+/// numbers feed a per-100-tick log line.
+#[allow(clippy::too_many_arguments)]
+fn wire_deliver(
+    state: &Arc<State>,
+    env: Env,
+    handle: jvmti_bindings::jni::jobject,
+    batch: &[crate::stream::Spawn],
+    px: f64,
+    py: f64,
+    pz: f64,
+    look: [f64; 3],
+    sky_visible: bool,
+    cos_half: f64,
+    n_near: &mut u64,
+    n_far: &mut u64,
+    n_cone: &mut u64,
+) -> Option<u64> {
+    // 1. This tick's payload list (one small Java object per player per
+    //    tick — the ONLY per-tick allocation besides the bundle itself).
+    let list_obj = jni::new_array_list(env, 256)?;
+    // 2. Gate + fill: one (cached, shared) packet per gated spawn.
+    let mut added = 0u64;
+    {
+        let mut cache = state.pkt_cache.lock().unwrap();
+        for sp in batch {
+            if !crate::stream::spawn_visible(sp, [px, py, pz], look, sky_visible, cos_half) {
+                if !sky_visible {
+                    continue;
+                }
+                let dx = sp.x - px;
+                let dy = sp.y - py;
+                let dz = sp.z - pz;
+                let d2 = dx * dx + dy * dy + dz * dz;
+                if d2 <= crate::stream::CULL_RADIUS * crate::stream::CULL_RADIUS {
+                    *n_near += 1;
+                } else if d2 > crate::stream::ZONE_FAR * crate::stream::ZONE_FAR {
+                    *n_far += 1;
+                } else {
+                    *n_cone += 1;
+                }
+                continue;
+            }
+            let pkt = cache.packet_for(env, sp.x, sp.y, sp.z)?;
+            if !jni::list_add(env, list_obj, pkt) {
+                return None;
+            }
+            added += 1;
+        }
+    }
+    if added == 0 {
+        return Some(0);
+    }
+    // 3. ONE bundle send (chunked under client bundle-size guards).
+    let total = added as i32;
+    let chunks = (total + WIRE_BUNDLE_MAX - 1) / WIRE_BUNDLE_MAX;
+    for c in 0..chunks {
+        let ok = if chunks == 1 {
+            // # Safety: main thread only; handle is a live CraftPlayer ref.
+            unsafe { jni::bundle_send(env, handle, list_obj) }
+        } else {
+            let from = c * WIRE_BUNDLE_MAX;
+            let to = ((c + 1) * WIRE_BUNDLE_MAX).min(total);
+            let sub = jni::list_sublist(env, list_obj, from, to)?;
+            // # Safety: main thread only; handle is a live CraftPlayer ref.
+            unsafe { jni::bundle_send(env, handle, sub) }
+        };
+        if !ok {
+            return None;
+        }
+    }
+    jni::WIRE_SPAWNED.fetch_add(added, Ordering::Relaxed);
+    Some(added)
 }
 
 pub fn pack_url(state: &Arc<State>) -> String {

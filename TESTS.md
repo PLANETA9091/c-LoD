@@ -5,7 +5,7 @@ CI (`.github/workflows/ci.yml`) runs layers 1–4 on every push; the `e2e-live`
 job additionally runs layer 5 on `master`. Layers 6–7 are the local
 real-client harness (a genuine vanilla 26.3 client under Xvfb — CI has no GPU).
 
-## 1. Rust unit tests — `cargo test` (61 tests)
+## 1. Rust unit tests — `cargo test` (65 tests)
 
 | module | count | what they pin |
 |--------|------:|---------------|
