@@ -68,8 +68,22 @@
 //! calls per y-step gone; any non-affine layout falls back automatically).
 //! Worker paint takes the stream lock once per batch instead of twice per
 //! cell, and the auto worker cap grew 4 → 8.
+//!
+//! v6.1 SEEDGEN TREES: after the walk the helper replays the exact vanilla
+//! `addVanillaDecorations` recipe for the VEGETAL_DECORATION step —
+//! `setDecorationSeed(seed, originX, originZ)` (chunk-origin block coords,
+//! transcribed from paper-26.3 bytecode), per placed feature
+//! `setFeatureSeed(decorated, globalIdx, step)` in ascending
+//! FeatureSorter-index order, then the REAL `FeaturePlacer.placeWithBiomeCheck`
+//! against a dynamic-proxy WorldGenLevel backed by the walked terrain.
+//! Every feature is freshly seeded per chunk, so running only our own
+//! biomes is bit-equivalent to vanilla's 3x3 palette union; tree tops and
+//! leaf materials land in the same packed cells (max of walk top and
+//! feature top). Any throw degrades that chunk to the terrain-only output —
+//! the v5.9 cells, proven bit-identical by the preflight; `native_trees`
+//! turns the pass off entirely.
 
-use crate::jni::{bind_method, clear_if_pending, jd, ji, jobj, jstr, jv, jz, LOADER};
+use crate::jni::{bind_method, clear_if_pending, jd, ji, jl, jobj, jstr, jv, jz, LOADER};
 use crate::{engine, log_info, palette};
 use jvmti_bindings::jni::{jfieldID, jmethodID, jobject};
 use jvmti_bindings::prelude::JniEnv;
@@ -241,6 +255,9 @@ struct SeedIds {
     helper_batch: jmethodID,
     f_mat_table: jfieldID,
     f_bio_table: jfieldID,
+    // v6.1 feature-run counters (static longs in the helper class).
+    f_feat_chunks: jfieldID,
+    f_feat_fails: jfieldID,
 }
 
 /// Boot-time NoiseSettings scalars (clamped to the level once).
@@ -270,6 +287,11 @@ pub struct Seedgen {
     /// Helper chunks that threw at runtime; the path disables itself after
     /// repeated failures and the v5.7 per-column path takes over.
     pub helper_fails: AtomicU64,
+    /// v6.1: chunks whose VEGETAL_DECORATION pass completed (trees/leaves
+    /// patched into the cells) — mirrored from the helper's static counters.
+    pub tree_chunks: AtomicU64,
+    /// v6.1: chunks whose whole feature pass threw (terrain-only output).
+    pub tree_fails: AtomicU64,
 }
 
 impl Seedgen {
@@ -286,6 +308,8 @@ impl Seedgen {
             workers: AtomicU64::new(0),
             helper: AtomicBool::new(false),
             helper_fails: AtomicU64::new(0),
+            tree_chunks: AtomicU64::new(0),
+            tree_fails: AtomicU64::new(0),
         }
     }
 
@@ -337,7 +361,7 @@ pub fn bootstrap(state: &Arc<engine::State>, env: Env, world: jobject) {
     if sg.ready() {
         return;
     }
-    let Some((ids, dims)) = (unsafe { resolve(env, world) }) else {
+    let Some((ids, dims)) = (unsafe { resolve(env, world, state.cfg.native_trees) }) else {
         log_info("seedgen: resolve failed — native gen OFF (ticket frontier stays)");
         return;
     };
@@ -371,11 +395,16 @@ pub fn bootstrap(state: &Arc<engine::State>, env: Env, world: jobject) {
     }
     log_info(&format!(
         "seedgen: ARMED — {workers} native workers, batch {batch} chunks/call \
-         (noise+surface per column, no tickets){}",
+         (noise+surface per column, no tickets){}{}",
         if helper_ok {
             ", helper: one JNI call per batch"
         } else {
             ", helper OFF: per-column JNI (v5.7 path)"
+        },
+        if helper_ok && state.cfg.native_trees {
+            ", trees on"
+        } else {
+            ""
         }
     ));
 }
@@ -420,6 +449,14 @@ fn worker_loop(state: &Arc<engine::State>, sg: &Arc<Seedgen>) {
                 .map(|_| Err("helper disabled".to_string()))
                 .collect()
         };
+        if helper_on {
+            // v6.1: mirror the helper's feature-run counters (2 static reads
+            // per batch; the diag is rate-limited so this stays free).
+            let tc = env.get_static_long_field(ids.helper_cls, ids.f_feat_chunks);
+            let tf = env.get_static_long_field(ids.helper_cls, ids.f_feat_fails);
+            sg.tree_chunks.store(tc as u64, Ordering::Relaxed);
+            sg.tree_fails.store(tf as u64, Ordering::Relaxed);
+        }
         let mut disable_now = false;
         for (i, (cx, cz)) in jobs.iter().enumerate() {
             let (cx, cz) = (*cx, *cz);
@@ -534,7 +571,7 @@ fn load_cls(env: Env, dotted: &str) -> Option<jobject> {
     jobj(k).map(|c| env.new_global_ref(c) as jobject)
 }
 
-unsafe fn resolve(env: Env, world_craft: jobject) -> Option<(SeedIds, NoiseDims)> {
+unsafe fn resolve(env: Env, world_craft: jobject, feats: bool) -> Option<(SeedIds, NoiseDims)> {
     // Bukkit facade -> ServerLevel (global; workers will use it as the
     // LevelHeightAccessor).
     let craft_cls = env.get_object_class(world_craft);
@@ -600,6 +637,14 @@ unsafe fn resolve(env: Env, world_craft: jobject) -> Option<(SeedIds, NoiseDims)
     let rs = sgstep!("random state", jobj(rs_o));
     let gen = env.new_global_ref(gen) as jobject;
     let rs = env.new_global_ref(rs) as jobject;
+    // v6.1: the world seed — the feature pipeline derives per-chunk
+    // decoration seeds from it (setDecorationSeed(seed, originX, originZ)).
+    let m_get_seed = sgstep!(
+        "m_getSeed",
+        bind_method(env, level_cls, level_cls, "getSeed", "()J")
+    );
+    let world_seed = env.call_long_method(level, m_get_seed, &[]);
+    clear_if_pending(env);
 
     // NoiseBasedChunkGenerator: generatorSettings().value().
     let gen_cls = sgstep!(
@@ -1240,34 +1285,40 @@ unsafe fn resolve(env: Env, world_craft: jobject) -> Option<(SeedIds, NoiseDims)
     // v5.8: the Java-side chunk helper — the whole noise walk behind ONE JNI
     // call per chunk. Failure here degrades to the v5.7 per-column path,
     // never to seedgen OFF.
-    let (helper_cls, _m_helper_init, m_helper_batch, f_mat, f_bio) = define_helper(
-        env,
-        level,
-        rs,
-        settings,
-        rule,
-        surface,
-        ctx,
-        pred,
-        fluid_picker,
-        blender,
-        default_block,
-        final_density,
-        upgrade_data,
-        factory,
-        biome_fn,
-        block_registry,
-        bman,
-        min_block_y,
-        size_y,
-    )
-    .unwrap_or((
-        std::ptr::null_mut(),
-        std::ptr::null_mut(),
-        std::ptr::null_mut(),
-        std::ptr::null_mut(),
-        std::ptr::null_mut(),
-    ));
+    let (helper_cls, _m_helper_init, m_helper_batch, f_mat, f_bio, f_fchunk, f_ffail) =
+        define_helper(
+            env,
+            level,
+            rs,
+            settings,
+            rule,
+            surface,
+            ctx,
+            pred,
+            fluid_picker,
+            blender,
+            default_block,
+            final_density,
+            upgrade_data,
+            factory,
+            biome_fn,
+            block_registry,
+            bman,
+            gen,
+            world_seed,
+            feats,
+            min_block_y,
+            size_y,
+        )
+        .unwrap_or((
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        ));
     if helper_cls.is_null() {
         eprintln!("[c-LoD] seedgen helper: unavailable — per-column v5.7 path stays");
     }
@@ -1325,6 +1376,8 @@ unsafe fn resolve(env: Env, world_craft: jobject) -> Option<(SeedIds, NoiseDims)
         helper_batch: m_helper_batch,
         f_mat_table: f_mat,
         f_bio_table: f_bio,
+        f_feat_chunks: f_fchunk,
+        f_feat_fails: f_ffail,
     };
     Some((ids, dims))
 }
@@ -1443,9 +1496,20 @@ unsafe fn define_helper(
     biome_fn: jobject,
     block_registry: jobject,
     bman: jobject,
+    gen: jobject,
+    world_seed: i64,
+    feats: bool,
     min_block_y: i32,
     size_y: i32,
-) -> Option<(jobject, jmethodID, jmethodID, jfieldID, jfieldID)> {
+) -> Option<(
+    jobject,
+    jmethodID,
+    jmethodID,
+    jfieldID,
+    jfieldID,
+    jfieldID,
+    jfieldID,
+)> {
     const HELPER: &[u8] = include_bytes!("../java/ClodSeedgen.class");
     let loader = loader_obj();
     if loader.is_null() {
@@ -1484,7 +1548,7 @@ unsafe fn define_helper(
              Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;\
              Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;\
              Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;\
-             Ljava/lang/Object;II)V"
+             Ljava/lang/Object;Ljava/lang/Object;JIII)V"
         )
     );
     env.call_static_void_method(
@@ -1507,8 +1571,11 @@ unsafe fn define_helper(
             jv(biome_fn),
             jv(block_registry),
             jv(bman),
+            jv(gen),
+            jl(world_seed),
             ji(min_block_y),
             ji(size_y),
+            ji(if feats { 1 } else { 0 }),
         ],
     );
     if env.exception_check() {
@@ -1529,7 +1596,15 @@ unsafe fn define_helper(
         "f_bioTable",
         env.get_static_field_id(cls, "bioTable", "[Ljava/lang/String;")
     );
-    Some((cls, m_init, m_batch, f_mat, f_bio))
+    let f_fchunk = sgstep!(
+        "f_featChunks",
+        env.get_static_field_id(cls, "featChunks", "J")
+    );
+    let f_ffail = sgstep!(
+        "f_featFails",
+        env.get_static_field_id(cls, "featFails", "J")
+    );
+    Some((cls, m_init, m_batch, f_mat, f_bio, f_fchunk, f_ffail))
 }
 
 // ---------------------------------------------------------------------------

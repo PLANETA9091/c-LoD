@@ -38,6 +38,15 @@ if [ "$SHA_A" != "$SHA_W" ]; then
     diff "$OUT/affine.txt" "$OUT/weird.txt" | head -20 || true
     exit 1
 fi
+# v6.1: the tree'd cells must ALSO be layout-independent
+TREE_A=$(grep TREE_SHA "$OUT/affine.txt" | cut -d' ' -f2)
+TREE_W=$(grep TREE_SHA "$OUT/weird.txt" | cut -d' ' -f2)
+[ -n "$TREE_A" ] && [ "$TREE_A" = "$TREE_W" ] || {
+    echo "FAIL: tree hashes differ or missing ($TREE_A != $TREE_W)"; exit 1;
+}
+grep -q "FEAT chunks=[1-9] fails=0" "$OUT/affine.txt" || {
+    echo "FAIL: feature run did not complete cleanly"; exit 1;
+}
 MAT_A=$(grep '^MAT ' "$OUT/affine.txt"); MAT_W=$(grep '^MAT ' "$OUT/weird.txt")
 BIO_A=$(grep '^BIO ' "$OUT/affine.txt"); BIO_W=$(grep '^BIO ' "$OUT/weird.txt")
 [ "$MAT_A" = "$MAT_W" ] && [ "$BIO_A" = "$BIO_W" ] || {

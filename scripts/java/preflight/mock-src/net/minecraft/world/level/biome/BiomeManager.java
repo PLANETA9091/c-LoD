@@ -1,6 +1,9 @@
 package net.minecraft.world.level.biome;
-import net.minecraft.core.Holder;
+
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
+
+/** Mock BiomeManager — Holders carry a value() so the feature gather runs. */
 public class BiomeManager {
     public Holder getBiome(BlockPos p) {
         int r = Math.floorDiv(p.x, 200);
@@ -9,6 +12,6 @@ public class BiomeManager {
             case 1 -> "minecraft:desert";
             default -> "minecraft:snowy_plains";
         };
-        return new Holder(b);
+        return new Holder(b, Biome.GLOBAL);
     }
 }

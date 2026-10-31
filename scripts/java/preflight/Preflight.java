@@ -51,6 +51,8 @@ public final class Preflight {
         boolean weird = "weird".equals(System.getProperty("clod.mock.layout", "affine"));
 
         // ---- the real helper, init()'d with mock objects -------------------
+        // Terrain-only init (gen=null, feats=0): the v5.9 contract — every
+        // parity/hash check below guards THIS output.
         BlockState stone = Aquifer.STONE;
         ClodSeedgen.init(
                 new LevelHeightAccessor() {}, // level (LevelHeightAccessor)
@@ -79,8 +81,12 @@ public final class Preflight {
                 },
                 new Registry(),               // blockRegistry
                 new net.minecraft.world.level.biome.BiomeManager(), // bman
-                MIN_Y, SIZE_Y);
+                null,                         // gen (v6.1: no feature pipeline)
+                42L,                          // world seed (v6.1)
+                MIN_Y, SIZE_Y,
+                0);                           // features OFF (terrain-only)
         check("helper ready", ClodSeedgen.isReady());
+        check("features off with null gen", !ClodSeedgen.featReady());
 
         // ---- ground truth per chunk via the v5.8 single-chunk call --------
         int[][] chunks = {
@@ -169,6 +175,91 @@ public final class Preflight {
         System.out.println("CELLS_SHA " + Long.toHexString(h));
         System.out.println("COLUMNS fast=" + ClodSeedgen.FAST_COLUMNS.get()
                 + " slow=" + ClodSeedgen.SLOW_COLUMNS.get());
+        // ---- v6.1 SEEDGEN TREES: re-init with a mock feature pipeline -----
+        // The terrain-only CELLS_SHA above stays the reference; this stage
+        // must (a) resolve, (b) plant deterministic mock trees through the
+        // REAL proxy/model surface, (c) patch cell tops, (d) be reproducible.
+        int vegOrd = net.minecraft.world.level.levelgen.GenerationStep
+                .Decoration.VEGETAL_ORDINAL;
+        net.minecraft.world.level.levelgen.placement.PlacedFeature treePf =
+                new net.minecraft.world.level.levelgen.placement.PlacedFeature(
+                        "clod:mock_tree", 3);
+        net.minecraft.world.level.biome.BiomeGenerationSettings.GLOBAL
+                .setStep(vegOrd, new net.minecraft.world.level.biome.HolderSet(
+                        new net.minecraft.core.Holder("clod:mock_tree",
+                                treePf)));
+        java.util.List<Object> stepDatas = new java.util.ArrayList<>();
+        for (int i = 0; i < vegOrd; i++) {
+            stepDatas.add(null); // non-vegetal steps unused
+        }
+        stepDatas.add(new net.minecraft.world.level.biome.FeatureSorter
+                .StepFeatureData(java.util.List.of(treePf)));
+        net.minecraft.world.level.chunk.ChunkGenerator mockGen =
+                new net.minecraft.world.level.chunk.ChunkGenerator(
+                        () -> stepDatas);
+        ClodSeedgen.init(
+                new LevelHeightAccessor() {}, new RandomState(),
+                new NoiseGeneratorSettings(), new MaterialRule() {},
+                new RandomState().surfaceSystem(), new WorldGenerationContext(),
+                (Predicate<Object>) s -> s instanceof BlockState bs && bs != Aquifer.AIR,
+                new Aquifer.FluidPicker() {}, new Blender(), stone,
+                new DensityFunction() {},
+                new net.minecraft.world.level.chunk.UpgradeData(),
+                new net.minecraft.world.level.chunk.PalettedContainerFactory(),
+                (java.util.function.Function<Object, Object>) p -> null,
+                new Registry(), new net.minecraft.world.level.biome.BiomeManager(),
+                mockGen, 12345L, MIN_Y, SIZE_Y, 1);
+        check("features on with mock gen", ClodSeedgen.featReady());
+        check("no feature fails pre-run", ClodSeedgen.featFails == 0);
+
+        long[] treeBatch = ClodSeedgen.chunkBatch(new int[] {0, 0}, 2);
+        long[] treeBatch2 = ClodSeedgen.chunkBatch(new int[] {0, 0}, 2);
+        check("tree run counted", ClodSeedgen.featChunks >= 2
+                && ClodSeedgen.featFails == 0);
+        check("tree cells deterministic", Arrays.equals(treeBatch, treeBatch2));
+
+        // every tree-topped cell: height grew AND material became a mock tree
+        // material (log or leaves), while void/unchanged cells match terrain
+        boolean sawLeaves = false;
+        boolean sawLog = false;
+        int grown = 0;
+        for (int i = 0; i < 64; i++) {
+            long t = treeBatch[i];
+            long o = singles[2][i];
+            if (o == 0L) {
+                check("void stays void under trees", t == 0L);
+                continue;
+            }
+            int th = (int) (t & 0xFFFF) - 32768;
+            int oh = (int) (o & 0xFFFF) - 32768;
+            if (th > oh) {
+                grown++;
+                int mo = (int) ((t >>> 17) & 0x7FFF);
+                String m = ClodSeedgen.matTable[mo];
+                if (m.endsWith("oak_leaves")) {
+                    sawLeaves = true;
+                }
+                if (m.endsWith("oak_log")) {
+                    sawLog = true;
+                }
+            }
+        }
+        check("tree tops patched into cells", grown > 0);
+        check("leaves material interned", sawLeaves);
+        check("log material interned", sawLog);
+        check("matTable has tree materials",
+                java.util.Arrays.stream(ClodSeedgen.matTable)
+                        .anyMatch(s -> s.endsWith("oak_leaves"))
+                        && java.util.Arrays.stream(ClodSeedgen.matTable)
+                                .anyMatch(s -> s.endsWith("oak_log")));
+
+        long th = 1125899906842597L;
+        for (long l : treeBatch) {
+            th = th * 31 + (l ^ (l >>> 31));
+        }
+        System.out.println("TREE_SHA " + Long.toHexString(th));
+        System.out.println("FEAT chunks=" + ClodSeedgen.featChunks
+                + " fails=" + ClodSeedgen.featFails);
         System.out.println("MAT " + String.join(",", ClodSeedgen.matTable));
         System.out.println("BIO " + String.join(",", ClodSeedgen.bioTable));
         System.out.println("PREFLIGHT PASS " + checks + " checks");

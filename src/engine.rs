@@ -805,7 +805,7 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     let wish_n = state.gen_wish.lock().unwrap().len();
     let forced_n = state.forced_chunks.load(Ordering::Relaxed);
     // v5.7 SEEDGEN diagnostics + v5.8 helper state (u64::MAX = off).
-    let (nat_c, nat_ch, nat_f, nat_w, nat_q, nat_h) = {
+    let (nat_c, nat_ch, nat_f, nat_w, nat_q, nat_h, nat_tc, nat_tf) = {
         let g = state.seedgen.lock().unwrap();
         match g.as_ref() {
             Some(sg) if sg.ready() => {
@@ -821,9 +821,11 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
                     sg.workers.load(Ordering::Relaxed),
                     sg.inflight_len(),
                     h,
+                    sg.tree_chunks.load(Ordering::Relaxed),
+                    sg.tree_fails.load(Ordering::Relaxed),
                 )
             }
-            _ => (0, 0, 0, 0, 0, u64::MAX),
+            _ => (0, 0, 0, 0, 0, u64::MAX, 0, 0),
         }
     };
     let nat_hs = if nat_h == u64::MAX {
@@ -832,6 +834,12 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
         "on".to_string()
     } else {
         format!("on (fails {nat_h})")
+    };
+    // v6.1 seedgen trees: chunks with the feature pass run / chunk-level fails.
+    let nat_ts = if nat_h == u64::MAX {
+        String::new()
+    } else {
+        format!(", trees {nat_tc}ch/fail {nat_tf}")
     };
     // v6.0 wire diagnostics: bundles sent / packets carried / failures.
     let wire_s = jni::WIRE_SPAWNED.load(Ordering::Relaxed);
@@ -848,7 +856,7 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     state.server.set_meta(valid, total_cells);
     let p0 = players.first();
     crate::log_info(&format!(
-        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}), spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} {cache_stat}",
+        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}), spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} {cache_stat}",
         jni::STREAM_SPAWNED.load(Ordering::Relaxed),
         jni::STREAM_FAILED.load(Ordering::Relaxed),
         p0.map(|p| format!("yaw {:.0} pitch {:.0}", p.yaw, p.pitch))

@@ -1,6 +1,6 @@
 [package]
 name = "lod"
-version = "6.0.0"
+version = "6.1.0"
 edition = "2021"
 description = "c-LoD — true server-side LOD for Paper 26.3 via /posteffect + one-time shader-only resource pack. All world data streams as sky-grid dust particles. No Display entities, no client mods, zero textures."
 license = "MIT"

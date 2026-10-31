@@ -90,6 +90,13 @@ pub struct Config {
     /// the bundle surface fails to resolve — the proven v5 per-particle
     /// path handles delivery.
     pub native_dust: bool,
+    /// v6.1 SEEDGEN TREES: run the real vanilla VEGETAL_DECORATION pass
+    /// (trees, leaves — the exact addVanillaDecorations recipe) on top of
+    /// the native terrain walk, so never-generated forest chunks stream
+    /// with tree tops from the seed alone. When false — or when any
+    /// feature surface fails to resolve — cells stay terrain-only (the
+    /// v5.9 output, bit-for-bit).
+    pub native_trees: bool,
 }
 
 impl Default for Config {
@@ -126,6 +133,7 @@ impl Default for Config {
             native_threads: 0,
             seedgen_batch: 8,
             native_dust: true,
+            native_trees: true,
         }
     }
 }
@@ -252,6 +260,9 @@ impl Config {
         if let Some(v) = get("native_dust") {
             cfg.native_dust = matches!(v.trim(), "1" | "true" | "yes" | "on");
         }
+        if let Some(v) = get("native_trees") {
+            cfg.native_trees = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
         cfg
     }
 }
@@ -341,6 +352,16 @@ mod tests {
         assert!(!c.native_dust, "legacy per-particle path selectable");
         let c = Config::parse("native_dust=1");
         assert!(c.native_dust);
+    }
+
+    #[test]
+    fn native_trees_knob() {
+        let c = Config::parse("");
+        assert!(c.native_trees, "v6.1 seedgen trees default ON");
+        let c = Config::parse("native_trees=false");
+        assert!(!c.native_trees, "terrain-only v5.9 output selectable");
+        let c = Config::parse("native_trees=on");
+        assert!(c.native_trees);
     }
 
     #[test]

@@ -903,6 +903,14 @@ impl JniEnv {
         }
     }
 
+    /// Gets a static long field.
+    pub fn get_static_long_field(&self, cls: jni::jclass, field_id: jni::jfieldID) -> jni::jlong {
+        unsafe {
+            let vtable = *self.env;
+            ((*vtable).GetStaticLongField)(self.env, cls, field_id)
+        }
+    }
+
     /// Sets a static object field.
     pub fn set_static_object_field(&self, cls: jni::jclass, field_id: jni::jfieldID, value: jni::jobject) {
         unsafe {

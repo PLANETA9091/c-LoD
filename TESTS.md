@@ -5,14 +5,14 @@ CI (`.github/workflows/ci.yml`) runs layers 1–4 on every push; the `e2e-live`
 job additionally runs layer 5 on `master`. Layers 6–7 are the local
 real-client harness (a genuine vanilla 26.3 client under Xvfb — CI has no GPU).
 
-## 1. Rust unit tests — `cargo test` (65 tests)
+## 1. Rust unit tests — `cargo test` (66 tests)
 
 | module | count | what they pin |
 |--------|------:|---------------|
 | `src/stream.rs` | 16 | 16-bit word packing (4 particles/word, X-sub = data bits, Z-sub = slot), HI/LO plane layout, delta-zone scheduling, cone admission, lap coverage |
 | `src/engine.rs` | 8 | `wish_admit` ledger (dup reject, backlog cap, per-tick budget, v5.5 window parameter), frontier math |
 | `src/seedgen.rs` | 12 | SeedQueue dedup/order/close + v5.9 `pop_batch` drain; bit-contract vs `ClodSeedgen.pack()` (height/liquid/ordinals/valid bit, bit budget); v5.9 `chunkBatch` payload parsing (header, statuses, zero-filled failed segments, corruption rejects) |
-| `src/config.rs` | 7 | `CLOD_OPTS` parsing + clamps (gen_budget 1..256, gen_wish 32..4096, particles_per_tick, disk geometry, native_threads/seedgen_batch) |
+| `src/config.rs` | 9 | `CLOD_OPTS` parsing + clamps (gen_budget 1..256, gen_wish 32..4096, particles_per_tick, disk geometry, native_threads/seedgen_batch, native_dust/native_trees knobs) |
 | `src/packgen.rs` | 5 | the pack builds byte-deterministically, 13 entries, ZERO textures/PNGs, capture chain present |
 | `src/palette.rs` | 4 | surface → RGB mapping incl. water/foliage tints |
 | `src/sha1.rs` | 4 | SHA-1 correctness (RFC vectors + pack-sized inputs) |
@@ -37,13 +37,21 @@ bash scripts/java/build.sh          # javac --release 17: the embedded seedgen
 
 ## 2b. SEEDGEN helper preflight — `scripts/java/preflight/run.sh`
 
-The v5.8/v5.9 Java helper against a mock `net.minecraft` hierarchy — no Paper
-needed. 52 checks per run × two JVMs: `chunk()` vs `chunkBatch()` bit-parity,
+The v5.8–v6.1 Java helper against a mock `net.minecraft` hierarchy — no Paper
+needed. 61 checks per run × two JVMs: `chunk()` vs `chunkBatch()` bit-parity,
 batch structure (statuses, zero-filled throwing segments, `n_ok`), `tabVer`
-monotonicity, buffer/NoiseChunk close discipline, void semantics — and the
+monotonicity, buffer/NoiseChunk close discipline, void semantics — the
 affine-stride fast path vs a non-affine (Fisher–Yates) layout falling back,
 both producing IDENTICAL cells (hash-compared across the two JVMs:
-`COLUMNS fast=1604 slow=0` vs `fast=0 slow=1604`, same `CELLS_SHA`).
+`COLUMNS fast=1604 slow=0` vs `fast=0 slow=1604`, same `CELLS_SHA`) — and,
+since v6.1, a full SEEDGEN TREES stage: the helper is re-`init()`ed with a
+mock feature pipeline (mock `ChunkGenerator.featuresPerStep`,
+`FeatureSorter$StepFeatureData`, `WorldgenRandom` with the REAL seed recipes,
+`FeaturePlacer` planting deterministic mock trees through the REAL proxy
+surface) and must resolve, patch tree tops into the packed cells (log- and
+leaf-topped columns), keep void cells void, stay deterministic, and produce
+layout-independent `TREE_SHA` — with the terrain-only `CELLS_SHA` unchanged
+from the v5.9 ground truth.
 
 ## 3. Pack integrity (in CI `glsl` job)
 

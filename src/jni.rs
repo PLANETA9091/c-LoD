@@ -49,6 +49,12 @@ pub(crate) fn jz(v: bool) -> jvalue {
     jvalue { z: v as jboolean }
 }
 
+pub(crate) fn jl(v: i64) -> jvalue {
+    jvalue {
+        j: v as jvmti_bindings::jni::jlong,
+    }
+}
+
 pub(crate) fn ji(v: i32) -> jvalue {
     jvalue { i: v as jint }
 }

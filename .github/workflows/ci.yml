@@ -67,6 +67,11 @@ jobs:
             echo 'FAIL: java/ClodSeedgen.class is stale — run scripts/java/build.sh and commit';
             exit 1;
           }
+      # v6.1: the full helper preflight (61 checks x two JVMs: terrain parity
+      # vs the v5.9 ground truth, batch structure, stride paths, and the
+      # SEEDGEN TREES stage through the real proxy surface) — no Paper needed.
+      - name: SEEDGEN preflight (mock hierarchy, both layouts)
+        run: bash scripts/java/preflight/run.sh "$(which javac)"
       # Recovery artifact: if a javac point-release ever shifts the bytecode,
       # the canonical rebuild lands here for the next commit.
       - name: Upload recompiled bytecode (recovery artifact)
