@@ -201,6 +201,8 @@ pub fn step(state: &Arc<State>, env: Env) {
 /// pattern: ClassLoader.defineClass bypasses the protected modifier).
 /// v6.4.2: every failure logs WHICH step died and dumps the pending JVM
 /// exception (if any) — the CI run of 2026-10-31 retried 600 times blind.
+/// v6.4.5: the blind retries had a root cause — the method id was looked
+/// up on java.lang.Class instead of java.lang.ClassLoader (see below).
 fn define(env: Env) -> Option<EditChannel> {
     const HELPER: &[u8] = include_bytes!("../java/ClodEdits.class");
     let loader = crate::seedgen::loader_obj();
@@ -208,17 +210,20 @@ fn define(env: Env) -> Option<EditChannel> {
         eprintln!("[c-LoD] edits helper: loader stash empty");
         return None;
     }
-    let Some(class_cls) = cplug_sdk::classes::find_class("java/lang/Class") else {
-        crate::log_info("edit events: define failed at find_class(java/lang/Class)");
-        return None;
-    };
-    let class_cls = class_cls.as_jclass();
+    // v6.4.5 ROOT FIX (runs 2026-10-31, EV_FAILED x600 blind): the method id
+    // was resolved on java.lang.Class — but defineClass(String,[B,int,int)
+    // lives on java.lang.ClassLoader. Class never had it (the JDK-1.1
+    // byte[]-only relic was removed in 12), so GetMethodID returned null on
+    // EVERY JVM and the channel never defined — both CI legs survived on the
+    // rescan wave alone, not the event push. Same resolution as seedgen:
+    // Class.forName("java.lang.ClassLoader") through the app loader.
+    let cl_cls = crate::seedgen::load_cls(env, "java.lang.ClassLoader")?;
     let Some(m_define) = env.get_method_id(
-        class_cls,
+        cl_cls,
         "defineClass",
         "(Ljava/lang/String;[BII)Ljava/lang/Class;",
     ) else {
-        crate::log_info("edit events: define failed at get_method_id(defineClass)");
+        crate::log_info("edit events: define failed at get_method_id(defineClass on ClassLoader)");
         return None;
     };
     let Some(name) = env.new_string_utf("clod.ClodEdits") else {

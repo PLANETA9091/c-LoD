@@ -552,7 +552,7 @@ pub(crate) fn loader_obj() -> jobject {
 }
 
 /// Load a class through the stashed app loader (jni.rs Class.forName path).
-fn load_cls(env: Env, dotted: &str) -> Option<jobject> {
+pub(crate) fn load_cls(env: Env, dotted: &str) -> Option<jobject> {
     use cplug_sdk::classes as sdkcls;
     let loader = loader_obj();
     if loader.is_null() {
