@@ -8,8 +8,9 @@ No client mods. **No Display entities. No textures in the pack.** The vanilla cl
  ┌─────────────────────────── SERVER (c-LoD module, Rust) ───────────────────────────┐
  │                                                                                   │
  │  heightmap scan (JNI, budgeted per tick)                                          │
- │    SEEDGEN (v5.7): chunks the server never made generate NATIVELY on our          │
- │      own daemon threads — vanilla NoiseChunk + MaterialSystem per column,         │
+ │    SEEDGEN (v5.7+5.8): chunks the server never made generate NATIVELY on our      │
+ │      own daemon threads — the vanilla NoiseChunk + MaterialSystem walk runs       │
+ │      INSIDE the JVM (v5.8 helper: one JNI call per CHUNK, was ~1500/column),      │
  │      no tickets, no chunk-system contention, zero TPS impact; cells land          │
  │      provisional and upgrade from the real chunk once the server makes it         │
  │    FORCED tickets stay as the fallback frontier (gen_budget / gen_wish, v5.5)     │
@@ -134,24 +135,24 @@ All numbers from the real 2-CPU e2e stand (Paper 26.3-207 + genuine vanilla clie
 - **Network**: the spawn gate paces the stream to what the camera can actually decode — 33–800 packets/tick observed vs 2048 constant.
 - **Scan throughput** (v5.5 gen-frontier): 35 → 80 cells/s sustained on 2 cores (best 896/s), a warm world re-scans ~49k cells in seconds. A vantage tour accelerates the scan ~15× (teleports load chunks, the ring sweep samples them instantly).
 - **Pre-join arm** (v5.6): the disk arms and warm-scans before the first player joins — 32 s ahead of the join, 54874/65536 cells warm at tick 200, 0 carrier pixels on the first horizon frame.
-- **SEEDGEN cold-world fill** (v5.7): the full 512×512-cell disk (1024 chunks the server had NEVER generated) filled natively in ~23 s on one worker of a 2-core box — ~2,750 cells/s vs ~80 cells/s for the v5.5 ticket frontier (**~35×**), zero failures, zero tickets, TPS untouched; with `native_threads` workers it scales by cores.
+- **SEEDGEN cold-world fill** (v5.7): the full 512×512-cell disk (1024 chunks the server had NEVER generated) filled natively in ~23 s on one worker of a 2-core box — ~2,750 cells/s vs ~80 cells/s for the v5.5 ticket frontier (**~35×**), zero failures, zero tickets, TPS untouched; with `native_threads` workers it scales by cores. v5.8 then moved the whole per-chunk noise walk inside the JVM (`java/ClodSeedgen`, one JNI call per chunk instead of ~1500 per column) — the CI stand re-measures the fill rate on every master push; the per-column v5.7 path stays as an automatic fallback.
 - **One push, forever**: the pack SHA-1 is byte-deterministic across restarts; clients never re-download.
 
 ## Development
 
 ```bash
-cargo test --release          # 48 unit tests (stream/engine/config/packgen/palette/sha1/http/zipw)
+cargo test --release          # 55 unit tests (stream/engine/config/packgen/palette/sha1/http/zipw/seedgen)
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 bash scripts/check_glsl.sh    # glslangValidator: every shader + both chain JSONs
 ```
 
-The full verification pyramid — CI layers, boot gates G1–G10, the real-client harness and the evidence archive — is mapped in [TESTS.md](TESTS.md). CI runs rustfmt, clippy (`-D warnings`), the full test suite, glslang validation, the pack-integrity assertions (12→13 entries, **zero** `.png`/`textures/`, capture chain present, no texture inputs), release builds on Linux/macOS/Windows, the CRUSSTY module bundle — and an **e2e live-server job** on `master`: a real Paper 26.3 kernel on Temurin 25 with the CRUSSTY runtime built from source, two boots (fresh world + restart) asserting the pack fetch, the gates and byte-exact SHA-1 reproduction.
+The full verification pyramid — CI layers, boot gates G1–G10, the real-client harness and the evidence archive — is mapped in [TESTS.md](TESTS.md). CI runs rustfmt, clippy (`-D warnings`), the full test suite, a bytecode-freshness check for the embedded seedgen helper (`java/ClodSeedgen.class` recompiled and diffed against the commit), glslang validation, the pack-integrity assertions (12→13 entries, **zero** `.png`/`textures/`, capture chain present, no texture inputs), release builds on Linux/macOS/Windows, the CRUSSTY module bundle — and an **e2e live-server job** on `master`: a real Paper 26.3 kernel on Temurin 25 with the CRUSSTY runtime built from source, two boots (fresh world + restart) asserting the pack fetch, the gates and byte-exact SHA-1 reproduction.
 
 ## Honest limitations (v5.6)
 
 - **The camera channel needs sky in the leftmost screen columns.** Facing a wall of terrain (or being fully indoors) the chain holds its last estimate with a slow decay — the LOD fades out instead of popping, and the atmosphere chain keeps working (it never needs rotation). Any sky row in the leftmost 8 columns re-locks the basis within one frame.
-- **A cold world starts nearly empty — for seconds, not minutes.** SEEDGEN (v5.7) fills never-generated chunks natively at ~35× the ticket frontier, so a fresh 512-block disk completes in well under a minute on a small VPS. Generated cells are `provisional`: terrain-exact, but trees/carvers/structures only arrive when the server generates the real chunk (the loaded-chunk sampler upgrades them then).
+- **A cold world starts nearly empty — for seconds, not minutes.** SEEDGEN (v5.7) fills never-generated chunks natively at ~35× the ticket frontier, and v5.8 pushes the whole noise walk into the JVM for another multiple (CI re-measures on every push), so a fresh 512-block disk completes in well under a minute on a small VPS. Generated cells are `provisional`: terrain-exact, but trees/carvers/structures only arrive when the server generates the real chunk (the loaded-chunk sampler upgrades them then). The helper degrades gracefully: bytecode that fails to define or throws on the host's Paper build falls back to the per-column v5.7 path automatically.
 - **The carrier is physics, not magic.** Dust particles are real entities on the wire: the stealth gate erases them from every conventional viewpoint, but a client parked at an extreme vantage can still spot sparse dots.
 - **No client→server feedback channel exists on vanilla 26.3** — the server paces the stream blind (FOV cone + decode band + delta-zone scheduler approximate what a real ACK channel would give).
 

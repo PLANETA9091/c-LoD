@@ -50,6 +50,24 @@ jobs:
       - name: Doc tests
         run: cargo test --doc
 
+  javahelper:
+    name: seedgen helper bytecode fresh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Rebuild java/ClodSeedgen.class and diff against the committed one
+        run: |
+          JAVAC="$(which javac)" bash scripts/java/build.sh
+          test "$(sha1sum java/ClodSeedgen.class | cut -d' ' -f1)" = \
+               "$(git show HEAD:java/ClodSeedgen.class | sha1sum | cut -d' ' -f1)" || {
+            echo 'FAIL: java/ClodSeedgen.class is stale — run scripts/java/build.sh and commit';
+            exit 1;
+          }
+
   glsl:
     name: shader validation (glslang)
     runs-on: ubuntu-latest

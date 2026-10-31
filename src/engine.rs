@@ -813,26 +813,41 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     // forced = chunks that completed gen and got sampled.
     let wish_n = state.gen_wish.lock().unwrap().len();
     let forced_n = state.forced_chunks.load(Ordering::Relaxed);
-    // v5.7 SEEDGEN diagnostics.
-    let (nat_c, nat_ch, nat_f, nat_w, nat_q) = {
+    // v5.7 SEEDGEN diagnostics + v5.8 helper state (u64::MAX = off).
+    let (nat_c, nat_ch, nat_f, nat_w, nat_q, nat_h) = {
         let g = state.seedgen.lock().unwrap();
         match g.as_ref() {
-            Some(sg) if sg.ready() => (
-                sg.cells.load(Ordering::Relaxed),
-                sg.chunks.load(Ordering::Relaxed),
-                sg.fails.load(Ordering::Relaxed),
-                sg.workers.load(Ordering::Relaxed),
-                sg.inflight_len(),
-            ),
-            _ => (0, 0, 0, 0, 0),
+            Some(sg) if sg.ready() => {
+                let h = if sg.helper.load(Ordering::Relaxed) {
+                    sg.helper_fails.load(Ordering::Relaxed)
+                } else {
+                    u64::MAX
+                };
+                (
+                    sg.cells.load(Ordering::Relaxed),
+                    sg.chunks.load(Ordering::Relaxed),
+                    sg.fails.load(Ordering::Relaxed),
+                    sg.workers.load(Ordering::Relaxed),
+                    sg.inflight_len(),
+                    h,
+                )
+            }
+            _ => (0, 0, 0, 0, 0, u64::MAX),
         }
+    };
+    let nat_hs = if nat_h == u64::MAX {
+        "off".to_string()
+    } else if nat_h == 0 {
+        "on".to_string()
+    } else {
+        format!("on (fails {nat_h})")
     };
     // v5.2.2: /clod-pack.info serves LIVE scan counters (it used to
     // report the boot-time cells=0 forever).
     state.server.set_meta(valid, total_cells);
     let p0 = players.first();
     crate::log_info(&format!(
-        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}), spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q})",
+        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}), spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}",
         jni::STREAM_SPAWNED.load(Ordering::Relaxed),
         jni::STREAM_FAILED.load(Ordering::Relaxed),
         p0.map(|p| format!("yaw {:.0} pitch {:.0}", p.yaw, p.pitch))

@@ -48,10 +48,19 @@
 //! columns all read the shared buffer). No tickets, no chunk-system
 //! contention, zero TPS impact — and, unlike the ticket frontier, it fills
 //! the disk pre-join by construction.
+//!
+//! v5.8: the ~1500 JNI transitions per column (indexUnchecked, buf get,
+//! blockY, computeSubstance, predicate — per Y step) are gone. The whole
+//! per-chunk walk now runs INSIDE the JVM behind `java/ClodSeedgen.java`,
+//! a JDK-only helper class embedded as bytecode and defined at bootstrap
+//! via ClassLoader.defineClass; the JNI boundary is crossed once per chunk
+//! (and twice per intern-table read). The recipe inside is byte-for-byte
+//! the transcription above, so outputs are identical; this side only
+//! unpacks the packed longs, filters by the disk window and paints.
 
 use crate::jni::{bind_method, clear_if_pending, jd, ji, jobj, jstr, jv, jz, LOADER};
 use crate::{engine, log_info, palette};
-use jvmti_bindings::jni::{jmethodID, jobject};
+use jvmti_bindings::jni::{jfieldID, jmethodID, jobject};
 use jvmti_bindings::prelude::JniEnv;
 use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -206,6 +215,12 @@ struct SeedIds {
     biome_get: jmethodID,
     holder_unwrap_key: jmethodID,
     rk_identifier: jmethodID,
+    // v5.8 Java-side chunk helper (all null when unavailable — the legacy
+    // per-column path stays as the fallback).
+    helper_cls: jobject,
+    helper_chunk: jmethodID,
+    f_mat_table: jfieldID,
+    f_bio_table: jfieldID,
 }
 
 /// Boot-time NoiseSettings scalars (clamped to the level once).
@@ -230,6 +245,11 @@ pub struct Seedgen {
     pub fails: AtomicU64,
     /// Worker thread count.
     pub workers: AtomicU64,
+    /// Java-side chunk helper armed (one JNI call per chunk, v5.8).
+    pub helper: AtomicBool,
+    /// Helper chunks that threw at runtime; the path disables itself after
+    /// repeated failures and the v5.7 per-column path takes over.
+    pub helper_fails: AtomicU64,
 }
 
 impl Seedgen {
@@ -244,6 +264,8 @@ impl Seedgen {
             chunks: AtomicU64::new(0),
             fails: AtomicU64::new(0),
             workers: AtomicU64::new(0),
+            helper: AtomicBool::new(false),
+            helper_fails: AtomicU64::new(0),
         }
     }
 
@@ -284,6 +306,8 @@ pub fn bootstrap(state: &Arc<engine::State>, env: Env, world: jobject) {
         log_info("seedgen: resolve failed — native gen OFF (ticket frontier stays)");
         return;
     };
+    let helper_ok = !ids.helper_cls.is_null();
+    sg.helper.store(helper_ok, Ordering::SeqCst);
     let _ = sg.ids.set(ids);
     let _ = sg.dims.set(dims);
     let workers = if state.cfg.native_threads > 0 {
@@ -310,7 +334,12 @@ pub fn bootstrap(state: &Arc<engine::State>, env: Env, world: jobject) {
         sg.workers.store(workers as u64, Ordering::Relaxed);
     }
     log_info(&format!(
-        "seedgen: ARMED — {workers} native workers (noise+surface per column, no tickets)"
+        "seedgen: ARMED — {workers} native workers (noise+surface per column, no tickets){}",
+        if helper_ok {
+            ", helper: one JNI call per chunk"
+        } else {
+            ", helper OFF: per-column JNI (v5.7 path)"
+        }
     ));
 }
 
@@ -1118,6 +1147,41 @@ unsafe fn resolve(env: Env, world_craft: jobject) -> Option<(SeedIds, NoiseDims)
     );
     env.delete_local_ref(fs);
 
+    // v5.8: the Java-side chunk helper — the whole noise walk behind ONE JNI
+    // call per chunk. Failure here degrades to the v5.7 per-column path,
+    // never to seedgen OFF.
+    let (helper_cls, _m_helper_init, m_helper_chunk, f_mat, f_bio) = define_helper(
+        env,
+        level,
+        rs,
+        settings,
+        rule,
+        surface,
+        ctx,
+        pred,
+        fluid_picker,
+        blender,
+        default_block,
+        final_density,
+        upgrade_data,
+        factory,
+        biome_fn,
+        block_registry,
+        bman,
+        min_block_y,
+        size_y,
+    )
+    .unwrap_or((
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+    ));
+    if helper_cls.is_null() {
+        eprintln!("[c-LoD] seedgen helper: unavailable — per-column v5.7 path stays");
+    }
+
     let ids = SeedIds {
         level,
         random_state: rs,
@@ -1167,6 +1231,10 @@ unsafe fn resolve(env: Env, world_craft: jobject) -> Option<(SeedIds, NoiseDims)
         biome_get: m_biome_get,
         holder_unwrap_key: m_unwrap,
         rk_identifier: m_rk_id,
+        helper_cls,
+        helper_chunk: m_helper_chunk,
+        f_mat_table: f_mat,
+        f_bio_table: f_bio,
     };
     Some((ids, dims))
 }
@@ -1260,6 +1328,120 @@ unsafe fn build_biome_function(
     Some(env.new_global_ref(f) as jobject)
 }
 
+/// Define + init the Java-side chunk helper (v5.8). The bytecode is compiled
+/// from `java/ClodSeedgen.java` (JDK-only source, see scripts/java/build.sh)
+/// and embedded in the module; `ClassLoader.defineClass` is reached through
+/// JNI, which bypasses the protected modifier. `init` receives the global
+/// refs resolved above and resolves every MethodHandle Java-side; any throw
+/// degrades to the v5.7 per-column path.
+#[allow(clippy::too_many_arguments)]
+unsafe fn define_helper(
+    env: Env,
+    level: jobject,
+    rs: jobject,
+    settings: jobject,
+    rule: jobject,
+    surface: jobject,
+    ctx: jobject,
+    pred: jobject,
+    fluid_picker: jobject,
+    blender: jobject,
+    default_block: jobject,
+    final_density: jobject,
+    upgrade_data: jobject,
+    factory: jobject,
+    biome_fn: jobject,
+    block_registry: jobject,
+    bman: jobject,
+    min_block_y: i32,
+    size_y: i32,
+) -> Option<(jobject, jmethodID, jmethodID, jfieldID, jfieldID)> {
+    const HELPER: &[u8] = include_bytes!("../java/ClodSeedgen.class");
+    let loader = loader_obj();
+    if loader.is_null() {
+        eprintln!("[c-LoD] seedgen helper: loader stash empty");
+        return None;
+    }
+    let cl_cls = load_cls(env, "java.lang.ClassLoader")?;
+    let m_define = sgstep!(
+        "m_defineClass",
+        env.get_method_id(
+            cl_cls,
+            "defineClass",
+            "(Ljava/lang/String;[BII)Ljava/lang/Class;"
+        )
+    );
+    let name = env.new_string_utf("clod.ClodSeedgen")?;
+    let arr = env.new_byte_array(HELPER.len() as i32)?;
+    let bytes: &[i8] = std::slice::from_raw_parts(HELPER.as_ptr() as *const i8, HELPER.len());
+    env.set_byte_array_region(arr, 0, HELPER.len() as i32, bytes);
+    clear_if_pending(env);
+    let cls_o = env.call_object_method(
+        loader,
+        m_define,
+        &[jv(name), jv(arr as jobject), ji(0), ji(HELPER.len() as i32)],
+    );
+    clear_if_pending(env);
+    let cls = jobj(cls_o)?;
+    let cls = env.new_global_ref(cls) as jobject;
+    let m_init = sgstep!(
+        "m_helper_init",
+        env.get_static_method_id(
+            cls,
+            "init",
+            "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;\
+             Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;\
+             Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;\
+             Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;\
+             Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;\
+             Ljava/lang/Object;II)V"
+        )
+    );
+    env.call_static_void_method(
+        cls,
+        m_init,
+        &[
+            jv(level),
+            jv(rs),
+            jv(settings),
+            jv(rule),
+            jv(surface),
+            jv(ctx),
+            jv(pred),
+            jv(fluid_picker),
+            jv(blender),
+            jv(default_block),
+            jv(final_density),
+            jv(upgrade_data),
+            jv(factory),
+            jv(biome_fn),
+            jv(block_registry),
+            jv(bman),
+            ji(min_block_y),
+            ji(size_y),
+        ],
+    );
+    if env.exception_check() {
+        env.exception_describe();
+        env.exception_clear();
+        eprintln!("[c-LoD] seedgen helper: init threw — per-column path stays");
+        return None;
+    }
+    let m_chunk = sgstep!(
+        "m_helper_chunk",
+        env.get_static_method_id(cls, "chunk", "(III)[J")
+    );
+    let f_mat = sgstep!(
+        "f_matTable",
+        env.get_static_field_id(cls, "matTable", "[Ljava/lang/String;")
+    );
+    let f_bio = sgstep!(
+        "f_bioTable",
+        env.get_static_field_id(cls, "bioTable", "[Ljava/lang/String;")
+    );
+    Some((cls, m_init, m_chunk, f_mat, f_bio))
+}
+
 // ---------------------------------------------------------------------------
 // Generation (worker threads)
 // ---------------------------------------------------------------------------
@@ -1278,6 +1460,36 @@ unsafe fn gen_chunk(
     cx: i32,
     cz: i32,
 ) -> Result<usize, String> {
+    // v5.8 helper path: the whole chunk in one JNI call. A per-chunk throw
+    // falls back to the legacy column walk below; repeated throws disable
+    // the helper for the process (the legacy path stays at v5.7 speed).
+    let sg = state.seedgen.lock().unwrap().clone();
+    let helper_on = sg
+        .as_ref()
+        .map(|s| s.helper.load(Ordering::SeqCst))
+        .unwrap_or(false);
+    if helper_on {
+        match gen_chunk_native(state, env, ids, cx, cz) {
+            Ok(n) => return Ok(n),
+            Err(e) => {
+                if let Some(sg) = sg.as_ref() {
+                    let f = sg.helper_fails.fetch_add(1, Ordering::SeqCst);
+                    if f >= 15 {
+                        sg.helper.store(false, Ordering::SeqCst);
+                        eprintln!(
+                            "[c-LoD] seedgen helper: DISABLED after repeated throws (last: {e})"
+                        );
+                    } else {
+                        eprintln!(
+                            "[c-LoD] seedgen helper chunk ({cx},{cz}) threw: {e} — legacy fallback"
+                        );
+                    }
+                }
+                clear_if_pending(env);
+            }
+        }
+    }
+
     let cell = state.cfg.cell_size.max(1);
     let wx0 = cx * 16;
     let wz0 = cz * 16;
@@ -1594,6 +1806,145 @@ unsafe fn gen_column(
     out
 }
 
+/// v5.8 fast path: the Java helper runs the whole noise walk and returns a
+/// packed long per cell; this side unpacks, filters by the disk window and
+/// paints. The recipe inside the helper is the same iterateNoiseColumn
+/// transcription, byte-for-byte — outputs are identical to the legacy path.
+///
+/// # Safety
+/// Same contract as `gen_chunk`; the helper class must be armed.
+unsafe fn gen_chunk_native(
+    state: &Arc<engine::State>,
+    env: Env,
+    ids: &SeedIds,
+    cx: i32,
+    cz: i32,
+) -> Result<usize, String> {
+    let cell = state.cfg.cell_size.max(1);
+    if cell > 16 || 16 % cell != 0 {
+        return Err("cell_size must divide 16".into());
+    }
+    let (origin_x, origin_z, side) = {
+        let s = state.stream.lock().unwrap();
+        (s.origin_x, s.origin_z, s.side)
+    };
+    let cell_of = |wx: i32, wz: i32| -> Option<(u32, u32)> {
+        let fx = ((wx as f64 - origin_x) / cell as f64).floor() as i32;
+        let fz = ((wz as f64 - origin_z) / cell as f64).floor() as i32;
+        if fx < 0 || fz < 0 || fx >= side as i32 || fz >= side as i32 {
+            return None;
+        }
+        let bx = origin_x + f64::from(fx) * cell as f64;
+        let bz = origin_z + f64::from(fz) * cell as f64;
+        if (f64::from(wx) - bx).abs() >= cell as f64 || (f64::from(wz) - bz).abs() >= cell as f64 {
+            return None;
+        }
+        Some((fx as u32, fz as u32))
+    };
+
+    env.push_local_frame(64)
+        .map_err(|_| "push_local_frame".to_string())?;
+    let out = (|| -> Result<usize, String> {
+        let arr_o = env.call_static_object_method(
+            ids.helper_cls,
+            ids.helper_chunk,
+            &[ji(cx), ji(cz), ji(cell)],
+        );
+        if env.exception_check() {
+            env.exception_clear();
+            return Err("helper chunk threw".into());
+        }
+        let arr = jobj(arr_o).ok_or("helper chunk null")?;
+        let n = env.get_array_length(arr);
+        let n_side = (16 / cell) as usize;
+        if n < (n_side * n_side) as i32 {
+            env.delete_local_ref(arr);
+            return Err(format!(
+                "helper returned {n} cells, expected {}",
+                n_side * n_side
+            ));
+        }
+        let mut packed = vec![0i64; n.max(0) as usize];
+        env.get_long_array_region(arr, 0, n, &mut packed);
+        env.delete_local_ref(arr);
+
+        // Intern-table snapshots (single read is enough: this thread's own
+        // ordinals were published before chunk() returned).
+        let mats = helper_table(env, ids, ids.f_mat_table);
+        let bios = helper_table(env, ids, ids.f_bio_table);
+
+        let n_side = (16 / cell) as usize;
+        let mut written = 0usize;
+        for gx in 0..n_side {
+            for gz in 0..n_side {
+                let l = packed[gx * n_side + gz];
+                if l == 0 {
+                    continue; // void column: valid bit clear
+                }
+                let wx = cx * 16 + gx as i32 * cell;
+                let wz = cz * 16 + gz as i32 * cell;
+                let Some((ccx, ccz)) = cell_of(wx, wz) else {
+                    continue;
+                };
+                let skip = {
+                    let st = state.stream.lock().unwrap();
+                    st.get(ccx, ccz).map(|c| c.valid).unwrap_or(false)
+                };
+                if skip {
+                    continue;
+                }
+                let (top_y, liquid, mo, bo) = unpack_cell(l);
+                let material = mats.get(mo).map(String::as_str).unwrap_or("");
+                let biome = bios.get(bo).map(String::as_str).unwrap_or("");
+                let rgb = palette::surface_color(material, biome, liquid);
+                let c = crate::stream::Cell {
+                    height: top_y.clamp(-64, 1023) as i16,
+                    water: liquid,
+                    valid: true,
+                    provisional: true,
+                    rgb,
+                };
+                state.stream.lock().unwrap().set_cell(ccx, ccz, c);
+                written += 1;
+            }
+        }
+        Ok(written)
+    })();
+    let _ = env.pop_local_frame(std::ptr::null_mut());
+    out
+}
+
+/// Read one String[] intern-table snapshot from the helper.
+unsafe fn helper_table(env: Env, ids: &SeedIds, field: jfieldID) -> Vec<String> {
+    let mut out = Vec::new();
+    let arr = env.get_static_object_field(ids.helper_cls, field);
+    if let Some(arr) = jobj(arr) {
+        let n = env.get_array_length(arr);
+        for i in 0..n {
+            let s = env.get_object_array_element(arr, i);
+            if let Some(name) = jstr(env, s) {
+                out.push(name);
+            }
+            if !s.is_null() {
+                env.delete_local_ref(s);
+            }
+        }
+    }
+    clear_if_pending(env);
+    out
+}
+
+/// Bit contract mirrored from `java/ClodSeedgen.java` `pack()`: bits 0-15
+/// height+32768, bit 16 liquid, bits 17-31 material ordinal, bits 32-46
+/// biome ordinal, bit 63 valid. Only called for nonzero (valid) longs.
+fn unpack_cell(l: i64) -> (i32, bool, usize, usize) {
+    let y = ((l & 0xFFFF) as u32 as i32) - 32768;
+    let liquid = (l & (1 << 16)) != 0;
+    let mat = ((l >> 17) & 0x7FFF) as usize;
+    let bio = ((l >> 32) & 0x7FFF) as usize;
+    (y, liquid, mat, bio)
+}
+
 // ---------------------------------------------------------------------------
 // Tests (pure logic — no JVM)
 // ---------------------------------------------------------------------------
@@ -1646,5 +1997,59 @@ mod tests {
         assert!(q.push(7, 9));
         let job = std::thread::spawn(move || q2.pop(5000)).join().unwrap();
         assert_eq!(job, Some((7, 9)));
+    }
+
+    /// Mirror of ClodSeedgen.pack() (java/ClodSeedgen.java) — the two sides
+    /// of the v5.8 contract must agree bit-for-bit.
+    fn java_pack(y: i64, liquid: bool, mat: i64, bio: i64) -> i64 {
+        let mut l = (y + 32768) & 0xFFFF;
+        if liquid {
+            l |= 1 << 16;
+        }
+        l |= mat << 17;
+        l |= bio << 32;
+        l |= 1 << 63;
+        l
+    }
+
+    #[test]
+    fn unpack_matches_java_pack() {
+        for y in [-64i64, 0, 62, 63, 100, 319, 320] {
+            for liquid in [false, true] {
+                for (mat, bio) in [(0i64, 0), (1, 2), (7, 9), (32767, 32767)] {
+                    let l = java_pack(y, liquid, mat, bio);
+                    let (hy, lq, mo, bo) = unpack_cell(l);
+                    assert_eq!(hy, y as i32, "height round-trip {y}");
+                    assert_eq!(lq, liquid, "liquid round-trip {y}/{liquid}");
+                    assert_eq!(mo, mat as usize, "material ordinal round-trip");
+                    assert_eq!(bo, bio as usize, "biome ordinal round-trip");
+                    assert!(l < 0, "valid bit (sign) must be set");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn void_cell_is_zero_and_skipped() {
+        // The helper emits 0 for a void column; the native path must treat
+        // exactly 0 as void (valid bit clear) and skip it before unpacking.
+        assert_eq!(java_pack(64, false, 0, 0) >> 63, -1);
+        let void = 0i64;
+        assert_eq!(void >> 63, 0, "void long has no valid bit");
+        // unpacking a void long is meaningless and never happens; document
+        // the sentinel here so the contract stays obvious.
+        let (y, _liquid, _m, _b) = unpack_cell(1 << 63);
+        assert_eq!(y, -32768);
+    }
+
+    #[test]
+    fn ordinal_bit_budget() {
+        // 15 bits per table: 32767 max ordinal must survive the round trip,
+        // bits 47..62 must stay zero so no future field collides.
+        let l = java_pack(100, true, 32767, 32767);
+        assert_eq!((l >> 47) & 0x7FFF, 0, "bits 47..62 must stay free");
+        let (_, _, mo, bo) = unpack_cell(l);
+        assert_eq!(mo, 32767);
+        assert_eq!(bo, 32767);
     }
 }

@@ -264,3 +264,19 @@ Work Log:
 
 Stage Summary:
 - v5.7 SEEDGEN: холодный мир заполняется на 100% за десятки секунд без единого тикета и без TPS-цены; клетки provisional и само-апгрейдятся до полной фиделити при реальной генерации. Бэклог: хелпер-класс для y-loop (срезать ~1500 JNI-операций/колонку → ещё ×5-10), features (деревья) в нативном генераторе, A/B-нога тикетов для отчёта.
+
+---
+Task ID: 16
+Agent: main
+Task: v5.8 SEEDGEN TURBO — Java-side y-loop helper: один JNI-вызов на чанк вместо ~1500 на колонку
+
+Work Log:
+- Бэклог Task 15 пункт 1 (главный под требование «ультра-быстро»): форензика показала, что в gen_column каждый Y-шаг колонны — это 5 JNI-переходов (indexUnchecked, buf.get, blockY, computeSubstance, pred.test) + exception_check на каждой итерации и push/pop_local_frame на колонку. На колонну до поверхности ~200 шагов ≈ 1000-1500 JNI-операций, на чанк ≈ 256 колонн ≈ 250-400k переходов. Замер v5.7: ~2750 клеток/с при теоретическом потолке шумовой математики ~10к/с на ядро — разрыв и есть JNI-налог.
+- РЕШЕНИЕ: java/ClodSeedgen.java — хелпер, компилированный ТОЛЬКО против JDK (ни одного Minecraft-импорта; все Minecraft-типы через MethodHandles, резолвятся в init() по mojang-mapped именам, снятым с живого v5.7-resolve). Весь чанк (DensityVolume+NoiseChunk+sampleVolume, ProtoChunk, 64-256 колонн: y-loop, topMaterial, материал/биом) выполняется ВНУТРИ JVM; наружу — packed long на клетку (bit63 valid, 0-15 height+32768, 16 liquid, 17-31/32-46 ординалы материалов/биомов) + String[] таблицы интернирования (volatile-снапшоты). Байткод встраивается в .so (include_bytes!), класс дефайнится при бутстрапе через ClassLoader.defineClass (JNI игнорирует protected).
+- ПРЕФЛАЙТ БЕЗ PAPER: мок-иерархия (28 классов с точными пакетами net.minecraft.*) + harness на 1029 проверок — packing, interning, void-семантика, порядок dx-major, детерминизм, вода/биомы. Поймал ДВА реальных бага ДО стенда: (1) забытый `package clod;` — defineClass падал бы live; (2) инвертированный liquid (`liquid = isEmpty` вместо `!isEmpty` — Rust-путь отрицает). + 3 собственных бага теста (океан не в том чанке, паритет биомов, indexUnchecked мока).
+- Rust: define_helper() в resolve() (defineClass + init с 16 глобальными рефами + dims; любая ошибка → null-поля → v5.7-путь, seedgen не выключается); gen_chunk диспетчеризует: helper → gen_chunk_native (один call_static_object_method, GetLongArrayRegion, две таблицы, unpack/palette/set_cell provisional) → при throw: legacy-путь для этого чанка, после 15 подряд — helper выключается навсегда (helper_fails в diag). unpack_cell + java_pack-зеркало покрыты тестами (контракт бит-в-бит).
+- CI: новый job javahelper — перекомпилировать java/ClodSeedgen.class и сравнить sha1 с закоммиченным (защита от расползания исходник/байткод; scripts/java/build.sh). README: диаграмма (v5.7+5.8), measured-строка, 55 тестов, honest limitations (graceful degradation). Версии 5.8.0 (Cargo.toml/module.json/Cargo.lock локально).
+- Локальная верификация восстановленным тулчейном (rustup stable 1.99): cargo fmt OK, clippy -D warnings 0, cargo test 55/55. Префлайт Java: PREFLIGHT PASS 1029 ok. Числа заполняемости ждёт CI e2e-live (playerless G9).
+
+Stage Summary:
+- v5.8: JNI-граница seedgen срезана с ~250-400k переходов на чанк до ~15; шум-математика (~25 мс/чанк на ядро) теперь почти весь бюджет. Ожидаемый разгон против v5.7 ×2.5-3.5 на том же железе (потолок ~10k клеток/с на воркера), финальная цифра — из CI-лога e2e-live. Оутпут бит-в-бит тот же (тот же рецепт, те же вызовы в том же порядке; палитра и provisional-апгрейд не тронуты). Бэклог: деревья в нативном генераторе, A/B-нога тикетов для отчёта.
