@@ -308,10 +308,89 @@ jobs:
             dist/boot2.log
             dist/logs/server.log
 
+  visual:
+    name: visual e2e (real client renders the live-edit proof)
+    # Layer 8: the only job that proves the v6.2/v6.3 guarantee ON SCREEN —
+    # a block placed mid-session reaches the LOD paint with zero relogs, and
+    # the marker survives a kick+rejoin. A genuine vanilla 26.3 client runs
+    # under Xvfb on the runner's Mesa llvmpipe (the sRGB GLX shim strips the
+    # attribute Mesa cannot satisfy; see scripts/bench/libclodgl.c).
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - name: X11 + software GL + python deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb ffmpeg libgl1 libglx-mesa0 libgl1-mesa-dri
+          python3 -m pip install --quiet --user pillow python-xlib
+      - name: Build module (release)
+        run: cargo build --release
+      - name: Build CRUSSTY runtime + launcher
+        run: |
+          git clone --depth 1 https://github.com/PLANETA9091/CRUSSTY.git crussty
+          cargo build --release --manifest-path crussty/runtime/Cargo.toml
+          mkdir -p crussty/launcher/out
+          javac -d crussty/launcher/out crussty/launcher/src/main/java/dev/dist/launcher/Main.java
+          jar cfe crussty/launcher/launcher.jar dev.dist.launcher.Main -C crussty/launcher/out .
+      - name: Fetch Paper 26.3
+        run: |
+          URL=$(curl -s https://fill.papermc.io/v3/projects/paper/versions/26.3/builds/latest \
+            | python3 -c "import json,sys;print(json.load(sys.stdin)['downloads']['server:default']['url'])")
+          curl -sL -o paper.jar "$URL"
+          mkdir -p dist/versions
+          cp paper.jar dist/versions/paper-26.3.jar
+      - name: Assemble dist root (fixed seed; view-distance 4 keeps the marker zone pure-LOD)
+        run: |
+          mkdir -p dist/modules/lod
+          cp target/release/liblod.so dist/modules/lod/
+          cp module.json dist/modules/lod/
+          cp crussty/launcher/launcher.jar dist/
+          cp crussty/runtime/target/release/libcrussty_runtime.so dist/
+          printf 'eula=true\n' > dist/eula.txt
+          {
+            echo 'online-mode=false'
+            echo 'view-distance=4'
+            echo 'simulation-distance=4'
+            echo 'server-port=25565'
+            echo 'spawn-protection=0'
+            echo 'white-list=false'
+            echo 'motd=c-LoD visual CI'
+            echo 'level-seed=clodbench2026'
+          } > dist/server.properties
+      - name: sRGB GLX shim
+        run: |
+          mkdir -p ~/mc-test/shim
+          gcc -shared -fPIC -O2 -o ~/mc-test/shim/libGL.so.1 scripts/bench/libclodgl.c -ldl
+      - name: Vanilla 26.3 client runtime (official manifest, ~600 MB)
+        run: python3 scripts/bench/setup_client.py
+      - name: "VISUAL — live-edit paint proof (leg 1 no-relog, leg 2 post-relog)"
+        env:
+          MC_TEST_DIST: ${{ github.workspace }}/dist
+        run: |
+          export CLOD_JAVA="$JAVA_HOME/bin/java"
+          bash scripts/bench/run_ci_visual.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-evidence
+          path: |
+            /home/runner/mc-test/shots/ci-visual/
+            /tmp/client.log
+            /tmp/server.log
+          if-no-files-found: warn
+
   strict:
     name: strictness gate (all green)
-    needs: [fmt, clippy, test, glsl, build, packaging, e2e-live]
-    if: always() && (needs.e2e-live.result == 'success' || needs.e2e-live.result == 'skipped')
+    needs: [fmt, clippy, test, glsl, build, packaging, e2e-live, visual]
+    if: always() && (needs.e2e-live.result == 'success' || needs.e2e-live.result == 'skipped') && (needs.visual.result == 'success' || needs.visual.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - name: Everything passed

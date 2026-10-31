@@ -168,15 +168,15 @@ All numbers from the real 2-CPU e2e stand (Paper 26.3-207 + genuine vanilla clie
 ## Development
 
 ```bash
-cargo test --release          # 72 unit tests (stream/engine/config/packgen/palette/sha1/http/zipw/seedgen/wire)
+cargo test --release          # 73 unit tests (stream/engine/config/packgen/palette/sha1/http/zipw/seedgen/edits/wire)
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 bash scripts/check_glsl.sh    # glslangValidator: every shader + both chain JSONs
 ```
 
-The full verification pyramid — CI layers, boot gates G1–G10, the real-client harness and the evidence archive — is mapped in [TESTS.md](TESTS.md). CI runs rustfmt, clippy (`-D warnings`), the full test suite, a bytecode-freshness check for the embedded seedgen helper (`java/ClodSeedgen.class` recompiled and diffed against the commit), glslang validation, the pack-integrity assertions (12→13 entries, **zero** `.png`/`textures/`, capture chain present, no texture inputs), release builds on Linux/macOS/Windows, the CRUSSTY module bundle — and an **e2e live-server job** on `master`: a real Paper 26.3 kernel on Temurin 25 with the CRUSSTY runtime built from source, two boots (fresh world + restart) asserting the pack fetch, the gates and byte-exact SHA-1 reproduction.
+The full verification pyramid — CI layers, boot gates G1–G10, the real-client harness and the evidence archive — is mapped in [TESTS.md](TESTS.md). CI runs rustfmt, clippy (`-D warnings`), the full test suite, a bytecode-freshness check for the embedded seedgen helper (`java/ClodSeedgen.class` recompiled and diffed against the commit), glslang validation, the pack-integrity assertions (12→13 entries, **zero** `.png`/`textures/`, capture chain present, no texture inputs), release builds on Linux/macOS/Windows, the CRUSSTY module bundle — an **e2e live-server job** on `master` (a real Paper 26.3 kernel on Temurin 25 with the CRUSSTY runtime built from source, two boots asserting the pack fetch, the gates and byte-exact SHA-1 reproduction) — and, since v6.4, the **visual job**: a genuine vanilla 26.3 client under Xvfb + Mesa llvmpipe on the runner joins the server, and the CI asserts ON SCREEN that a `red_concrete` column placed mid-session repaints the LOD disk **without any relog** (and that the marker survives a kick+rejoin). Screenshots upload as artifacts.
 
-## Honest limitations (v6.3)
+## Honest limitations (v6.4)
 
 - **The camera channel needs sky in the leftmost screen columns.** Facing a wall of terrain (or being fully indoors) the chain holds its last estimate with a slow decay — the LOD fades out instead of popping, and the atmosphere chain keeps working (it never needs rotation). Any sky row in the leftmost 8 columns re-locks the basis within one frame.
 - **A cold world starts nearly empty — for seconds, not minutes.** SEEDGEN (v5.7) fills never-generated chunks natively at ~35× the ticket frontier, and v5.8/v5.9 keep shaving the per-chunk overhead (walk inside the JVM → batched JNI → versioned tables + identity caches + stride math), so a fresh 512-block disk completes in well under a minute on a small VPS. Generated cells are `provisional`: terrain-exact, but trees/carvers/structures only arrive when the server generates the real chunk (the v6.2 rescan wave or the loaded-chunk sampler upgrades them then). The helper degrades gracefully: bytecode that fails to define or throws on the host's Paper build falls back to the per-column v5.7 path automatically.

@@ -123,6 +123,29 @@ pub fn surface_color(material: &str, biome: &str, liquid: bool) -> [u8; 3] {
         "NETHER_BRICKS" | "NETHERRACK" | "MAGMA_BLOCK" => [0x6E, 0x36, 0x3A],
         "END_STONE" => [0xDB, 0xDF, 0xA7],
 
+        // Concrete family — the 16 vanilla dye MapColors, unchanged since
+        // 1.12. Before v6.4 every concrete fell through to the neutral stone
+        // gray, which made placed builds invisible against stone terrain;
+        // RED_CONCRETE is also the marker block of the CI visual test
+        // (`run_ci_visual.sh` paints a column and asserts its color on
+        // screen), so this table is load-bearing for layer 8.
+        "WHITE_CONCRETE" => [0xCF, 0xD5, 0xD6],
+        "ORANGE_CONCRETE" => [0xE0, 0x61, 0x01],
+        "MAGENTA_CONCRETE" => [0xBE, 0x45, 0xB4],
+        "LIGHT_BLUE_CONCRETE" => [0x69, 0xA1, 0xDC],
+        "YELLOW_CONCRETE" => [0xF0, 0xC4, 0x13],
+        "LIME_CONCRETE" => [0x5D, 0xB7, 0x28],
+        "PINK_CONCRETE" => [0xED, 0x8D, 0xAD],
+        "GRAY_CONCRETE" => [0x3D, 0x43, 0x4A],
+        "LIGHT_GRAY_CONCRETE" => [0x8E, 0x8E, 0x87],
+        "CYAN_CONCRETE" => [0x15, 0x77, 0x88],
+        "PURPLE_CONCRETE" => [0x79, 0x2A, 0xAC],
+        "BLUE_CONCRETE" => [0x35, 0x39, 0x9D],
+        "BROWN_CONCRETE" => [0x72, 0x47, 0x28],
+        "GREEN_CONCRETE" => [0x54, 0x6D, 0x1B],
+        "RED_CONCRETE" => [0x8E, 0x21, 0x21],
+        "BLACK_CONCRETE" => [0x08, 0x0A, 0x0F],
+
         // Vegetation blocks that carry the biome tint.
         "OAK_LEAVES" => mul([0x48, 0xB5, 0x18], grass),
         "SPRUCE_LEAVES" => [0x61, 0x77, 0x61],
@@ -242,5 +265,61 @@ mod tests {
         let b = surface_color("SPRUCE_LEAVES", "TAIGA", false);
         assert_eq!(a, b);
         assert_eq!(a, [0x61, 0x77, 0x61]);
+    }
+
+    #[test]
+    fn concrete_family_carries_the_dye() {
+        // The exact vanilla MapColors — pinned because the CI visual test
+        // (layer 8) looks for RED_CONCRETE pixels on screen.
+        assert_eq!(
+            surface_color("RED_CONCRETE", "PLAINS", false),
+            [0x8E, 0x21, 0x21]
+        );
+        assert_eq!(
+            surface_color("WHITE_CONCRETE", "PLAINS", false),
+            [0xCF, 0xD5, 0xD6]
+        );
+        assert_eq!(
+            surface_color("YELLOW_CONCRETE", "PLAINS", false),
+            [0xF0, 0xC4, 0x13]
+        );
+        // No concrete may fall through to the neutral-stone fallback that the
+        // whole family hit before v6.4 (a placed build would vanish against
+        // stone terrain).
+        for m in [
+            "ORANGE_CONCRETE",
+            "MAGENTA_CONCRETE",
+            "LIGHT_BLUE_CONCRETE",
+            "LIME_CONCRETE",
+            "PINK_CONCRETE",
+            "GRAY_CONCRETE",
+            "LIGHT_GRAY_CONCRETE",
+            "CYAN_CONCRETE",
+            "PURPLE_CONCRETE",
+            "BLUE_CONCRETE",
+            "BROWN_CONCRETE",
+            "GREEN_CONCRETE",
+            "BLACK_CONCRETE",
+        ] {
+            let c = surface_color(m, "PLAINS", false);
+            assert_ne!(c, [0x7A, 0x7A, 0x7A], "{m} fell to the stone fallback");
+        }
+        // The marker red must stay visually separated from terrain reds
+        // (dirt/terracotta are brown-shifted) — the on-screen probe
+        // thresholds fogged pixels on r-g >= 30, so the source color needs a
+        // wide margin above every overworld terrain red.
+        let red = surface_color("RED_CONCRETE", "PLAINS", false);
+        let dirt = surface_color("DIRT", "PLAINS", false);
+        let terr = surface_color("TERRACOTTA", "PLAINS", false);
+        let sep = |c: [u8; 3]| c[0] as i32 - c[1] as i32;
+        assert!(sep(red) > 80, "marker red must be strongly r-dominant");
+        assert!(
+            sep(red) - sep(dirt) > 40,
+            "marker red must separate from dirt"
+        );
+        assert!(
+            sep(red) - sep(terr) > 40,
+            "marker red must separate from terracotta"
+        );
     }
 }

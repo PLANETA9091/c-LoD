@@ -7,19 +7,48 @@ Downloads (per the client version manifest 26.3.json):
   - asset index 34 + all asset objects         -> client/assets/
   - logging config                             -> client/logconfig.xml
 
-The client.jar itself is reused from analysis/mc263/client.jar.
+The client.jar is reused from analysis/mc263/client.jar when present (the
+local bench); otherwise (CI) it is downloaded from the official Mojang URL in
+the manifest and verified against the manifest SHA-1.
+
+The manifest itself resolves in this order:
+  1. $CLOD_MANIFEST
+  2. scripts/bench/26.3.json (the committed copy — the CI path, no analysis
+     tree exists on a runner)
+  3. /home/z/my-project/analysis/mc263/26.3.json (the local bench copy)
 """
 import concurrent.futures as futures
+import hashlib
 import json
 import os
 import shutil
 import sys
+import urllib.request
 import zipfile
 
-MANIFEST = "/home/z/my-project/analysis/mc263/26.3.json"
-CLIENT_JAR = "/home/z/my-project/analysis/mc263/client.jar"
+_BENCH = os.path.dirname(os.path.abspath(__file__))
+MANIFEST = os.environ.get(
+    "CLOD_MANIFEST",
+    next(p for p in (os.path.join(_BENCH, "26.3.json"),
+                     "/home/z/my-project/analysis/mc263/26.3.json")
+         if os.path.exists(p)),
+)
+CLIENT_JAR = os.environ.get("CLOD_CLIENT_JAR",
+                            "/home/z/my-project/analysis/mc263/client.jar")
 ROOT = os.path.expanduser("~/mc-test/client")
 UA = {"User-Agent": "c-LoD-bench/4.1 (test harness)"}
+
+
+def fetch_client_jar(m, dest):
+    """CI path: pull the real client.jar from the manifest URL, sha1-verified."""
+    url = m["downloads"]["client"]["url"]
+    sha1 = m["downloads"]["client"]["sha1"]
+    print(f"client.jar not local — downloading from Mojang: {url}", flush=True)
+    fetch(url, dest)
+    h = hashlib.sha1(open(dest, "rb").read()).hexdigest()
+    if h != sha1:
+        raise SystemExit(f"client.jar sha1 mismatch: got {h}, want {sha1}")
+    print(f"client.jar verified ({sha1[:12]}...)", flush=True)
 
 
 def rules_allow(entry):
@@ -59,7 +88,11 @@ def main():
               os.path.join(assets_dir, "objects"), os.path.join(ROOT, "versions", "26.3")):
         os.makedirs(d, exist_ok=True)
 
-    shutil.copyfile(CLIENT_JAR, os.path.join(ROOT, "versions", "26.3", "26.3.jar"))
+    client_dst = os.path.join(ROOT, "versions", "26.3", "26.3.jar")
+    if os.path.exists(CLIENT_JAR):
+        shutil.copyfile(CLIENT_JAR, client_dst)
+    else:
+        fetch_client_jar(m, client_dst)
 
     # ---- libraries + natives ----
     artifacts, native_jars = [], []

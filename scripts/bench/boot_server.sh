@@ -2,8 +2,11 @@
 # Boot the Paper 26.3 + CRUSSTY + c-LoD stack; stdin via /tmp/server.in fifo.
 # Usage: boot_server.sh   (returns once "pack finalized" appears, gates run)
 set -euo pipefail
-D="$HOME/mc-test/dist"
-JAVA="$HOME/tools/jdk25/bin/java"
+# BENCH_DIR must be absolute: the script cds into the dist root later,
+# and $0-relative paths would break after the cd.
+BENCH_DIR="$(cd "$(dirname "$0")" && pwd)"
+D="${MC_TEST_DIST:-$HOME/mc-test/dist}"
+JAVA="${CLOD_JAVA:-$HOME/tools/jdk25/bin/java}"
 # Disk center: override via CLOD_CENTER env ("x,z"), default region spawn
 CENTER="${CLOD_CENTER:-0,64}"
 # v5.2.2: particles_per_tick 2048 (was 1024) — halves the lap (256 ticks),
@@ -53,7 +56,7 @@ sleep 1
 
 # v5.5 frontier: optional chunk-system thread tuning (A/B via env).
 # PAPER_WORKERS=4 PAPER_IO=2 boot_server.sh  ->  patched boot.
-python3 /home/z/my-project/c-LoD/scripts/bench/patch_paper_cfg.py "$D"
+python3 "$BENCH_DIR/patch_paper_cfg.py" "$D"
 
 rm -f /tmp/server.in /tmp/server.log
 mkfifo /tmp/server.in
@@ -82,5 +85,5 @@ done
 [ "$HTTP_OK" = "1" ] || { echo "HTTP GATE FAILED: pack not served on 8199"; grep -i "http server" /tmp/server.log; exit 1; }
 echo "http gate: pack served OK"
 echo "=== gates ==="
-python3 /home/z/my-project/c-LoD/scripts/e2e/gates.py /tmp/server.log
+python3 "$BENCH_DIR/../e2e/gates.py" /tmp/server.log
 echo "=== server is up (stdin: /tmp/server.in, log: /tmp/server.log) ==="
