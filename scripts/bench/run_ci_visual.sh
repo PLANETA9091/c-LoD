@@ -222,6 +222,25 @@ sum "- stream live: cells=$CELLS"
 # The wave starts when the camera enters the disk — the settle wait below is
 # meaningless at spawn (the wire is quiet there because nothing decodes).
 srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"
+# v6.4.4: wire-quiet alone settled too early — the scan keeps dribbling late
+# cells under the WIRE_QUIET threshold while the screen still drifts >1500 px
+# between shots (run 41237303358: both legs passed, the baseline gate fired
+# mid-wave). The scan's own live counters are the honest clock: hold the
+# baseline until /clod-pack.info reports cells=X/Y fully painted.
+SCAN_DONE=0; XY=""
+for _ in $(seq 1 210); do
+  XY=$(curl -s http://127.0.0.1:8199/clod-pack.info \
+       | grep -o 'cells=[0-9]*/[0-9]*' | head -1)
+  X="${XY#cells=}"; X="${X%/*}"; Y="${XY#*/}"
+  if [ -n "$X" ] && [ -n "$Y" ] && [ "$Y" -gt 0 ] 2>/dev/null \
+     && [ "$X" -ge "$Y" ] 2>/dev/null; then
+    SCAN_DONE=1
+    break
+  fi
+  sleep 2
+done
+note "scan complete=$SCAN_DONE (cells=${XY:-?})"
+sum "- scan complete=$SCAN_DONE (cells=${XY:-?})"
 LAST_WIRE=-1
 SETTLED=0
 for _ in $(seq 1 21); do
@@ -238,8 +257,10 @@ note "paint settled=$SETTLED (wire ${LAST_WIRE}p)"
 sum "- paint settled=$SETTLED (wire ${LAST_WIRE}p)"
 
 # ---- 4a. stable baseline (the scan keeps painting late cells; retry) ---------
+# v6.4.4: 3 tries 12 s apart still fired mid-wave once the scan tail ran long;
+# now 6 tries with a 10 s drain between them (worst case ~2 min extra).
 DRIFT=999999
-for t in 1 2 3; do
+for t in 1 2 3 4 5 6; do
   srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"
   sleep 6
   shot 10_before_edit || exit 1
@@ -250,9 +271,10 @@ for t in 1 2 3; do
   note "baseline stability try $t: drift=$DRIFT px"
   sum "- baseline try $t: drift=$DRIFT px"
   [ "$DRIFT" -le 1500 ] 2>/dev/null && break
+  sleep 10  # v6.4.4: let the tail of the wave drain between tries
 done
 [ "$DRIFT" -le 1500 ] 2>/dev/null \
-  || fail "no stable baseline after 3 tries (drift=$DRIFT) — the A/B would lie"
+  || fail "no stable baseline after 6 tries (drift=$DRIFT) — the A/B would lie"
 
 # ---- 5. THE LIVE EDIT (no relog!) + probe loop -------------------------------
 note "placing $MARKER column at $CX,$CZ (y $FILL_Y0..$FILL_Y1)"
