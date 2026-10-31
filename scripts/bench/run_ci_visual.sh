@@ -36,14 +36,25 @@ MIN_CHANGE="${MIN_CHANGE:-300}"
 # the marker column: 5x5 footprint, y 100..200 — the top surface of those
 # columns becomes the marker no matter what the terrain height was
 FILL_Y0=100; FILL_Y1=200
-# vantage: 200 blocks west of the marker, looking east (Bukkit yaw 270) —
-# outside the 64-block vanilla chunk radius, inside the 256-block LOD disk
-VX=$(( CX - 200 )); VY=150; VYAW=270; VPITCH=5
+# vantage: 100 blocks west of the marker, looking east (Bukkit yaw 270).
+# THE GEOMETRY CONSTRAINTS (v6.4.1 fix — the first run stood at 200 m and
+# the marker never painted): the vanilla client culls particles beyond
+# ~renderDistance*16 blocks (options.txt renderDistance:8 -> 128 blocks),
+# so the dust carrying the marker bytes must spawn WITHIN that radius;
+# the server view-distance 4 (64 blocks) still keeps the vantage outside
+# the vanilla chunk radius — the marker zone stays pure-LOD territory.
+VX=$(( CX - 100 )); VY=150; VYAW=270; VPITCH=5
 mkdir -p "$SHOTS"
 FAILURES=0
 FOUND1=0; FOUND2=0
+# self-carrying diagnostics: the runner's step log is auth-walled for the
+# anonymous forensics this job exists for, but the STEP SUMMARY renders
+# publicly — dump the whole decision timeline there, always.
+SUMMARY="${GITHUB_STEP_SUMMARY:-/tmp/step_summary.md}"
+touch "$SUMMARY"
+sum() { echo "$*" >> "$SUMMARY"; }
 
-fail() { echo "FAIL: $*"; FAILURES=$((FAILURES + 1)); }
+fail() { echo "FAIL: $*"; FAILURES=$((FAILURES + 1)); sum "- **FAIL:** $*"; }
 note() { echo "--- $*"; }
 
 srv() { echo "$1" > /tmp/server.in; }
@@ -104,7 +115,39 @@ stop_stack() {
   pkill -9 -f 'paper-26.3' 2>/dev/null || true
   pkill -9 -f 'launcher.jar' 2>/dev/null || true
 }
-trap stop_stack EXIT
+
+# runs on EVERY exit path (set -u failures, early exits, verdicts): the
+# anonymous-visible decision timeline — this is the whole point of layer 8
+# forensics: a red X with no logs is worthless.
+dump_summary() {
+  local rc=$?
+  sum ""
+  sum "### boot / stream"
+  sum '```'
+  grep -E "pack finalized|sky-grid stream armed|http gate|G[0-9]+ ok|gates" /tmp/server.log 2>/dev/null | head -8 >> "$SUMMARY" || true
+  grep -oE "cells=[0-9]+/[0-9]+" /tmp/server.log 2>/dev/null | tail -1 >> "$SUMMARY" || true
+  grep -E "edits \+[0-9]+p/[0-9]+c/[0-9]+e" /tmp/server.log 2>/dev/null | tail -2 >> "$SUMMARY" || true
+  sum '```'
+  sum "### sessions"
+  sum '```'
+  grep -E "Stepan (joined|left)|Accepted|rejected" /tmp/server.log 2>/dev/null | head -10 >> "$SUMMARY" || true
+  sum '```'
+  sum "### client log tail"
+  sum '```'
+  tail -30 /tmp/client.log 2>/dev/null >> "$SUMMARY" || echo "(no client log)" >> "$SUMMARY"
+  sum '```'
+  sum "### server log tail"
+  sum '```'
+  tail -25 /tmp/server.log 2>/dev/null >> "$SUMMARY" || true
+  sum '```'
+  sum "### shots"
+  sum '```'
+  ls -la "$SHOTS" 2>/dev/null | tail -25 >> "$SUMMARY" || true
+  sum '```'
+  sum ""
+  sum "**exit=$rc** failures=$FAILURES leg1=$FOUND1 leg2=$FOUND2"
+}
+trap 'rc=$?; stop_stack; dump_summary' EXIT
 
 # ---- 0. sanity -------------------------------------------------------------
 for f in "$D/launcher.jar" "$HOME/mc-test/shim/libGL.so.1" \
@@ -113,10 +156,13 @@ for f in "$D/launcher.jar" "$HOME/mc-test/shim/libGL.so.1" \
 done
 
 # ---- 1. boot the stack (fifo console, gates) --------------------------------
+sum "### c-LoD visual run ($CENTER, marker=$MARKER, vantage $VX,$VY yaw $VYAW)"
 CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" || {
   echo "FAIL: boot/gates"; tail -40 /tmp/server.log; exit 1; }
+sum "- boot + gates OK ($(date -u +%H:%M:%S))"
 wait_log "sky-grid stream armed" /tmp/server.log 60 || {
   echo "FAIL: sky-grid never armed"; tail -40 /tmp/server.log; exit 1; }
+sum "- sky-grid armed"
 
 # ---- 2. client #1: join, accept pack ----------------------------------------
 JOIN1=$(join_count)
@@ -124,6 +170,7 @@ bash "$BENCH_DIR/run_client.sh" || fail "run_client.sh exited nonzero"
 wait_log "Stepan joined the game" /tmp/server.log 240 || {
   echo "FAIL: client never joined"; tail -30 /tmp/client.log; exit 1; }
 note "client joined (leg 1)"
+sum "- joined session 1 ($(date -u +%H:%M:%S))"
 sleep 5
 accept_pack_prompt leg1 60
 sleep 15
@@ -143,6 +190,7 @@ for _ in $(seq 1 300); do
 done
 [ "$CELLS" -ge 2000 ] 2>/dev/null || { echo "FAIL: scan never populated (cells=$CELLS)"; exit 1; }
 note "stream live: cells=$CELLS (the fill below re-streams its columns via the event push, so full scan completion is not required)"
+sum "- stream live: cells=$CELLS"
 
 # ---- 4. stable baseline (the scan keeps painting late cells; retry) ---------
 DRIFT=999999
@@ -155,6 +203,7 @@ for t in 1 2 3; do
   [ -f "$SHOTS/11_baseline_settle.png" ] || { fail "settle shot missing"; exit 1; }
   DRIFT=$(paint_px "$SHOTS/10_before_edit.png" "$SHOTS/11_baseline_settle.png")
   note "baseline stability try $t: drift=$DRIFT px"
+  sum "- baseline try $t: drift=$DRIFT px"
   [ "$DRIFT" -le 1500 ] 2>/dev/null && break
 done
 [ "$DRIFT" -le 1500 ] 2>/dev/null \
@@ -165,12 +214,19 @@ note "placing $MARKER column at $CX,$CZ (y $FILL_Y0..$FILL_Y1)"
 srv "fill $((CX - 2)) $FILL_Y0 $((CZ - 2)) $((CX + 2)) $FILL_Y1 $((CZ + 2)) minecraft:$MARKER"
 sleep 2
 grep -E "Changed [0-9]+ blocks" /tmp/server.log | tail -1 || note "fill summary not in log (probe loop decides)"
+sum "- fill issued: 5x5x$((FILL_Y1 - FILL_Y0 + 1)) $MARKER at $CX,$CZ"
+PROBE_LOG="$SHOTS/probe_counts.txt"; : > "$PROBE_LOG"
 for k in $(seq 0 23); do
   shot "12_after_edit_probe$k" || exit 1
-  if python3 "$BENCH_DIR/visual_diff.py" \
+  python3 "$BENCH_DIR/visual_diff.py" \
        "$SHOTS/10_before_edit.png" "$SHOTS/12_after_edit_probe$k.png" \
        --probe red --min-probe "$MIN_PROBE" --min-change "$MIN_CHANGE" \
-       --out "$SHOTS/diff_live_edit.png"; then
+       --out "$SHOTS/diff_live_edit.png" > /tmp/probe_out.txt 2>&1
+  PC=$(grep -o 'probe\[red\] px = [0-9]*' /tmp/probe_out.txt | grep -o '[0-9]*$')
+  PS=$(grep -o 'paint px = [0-9]*' /tmp/probe_out.txt | grep -o '[0-9]*$')
+  echo "probe$k red=${PC:-?} paint=${PS:-?}" >> "$PROBE_LOG"
+  sum "- probe $k: red=${PC:-?} paint=${PS:-?} (need red>=$MIN_PROBE paint>=$MIN_CHANGE)"
+  if grep -q "VISUAL OK" /tmp/probe_out.txt; then
     FOUND1=1
     note "marker VISIBLE on screen after edit (probe $k, ~$((k * 5 + 5)) s)"
     break
@@ -181,7 +237,8 @@ NOW_JOIN=$(join_count)
 [ "$NOW_JOIN" = "$JOIN1" ] \
   || fail "join count changed mid-test ($JOIN1 -> $NOW_JOIN): the proof must hold WITHOUT a relog"
 [ "$FOUND1" = "1" ] && [ "$NOW_JOIN" = "$JOIN1" ] \
-  && echo "LEG 1 PASS: the edit reached the LOD paint with zero relogs"
+  && echo "LEG 1 PASS: the edit reached the LOD paint with zero relogs" \
+  && sum "- **LEG 1 PASS** (zero relogs)"
 grep -E "edits \+[0-9]+p/[0-9]+c/[0-9]+e" /tmp/server.log | tail -2 || true
 
 # ---- 6. leg 2: kick + rejoin, the marker must persist ------------------------
@@ -198,6 +255,7 @@ for _ in $(seq 1 240); do
 done
 [ "$REJOINED" = "1" ] || { echo "FAIL: rejoin never happened"; tail -30 /tmp/client.log; exit 1; }
 note "client rejoined (leg 2)"
+sum "- joined session 2 ($(date -u +%H:%M:%S))"
 sleep 5
 accept_pack_prompt leg2 30
 sleep 15
@@ -209,10 +267,14 @@ for k in $(seq 0 11); do
   shot "13_after_relog_probe$k" || exit 1
   # leg 2 asserts the MARKER COLOR on screen (probe only): scene drift between
   # sessions is allowed to move non-marker pixels
-  if python3 "$BENCH_DIR/visual_diff.py" \
+  python3 "$BENCH_DIR/visual_diff.py" \
        "$SHOTS/10_before_edit.png" "$SHOTS/13_after_relog_probe$k.png" \
        --probe red --min-probe "$MIN_PROBE" --min-change 0 \
-       --out "$SHOTS/diff_after_relog.png"; then
+       --out "$SHOTS/diff_after_relog.png" > /tmp/probe_out.txt 2>&1
+  PC=$(grep -o 'probe\[red\] px = [0-9]*' /tmp/probe_out.txt | grep -o '[0-9]*$')
+  echo "relog_probe$k red=${PC:-?}" >> "$PROBE_LOG"
+  sum "- relog probe $k: red=${PC:-?} (need >= $MIN_PROBE)"
+  if grep -q "VISUAL OK" /tmp/probe_out.txt; then
     FOUND2=1
     note "marker STILL visible after relog (probe $k)"
     break
@@ -220,6 +282,7 @@ for k in $(seq 0 11); do
   sleep 5
 done
 [ "$FOUND2" = "1" ] && echo "LEG 2 PASS: the streamed marker survives the session change" \
+  && sum "- **LEG 2 PASS** (marker persisted over relog)" \
   || fail "marker lost after relog — stream state is not persistent/deterministic"
 
 # ---- 7. verdict ---------------------------------------------------------------
