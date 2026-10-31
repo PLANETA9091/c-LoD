@@ -5,14 +5,15 @@ CI (`.github/workflows/ci.yml`) runs layers 1–4 on every push; the `e2e-live`
 job additionally runs layer 5 on `master`. Layers 6–7 are the local
 real-client harness (a genuine vanilla 26.3 client under Xvfb — CI has no GPU).
 
-## 1. Rust unit tests — `cargo test` (48 tests)
+## 1. Rust unit tests — `cargo test` (61 tests)
 
 | module | count | what they pin |
 |--------|------:|---------------|
 | `src/stream.rs` | 16 | 16-bit word packing (4 particles/word, X-sub = data bits, Z-sub = slot), HI/LO plane layout, delta-zone scheduling, cone admission, lap coverage |
 | `src/engine.rs` | 8 | `wish_admit` ledger (dup reject, backlog cap, per-tick budget, v5.5 window parameter), frontier math |
-| `src/config.rs` | 6 | `CLOD_OPTS` parsing + clamps (gen_budget 1..256, gen_wish 32..4096, particles_per_tick, disk geometry) |
-| `src/packgen.rs` | 5 | the pack builds byte-deterministically, 12 entries, ZERO textures/PNGs, capture chain present |
+| `src/seedgen.rs` | 12 | SeedQueue dedup/order/close + v5.9 `pop_batch` drain; bit-contract vs `ClodSeedgen.pack()` (height/liquid/ordinals/valid bit, bit budget); v5.9 `chunkBatch` payload parsing (header, statuses, zero-filled failed segments, corruption rejects) |
+| `src/config.rs` | 7 | `CLOD_OPTS` parsing + clamps (gen_budget 1..256, gen_wish 32..4096, particles_per_tick, disk geometry, native_threads/seedgen_batch) |
+| `src/packgen.rs` | 5 | the pack builds byte-deterministically, 13 entries, ZERO textures/PNGs, capture chain present |
 | `src/palette.rs` | 4 | surface → RGB mapping incl. water/foliage tints |
 | `src/sha1.rs` | 4 | SHA-1 correctness (RFC vectors + pack-sized inputs) |
 | `src/http.rs` | 2 | embedded pack server routes/metadata |
@@ -29,7 +30,20 @@ cargo fmt --all -- --check          # rustfmt
 cargo clippy --all-targets -- -D warnings
 bash scripts/check_glsl.sh          # glslangValidator on every shader +
                                     # JSON schema check of both post-chains
+bash scripts/java/build.sh          # javac --release 17: the embedded seedgen
+                                    # helper must rebuild to the committed bytes
+                                    # (CI `javahelper` diffs the SHA-1)
 ```
+
+## 2b. SEEDGEN helper preflight — `scripts/java/preflight/run.sh`
+
+The v5.8/v5.9 Java helper against a mock `net.minecraft` hierarchy — no Paper
+needed. 52 checks per run × two JVMs: `chunk()` vs `chunkBatch()` bit-parity,
+batch structure (statuses, zero-filled throwing segments, `n_ok`), `tabVer`
+monotonicity, buffer/NoiseChunk close discipline, void semantics — and the
+affine-stride fast path vs a non-affine (Fisher–Yates) layout falling back,
+both producing IDENTICAL cells (hash-compared across the two JVMs:
+`COLUMNS fast=1604 slow=0` vs `fast=0 slow=1604`, same `CELLS_SHA`).
 
 ## 3. Pack integrity (in CI `glsl` job)
 

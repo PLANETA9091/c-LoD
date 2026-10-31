@@ -3,6 +3,8 @@ package clod;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
+import java.util.Arrays;
+import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -10,19 +12,39 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 
 /**
- * c-LoD SEEDGEN HELPER (v5.8): the whole per-chunk noise walk runs INSIDE the
- * JVM, so the JNI boundary is crossed ONCE per chunk instead of ~1500 times
- * per column. The recipe is the v5.7 iterateNoiseColumn transcription,
- * byte-for-byte — same calls, same order, same outputs.
+ * c-LoD SEEDGEN HELPER (v5.9): the whole per-chunk noise walk runs INSIDE the
+ * JVM. v5.8 crossed the JNI boundary once per chunk; v5.9 crosses it once per
+ * BATCH of chunks (chunkBatch) and strips the remaining per-chunk fat:
+ *
+ *   - intern tables are no longer read back per chunk — the payload header
+ *     carries a monotonically increasing tabVer, the native side re-reads
+ *     matTable/bioTable only when it changes (a table read used to cost one
+ *     JNI call PER STRING, 60-230 crossings per chunk);
+ *   - the per-cell material/biome interning (getBlock -> getKey -> toString
+ *     -> map lookup, plus getFluidState/isEmpty) is cached in per-worker
+ *     IdentityHashMaps. Vanilla BlockStates and biome Holders are canonical
+ *     singletons, so identity equality is exact and the packed result is
+ *     bit-identical to recomputing it;
+ *   - the y-walk uses affine index/height stepping: indexUnchecked and
+ *     blockY are verified LINEAR on three points of EVERY column before the
+ *     fast path is taken (any real volume layout is affine; a non-affine
+ *     layout automatically falls back to the v5.8 per-step calls). Two of
+ *     the five MethodHandle invocations per y-step disappear.
+ *
+ * The recipe itself is unchanged — the v5.7 iterateNoiseColumn transcription
+ * is executed call-for-call in the same order, so outputs stay bit-for-bit
+ * identical to the v5.7/v5.8 paths (guarded by the preflight parity harness,
+ * scripts/java/preflight).
  *
  * Compiled against the JDK ONLY (javac --release 17, no Minecraft jars):
  * every Minecraft type is reached through MethodHandles resolved in init()
  * from the objects the JNI side passes in. The mojang-mapped names below are
  * the exact ones proven live by the v5.7 Rust resolve() on paper-26.3.
  *
- * Threading: init() runs once on the server main thread; chunk() runs on the
- * clod-seedgen-N daemon workers. Shared state is immutable-after-init
- * (volatile fields) or concurrent (intern tables); per-call state is local.
+ * Threading: init() runs once on the server main thread; chunk()/chunkBatch()
+ * run on the clod-seedgen-N daemon workers. Shared state is immutable-after-
+ * init (volatile fields) or concurrent (intern tables); per-call state is
+ * local; the identity caches are per-worker ThreadLocals.
  *
  * Output contract (packed long per LOD cell, mirrored by src/seedgen.rs):
  *   bit 63    : valid (1 = terrain hit, 0 = void column -> long is 0)
@@ -30,6 +52,15 @@ import java.util.function.Predicate;
  *   bit 16    : liquid (top block has a non-empty fluid state)
  *   bits 17-31: material ordinal (matTable)
  *   bits 32-46: biome ordinal   (bioTable)
+ *
+ * chunkBatch payload (long[]):
+ *   [0] = number of chunks requested (k)
+ *   [1] = segments that completed OK (k minus the ones that threw)
+ *   [2] = tabVer snapshot (tables re-read by native only when it moves)
+ *   [3] = 0 (spare)
+ *   then k segments of (1 + n*n) longs each (dx-major, dz-minor cells):
+ *     seg[0] = 1 (chunk OK) | 0 (chunk threw; the rest of the segment is 0)
+ *     seg[1..] = packed cells
  */
 public final class ClodSeedgen {
     private ClodSeedgen() {}
@@ -50,10 +81,28 @@ public final class ClodSeedgen {
     // --- intern tables (grown by workers; JNI reads the snapshots) ---
     public static volatile String[] matTable = new String[0];
     public static volatile String[] bioTable = new String[0];
+    /** Bumped on every table rebuild; the batch payload header snapshots it
+     *  so the native side can cache both tables until it moves. */
+    public static volatile int tabVer = 0;
     private static final Map<String, Integer> MAT = new ConcurrentHashMap<>();
     private static final Map<String, Integer> BIO = new ConcurrentHashMap<>();
     private static final AtomicInteger MAT_N = new AtomicInteger();
     private static final AtomicInteger BIO_N = new AtomicInteger();
+
+    // --- v5.9 per-worker identity caches (canonical singletons in vanilla;
+    // identity equality is exact; per-worker so no synchronization) ---
+    private static final ThreadLocal<IdentityHashMap<Object, Long>> ST_CACHE =
+            ThreadLocal.withInitial(IdentityHashMap::new);
+    private static final ThreadLocal<IdentityHashMap<Object, Integer>> BIO_CACHE =
+            ThreadLocal.withInitial(IdentityHashMap::new);
+    private static final int CACHE_CAP = 4096;
+
+    // Telemetry for the preflight harness: how many columns took the affine
+    // stride fast path vs the verified fallback.
+    public static final java.util.concurrent.atomic.AtomicLong FAST_COLUMNS =
+            new java.util.concurrent.atomic.AtomicLong();
+    public static final java.util.concurrent.atomic.AtomicLong SLOW_COLUMNS =
+            new java.util.concurrent.atomic.AtomicLong();
 
     // Resolve helpers: full access to Paper's unnamed-module classes.
     private static MethodHandle ctor(Class<?> t, MethodType mt) throws Throwable {
@@ -210,13 +259,52 @@ public final class ClodSeedgen {
     }
 
     /**
-     * One LOD chunk, one JNI call. Returns packed longs in dx-major,
-     * dz-minor order with cell-size stepping: index
-     * (dx/cell)*(16/cell)+(dz/cell).
+     * One LOD chunk (v5.8 contract kept for the preflight parity harness and
+     * the single-chunk JNI path). Returns packed longs in dx-major, dz-minor
+     * order with cell-size stepping: index (dx/cell)*(16/cell)+(dz/cell).
      */
     public static long[] chunk(int cx, int cz, int cell) throws Throwable {
         int n = 16 / cell;
+        long[] seg = new long[1 + n * n];
+        chunkInto(seg, 0, cx, cz, cell, n); // throws on failure
         long[] out = new long[n * n];
+        System.arraycopy(seg, 1, out, 0, n * n);
+        return out;
+    }
+
+    /**
+     * v5.9: one JNI call per BATCH of chunks. coords = [cx0,cz0,cx1,cz1,...].
+     * A chunk that throws marks only its own segment (status 0, zero-filled)
+     * and the batch continues — the native side falls back to the legacy
+     * per-column path for exactly that chunk.
+     */
+    public static long[] chunkBatch(int[] coords, int cell) throws Throwable {
+        int k = coords.length / 2;
+        int n = 16 / cell;
+        int seg = 1 + n * n;
+        long[] out = new long[4 + k * seg];
+        out[0] = k;
+        int ok = 0;
+        for (int i = 0; i < k; i++) {
+            int off = 4 + i * seg;
+            try {
+                chunkInto(out, off, coords[2 * i], coords[2 * i + 1], cell, n);
+                ok++;
+            } catch (Throwable t) {
+                Arrays.fill(out, off, off + seg, 0L);
+            }
+        }
+        out[1] = ok;
+        out[2] = tabVer;
+        return out;
+    }
+
+    /** Fill one chunk segment: out[off]=status, out[off+1..]=packed cells.
+     *  Throws on any failure (buffer close still runs); the caller owns the
+     *  status convention. */
+    private static void chunkInto(long[] out, int off, int cx, int cz,
+            int cell, int n) throws Throwable {
+        out[off] = 0L; // pessimistic status; flipped on full success
         int wx0 = cx * 16;
         int wz0 = cz * 16;
 
@@ -236,88 +324,162 @@ public final class ClodSeedgen {
 
             Predicate<Object> p = pred;
             Object db = defaultBlock;
-            int o = 0;
+            IdentityHashMap<Object, Long> stc = ST_CACHE.get();
+            IdentityHashMap<Object, Integer> bioc = BIO_CACHE.get();
+            int o = off + 1;
             for (int dx = 0; dx < 16; dx += cell) {
                 for (int dz = 0; dz < 16; dz += cell) {
-                    int wx = wx0 + dx;
-                    int wz = wz0 + dz;
-                    int hit = Integer.MIN_VALUE;
-                    Object top = db;
-                    for (int i = sizeY - 1; i >= 0; --i) {
-                        int idx = (int) dvIndex.invoke(vol, dx, i, dz);
-                        float d = (float) bufGet.invoke(buf, idx);
-                        int y = (int) dvBlockY.invoke(vol, i);
-                        Object s = aqSubstance.invoke(aquifer, wx, y, wz, (double) d);
-                        if (s == null) {
-                            s = db;
-                        }
-                        if (p.test(s)) {
-                            hit = y;
-                            top = s;
-                            break;
-                        }
-                    }
-                    if (hit == Integer.MIN_VALUE) {
-                        out[o++] = 0L; // void column: valid bit clear
-                        continue;
-                    }
-                    Object bp = blockPosNew.invoke(wx, hit, wz);
-                    Object topOpt = topMaterial.invoke(surface, rule,
-                            randomState, ctx, biomeFn, proto, set, bp, false);
-                    if (topOpt instanceof Optional opt && opt.isPresent()) {
-                        Object better = opt.get();
-                        if (better != null) {
-                            top = better;
-                        }
-                    }
-                    boolean liquid = false;
-                    Object fsO = stFluidState.invoke(top);
-                    if (fsO != null) {
-                        liquid = !(boolean) fsEmpty.invoke(fsO);
-                    }
-                    String mat = "";
-                    Object b = stBlock.invoke(top);
-                    if (b != null) {
-                        Object id = regGetKey.invoke(blockRegistry, b);
-                        if (id != null) {
-                            mat = id.toString();
-                        }
-                    }
-                    String bio = "";
-                    Object h = biomeGet.invoke(bman, bp);
-                    if (h != null) {
-                        Object bo = holderUnwrapKey.invoke(h);
-                        if (bo instanceof Optional bopt && bopt.isPresent()) {
-                            Object r = bopt.get();
-                            if (r != null) {
-                                Object id = rkIdentifier.invoke(r);
-                                if (id != null) {
-                                    bio = id.toString();
-                                }
-                            }
-                        }
-                    }
-                    out[o++] = pack(hit, liquid, matOrd(mat), bioOrd(bio));
+                    out[o++] = walkColumn(vol, buf, aquifer, set, proto, p, db,
+                            stc, bioc, wx0 + dx, wz0 + dz, dx, dz);
                 }
             }
+            out[off] = 1L;
         } finally {
             if (buf != null) {
                 bufClose.invoke(buf);
             }
             ncClose.invoke(nc);
         }
-        return out;
     }
 
-    private static long pack(int y, boolean liquid, int mat, int bio) {
-        long l = ((long) (y + 32768)) & 0xFFFFL;
-        if (liquid) {
+    /** One LOD column: top-down density walk + surface rule + interning.
+     *  v5.9 stride fast path: indexUnchecked(dx,i,dz) and blockY(i) are
+     *  verified affine on three points of THIS column before stepping is
+     *  used; otherwise the v5.8 per-step calls run (bit-identical either
+     *  way — the verification is numeric, not structural). */
+    private static long walkColumn(Object vol, Object buf, Object aquifer,
+            Object set, Object proto, Predicate<Object> p, Object db,
+            IdentityHashMap<Object, Long> stc,
+            IdentityHashMap<Object, Integer> bioc,
+            int wx, int wz, int dx, int dz) throws Throwable {
+        int iTop = sizeY - 1;
+        int idxTop = (int) dvIndex.invoke(vol, dx, iTop, dz);
+        int idxMid = (int) dvIndex.invoke(vol, dx, iTop - 1, dz);
+        int idxLow = (int) dvIndex.invoke(vol, dx, iTop - 2, dz);
+        int yTop = (int) dvBlockY.invoke(vol, iTop);
+        int yMid = (int) dvBlockY.invoke(vol, iTop - 1);
+        int yLow = (int) dvBlockY.invoke(vol, iTop - 2);
+        int di = idxMid - idxTop; // negative: the index grows with i
+        int dy = yMid - yTop;     // must be -1 (blockY = minY + i)
+        boolean fast = di != 0
+                && (idxTop - idxMid) == (idxMid - idxLow)
+                && dy == -1
+                && (yTop - yMid) == (yMid - yLow);
+        if (fast) {
+            FAST_COLUMNS.incrementAndGet();
+        } else {
+            SLOW_COLUMNS.incrementAndGet();
+        }
+
+        int hit = Integer.MIN_VALUE;
+        Object top = db;
+        int idx = idxTop;
+        int y = yTop;
+        for (int k = 0; k < sizeY; k++) {
+            int i = iTop - k;
+            float d;
+            int cy;
+            if (fast) {
+                d = (float) bufGet.invoke(buf, idx);
+                cy = y;
+            } else {
+                d = (float) bufGet.invoke(buf,
+                        (int) dvIndex.invoke(vol, dx, i, dz));
+                cy = (int) dvBlockY.invoke(vol, i);
+            }
+            Object s = aqSubstance.invoke(aquifer, wx, cy, wz, (double) d);
+            if (s == null) {
+                s = db;
+            }
+            if (p.test(s)) {
+                hit = cy;
+                top = s;
+                break;
+            }
+            idx += di;
+            y += dy;
+        }
+        if (hit == Integer.MIN_VALUE) {
+            return 0L; // void column: valid bit clear
+        }
+        Object bp = blockPosNew.invoke(wx, hit, wz);
+        Object topOpt = topMaterial.invoke(surface, rule,
+                randomState, ctx, biomeFn, proto, set, bp, false);
+        if (topOpt instanceof Optional opt && opt.isPresent()) {
+            Object better = opt.get();
+            if (better != null) {
+                top = better;
+            }
+        }
+        long minfo = matInfo(top, stc);
+        int bo = bioOrdCached(bp, bioc);
+        long l = ((long) (hit + 32768)) & 0xFFFFL;
+        if ((minfo & 1L) != 0L) {
             l |= 1L << 16;
         }
-        l |= (long) mat << 17;
-        l |= (long) bio << 32;
+        l |= (minfo >>> 1) << 17;
+        l |= (long) bo << 32;
         l |= 1L << 63;
         return l;
+    }
+
+    /** liquid bit + material ordinal for one BlockState, cached by identity.
+     *  Same calls, same order as the v5.8 inline code — only repeated work
+     *  is removed (states are canonical singletons). */
+    private static long matInfo(Object st,
+            IdentityHashMap<Object, Long> stc) throws Throwable {
+        Long c = stc.get(st);
+        if (c != null) {
+            return c;
+        }
+        boolean liquid = false;
+        Object fsO = stFluidState.invoke(st);
+        if (fsO != null) {
+            liquid = !(boolean) fsEmpty.invoke(fsO);
+        }
+        String mat = "";
+        Object b = stBlock.invoke(st);
+        if (b != null) {
+            Object id = regGetKey.invoke(blockRegistry, b);
+            if (id != null) {
+                mat = id.toString();
+            }
+        }
+        long v = (liquid ? 1L : 0L) | ((long) matOrd(mat) << 1);
+        if (stc.size() < CACHE_CAP) {
+            stc.put(st, v);
+        }
+        return v;
+    }
+
+    /** Biome ordinal for one BlockPos, caching the Holder->ordinal half
+     *  (getBiome itself stays per-cell — it is position-dependent). */
+    private static int bioOrdCached(Object bp,
+            IdentityHashMap<Object, Integer> bioc) throws Throwable {
+        Object h = biomeGet.invoke(bman, bp);
+        if (h == null) {
+            return bioOrd("");
+        }
+        Integer o = bioc.get(h);
+        if (o != null) {
+            return o;
+        }
+        String bio = "";
+        Object bo = holderUnwrapKey.invoke(h);
+        if (bo instanceof Optional bopt && bopt.isPresent()) {
+            Object r = bopt.get();
+            if (r != null) {
+                Object id = rkIdentifier.invoke(r);
+                if (id != null) {
+                    bio = id.toString();
+                }
+            }
+        }
+        int v = bioOrd(bio);
+        if (bioc.size() < CACHE_CAP) {
+            bioc.put(h, v);
+        }
+        return v;
     }
 
     private static int matOrd(String s) {
@@ -356,5 +518,6 @@ public final class ClodSeedgen {
         } else {
             bioTable = t;
         }
+        tabVer++;
     }
 }

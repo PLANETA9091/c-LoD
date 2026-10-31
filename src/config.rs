@@ -78,8 +78,12 @@ pub struct Config {
     /// When false (or when the NMS surface fails to resolve) the pre-5.7
     /// FORCED-ticket frontier handles unloaded chunks.
     pub native_gen: bool,
-    /// SEEDGEN worker thread count. 0 = auto (cores-1, clamped 1..4).
+    /// SEEDGEN worker thread count. 0 = auto (cores-1, clamped 1..8).
     pub native_threads: i32,
+    /// SEEDGEN v5.9: chunks per JNI batch call (one helper->Rust crossing
+    /// amortized over N chunks; the noise walk still runs per chunk inside
+    /// the JVM). 1 = one crossing per chunk (the v5.8 shape).
+    pub seedgen_batch: i32,
 }
 
 impl Default for Config {
@@ -114,6 +118,7 @@ impl Default for Config {
             max_height: 320,
             native_gen: true,
             native_threads: 0,
+            seedgen_batch: 8,
         }
     }
 }
@@ -234,6 +239,9 @@ impl Config {
         if let Some(v) = get("native_threads").and_then(|v| v.parse::<i32>().ok()) {
             cfg.native_threads = v.clamp(0, 16);
         }
+        if let Some(v) = get("seedgen_batch").and_then(|v| v.parse::<i32>().ok()) {
+            cfg.seedgen_batch = v.clamp(1, 64);
+        }
         cfg
     }
 }
@@ -298,6 +306,21 @@ mod tests {
         assert_eq!(c.gen_wish, 4096);
         let c = Config::parse("gen_wish=10");
         assert_eq!(c.gen_wish, 32);
+    }
+
+    #[test]
+    fn seedgen_knobs_parse_and_clamp() {
+        let c = Config::parse("native_threads=12;seedgen_batch=32");
+        assert_eq!(c.native_threads, 12);
+        assert_eq!(c.seedgen_batch, 32);
+        // native_threads=0 keeps the auto path; batch clamps hard.
+        let c = Config::parse("native_threads=0;seedgen_batch=1000");
+        assert_eq!(c.native_threads, 0);
+        assert_eq!(c.seedgen_batch, 64);
+        let c = Config::parse("seedgen_batch=0");
+        assert_eq!(c.seedgen_batch, 1, "batch 0/1 mean the single-chunk shape");
+        let c = Config::default();
+        assert_eq!(c.seedgen_batch, 8, "v5.9 batch default");
     }
 
     #[test]

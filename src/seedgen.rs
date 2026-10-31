@@ -57,6 +57,17 @@
 //! (and twice per intern-table read). The recipe inside is byte-for-byte
 //! the transcription above, so outputs are identical; this side only
 //! unpacks the packed longs, filters by the disk window and paints.
+//!
+//! v5.9: the boundary is crossed once per BATCH of chunks (chunkBatch,
+//! `seedgen_batch` chunks per call — a chunk that throws marks only its own
+//! segment and falls back to the legacy walk), the intern tables ride a
+//! monotonic tabVer in the payload header (they used to be re-read one JNI
+//! call PER STRING every chunk — 60-230 crossings, an order of magnitude
+//! more than the walk itself), and the Java side steps the y-walk on
+//! numerically-verified affine index/height strides (2 of 5 MethodHandle
+//! calls per y-step gone; any non-affine layout falls back automatically).
+//! Worker paint takes the stream lock once per batch instead of twice per
+//! cell, and the auto worker cap grew 4 → 8.
 
 use crate::jni::{bind_method, clear_if_pending, jd, ji, jobj, jstr, jv, jz, LOADER};
 use crate::{engine, log_info, palette};
@@ -116,13 +127,22 @@ impl SeedQueue {
         true
     }
 
-    /// Block (with timeout) for the next job. None only when closed —
-    /// idle workers keep waiting internally.
-    pub fn pop(&self, timeout_ms: u64) -> Option<(i32, i32)> {
+    /// Block for the first job, then drain up to `max` more without
+    /// waiting (v5.9: one JNI batch call amortized over the drain).
+    /// Some(non-empty) on jobs, None only when closed.
+    pub fn pop_batch(&self, max: usize, timeout_ms: u64) -> Option<Vec<(i32, i32)>> {
+        let max = max.max(1);
         let mut pending = self.pending.lock().unwrap();
         loop {
-            if let Some(job) = pending.pop_front() {
-                return Some(job);
+            let mut out = Vec::with_capacity(max.min(16));
+            while out.len() < max {
+                match pending.pop_front() {
+                    Some(job) => out.push(job),
+                    None => break,
+                }
+            }
+            if !out.is_empty() {
+                return Some(out);
             }
             if !self.running.load(Ordering::SeqCst) {
                 return None;
@@ -215,10 +235,10 @@ struct SeedIds {
     biome_get: jmethodID,
     holder_unwrap_key: jmethodID,
     rk_identifier: jmethodID,
-    // v5.8 Java-side chunk helper (all null when unavailable — the legacy
+    // v5.9 Java-side chunk helper (all null when unavailable — the legacy
     // per-column path stays as the fallback).
     helper_cls: jobject,
-    helper_chunk: jmethodID,
+    helper_batch: jmethodID,
     f_mat_table: jfieldID,
     f_bio_table: jfieldID,
 }
@@ -331,8 +351,9 @@ pub fn bootstrap(state: &Arc<engine::State>, env: Env, world: jobject) {
         std::thread::available_parallelism()
             .map(|n| n.get().saturating_sub(1))
             .unwrap_or(1)
-            .clamp(1, 4)
+            .clamp(1, 8)
     };
+    let batch = state.cfg.seedgen_batch.clamp(1, 64);
     if sg
         .spawned
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -349,9 +370,10 @@ pub fn bootstrap(state: &Arc<engine::State>, env: Env, world: jobject) {
         sg.workers.store(workers as u64, Ordering::Relaxed);
     }
     log_info(&format!(
-        "seedgen: ARMED — {workers} native workers (noise+surface per column, no tickets){}",
+        "seedgen: ARMED — {workers} native workers, batch {batch} chunks/call \
+         (noise+surface per column, no tickets){}",
         if helper_ok {
-            ", helper: one JNI call per chunk"
+            ", helper: one JNI call per batch"
         } else {
             ", helper OFF: per-column JNI (v5.7 path)"
         }
@@ -379,21 +401,74 @@ fn worker_loop(state: &Arc<engine::State>, sg: &Arc<Seedgen>) {
     let Some(dims) = sg.dims.get().cloned() else {
         return;
     };
-    // Loop until the queue closes (pop returns None only on shutdown).
-    while let Some((cx, cz)) = sg.q.pop(1000) {
-        let out = unsafe { gen_chunk(state, &env, &ids, dims, cx, cz) };
-        match out {
-            Ok(n) => {
-                sg.chunks.fetch_add(1, Ordering::Relaxed);
-                sg.cells.fetch_add(n as u64, Ordering::Relaxed);
-            }
-            Err(e) => {
-                sg.fails.fetch_add(1, Ordering::Relaxed);
-                eprintln!("[c-LoD] seedgen chunk ({cx},{cz}) FAILED: {e}");
-                clear_if_pending(&env);
+    let batch = state.cfg.seedgen_batch.clamp(1, 64) as usize;
+    // Intern-table snapshots cached by the batch payload's tabVer: a table
+    // re-read costs one JNI call per string, so it happens only when the
+    // helper actually grew a table (a new material/biome was interned).
+    let mut tables = Tables {
+        ver: i64::MIN,
+        mats: Vec::new(),
+        bios: Vec::new(),
+    };
+    // Loop until the queue closes (pop_batch returns None only on shutdown).
+    while let Some(jobs) = sg.q.pop_batch(batch, 1000) {
+        let helper_on = sg.helper.load(Ordering::SeqCst);
+        let results: Vec<Result<usize, String>> = if helper_on {
+            unsafe { gen_batch(state, &env, &ids, &mut tables, &jobs) }
+        } else {
+            jobs.iter()
+                .map(|_| Err("helper disabled".to_string()))
+                .collect()
+        };
+        let mut disable_now = false;
+        for (i, (cx, cz)) in jobs.iter().enumerate() {
+            let (cx, cz) = (*cx, *cz);
+            match &results[i] {
+                Ok(n) => {
+                    sg.chunks.fetch_add(1, Ordering::Relaxed);
+                    sg.cells.fetch_add(*n as u64, Ordering::Relaxed);
+                }
+                Err(e) => {
+                    // Only helper-path failures count toward the disable
+                    // threshold; once the helper is off, every batch goes
+                    // straight to the legacy walk without counting.
+                    if helper_on {
+                        let f = sg.helper_fails.fetch_add(1, Ordering::SeqCst);
+                        if f == 15 {
+                            sg.helper.store(false, Ordering::SeqCst);
+                            disable_now = true;
+                        } else if f < 15 {
+                            eprintln!(
+                                "[c-LoD] seedgen batch chunk ({cx},{cz}) threw: {e} — legacy fallback"
+                            );
+                        }
+                    }
+                    clear_if_pending(&env);
+                    // The legacy per-column walk owns this chunk (it may
+                    // still fail for the same vanilla reason — the sweep
+                    // re-queues it either way).
+                    match unsafe { gen_chunk_legacy(state, &env, &ids, dims, cx, cz) } {
+                        Ok(n) => {
+                            sg.chunks.fetch_add(1, Ordering::Relaxed);
+                            sg.cells.fetch_add(n as u64, Ordering::Relaxed);
+                        }
+                        Err(e2) => {
+                            sg.fails.fetch_add(1, Ordering::Relaxed);
+                            eprintln!("[c-LoD] seedgen chunk ({cx},{cz}) FAILED: {e2}");
+                            clear_if_pending(&env);
+                        }
+                    }
+                }
             }
         }
-        sg.q.done(cx, cz);
+        if disable_now {
+            eprintln!(
+                "[c-LoD] seedgen helper: DISABLED after repeated throws — the v5.7 per-column path stays"
+            );
+        }
+        for (cx, cz) in &jobs {
+            sg.q.done(*cx, *cz);
+        }
     }
 }
 
@@ -1165,7 +1240,7 @@ unsafe fn resolve(env: Env, world_craft: jobject) -> Option<(SeedIds, NoiseDims)
     // v5.8: the Java-side chunk helper — the whole noise walk behind ONE JNI
     // call per chunk. Failure here degrades to the v5.7 per-column path,
     // never to seedgen OFF.
-    let (helper_cls, _m_helper_init, m_helper_chunk, f_mat, f_bio) = define_helper(
+    let (helper_cls, _m_helper_init, m_helper_batch, f_mat, f_bio) = define_helper(
         env,
         level,
         rs,
@@ -1247,7 +1322,7 @@ unsafe fn resolve(env: Env, world_craft: jobject) -> Option<(SeedIds, NoiseDims)
         holder_unwrap_key: m_unwrap,
         rk_identifier: m_rk_id,
         helper_cls,
-        helper_chunk: m_helper_chunk,
+        helper_batch: m_helper_batch,
         f_mat_table: f_mat,
         f_bio_table: f_bio,
     };
@@ -1442,9 +1517,9 @@ unsafe fn define_helper(
         eprintln!("[c-LoD] seedgen helper: init threw — per-column path stays");
         return None;
     }
-    let m_chunk = sgstep!(
-        "m_helper_chunk",
-        env.get_static_method_id(cls, "chunk", "(III)[J")
+    let m_batch = sgstep!(
+        "m_helper_batch",
+        env.get_static_method_id(cls, "chunkBatch", "([II)[J")
     );
     let f_mat = sgstep!(
         "f_matTable",
@@ -1454,7 +1529,7 @@ unsafe fn define_helper(
         "f_bioTable",
         env.get_static_field_id(cls, "bioTable", "[Ljava/lang/String;")
     );
-    Some((cls, m_init, m_chunk, f_mat, f_bio))
+    Some((cls, m_init, m_batch, f_mat, f_bio))
 }
 
 // ---------------------------------------------------------------------------
@@ -1462,12 +1537,14 @@ unsafe fn define_helper(
 // ---------------------------------------------------------------------------
 
 /// Generate one 16x16 chunk's LOD columns with the vanilla noise+surface
-/// pipeline. Returns the number of cells written.
+/// pipeline (the v5.7 per-column walk). This is the fallback path: the
+/// helper batch (gen_batch) owns the hot path and hands single chunks over
+/// here when their batch segment threw. Returns the number of cells written.
 ///
 /// # Safety
 /// `env` must be attached, ids resolved on the main thread, all stored
 /// objects must be global refs. No JVM objects escape this function.
-unsafe fn gen_chunk(
+unsafe fn gen_chunk_legacy(
     state: &Arc<engine::State>,
     env: Env,
     ids: &SeedIds,
@@ -1475,36 +1552,6 @@ unsafe fn gen_chunk(
     cx: i32,
     cz: i32,
 ) -> Result<usize, String> {
-    // v5.8 helper path: the whole chunk in one JNI call. A per-chunk throw
-    // falls back to the legacy column walk below; repeated throws disable
-    // the helper for the process (the legacy path stays at v5.7 speed).
-    let sg = state.seedgen.lock().unwrap().clone();
-    let helper_on = sg
-        .as_ref()
-        .map(|s| s.helper.load(Ordering::SeqCst))
-        .unwrap_or(false);
-    if helper_on {
-        match gen_chunk_native(state, env, ids, cx, cz) {
-            Ok(n) => return Ok(n),
-            Err(e) => {
-                if let Some(sg) = sg.as_ref() {
-                    let f = sg.helper_fails.fetch_add(1, Ordering::SeqCst);
-                    if f >= 15 {
-                        sg.helper.store(false, Ordering::SeqCst);
-                        eprintln!(
-                            "[c-LoD] seedgen helper: DISABLED after repeated throws (last: {e})"
-                        );
-                    } else {
-                        eprintln!(
-                            "[c-LoD] seedgen helper chunk ({cx},{cz}) threw: {e} — legacy fallback"
-                        );
-                    }
-                }
-                clear_if_pending(env);
-            }
-        }
-    }
-
     let cell = state.cfg.cell_size.max(1);
     let wx0 = cx * 16;
     let wz0 = cz * 16;
@@ -1821,112 +1868,180 @@ unsafe fn gen_column(
     out
 }
 
-/// v5.8 fast path: the Java helper runs the whole noise walk and returns a
-/// packed long per cell; this side unpacks, filters by the disk window and
-/// paints. The recipe inside the helper is the same iterateNoiseColumn
-/// transcription, byte-for-byte — outputs are identical to the legacy path.
+/// v5.9 fast path: one JNI call per BATCH of chunks. The Java helper
+/// (java/ClodSeedgen.chunkBatch) runs the whole per-chunk noise walk inside
+/// the JVM and returns a payload: header [n, n_ok, tabVer, spare] plus one
+/// [status, cells…] segment per chunk. This side parses the payload, re-reads
+/// the intern tables only when tabVer moved, filters by the disk window and
+/// paints — under ONE stream lock for the whole batch. Failed segments come
+/// back Err so the caller falls back to the legacy per-column walk for
+/// exactly those chunks. The recipe inside the helper is the same
+/// iterateNoiseColumn transcription, byte-for-byte — outputs are identical
+/// to the legacy path.
 ///
 /// # Safety
-/// Same contract as `gen_chunk`; the helper class must be armed.
-unsafe fn gen_chunk_native(
+/// Same contract as `gen_chunk_legacy`; the helper class must be armed.
+unsafe fn gen_batch(
     state: &Arc<engine::State>,
     env: Env,
     ids: &SeedIds,
-    cx: i32,
-    cz: i32,
-) -> Result<usize, String> {
+    tables: &mut Tables,
+    jobs: &[(i32, i32)],
+) -> Vec<Result<usize, String>> {
+    let k = jobs.len();
     let cell = state.cfg.cell_size.max(1);
+    let n_side = (16 / cell) as usize;
     if cell > 16 || 16 % cell != 0 {
-        return Err("cell_size must divide 16".into());
+        return vec![Err("cell_size must divide 16".into()); k];
     }
-    let (origin_x, origin_z, side) = {
-        let s = state.stream.lock().unwrap();
-        (s.origin_x, s.origin_z, s.side)
-    };
-    let cell_of = |wx: i32, wz: i32| -> Option<(u32, u32)> {
-        let fx = ((wx as f64 - origin_x) / cell as f64).floor() as i32;
-        let fz = ((wz as f64 - origin_z) / cell as f64).floor() as i32;
-        if fx < 0 || fz < 0 || fx >= side as i32 || fz >= side as i32 {
-            return None;
+    if env.push_local_frame(64).is_err() {
+        return vec![Err("push_local_frame".into()); k];
+    }
+    let out = (|| -> Vec<Result<usize, String>> {
+        // coords = [cx0,cz0,cx1,cz1,...] for the single batch call.
+        let mut coords = Vec::with_capacity(k * 2);
+        for (cx, cz) in jobs {
+            coords.push(*cx);
+            coords.push(*cz);
         }
-        let bx = origin_x + f64::from(fx) * cell as f64;
-        let bz = origin_z + f64::from(fz) * cell as f64;
-        if (f64::from(wx) - bx).abs() >= cell as f64 || (f64::from(wz) - bz).abs() >= cell as f64 {
-            return None;
-        }
-        Some((fx as u32, fz as u32))
-    };
-
-    env.push_local_frame(64)
-        .map_err(|_| "push_local_frame".to_string())?;
-    let out = (|| -> Result<usize, String> {
-        let arr_o = env.call_static_object_method(
+        let Some(arr) = env.new_int_array(coords.len() as i32) else {
+            return vec![Err("coord array".into()); k];
+        };
+        env.set_int_array_region(arr, 0, coords.len() as i32, &coords);
+        let payload_o = env.call_static_object_method(
             ids.helper_cls,
-            ids.helper_chunk,
-            &[ji(cx), ji(cz), ji(cell)],
+            ids.helper_batch,
+            &[jv(arr as jobject), ji(cell)],
         );
+        env.delete_local_ref(arr);
         if env.exception_check() {
             env.exception_clear();
-            return Err("helper chunk threw".into());
+            return vec![Err("helper batch threw".into()); k];
         }
-        let arr = jobj(arr_o).ok_or("helper chunk null")?;
-        let n = env.get_array_length(arr);
-        let n_side = (16 / cell) as usize;
-        if n < (n_side * n_side) as i32 {
-            env.delete_local_ref(arr);
-            return Err(format!(
-                "helper returned {n} cells, expected {}",
-                n_side * n_side
-            ));
+        let Some(payload_arr) = jobj(payload_o) else {
+            return vec![Err("helper batch null".into()); k];
+        };
+        let plen = env.get_array_length(payload_arr);
+        let seg = 1 + n_side * n_side;
+        let want = 4 + k * seg;
+        if (plen as usize) < want {
+            return vec![Err(format!("helper payload {plen} < {want}")); k];
         }
-        let mut packed = vec![0i64; n.max(0) as usize];
-        env.get_long_array_region(arr, 0, n, &mut packed);
-        env.delete_local_ref(arr);
+        let mut payload = vec![0i64; plen.max(0) as usize];
+        env.get_long_array_region(payload_arr, 0, plen, &mut payload);
+        let parsed = match parse_batch(&payload, k, n_side) {
+            Ok(p) => p,
+            Err(e) => return vec![Err(e); k],
+        };
 
-        // Intern-table snapshots (single read is enough: this thread's own
-        // ordinals were published before chunk() returned).
-        let mats = helper_table(env, ids, ids.f_mat_table);
-        let bios = helper_table(env, ids, ids.f_bio_table);
+        // Intern tables: re-read only when the payload's tabVer moved
+        // (a table re-read costs one JNI call per string).
+        if parsed.tab_ver != tables.ver {
+            tables.mats = helper_table(env, ids, ids.f_mat_table);
+            tables.bios = helper_table(env, ids, ids.f_bio_table);
+            tables.ver = parsed.tab_ver;
+        }
 
-        let n_side = (16 / cell) as usize;
-        let mut written = 0usize;
-        for gx in 0..n_side {
-            for gz in 0..n_side {
-                let l = packed[gx * n_side + gz];
-                if l == 0 {
-                    continue; // void column: valid bit clear
-                }
-                let wx = cx * 16 + gx as i32 * cell;
-                let wz = cz * 16 + gz as i32 * cell;
-                let Some((ccx, ccz)) = cell_of(wx, wz) else {
-                    continue;
-                };
-                let skip = {
-                    let st = state.stream.lock().unwrap();
-                    st.get(ccx, ccz).map(|c| c.valid).unwrap_or(false)
-                };
-                if skip {
-                    continue;
-                }
-                let (top_y, liquid, mo, bo) = unpack_cell(l);
-                let material = mats.get(mo).map(String::as_str).unwrap_or("");
-                let biome = bios.get(bo).map(String::as_str).unwrap_or("");
-                let rgb = palette::surface_color(material, biome, liquid);
-                let c = crate::stream::Cell {
-                    height: top_y.clamp(-64, 1023) as i16,
-                    water: liquid,
-                    valid: true,
-                    provisional: true,
-                    rgb,
-                };
-                state.stream.lock().unwrap().set_cell(ccx, ccz, c);
-                written += 1;
+        // One stream lock for the whole batch (v5.8 locked twice per cell).
+        let mut stream = state.stream.lock().unwrap();
+        let (origin_x, origin_z, side) = (stream.origin_x, stream.origin_z, stream.side);
+        let cell_of = |wx: i32, wz: i32| -> Option<(u32, u32)> {
+            let fx = ((wx as f64 - origin_x) / cell as f64).floor() as i32;
+            let fz = ((wz as f64 - origin_z) / cell as f64).floor() as i32;
+            if fx < 0 || fz < 0 || fx >= side as i32 || fz >= side as i32 {
+                return None;
             }
+            let bx = origin_x + f64::from(fx) * cell as f64;
+            let bz = origin_z + f64::from(fz) * cell as f64;
+            if (f64::from(wx) - bx).abs() >= cell as f64
+                || (f64::from(wz) - bz).abs() >= cell as f64
+            {
+                return None;
+            }
+            Some((fx as u32, fz as u32))
+        };
+
+        let mut results: Vec<Result<usize, String>> = vec![Ok(0); k];
+        for (i, (ok, cells)) in parsed.segments.iter().enumerate() {
+            if !ok {
+                results[i] = Err("helper segment threw".into());
+                continue;
+            }
+            let (cx, cz) = jobs[i];
+            let mut written = 0usize;
+            for gx in 0..n_side {
+                for gz in 0..n_side {
+                    let l = cells[gx * n_side + gz];
+                    if l == 0 {
+                        continue; // void column: valid bit clear
+                    }
+                    let wx = cx * 16 + gx as i32 * cell;
+                    let wz = cz * 16 + gz as i32 * cell;
+                    let Some((ccx, ccz)) = cell_of(wx, wz) else {
+                        continue;
+                    };
+                    if stream.get(ccx, ccz).map(|c| c.valid).unwrap_or(false) {
+                        continue; // already painted (loaded-chunk sample or upgrade)
+                    }
+                    let (top_y, liquid, mo, bo) = unpack_cell(l);
+                    let material = tables.mats.get(mo).map(String::as_str).unwrap_or("");
+                    let biome = tables.bios.get(bo).map(String::as_str).unwrap_or("");
+                    let rgb = palette::surface_color(material, biome, liquid);
+                    let c = crate::stream::Cell {
+                        height: top_y.clamp(-64, 1023) as i16,
+                        water: liquid,
+                        valid: true,
+                        provisional: true,
+                        rgb,
+                    };
+                    stream.set_cell(ccx, ccz, c);
+                    written += 1;
+                }
+            }
+            results[i] = Ok(written);
         }
-        Ok(written)
+        results
     })();
     let _ = env.pop_local_frame(std::ptr::null_mut());
     out
+}
+
+/// Per-worker intern-table snapshots, cached by the batch payload's tabVer.
+struct Tables {
+    ver: i64,
+    mats: Vec<String>,
+    bios: Vec<String>,
+}
+
+/// Parse the chunkBatch payload: header [n, n_ok, tab_ver, spare] plus k
+/// segments of [status, n_side*n_side cells]. Zero-copy: the cell slices
+/// borrow the payload. Mirrors java/ClodSeedgen.chunkBatch.
+fn parse_batch<'a>(payload: &'a [i64], k: usize, n_side: usize) -> Result<BatchParsed<'a>, String> {
+    let seg = 1 + n_side * n_side;
+    let want = 4 + k * seg;
+    if payload.len() < want {
+        return Err(format!("payload {} < {want}", payload.len()));
+    }
+    if payload[0] != k as i64 {
+        return Err(format!(
+            "payload header says {} chunks, sent {k}",
+            payload[0]
+        ));
+    }
+    let mut segments = Vec::with_capacity(k);
+    for i in 0..k {
+        let off = 4 + i * seg;
+        segments.push((payload[off] == 1, &payload[off + 1..off + seg]));
+    }
+    Ok(BatchParsed {
+        tab_ver: payload[2],
+        segments,
+    })
+}
+
+struct BatchParsed<'a> {
+    tab_ver: i64,
+    segments: Vec<(bool, &'a [i64])>,
 }
 
 /// Read one String[] intern-table snapshot from the helper.
@@ -1975,8 +2090,9 @@ mod tests {
         assert!(!q.push(1, 2), "duplicate must be rejected");
         assert!(q.push(3, 4));
         assert_eq!(q.inflight_len(), 2);
-        assert_eq!(q.pop(1), Some((1, 2)));
-        assert_eq!(q.pop(1), Some((3, 4)));
+        let one = |q: &SeedQueue| q.pop_batch(1, 1).and_then(|mut v| v.pop());
+        assert_eq!(one(&q), Some((1, 2)));
+        assert_eq!(one(&q), Some((3, 4)));
         q.done(1, 2);
         assert_eq!(q.inflight_len(), 1);
         assert!(q.push(1, 2), "completed chunk can re-queue");
@@ -1987,7 +2103,7 @@ mod tests {
         let q = SeedQueue::new();
         q.close();
         assert!(!q.push(5, 5), "closed queue rejects");
-        assert_eq!(q.pop(1), None);
+        assert_eq!(q.pop_batch(1, 1), None);
     }
 
     #[test]
@@ -2001,7 +2117,7 @@ mod tests {
             q2.close();
         });
         let t = std::time::Instant::now();
-        assert_eq!(q.pop(5000), None, "closed queue returns None");
+        assert_eq!(q.pop_batch(1, 5000), None, "closed queue returns None");
         assert!(t.elapsed() >= std::time::Duration::from_millis(40));
     }
 
@@ -2010,7 +2126,9 @@ mod tests {
         let q = Arc::new(SeedQueue::new());
         let q2 = Arc::clone(&q);
         assert!(q.push(7, 9));
-        let job = std::thread::spawn(move || q2.pop(5000)).join().unwrap();
+        let job = std::thread::spawn(move || q2.pop_batch(1, 5000).and_then(|mut v| v.pop()))
+            .join()
+            .unwrap();
         assert_eq!(job, Some((7, 9)));
     }
 
@@ -2066,5 +2184,113 @@ mod tests {
         let (_, _, mo, bo) = unpack_cell(l);
         assert_eq!(mo, 32767);
         assert_eq!(bo, 32767);
+    }
+
+    /// Mirror of ClodSeedgen.chunkBatch()'s payload layout: header
+    /// [n, n_ok, tabVer, spare] + per-chunk [status, n*n cells].
+    fn java_batch_payload(chunks: &[(i64, bool, Vec<i64>)], tab_ver: i64) -> Vec<i64> {
+        let k = chunks.len() as i64;
+        let seg_cells = chunks.first().map(|c| c.2.len()).unwrap_or(0);
+        let mut out = vec![0i64; 4 + chunks.len() * (1 + seg_cells)];
+        out[0] = k;
+        out[1] = chunks.iter().filter(|c| c.1).count() as i64;
+        out[2] = tab_ver;
+        for (i, (_, ok, cells)) in chunks.iter().enumerate() {
+            let off = 4 + i * (1 + seg_cells);
+            out[off] = *ok as i64;
+            out[off + 1..off + 1 + seg_cells].copy_from_slice(cells);
+        }
+        out
+    }
+
+    #[test]
+    fn batch_payload_round_trip() {
+        let cells_ok: Vec<i64> = (0..64).map(java_pack_i).collect();
+        let cells_void = vec![0i64; 64];
+        let payload = java_batch_payload(
+            &[
+                (10, true, cells_ok.clone()),
+                (11, true, cells_void.clone()),
+                (12, true, cells_ok.clone()),
+            ],
+            7,
+        );
+        let p = parse_batch(&payload, 3, 8).expect("valid payload parses");
+        assert_eq!(p.tab_ver, 7);
+        assert_eq!(p.segments.len(), 3);
+        assert!(p.segments.iter().all(|(ok, _)| *ok));
+        for (gx, gz) in [(0usize, 0usize), (3, 5), (7, 7)] {
+            let (y, liquid, mo, bo) = unpack_cell(p.segments[0].1[gx * 8 + gz]);
+            let (y0, l0, m0, b0) = unpack_cell(java_pack_i((gx * 8 + gz) as i64));
+            assert_eq!((y, liquid, mo, bo), (y0, l0, m0, b0));
+        }
+        assert!(
+            p.segments[1].1.iter().all(|l| *l == 0),
+            "void cells stay zero"
+        );
+    }
+
+    #[test]
+    fn batch_failed_segment_flagged() {
+        let cells_ok: Vec<i64> = (0..64).map(java_pack_i).collect();
+        // Java zeroes a throwing chunk's whole segment (status 0 + zero cells).
+        let payload =
+            java_batch_payload(&[(1, true, cells_ok.clone()), (2, false, vec![0; 64])], 3);
+        let p = parse_batch(&payload, 2, 8).expect("parses");
+        assert!(p.segments[0].0, "first chunk OK");
+        assert!(!p.segments[1].0, "failed chunk flagged");
+        assert!(
+            p.segments[1].1.iter().all(|l| *l == 0),
+            "failed segment zero-filled"
+        );
+    }
+
+    #[test]
+    fn batch_payload_rejects_corruption() {
+        let cells: Vec<i64> = vec![0; 64];
+        let good = java_batch_payload(&[(1, true, cells.clone())], 1);
+        let mut short = good.clone();
+        short.pop();
+        assert!(parse_batch(&short, 1, 8).is_err(), "short payload rejected");
+        let mut wrong_header = good.clone();
+        wrong_header[0] = 5; // says 5 chunks, sent 1
+        assert!(
+            parse_batch(&wrong_header, 1, 8).is_err(),
+            "header mismatch rejected"
+        );
+    }
+
+    fn java_pack_i(i: i64) -> i64 {
+        java_pack(i % 300 - 50, i % 2 == 0, i % 5, i % 7)
+    }
+
+    #[test]
+    fn queue_pop_batch_drains_up_to_max() {
+        let q = SeedQueue::new();
+        for i in 0..10 {
+            assert!(q.push(i, i));
+        }
+        let b = q.pop_batch(4, 1).expect("jobs ready");
+        assert_eq!(b.len(), 4, "drain respects max");
+        let b2 = q.pop_batch(100, 1).expect("jobs ready");
+        assert_eq!(b2.len(), 6, "remainder drained in one batch");
+        assert_eq!(q.inflight_len(), 10);
+        for (cx, cz) in b.iter().chain(b2.iter()) {
+            q.done(*cx, *cz);
+        }
+        assert_eq!(q.inflight_len(), 0);
+    }
+
+    #[test]
+    fn queue_pop_batch_blocks_then_wakes() {
+        let q = Arc::new(SeedQueue::new());
+        let q2 = Arc::clone(&q);
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            q2.push(3, 4);
+            q2.push(5, 6);
+        });
+        let b = q.pop_batch(2, 5000).expect("woken by pushes");
+        assert_eq!(b, vec![(3, 4), (5, 6)]);
     }
 }

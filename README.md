@@ -8,11 +8,13 @@ No client mods. **No Display entities. No textures in the pack.** The vanilla cl
  ┌─────────────────────────── SERVER (c-LoD module, Rust) ───────────────────────────┐
  │                                                                                   │
  │  heightmap scan (JNI, budgeted per tick)                                          │
- │    SEEDGEN (v5.7+5.8): chunks the server never made generate NATIVELY on our      │
+ │    SEEDGEN (v5.7–5.9): chunks the server never made generate NATIVELY on our      │
  │      own daemon threads — the vanilla NoiseChunk + MaterialSystem walk runs       │
- │      INSIDE the JVM (v5.8 helper: one JNI call per CHUNK, was ~1500/column),      │
- │      no tickets, no chunk-system contention, zero TPS impact; cells land          │
- │      provisional and upgrade from the real chunk once the server makes it         │
+ │      INSIDE the JVM (v5.8: one JNI call per chunk, was ~1500/column;              │
+ │      v5.9: one call per BATCH of chunks, versioned intern tables, identity        │
+ │      caches for the per-cell interning, affine-stride y-walk), no tickets,        │
+ │      no chunk-system contention, zero TPS impact; cells land provisional          │
+ │      and upgrade from the real chunk once the server makes it                     │
  │    FORCED tickets stay as the fallback frontier (gen_budget / gen_wish, v5.5)     │
  │    delta-zone scheduler (v5.4): the stream pays only for decodable cells + edits  │
  │        │                                                                          │
@@ -118,7 +120,8 @@ Options string passed through the CRUSSTY runtime (`key=value;key=value`). Every
 | `snow_line` | `0.78` | Snow blend point (normalized elevation) |
 | `max_height` | `320` | Terrain ceiling used for ray culling |
 | `native_gen` | `true` | SEEDGEN: generate never-generated chunks natively on our own threads (false = legacy FORCED-ticket frontier) |
-| `native_threads` | `0` | SEEDGEN worker count; 0 = auto (cores−1, clamped 1–4) |
+| `native_threads` | `0` | SEEDGEN worker count; 0 = auto (cores−1, clamped 1–8) |
+| `seedgen_batch` | `8` | SEEDGEN v5.9: chunks per JNI batch call (1 = one crossing per chunk, the v5.8 shape) |
 
 Post-effect ids installed by the pack: **`clod:lod_terrain`**, **`clod:atmosphere`** — exactly the identifiers the vanilla `/posteffect` command accepts, so admins can also toggle them by hand:
 
@@ -135,13 +138,13 @@ All numbers from the real 2-CPU e2e stand (Paper 26.3-207 + genuine vanilla clie
 - **Network**: the spawn gate paces the stream to what the camera can actually decode — 33–800 packets/tick observed vs 2048 constant.
 - **Scan throughput** (v5.5 gen-frontier): 35 → 80 cells/s sustained on 2 cores (best 896/s), a warm world re-scans ~49k cells in seconds. A vantage tour accelerates the scan ~15× (teleports load chunks, the ring sweep samples them instantly).
 - **Pre-join arm** (v5.6): the disk arms and warm-scans before the first player joins — 32 s ahead of the join, 54874/65536 cells warm at tick 200, 0 carrier pixels on the first horizon frame.
-- **SEEDGEN cold-world fill** (v5.7): the full 512×512-cell disk (1024 chunks the server had NEVER generated) filled natively in ~23 s on one worker of a 2-core box — ~2,750 cells/s vs ~80 cells/s for the v5.5 ticket frontier (**~35×**), zero failures, zero tickets, TPS untouched; with `native_threads` workers it scales by cores. v5.8 then moved the whole per-chunk noise walk inside the JVM (`java/ClodSeedgen`, one JNI call per chunk instead of ~1500 per column) — the CI stand re-measures the fill rate on every master push; the per-column v5.7 path stays as an automatic fallback.
+- **SEEDGEN cold-world fill** (v5.7): the full 512×512-cell disk (1024 chunks the server had NEVER generated) filled natively in ~23 s on one worker of a 2-core box — ~2,750 cells/s vs ~80 cells/s for the v5.5 ticket frontier (**~35×**), zero failures, zero tickets, TPS untouched; with `native_threads` workers it scales by cores. v5.8 moved the whole per-chunk noise walk inside the JVM (`java/ClodSeedgen`, one JNI call per chunk instead of ~1500 per column). v5.9 shaves the rest of the overhead: one JNI call per **batch** of chunks (`seedgen_batch`, default 8), intern tables versioned in the payload header (they used to be re-read one JNI call per string every chunk), per-worker identity caches for the per-cell material/biome interning, and an affine-stride y-walk verified per column against the exact v5.8 calls (the preflight proves both paths bit-identical). The per-column v5.7 path stays as an automatic fallback; the CI stand re-measures the fill rate on every master push.
 - **One push, forever**: the pack SHA-1 is byte-deterministic across restarts; clients never re-download.
 
 ## Development
 
 ```bash
-cargo test --release          # 55 unit tests (stream/engine/config/packgen/palette/sha1/http/zipw/seedgen)
+cargo test --release          # 61 unit tests (stream/engine/config/packgen/palette/sha1/http/zipw/seedgen)
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 bash scripts/check_glsl.sh    # glslangValidator: every shader + both chain JSONs
@@ -152,7 +155,7 @@ The full verification pyramid — CI layers, boot gates G1–G10, the real-clien
 ## Honest limitations (v5.6)
 
 - **The camera channel needs sky in the leftmost screen columns.** Facing a wall of terrain (or being fully indoors) the chain holds its last estimate with a slow decay — the LOD fades out instead of popping, and the atmosphere chain keeps working (it never needs rotation). Any sky row in the leftmost 8 columns re-locks the basis within one frame.
-- **A cold world starts nearly empty — for seconds, not minutes.** SEEDGEN (v5.7) fills never-generated chunks natively at ~35× the ticket frontier, and v5.8 pushes the whole noise walk into the JVM for another multiple (CI re-measures on every push), so a fresh 512-block disk completes in well under a minute on a small VPS. Generated cells are `provisional`: terrain-exact, but trees/carvers/structures only arrive when the server generates the real chunk (the loaded-chunk sampler upgrades them then). The helper degrades gracefully: bytecode that fails to define or throws on the host's Paper build falls back to the per-column v5.7 path automatically.
+- **A cold world starts nearly empty — for seconds, not minutes.** SEEDGEN (v5.7) fills never-generated chunks natively at ~35× the ticket frontier, and v5.8/v5.9 keep shaving the per-chunk overhead (walk inside the JVM → batched JNI → versioned tables + identity caches + stride math), so a fresh 512-block disk completes in well under a minute on a small VPS. Generated cells are `provisional`: terrain-exact, but trees/carvers/structures only arrive when the server generates the real chunk (the loaded-chunk sampler upgrades them then). The helper degrades gracefully: bytecode that fails to define or throws on the host's Paper build falls back to the per-column v5.7 path automatically.
 - **The carrier is physics, not magic.** Dust particles are real entities on the wire: the stealth gate erases them from every conventional viewpoint, but a client parked at an extreme vantage can still spot sparse dots.
 - **No client→server feedback channel exists on vanilla 26.3** — the server paces the stream blind (FOV cone + decode band + delta-zone scheduler approximate what a real ACK channel would give).
 

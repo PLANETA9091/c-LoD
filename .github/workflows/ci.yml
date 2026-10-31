@@ -67,6 +67,15 @@ jobs:
             echo 'FAIL: java/ClodSeedgen.class is stale — run scripts/java/build.sh and commit';
             exit 1;
           }
+      # Recovery artifact: if a javac point-release ever shifts the bytecode,
+      # the canonical rebuild lands here for the next commit.
+      - name: Upload recompiled bytecode (recovery artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: seedgen-bytecode
+          path: java/ClodSeedgen.class
+          if-no-files-found: error
 
   glsl:
     name: shader validation (glslang)
