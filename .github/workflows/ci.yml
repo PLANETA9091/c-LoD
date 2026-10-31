@@ -189,8 +189,19 @@ jobs:
           cp paper.jar dist/versions/paper-26.3.jar
       - name: Build c-LoD host plugin (ClodEdits needs one enabled plugin)
         run: |
+          # v6.4.6.1: paper.jar is a paperclip BOOTSTRAP — 565 entries, zero
+          # API classes (javac -cp paper.jar failed: cannot find symbol
+          # JavaPlugin). Compile against the real paper-api build that
+          # matches the server build (metadata's last -stable line).
+          APIV=$(curl -s https://repo.papermc.io/repository/maven-public/io/papermc/paper/paper-api/maven-metadata.xml \
+            | grep -o "26\.3\.build\.[0-9]*-stable" | tail -1)
+          echo "paper-api: $APIV"
+          curl -sL -o paper-api.jar \
+            "https://repo.papermc.io/repository/maven-public/io/papermc/paper/paper-api/${APIV}/paper-api-${APIV}.jar"
+          test -s paper-api.jar || { echo "paper-api download failed"; exit 1; }
           mkdir -p dist/plugins hostout
-          javac -cp paper.jar -d hostout scripts/java/host/ClodHost.java
+          javac -cp paper-api.jar -d hostout scripts/java/host/ClodHost.java \
+            || { echo "javac failed"; exit 1; }
           jar cf dist/plugins/clodhost.jar -C hostout clod -C scripts/java/host plugin.yml
       - name: Assemble dist root
         run: |
@@ -377,8 +388,19 @@ jobs:
       # to be enabled.
       - name: Build c-LoD host plugin (ClodEdits needs one enabled plugin)
         run: |
+          # v6.4.6.1: paper.jar is a paperclip BOOTSTRAP — 565 entries, zero
+          # API classes (javac -cp paper.jar failed: cannot find symbol
+          # JavaPlugin). Compile against the real paper-api build that
+          # matches the server build (metadata's last -stable line).
+          APIV=$(curl -s https://repo.papermc.io/repository/maven-public/io/papermc/paper/paper-api/maven-metadata.xml \
+            | grep -o "26\.3\.build\.[0-9]*-stable" | tail -1)
+          echo "paper-api: $APIV"
+          curl -sL -o paper-api.jar \
+            "https://repo.papermc.io/repository/maven-public/io/papermc/paper/paper-api/${APIV}/paper-api-${APIV}.jar"
+          test -s paper-api.jar || { echo "paper-api download failed"; exit 1; }
           mkdir -p dist/plugins hostout
-          javac -cp paper.jar -d hostout scripts/java/host/ClodHost.java
+          javac -cp paper-api.jar -d hostout scripts/java/host/ClodHost.java \
+            || { echo "javac failed"; exit 1; }
           jar cf dist/plugins/clodhost.jar -C hostout clod -C scripts/java/host plugin.yml
       - name: Assemble dist root (fixed seed; view-distance 4 keeps the marker zone pure-LOD)
         run: |
