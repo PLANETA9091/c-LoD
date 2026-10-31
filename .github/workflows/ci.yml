@@ -198,6 +198,14 @@ jobs:
           if ! grep -q "pack finalized (ONE-TIME, static)" boot1.log; then
             tail -80 boot1.log; kill -9 $SRV 2>/dev/null || true; exit 1
           fi
+          # v5.8: wait for the arm marker — it prints asynchronously after
+          # pack finalize (the world resolve + lazy seedgen arm sit between
+          # them); a single immediate grep was a race.
+          for i in $(seq 1 60); do
+            grep -q "sky-grid stream armed" boot1.log && break
+            if ! kill -0 $SRV 2>/dev/null; then echo "SERVER DIED"; tail -60 boot1.log; exit 1; fi
+            sleep 2
+          done
           grep -q "sky-grid stream armed" boot1.log || { echo "sky-grid stream did not arm"; tail -80 boot1.log; exit 1; }
           echo "--- gates ---"
           python3 ../scripts/e2e/gates.py boot1.log
@@ -246,6 +254,12 @@ jobs:
           if ! grep -q "pack finalized (ONE-TIME, static)" boot2.log; then
             tail -80 boot2.log; kill -9 $SRV 2>/dev/null || true; exit 1
           fi
+          # v5.8: same asynchronous-arm wait as boot #1.
+          for i in $(seq 1 60); do
+            grep -q "sky-grid stream armed" boot2.log && break
+            if ! kill -0 $SRV 2>/dev/null; then echo "SERVER DIED"; tail -60 boot2.log; exit 1; fi
+            sleep 2
+          done
           grep -q "sky-grid stream armed" boot2.log || { echo "sky-grid stream did not arm"; tail -80 boot2.log; exit 1; }
           echo "--- gates (boot #2) ---"
           python3 ../scripts/e2e/gates.py boot2.log

@@ -233,32 +233,6 @@ fn ensure_boot(state: &Arc<State>, env: Env) {
         }
     }
     drop(w);
-
-    // SEEDGEN (v5.7): arm the native generator once the world is known.
-    // The bootstrap is a no-op after the first attempt (success or failure —
-    // a failed resolve keeps the ticket frontier in charge).
-    eprintln!(
-        "[c-LoD] EB: seedgen block, native_gen={}",
-        state.cfg.native_gen
-    );
-    if state.cfg.native_gen {
-        let world_handle = *state.world_obj.lock().unwrap();
-        if world_handle != 0 {
-            let need_arm = {
-                let mut g = state.seedgen.lock().unwrap();
-                if g.is_none() {
-                    *g = Some(Arc::new(crate::seedgen::Seedgen::new()));
-                    true
-                } else {
-                    !g.as_ref().unwrap().ready() && !g.as_ref().unwrap().tried()
-                }
-            };
-            if need_arm {
-                let world = unsafe { as_obj(world_handle) };
-                crate::seedgen::bootstrap(state, env, world);
-            }
-        }
-    }
 }
 
 /// # Safety
@@ -411,12 +385,20 @@ fn scan_cell(
                 }
             }
         }
-    } else if state.cfg.native_gen && crate::seedgen::enqueue(state, wx >> 4, wz >> 4) {
-        // SEEDGEN (v5.7): the chunk fills on OUR worker threads — vanilla
-        // noise+surface per column, no chunk-system tickets, zero TPS
-        // impact, pre-join by construction. Cells land provisional; the
-        // loaded-chunk sampler upgrades them when the server generates the
-        // real chunk (trees/carvers/structures arrive with that upgrade).
+    } else if state.cfg.native_gen {
+        // SEEDGEN (v5.7, v5.8 LAZY ARM): the first unloaded cell arms the
+        // native generator (bootstrap no-ops after the first attempt), so
+        // the pre-join "stream armed" marker is no longer delayed by the
+        // ~20-class MethodHandle resolve. The chunk then fills on OUR
+        // worker threads — vanilla noise+surface, no tickets, zero TPS
+        // impact; cells land provisional and the loaded-chunk sampler
+        // upgrades them when the server generates the real chunk.
+        if !crate::seedgen::tried(state) {
+            crate::seedgen::bootstrap(state, env, world);
+        }
+        if !crate::seedgen::enqueue(state, wx >> 4, wz >> 4) && allow_force {
+            force_chunk_for(state, env, world, wx >> 4, wz >> 4);
+        }
     } else if allow_force {
         force_chunk_for(state, env, world, wx >> 4, wz >> 4);
     }

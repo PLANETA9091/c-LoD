@@ -290,11 +290,26 @@ impl Seedgen {
     }
 }
 
-/// Resolve the whole JNI surface + spawn worker threads. Main thread only.
-/// No-op when already armed.
+/// True once a bootstrap attempt happened in this process (any state).
+/// The lazy arm polls this before calling bootstrap — a plain atomic read
+/// per unloaded cell, no locking in the hot scan path.
+pub fn tried(state: &Arc<engine::State>) -> bool {
+    let sg = state.seedgen.lock().unwrap().clone();
+    sg.map(|s| s.tried()).unwrap_or(false)
+}
+
+/// Resolve the whole JNI surface + spawn worker threads. Must run on the
+/// main thread (JNI-safe); no-op after the first attempt.
 pub fn bootstrap(state: &Arc<engine::State>, env: Env, world: jobject) {
-    let Some(sg) = state.seedgen.lock().unwrap().clone() else {
-        return;
+    {
+        let mut g = state.seedgen.lock().unwrap();
+        if g.is_none() {
+            *g = Some(Arc::new(Seedgen::new()));
+        }
+    }
+    let sg = match state.seedgen.lock().unwrap().clone() {
+        Some(sg) => sg,
+        None => return,
     };
     if sg.tried.swap(true, Ordering::SeqCst) {
         return; // one attempt per process

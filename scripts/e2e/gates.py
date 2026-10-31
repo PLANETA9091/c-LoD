@@ -88,6 +88,18 @@ def main(path: str) -> int:
     nse = log.count("NoSuchMethodError") + log.count("NoClassDefFoundError")
     need(nse == 0, "G10 no JNI linkage errors", f"{nse} linkage errors in the boot log")
 
+    # v5.8 observability: the native filler + helper state (informational —
+    # the fill numbers are re-measured, not asserted here).
+    n = re.search(
+        r"native (\d+)c/(\d+)ch fail (\d+) \((\d+)w q (\d+)\) helper (off|on(?: \(fails \d+\))?)",
+        log,
+    )
+    if n:
+        print(
+            f"  INFO native fill: chunks {n.group(2)}, cells {n.group(1)}, "
+            f"fails {n.group(3)}, workers {n.group(4)}, helper {n.group(6)}"
+        )
+
     print()
     if failed:
         print("GATES FAILED")
