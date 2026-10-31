@@ -208,5 +208,39 @@ for chain in sorted(Path("assets/post_effect").glob("*.json")):
 sys.exit(0 if ok else 1)
 PYEOF
 
+# v6.4.7: renderpearl (the 26.3 shader frontend) REQUIRES every sampler2D
+# declared in a pass's fragment shader to appear in the pass's "inputs" —
+# the run-41248401337 client log named it exactly:
+#   ShaderCompileException: Unable to find shader defined uniform
+#   (ResetSampler)  at PipelineBuilder.generateBackendCreateInfo
+# capture.fsh declares five samplers but the mode-2 (clod_reset) pass
+# declared four — the whole post pipeline died at reload and the client
+# disconnected mid-session. Gate the mapping statically: every
+# "uniform sampler2D X;" in the shader must have an input named X minus
+# the "Sampler" suffix, and every input must be used by the shader.
+python3 - <<'PYEOF'
+import re, sys
+from pathlib import Path
+ok = True
+for chain in sorted(Path("assets/post_effect").glob("*.json")):
+    txt = re.sub(r"__[A-Z0-9_]+__", "0", chain.read_text())
+    txt = re.sub(r"^\s*//.*$", "", txt, flags=re.M)
+    j = json.loads(txt)
+    for i, p in enumerate(j.get("passes", [])):
+        fs = p["fragment_shader"].split("/")[-1]
+        src = Path(f"assets/glsl/{fs}.fsh").read_text()
+        declared = set(re.findall(r"uniform sampler2D (\w+);", src))
+        have = {f"{inp['sampler_name']}Sampler" for inp in p.get("inputs", [])}
+        missing, unused = declared - have, have - declared
+        if missing or unused:
+            ok = False
+            print(f"FAIL {chain.name} pass {i} ({fs}):"
+                  f" not in inputs={sorted(missing)} unused={sorted(unused)}")
+print("OK   sampler inputs map (renderpearl rule)" if ok else "FAIL sampler inputs map")
+sys.exit(0 if ok else 1)
+PYEOF
+sampler_gate_rc=$?
+[ "$sampler_gate_rc" -ne 0 ] && status=1
+
 [ "$status" -eq 0 ] && echo "all shaders valid"
 exit "$status"
