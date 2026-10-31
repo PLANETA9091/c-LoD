@@ -27,14 +27,12 @@ import urllib.request
 import zipfile
 
 _BENCH = os.path.dirname(os.path.abspath(__file__))
-MANIFEST = os.environ.get(
-    "CLOD_MANIFEST",
-    next(p for p in (os.path.join(_BENCH, "26.3.json"),
-                     "/home/z/my-project/analysis/mc263/26.3.json")
-         if os.path.exists(p)),
-)
-CLIENT_JAR = os.environ.get("CLOD_CLIENT_JAR",
-                            "/home/z/my-project/analysis/mc263/client.jar")
+MANIFEST = os.environ.get("CLOD_MANIFEST") or next(
+    p for p in (os.path.join(_BENCH, "26.3.json"),
+                "/home/z/my-project/analysis/mc263/26.3.json")
+    if os.path.exists(p))
+CLIENT_JAR = os.environ.get("CLOD_CLIENT_JAR") or \
+    "/home/z/my-project/analysis/mc263/client.jar"
 ROOT = os.path.expanduser("~/mc-test/client")
 UA = {"User-Agent": "c-LoD-bench/4.1 (test harness)"}
 
