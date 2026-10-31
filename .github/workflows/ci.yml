@@ -369,6 +369,11 @@ jobs:
         run: |
           mkdir -p ~/mc-test/shim
           gcc -shared -fPIC -O2 -o ~/mc-test/shim/libGL.so.1 scripts/bench/libclodgl.c -ldl
+      - name: Vanilla 26.3 client cache (~600 MB — assets are size-checked, warm cache skips the bulk)
+        uses: actions/cache@v4
+        with:
+          path: ~/mc-test/client
+          key: mc263-client-v1
       - name: Vanilla 26.3 client runtime (official manifest, ~600 MB)
         run: python3 scripts/bench/setup_client.py
       - name: "VISUAL — live-edit paint proof (leg 1 no-relog, leg 2 post-relog)"
