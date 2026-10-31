@@ -35,8 +35,19 @@ def main(path: str) -> int:
         "G1 inject (cplugin_init, config parsed)",
         "module never reached cplugin_init or config parsing failed",
     )
+    # v6.4.2: the runtime's "pipeline ready: N module hook(s)" print and the
+    # module's async log lines share stdout; the CI e2e job once read the
+    # interleaved bytes ("pipeline ready: [c-LoD] pack server listening
+    # ...1\n module hook(s)") and failed G2 on a healthy boot. Match the
+    # count anywhere within a small window after the marker instead of
+    # requiring one clean line.
+    g2_ok = False
+    m2 = re.search(r"pipeline ready:", log)
+    if m2:
+        hm = re.search(r"(\d+)\s+module hooks?", log[m2.end():m2.end() + 400], re.S)
+        g2_ok = hm is not None and hm.group(1) == "1"
     need(
-        re.search(r"pipeline ready: 1 module hook", log) is not None,
+        g2_ok,
         "G2 runtime admitted the module",
         "runtime did not load exactly 1 module hook (scan error or double load)",
     )

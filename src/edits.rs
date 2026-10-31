@@ -25,7 +25,7 @@ use crate::engine::State;
 use crate::jni::{clear_if_pending, ji, jobj, jv};
 use jvmti_bindings::jni::{jfieldID, jmethodID, jobject};
 use jvmti_bindings::prelude::JniEnv;
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 type Env<'a> = &'a JniEnv;
@@ -39,6 +39,11 @@ pub const EV_DEFINE_PENDING: u8 = 0;
 pub const EV_DEFINING: u8 = 1;
 pub const EV_LIVE: u8 = 2;
 pub const EV_FAILED: u8 = 3;
+
+/// v6.4.2: define attempts before the channel is declared permanently
+/// broken (the rescan wave takes over). The first engine ticks race the
+/// runtime startup, so the cap must tolerate minutes of retries, not one.
+pub const DEFINE_TRY_LIMIT: u32 = 600;
 
 /// One defined helper class + the consumer's cursor into its ring. The
 /// JVM handles are stored as usize (the State style: raw JNI handles are
@@ -56,6 +61,10 @@ pub struct EditChannel {
 pub struct Edits {
     pub channel: Mutex<Option<EditChannel>>,
     pub state: AtomicU8,
+    /// v6.4.2: define attempts so far (the retry cap keeps a genuinely
+    /// broken helper from looping forever while a too-early first tick
+    /// no longer kills the channel permanently).
+    pub tries: AtomicU32,
     /// Raw ring entries drained since boot.
     pub pushes: AtomicU64,
     /// Unique in-disk columns pushed since boot.
@@ -71,6 +80,7 @@ impl Edits {
         Self {
             channel: Mutex::new(None),
             state: AtomicU8::new(EV_DEFINE_PENDING),
+            tries: AtomicU32::new(0),
             pushes: AtomicU64::new(0),
             cells: AtomicU64::new(0),
             edits: AtomicU64::new(0),
@@ -122,16 +132,32 @@ pub fn step(state: &Arc<State>, env: Env) {
     let mut ch_slot = state.edits.channel.lock().unwrap();
     match state.edits.state() {
         EV_DEFINE_PENDING => {
-            // Define once per process; a failure is permanent (wave-only).
+            // v6.4.2 FIX (CI visual run 2026-10-31): the very first engine
+            // ticks can race the runtime's own startup (cplug class-find,
+            // kernel surfaces) — a define failure there was PERMANENT and
+            // the whole session lost its event push (the CI marker never
+            // streamed, edits stayed -0p/0c/0e while the rescan wave ran).
+            // Retry until the channel defines; cap the attempts so a
+            // genuinely broken helper still falls back to the wave.
+            if crate::seedgen::loader_obj().is_null() {
+                return; // nothing to define with yet — retry next tick, not fatal
+            }
             if let Some(ch) = define(env) {
                 *ch_slot = Some(ch);
                 state.edits.state.store(EV_DEFINING, Ordering::Relaxed);
                 crate::log_info("edit events: helper defined, hunting a host plugin");
             } else {
-                state.edits.state.store(EV_FAILED, Ordering::Relaxed);
-                crate::log_info(
-                    "edit events: helper failed to define — rescan wave stays the detector",
-                );
+                let t = state.edits.tries.fetch_add(1, Ordering::Relaxed) + 1;
+                if t >= DEFINE_TRY_LIMIT {
+                    state.edits.state.store(EV_FAILED, Ordering::Relaxed);
+                    crate::log_info(
+                        "edit events: helper failed to define — rescan wave stays the detector",
+                    );
+                } else if t == 1 || t.is_multiple_of(100) {
+                    crate::log_info(&format!(
+                        "edit events: define attempt {t}/{DEFINE_TRY_LIMIT} failed — retrying next tick"
+                    ));
+                }
             }
         }
         EV_DEFINING => {

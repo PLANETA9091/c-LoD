@@ -111,9 +111,14 @@ const PACK_PUSH_DELAY_TICKS: u64 = 40;
 
 impl State {
     pub fn new(cfg: Config) -> Arc<Self> {
+        // Placeholder streamer: the config names the disk CENTER (see
+        // arm_from_config), the Streamer takes the ORIGIN — the arm replaces
+        // this instance, but anything that touches it before the arm must
+        // see the same geometry the pack's GridInfo bakes.
+        let half = f64::from(cfg.region_blocks) * 0.5;
         let stream = Streamer::new(
-            cfg.center_x.unwrap_or(0.0),
-            cfg.center_z.unwrap_or(0.0),
+            cfg.center_x.unwrap_or(0.0) - half,
+            cfg.center_z.unwrap_or(0.0) - half,
             cfg.region_blocks,
             cfg.cell_size,
         );
@@ -919,7 +924,16 @@ fn arm_from_config(state: &Arc<State>) {
         return;
     }
     if let (Some(x), Some(z)) = (state.cfg.center_x, state.cfg.center_z) {
-        arm_stream(state, x, z);
+        // v6.4.2 FIX (CI visual run 2026-10-31): the config names the disk
+        // CENTER (the boot marker, run_ci_visual.sh vantage math and the
+        // player-anchored path below all treat it that way) — but
+        // Streamer::new takes the disk ORIGIN. Passing the center verbatim
+        // shifted the whole disk by (+region/2, +region/2): the CI vantage
+        // 100 blocks west of the named center landed outside every decode
+        // band, the scheduler streamed nothing (cone 0 zone 0, spawned 0)
+        // and the visual proof had no paint to verify.
+        let half = f64::from(state.cfg.region_blocks) * 0.5;
+        arm_stream(state, x - half, z - half);
     }
 }
 
@@ -1423,7 +1437,15 @@ mod tests {
     #[test]
     fn world_to_cell_maps_inside_disk() {
         let st = State::new(Config::parse(""));
-        let s = st.stream.lock().unwrap();
+        {
+            let s = st.stream.lock().unwrap();
+            // v6.4.2: the placeholder streamer is disk-CENTER-anchored (no
+            // center configured -> center 0,0 -> origin -region/2), the same
+            // conversion arm_from_config and the pack's GridInfo apply.
+            assert_eq!(world_to_cell(&s, 0, 0), Some((128, 128)));
+        }
+        // the world->cell math itself, pinned against a known origin
+        let s = Streamer::new(0.0, 0.0, 512, 2);
         assert_eq!(world_to_cell(&s, 0, 0), Some((0, 0)));
         assert_eq!(world_to_cell(&s, 511, 511), Some((255, 255)));
         assert_eq!(world_to_cell(&s, 100, 200), Some((50, 100)));

@@ -82,17 +82,26 @@ pub unsafe extern "C" fn cplugin_init(
     let _ = STATE.set(Arc::clone(&st));
 
     // Embedded HTTP server for the resource pack (own thread, no JVM).
+    // v6.4.2 FIX: bind + the "listening" marker happen synchronously HERE —
+    // the marker used to print from the accept thread and could interleave
+    // mid-line with the runtime's "pipeline ready: N module hook(s)" (the
+    // CI e2e G2 gate failed on a perfectly healthy boot).
     {
         let srv = Arc::clone(&st.server);
         let port = st.cfg.http_port;
-        std::thread::Builder::new()
-            .name("clod-http".into())
-            .spawn(move || {
-                if let Err(e) = srv.serve(port) {
-                    eprintln!("[c-LoD] http server failed: {e}");
-                }
-            })
-            .ok();
+        match srv.bind(port) {
+            Ok(listener) => {
+                std::thread::Builder::new()
+                    .name("clod-http".into())
+                    .spawn(move || {
+                        srv.accept_loop(listener);
+                    })
+                    .ok();
+            }
+            Err(e) => {
+                eprintln!("[c-LoD] http server failed: {e}");
+            }
+        }
     }
 
     // Everything JVM-side waits until the kernel (Bukkit) is up.

@@ -33,17 +33,24 @@ CX="${CENTER%,*}"; CZ="${CENTER#*,}"
 MARKER="red_concrete"
 MIN_PROBE="${MIN_PROBE:-150}"
 MIN_CHANGE="${MIN_CHANGE:-300}"
-# the marker column: 5x5 footprint, y 100..200 — the top surface of those
-# columns becomes the marker no matter what the terrain height was
-FILL_Y0=100; FILL_Y1=200
-# vantage: 100 blocks west of the marker, looking east (Bukkit yaw 270).
-# THE GEOMETRY CONSTRAINTS (v6.4.1 fix — the first run stood at 200 m and
-# the marker never painted): the vanilla client culls particles beyond
-# ~renderDistance*16 blocks (options.txt renderDistance:8 -> 128 blocks),
-# so the dust carrying the marker bytes must spawn WITHIN that radius;
-# the server view-distance 4 (64 blocks) still keeps the vantage outside
-# the vanilla chunk radius — the marker zone stays pure-LOD territory.
-VX=$(( CX - 100 )); VY=150; VYAW=270; VPITCH=5
+# the marker column: 5x5 footprint, y 60..170 — the top surface of those
+# columns becomes the marker no matter what the terrain height was (the
+# height byte is surface_y + 64, so the cap paints a dome at world y=170).
+FILL_Y0=60; FILL_Y1=170
+# vantage: 75 blocks west of the marker, looking east (Bukkit yaw 270).
+# THE GEOMETRY CONSTRAINTS (v6.4.2 — run 2026-10-31 stood at 100 m and the
+# marker never decoded): the SERVER decode band requires BOTH plane probes
+# (y=120 and y=80) inside [30, 110] 3D of the eye — from an eye at y=151.6
+# the LO plane (dy=-71.6) caps the horizontal distance at ~83 blocks, so a
+# 100 m vantage left every marker cell outside the band (cone 0 zone 0,
+# spawned 0, wire 0p the whole run). The constraints chain:
+#   - server decode band (LO plane): horizontal <= ~83 blocks;
+#   - near gate: >= 30 blocks (CULL_RADIUS+2);
+#   - vanilla purity: > 64 blocks (server view-distance 4) so the marker
+#     zone stays pure-LOD territory;
+#   - client particle cull: < 128 blocks (renderDistance 8).
+# 75 blocks satisfies all four; 100 failed the first one.
+VX=$(( CX - 75 )); VY=150; VYAW=270; VPITCH=5
 mkdir -p "$SHOTS"
 FAILURES=0
 FOUND1=0; FOUND2=0
@@ -77,9 +84,17 @@ shot() { # name
     && note "shot $1" || { fail "screenshot $1 failed"; return 1; }
 }
 
-paint_px() { # a.png b.png -> changed pixel count (2>/dev/null: assertion FAILs are noise here)
-  python3 "$BENCH_DIR/visual_diff.py" "$1" "$2" --min-change 2000000000 2>/dev/null \
-    | grep -o 'paint px = [0-9]*' | grep -o '[0-9]*$' || echo 999999
+paint_px() { # a.png b.png -> changed pixel count, ALWAYS a single line
+  # v6.4.2 FIX: visual_diff.py asserts against --min-change and exits 1 when
+  # below it; with the 2000000000 sentinel the assertion always fired, and
+  # under `set -o pipefail` the `|| echo 999999` appended a SECOND line after
+  # the real count — DRIFT became "0\n999999" and `[ "$DRIFT" -le 1500 ]`
+  # died on the multiline string ("no stable baseline after 3 tries
+  # (drift=0\n999999)"). Capture, take the last count, tolerate the exit.
+  local out
+  out=$(python3 "$BENCH_DIR/visual_diff.py" "$1" "$2" --min-change 2000000000 2>/dev/null \
+        | grep -o 'paint px = [0-9]*' | grep -o '[0-9]*$' | tail -1) || true
+  echo "${out:-999999}"
 }
 
 accept_pack_prompt() { # tag loops — wait for the yellow prompt, click Proceed
@@ -165,12 +180,15 @@ wait_log "sky-grid stream armed" /tmp/server.log 60 || {
 sum "- sky-grid armed"
 
 # ---- 2. client #1: join, accept pack ----------------------------------------
-JOIN1=$(join_count)
 bash "$BENCH_DIR/run_client.sh" || fail "run_client.sh exited nonzero"
 wait_log "Stepan joined the game" /tmp/server.log 240 || {
   echo "FAIL: client never joined"; tail -30 /tmp/client.log; exit 1; }
 note "client joined (leg 1)"
 sum "- joined session 1 ($(date -u +%H:%M:%S))"
+# v6.4.2 FIX: the relog guard baseline must be captured AFTER the join it
+# guards — captured before, it was 0 and the guard read "0 -> 1" (the join
+# itself) and failed every run ("join count changed mid-test").
+JOIN1=$(join_count)
 sleep 5
 accept_pack_prompt leg1 60
 sleep 15
@@ -211,10 +229,24 @@ done
 
 # ---- 5. THE LIVE EDIT (no relog!) + probe loop -------------------------------
 note "placing $MARKER column at $CX,$CZ (y $FILL_Y0..$FILL_Y1)"
+# v6.4.2 FIX (CI visual run 2026-10-31): the marker zone sits 100 blocks from
+# the vantage while the server view-distance is 4 (64 blocks) — the fill hit
+# "System chat: That position is not loaded", placed NOTHING, and every probe
+# then failed on principle. Pin the marker chunks with forceload first.
+srv "forceload add $((CX - 48)) $((CZ - 48)) $((CX + 48)) $((CZ + 48))"
+sleep 3
+FILL_LOG=$(grep -c "That position is not loaded" /tmp/server.log 2>/dev/null || true)
 srv "fill $((CX - 2)) $FILL_Y0 $((CZ - 2)) $((CX + 2)) $FILL_Y1 $((CZ + 2)) minecraft:$MARKER"
-sleep 2
-grep -E "Changed [0-9]+ blocks" /tmp/server.log | tail -1 || note "fill summary not in log (probe loop decides)"
-sum "- fill issued: 5x5x$((FILL_Y1 - FILL_Y0 + 1)) $MARKER at $CX,$CZ"
+sleep 3
+FILL_LOG2=$(grep -c "That position is not loaded" /tmp/server.log 2>/dev/null || true)
+if [ "${FILL_LOG2:-0}" -gt "${FILL_LOG:-0}" ] 2>/dev/null; then
+  fail "the fill hit an unloaded chunk even after forceload — cannot place the marker"
+else
+  note "fill landed (no 'position not loaded' after forceload)"
+fi
+grep -iE "Changed [0-9]+ block|Filled" /tmp/server.log | tail -1 \
+  || note "fill summary not in log (probe loop decides)"
+sum "- fill issued: 5x$((FILL_Y1 - FILL_Y0 + 1))x5 $MARKER at $CX,$CZ (zone forceloaded ±48)"
 PROBE_LOG="$SHOTS/probe_counts.txt"; : > "$PROBE_LOG"
 for k in $(seq 0 23); do
   shot "12_after_edit_probe$k" || exit 1

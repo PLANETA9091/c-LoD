@@ -7,8 +7,12 @@ set -euo pipefail
 BENCH_DIR="$(cd "$(dirname "$0")" && pwd)"
 D="${MC_TEST_DIST:-$HOME/mc-test/dist}"
 JAVA="${CLOD_JAVA:-$HOME/tools/jdk25/bin/java}"
-# Disk center: override via CLOD_CENTER env ("x,z"), default region spawn
-CENTER="${CLOD_CENTER:-0,64}"
+# Disk center: override via CLOD_CENTER env ("x,z"), default region spawn.
+# v6.4.2: the config names the disk CENTER (engine::arm_from_config converts
+# to the Streamer origin). The historical default disk was [0..512]x[64..576]
+# (origin 0,64) — the equivalent center is 256,320, so the local bench
+# vantages keep their world coords.
+CENTER="${CLOD_CENTER:-256,320}"
 # v5.2.2: particles_per_tick 2048 (was 1024) — halves the lap (256 ticks),
 # doubling the per-bit decode probability per minute; server CPU headroom
 # verified (spawn cost is one packet per particle, 0 failed at 33M+).

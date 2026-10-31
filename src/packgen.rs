@@ -98,8 +98,19 @@ pub fn build(cfg: &Config) -> Pack {
         // 26.3 device depth: d = depth_near / eyeZ (infinite far, sky == 0.0).
         ("__DEPTH_NEAR__", fmt_f(cfg.depth_near)),
         // SKY-GRID geometry (must match src/stream.rs exactly).
-        ("__ORIGIN_X__", fmt_f(cfg.center_x.unwrap_or(0.0) as f32)),
-        ("__ORIGIN_Z__", fmt_f(cfg.center_z.unwrap_or(0.0) as f32)),
+        // v6.4.2: the config names the disk CENTER (see engine::arm_from_config);
+        // GridInfo.xy is the disk ORIGIN (the shader maps world->cell via
+        // (xz - GridInfo.xy)/cell), so the same center->origin conversion
+        // applies here. Passing the center verbatim shifted every painted
+        // dome 256 blocks off the streamed disk.
+        (
+            "__ORIGIN_X__",
+            fmt_f((cfg.center_x.unwrap_or(0.0) - f64::from(cfg.region_blocks) * 0.5) as f32),
+        ),
+        (
+            "__ORIGIN_Z__",
+            fmt_f((cfg.center_z.unwrap_or(0.0) - f64::from(cfg.region_blocks) * 0.5) as f32),
+        ),
         ("__PLANE_HI_Y__", fmt_f(crate::stream::PLANE_HI_Y as f32)),
         ("__PLANE_LO_Y__", fmt_f(crate::stream::PLANE_LO_Y as f32)),
         (

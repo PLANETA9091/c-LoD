@@ -1243,4 +1243,44 @@ mod tests {
             .iter()
             .any(|sp| (sp.x - (wx + 1.0)).abs() < 2.1 && (sp.z - (wz + 1.0)).abs() < 2.1));
     }
+
+    /// v6.4.2 regression (CI visual run 2026-10-31): the config names the
+    /// disk CENTER, the Streamer takes the ORIGIN (center - region/2 — the
+    /// same conversion engine::arm_from_config and the pack's GridInfo now
+    /// apply). With the center passed verbatim the disk shifted (+256,+256),
+    /// the CI vantage 100 blocks west of the named center fell outside every
+    /// decode band (both plane probes need [CULL_RADIUS+2, ZONE_FAR-2]) and
+    /// the scheduler streamed NOTHING (cone 0 zone 0, spawned 0, wire 0p).
+    #[test]
+    fn center_anchored_disk_streams_from_an_off_center_vantage() {
+        let (cx, cz, region) = (-930.0, 796.0, 512);
+        let half = f64::from(region) * 0.5;
+        let mut s = Streamer::new(cx - half, cz - half, region, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]));
+            }
+        }
+        // the CI vantage: 75 blocks west of the named center (v6.4.2 — the
+        // LO plane caps the horizontal decode distance at ~83 blocks, and
+        // vanilla purity needs > 64), eye y=150+1.62, looking east (Bukkit
+        // yaw -90 == 270), pitch 5 down.
+        let v = ViewHint {
+            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            look: look_dir(-90.0, 5.0),
+            now: 400,
+        };
+        let b: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        assert!(
+            s.cone_cells + s.zone_cells > 0,
+            "no cells decoded from the off-center vantage — center->origin is broken"
+        );
+        assert!(!b.is_empty());
+        // the spawned cells must sit inside the disk that the config center
+        // implies: [-1186..-674] x [540..1052]
+        for sp in b.iter() {
+            assert!(sp.x >= cx - half && sp.x <= cx + half);
+            assert!(sp.z >= cz - half && sp.z <= cz + half);
+        }
+    }
 }

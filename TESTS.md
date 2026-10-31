@@ -7,11 +7,11 @@ runs layer 8 there too — a real vanilla 26.3 client under Xvfb + Mesa
 llvmpipe on the runner (no GPU needed, software GL is enough for 640×360).
 Layers 6–7 remain the richer local real-client harness.
 
-## 1. Rust unit tests — `cargo test` (73 tests)
+## 1. Rust unit tests — `cargo test` (74 tests)
 
 | module | count | what they pin |
 |--------|------:|---------------|
-| `src/stream.rs` | 18 | 16-bit word packing (4 particles/word, X-sub = data bits, Z-sub = slot), HI/LO plane layout, delta-zone scheduling, cone admission, lap coverage; v6.2 rescan due/mark semantics + the dirty edit stream carrying exactly ONE reset electron at the (qx=0,qz=0) probe position |
+| `src/stream.rs` | 19 | 16-bit word packing (4 particles/word, X-sub = data bits, Z-sub = slot), HI/LO plane layout, delta-zone scheduling, cone admission, lap coverage; v6.2 rescan due/mark semantics + the dirty edit stream carrying exactly ONE reset electron at the (qx=0,qz=0) probe position; v6.4.2 center-anchored disk (config center -> Streamer origin) streams from an off-center vantage |
 | `src/engine.rs` | 8 | `wish_admit` ledger (dup reject, backlog cap, per-tick budget, v5.5 window parameter), frontier math |
 | `src/seedgen.rs` | 12 | SeedQueue dedup/order/close + v5.9 `pop_batch` drain; bit-contract vs `ClodSeedgen.pack()` (height/liquid/ordinals/valid bit, bit budget); v5.9 `chunkBatch` payload parsing (header, statuses, zero-filled failed segments, corruption rejects) |
 | `src/config.rs` | 11 | `CLOD_OPTS` parsing + clamps (gen_budget 1..256, gen_wish 32..4096, particles_per_tick, disk geometry, native_threads/seedgen_batch, native_dust/native_trees/native_edits, rescan_ticks 0/off + 5..2400) |

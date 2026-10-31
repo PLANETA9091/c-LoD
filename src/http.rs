@@ -70,11 +70,22 @@ impl PackServer {
         self.meta.read().map(|m| m.clone()).unwrap_or_default()
     }
 
-    pub fn serve(self: &Arc<Self>, port: u16) -> std::io::Result<()> {
+    /// Bind + the "listening" marker, synchronously. v6.4.2 FIX: the
+    /// marker used to print from the accept thread, racing the runtime's
+    /// "pipeline ready: N module hook(s)" line — the CI e2e gate read the
+    /// interleaved bytes ("pipeline ready: [c-LoD] pack server listening
+    /// ...1 module hook(s)") and failed G2 on a healthy boot. Binding and
+    /// logging on the init thread serializes the two lines.
+    pub fn bind(self: &Arc<Self>, port: u16) -> std::io::Result<TcpListener> {
         let listener = TcpListener::bind(("0.0.0.0", port))?;
         crate::log_info(&format!(
             "c-LoD pack server listening on 0.0.0.0:{port} (GET /clod-pack.zip | /clod-pack.sha1 | /clod-pack.info)"
         ));
+        Ok(listener)
+    }
+
+    /// The accept loop — run on a worker thread AFTER bind() returned.
+    pub fn accept_loop(self: &Arc<Self>, listener: TcpListener) {
         for stream in listener.incoming() {
             match stream {
                 Ok(s) => {
@@ -86,7 +97,6 @@ impl PackServer {
                 Err(_) => continue,
             }
         }
-        Ok(())
     }
 }
 
@@ -215,7 +225,8 @@ mod tests {
         );
         let srv2 = Arc::clone(&srv);
         let h = std::thread::spawn(move || {
-            let _ = srv2.serve(18401);
+            let listener = srv2.bind(18401).expect("bind");
+            srv2.accept_loop(listener);
         });
         std::thread::sleep(Duration::from_millis(300));
 
