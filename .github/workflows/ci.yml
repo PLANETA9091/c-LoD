@@ -187,6 +187,11 @@ jobs:
           curl -sL -o paper.jar "$URL"
           mkdir -p dist/versions
           cp paper.jar dist/versions/paper-26.3.jar
+      - name: Build c-LoD host plugin (ClodEdits needs one enabled plugin)
+        run: |
+          mkdir -p dist/plugins hostout
+          javac -cp paper.jar -d hostout scripts/java/host/ClodHost.java
+          jar cf dist/plugins/clodhost.jar -C hostout clod -C scripts/java/host plugin.yml
       - name: Assemble dist root
         run: |
           mkdir -p dist/modules/lod
@@ -226,6 +231,17 @@ jobs:
             sleep 2
           done
           grep -q "sky-grid stream armed" boot1.log || { echo "sky-grid stream did not arm"; tail -80 boot1.log; exit 1; }
+          # v6.4.6: with the host plugin the event push MUST register — the
+          # bare-server "hunting a host plugin" forever state is a CI bug,
+          # not a graceful fallback. Wait for it: define rides the first
+          # engine ticks after the world resolve.
+          for i in $(seq 1 60); do
+            grep -q "edit events: listener registered" boot1.log && break
+            if ! kill -0 $SRV 2>/dev/null; then echo "SERVER DIED"; tail -60 boot1.log; exit 1; fi
+            sleep 2
+          done
+          grep -q "edit events: listener registered" boot1.log \
+            || { echo "FAIL: event push never registered (host plugin missing or failed)"; tail -40 boot1.log; exit 1; }
           echo "--- gates ---"
           python3 ../scripts/e2e/gates.py boot1.log
           echo "--- HTTP pack fetch ---"
@@ -280,6 +296,13 @@ jobs:
             sleep 2
           done
           grep -q "sky-grid stream armed" boot2.log || { echo "sky-grid stream did not arm"; tail -80 boot2.log; exit 1; }
+          for i in $(seq 1 60); do
+            grep -q "edit events: listener registered" boot2.log && break
+            if ! kill -0 $SRV 2>/dev/null; then echo "SERVER DIED"; tail -60 boot2.log; exit 1; fi
+            sleep 2
+          done
+          grep -q "edit events: listener registered" boot2.log \
+            || { echo "FAIL: event push never registered on boot #2"; tail -40 boot2.log; exit 1; }
           echo "--- gates (boot #2) ---"
           python3 ../scripts/e2e/gates.py boot2.log
           echo "--- stopping boot #2 ---"
@@ -347,6 +370,16 @@ jobs:
           curl -sL -o paper.jar "$URL"
           mkdir -p dist/versions
           cp paper.jar dist/versions/paper-26.3.jar
+      # v6.4.6: ClodEdits.tryInit registers with the FIRST ENABLED plugin —
+      # on a bare CI server there is none and the v6.3 event push never goes
+      # live (edits ~0p/0c/0e the whole session). This one-class plugin is
+      # built against the same paper.jar the server runs and exists purely
+      # to be enabled.
+      - name: Build c-LoD host plugin (ClodEdits needs one enabled plugin)
+        run: |
+          mkdir -p dist/plugins hostout
+          javac -cp paper.jar -d hostout scripts/java/host/ClodHost.java
+          jar cf dist/plugins/clodhost.jar -C hostout clod -C scripts/java/host plugin.yml
       - name: Assemble dist root (fixed seed; view-distance 4 keeps the marker zone pure-LOD)
         run: |
           mkdir -p dist/modules/lod

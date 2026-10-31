@@ -1,0 +1,6 @@
+name: ClodHost
+main: clod.ClodHost
+version: 1.0.0
+description: c-LoD CI host - an enabled plugin so ClodEdits can register
+author: c-LoD
+api-version: '26.3'

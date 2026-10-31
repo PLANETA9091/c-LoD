@@ -46,10 +46,40 @@ grep -q "^simulationDistance:" "$OPT" && sed -i 's/^simulationDistance:.*/simula
 grep -q "^renderClouds:" "$OPT" && sed -i 's/^renderClouds:.*/renderClouds:false/' "$OPT" || echo "renderClouds:false" >> "$OPT"
 
 export LP_NUM_THREADS=$(nproc)
+
+# v6.4.6: the INFO client log never says WHY the session dies 2-19 s after
+# the pack push ("Stepan lost connection: Disconnected" server-side, no
+# exception client-side) and why the clod post pipelines fail to compile
+# ("Couldn't compile pipeline (clod:lod_terrain/3): " — the reason goes to
+# a DEBUG logger). Put the renderer + network loggers on DEBUG.
+LOG4J_CFG="$C/log4j2-ci.xml"
+if [ ! -f "$LOG4J_CFG" ]; then
+cat > "$LOG4J_CFG" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="[%d{HH:mm:ss}] [%t/%level]: %msg%n%throwable"/>
+        </Console>
+    </Appenders>
+    <Loggers>
+        <Logger name="net.minecraft.client.renderer" level="DEBUG"/>
+        <Logger name="com.mojang.blaze3d" level="DEBUG"/>
+        <Logger name="net.minecraft.network" level="DEBUG"/>
+        <Logger name="net.minecraft.server.network" level="DEBUG"/>
+        <Root level="INFO">
+            <AppenderRef ref="Console"/>
+        </Root>
+    </Loggers>
+</Configuration>
+EOF
+fi
+
 nohup "$JAVA" -Xmx1200M \
   -Djava.library.path="$C/natives" \
   -Dorg.lwjgl.librarypath="$C/natives" \
   -Dorg.lwjgl.opengl.libname=libGL.so.1 \
+  -Dlog4j.configurationFile="file:$LOG4J_CFG" \
   -cp "$(cat $C/cp.txt)" \
   net.minecraft.client.main.Main \
   --username Stepan \

@@ -78,6 +78,29 @@ join_count() { # grep -c prints 0 itself when nothing matches; never append
   grep -c "Stepan joined the game" /tmp/server.log 2>/dev/null || true
   }
 
+# v6.4.6: the shots are only evidence while the client is IN the game. The
+# 2026-10-31 run b336f57 disproved both green legs: the client disconnected
+# 2-19 s after the pack push (INFO client log does not say why — the
+# renderer logger now runs at DEBUG), the screen fell back to the main
+# menu, and the AUTUMN-PANORAMA red foliage fed the red detector 63680 px
+# (threshold 150) — both legs "passed" on the menu. joins > lefts in
+# server.log is the honest in-game bit; assert it around every shot.
+left_count() {
+  grep -c "Stepan left the game" /tmp/server.log 2>/dev/null || true
+  }
+
+online() {
+  [ "$(join_count)" -gt "$(left_count)" ] 2>/dev/null
+  }
+
+assert_online() { # tag — fail fast once the client is out of the game
+  if ! online; then
+    fail "$tag: client left the game mid-test (joins=$(join_count) lefts=$(left_count)) — the shot is the main-menu panorama, not the LOD proof"
+    return 1
+  fi
+  return 0
+}
+
 shot() { # name
   ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 \
     -i :99 -frames:v 1 "$SHOTS/$1.png" 2>>"$SHOTS/ffmpeg.err" \
@@ -261,6 +284,7 @@ sum "- paint settled=$SETTLED (wire ${LAST_WIRE}p)"
 # now 6 tries with a 10 s drain between them (worst case ~2 min extra).
 DRIFT=999999
 for t in 1 2 3 4 5 6; do
+  assert_online "baseline try $t" || exit 1
   srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"
   sleep 6
   shot 10_before_edit || exit 1
@@ -298,6 +322,7 @@ grep -iE "Changed [0-9]+ block|Filled" /tmp/server.log | tail -1 \
 sum "- fill issued: 5x$((FILL_Y1 - FILL_Y0 + 1))x5 $MARKER at $CX,$CZ (zone forceloaded ±48)"
 PROBE_LOG="$SHOTS/probe_counts.txt"; : > "$PROBE_LOG"
 for k in $(seq 0 23); do
+  assert_online "edit probe $k" || exit 1
   shot "12_after_edit_probe$k" || exit 1
   python3 "$BENCH_DIR/visual_diff.py" \
        "$SHOTS/10_before_edit.png" "$SHOTS/12_after_edit_probe$k.png" \
@@ -339,12 +364,17 @@ note "client rejoined (leg 2)"
 sum "- joined session 2 ($(date -u +%H:%M:%S))"
 sleep 5
 accept_pack_prompt leg2 30
+# v6.4.6: both 2026-10-31 sessions died 2-19 s after the pack push — the
+# rejoin leg must not probe a menu, say it loudly and stop here.
+assert_online "after leg-2 pack accept" || exit 1
 sleep 15
+assert_online "15 s after leg-2 pack accept" || exit 1
 srv "time set 6000"
 srv "gamemode spectator Stepan"
 srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"
 sleep 30   # fresh session: the dust must re-deliver the persisted disk
 for k in $(seq 0 11); do
+  assert_online "relog probe $k" || exit 1
   shot "13_after_relog_probe$k" || exit 1
   # leg 2 asserts the MARKER COLOR on screen (probe only): scene drift between
   # sessions is allowed to move non-marker pixels
