@@ -5,15 +5,15 @@ CI (`.github/workflows/ci.yml`) runs layers 1–4 on every push; the `e2e-live`
 job additionally runs layer 5 on `master`. Layers 6–7 are the local
 real-client harness (a genuine vanilla 26.3 client under Xvfb — CI has no GPU).
 
-## 1. Rust unit tests — `cargo test` (66 tests)
+## 1. Rust unit tests — `cargo test` (69 tests)
 
 | module | count | what they pin |
 |--------|------:|---------------|
-| `src/stream.rs` | 16 | 16-bit word packing (4 particles/word, X-sub = data bits, Z-sub = slot), HI/LO plane layout, delta-zone scheduling, cone admission, lap coverage |
+| `src/stream.rs` | 18 | 16-bit word packing (4 particles/word, X-sub = data bits, Z-sub = slot), HI/LO plane layout, delta-zone scheduling, cone admission, lap coverage; v6.2 rescan due/mark semantics + the dirty edit stream carrying exactly ONE reset electron at the (qx=0,qz=0) probe position |
 | `src/engine.rs` | 8 | `wish_admit` ledger (dup reject, backlog cap, per-tick budget, v5.5 window parameter), frontier math |
 | `src/seedgen.rs` | 12 | SeedQueue dedup/order/close + v5.9 `pop_batch` drain; bit-contract vs `ClodSeedgen.pack()` (height/liquid/ordinals/valid bit, bit budget); v5.9 `chunkBatch` payload parsing (header, statuses, zero-filled failed segments, corruption rejects) |
-| `src/config.rs` | 9 | `CLOD_OPTS` parsing + clamps (gen_budget 1..256, gen_wish 32..4096, particles_per_tick, disk geometry, native_threads/seedgen_batch, native_dust/native_trees knobs) |
-| `src/packgen.rs` | 5 | the pack builds byte-deterministically, 13 entries, ZERO textures/PNGs, capture chain present |
+| `src/config.rs` | 10 | `CLOD_OPTS` parsing + clamps (gen_budget 1..256, gen_wish 32..4096, particles_per_tick, disk geometry, native_threads/seedgen_batch, native_dust/native_trees, rescan_ticks 0/off + 5..2400) |
+| `src/packgen.rs` | 5 | the pack builds byte-deterministically, 13 entries, ZERO textures/PNGs, capture chain present; v6.2: reset pass precedes the data captures, ClodAtlas/AtlasInfo stay renamed to ClodRegion/RegionInfo |
 | `src/palette.rs` | 4 | surface → RGB mapping incl. water/foliage tints |
 | `src/sha1.rs` | 4 | SHA-1 correctness (RFC vectors + pack-sized inputs) |
 | `src/http.rs` | 2 | embedded pack server routes/metadata |

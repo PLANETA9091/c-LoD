@@ -2,7 +2,7 @@
 //!
 //! The resource pack is a STATIC shader-only artifact built once per process
 //! boot and pushed once per client join — it contains ZERO world data: no
-//! atlas, no PNGs, nothing world-derived. Every byte of LOD data travels at
+//! textures, no PNGs, nothing world-derived. Every byte of LOD data travels at
 //! runtime as DUST PARTICLES flying over the scan disk on two sky planes
 //! (HI = height word at Y=260, LO = color index word at Y=272); the pack's
 //! capture shaders decode them against the depth buffer into persistent
@@ -218,7 +218,7 @@ fn ensure_boot(state: &Arc<State>, env: Env) {
             );
             *state.pack.write().unwrap() = Some(Arc::new(new_pack));
             crate::log_info(&format!(
-                "c-LoD pack finalized (ONE-TIME, static): shader-only, {len} bytes, sha1 {sha} — no atlas, no textures, one push per join"
+                "c-LoD pack finalized (ONE-TIME, static): shader-only, {len} bytes, sha1 {sha} — zero textures, zero world data, one push per join"
             ));
         } else {
             if BRIDGE_OK.swap(2, Ordering::SeqCst) == 0 {
@@ -281,8 +281,11 @@ fn wish_admit(
 }
 
 /// Center-centric heightmap sweep into the disk store. The LOD data source:
-/// rings of `cell_size` blocks around the disk center, skipping cells
-/// already valid; unloaded chunks queue for the async force-load frontier.
+/// rings of `cell_size` blocks around the disk center. Cells already valid
+/// are NOT re-painted here (the v6.2 rescan wave owns them); unloaded
+/// chunks queue for the async force-load frontier / seedgen. Only real
+/// samples consume the budget — an unloaded edge retries next tick for
+/// free instead of starving the wave.
 fn stream_scan(state: &Arc<State>, env: Env) {
     if state.phase.load(Ordering::SeqCst) != PHASE_LIVE {
         return;
@@ -323,7 +326,7 @@ fn stream_scan(state: &Arc<State>, env: Env) {
             }
             let wx = ox + f64::from(cx) * f64::from(cell);
             let wz = oz + f64::from(cz) * f64::from(cell);
-            scan_cell(
+            if scan_cell(
                 state,
                 env,
                 world,
@@ -332,9 +335,13 @@ fn stream_scan(state: &Arc<State>, env: Env) {
                 wx as i32,
                 wz as i32,
                 allow_force,
-            );
-            done += 1;
-            done >= budget
+            ) {
+                done += 1;
+                if done >= budget {
+                    return true;
+                }
+            }
+            false
         };
         // One ring: top+bottom rows and left+right columns.
         let mut stop = false;
@@ -352,12 +359,143 @@ fn stream_scan(state: &Arc<State>, env: Env) {
         }
         ring += 1;
     }
+    // v6.2 LIVE EDITS: whatever budget the paint pass left goes to the
+    // rescan wave — it re-samples stale cells of loaded chunks so blocks
+    // placed after server start reach the LOD without a relog.
+    let now = state.tick_no.load(Ordering::Relaxed);
+    rescan_wave(
+        state,
+        env,
+        world,
+        side,
+        ox,
+        oz,
+        cell,
+        budget.saturating_sub(done),
+        now,
+        state.cfg.rescan_ticks,
+    );
 }
 
-/// Sample one world column into the disk store (or queue its chunk for the
-/// async force-load frontier when unloaded). `allow_force=false` (idle,
-/// nobody online) makes the cell silently skip instead of queueing a
-/// generation ticket — the idle server never churns the chunk system.
+/// v6.2 LIVE EDITS: the rescan wave. The disk cursor advances row-major;
+/// cells of LOADED chunks whose scan age reached `rescan_ticks` are
+/// re-sampled — a cheap height probe first (one JNI call), and only a
+/// moved surface pays for the full color sample. A changed sample lands
+/// via `set_cell`, whose word-compare marks the cell dirty; the dirty
+/// phase streams it with a v6.2 reset electron and the client replaces
+/// the word atomically. Unloaded chunks cannot change (vanilla ticks no
+/// blocks there) — their cells get a grace stamp and are re-checked on
+/// the next wave. `period == 0` disables the wave (v6.1 paint-once).
+#[allow(clippy::too_many_arguments)]
+fn rescan_wave(
+    state: &Arc<State>,
+    env: Env,
+    world: jvmti_bindings::jni::jobject,
+    side: i32,
+    ox: f64,
+    oz: f64,
+    cell: i32,
+    mut budget: u32,
+    now: u64,
+    period: u64,
+) {
+    if period == 0 || budget == 0 {
+        return;
+    }
+    let total = (side as u64) * (side as u64);
+    if total == 0 {
+        return;
+    }
+    // Per-wave loaded-chunk verdicts: one JNI probe per chunk per tick,
+    // shared across the whole wave (spatially coherent batches hit it).
+    let mut loaded: HashMap<(i32, i32), bool> = HashMap::new();
+    let mut sampled: u64 = 0;
+    let mut edits: u64 = 0;
+    // Collect candidates under ONE lock per batch (a full lap scan costs
+    // only Vec reads; the per-cell JNI work happens unlocked below).
+    const BATCH: usize = 256;
+    loop {
+        if budget == 0 {
+            break;
+        }
+        let mut batch: Vec<(u32, u32)> = Vec::new();
+        {
+            let mut s = state.stream.lock().unwrap();
+            let mut visits = 0u64;
+            while visits < total && batch.len() < BATCH {
+                let t = s.rescan_next(total);
+                let ccx = (t % side as u64) as u32;
+                let ccz = (t / side as u64) as u32;
+                let valid = s.get(ccx, ccz).map(|c| c.valid).unwrap_or(false);
+                if valid && s.scan_due(ccx, ccz, now, period) {
+                    batch.push((ccx, ccz));
+                }
+                visits += 1;
+            }
+        }
+        if batch.is_empty() {
+            break; // nothing due ahead of the cursor this lap
+        }
+        for (ccx, ccz) in batch {
+            if budget == 0 {
+                break;
+            }
+            let wx = ox + f64::from(ccx) * f64::from(cell);
+            let wz = oz + f64::from(ccz) * f64::from(cell);
+            let ck = (wx as i32 >> 4, wz as i32 >> 4);
+            let is_loaded = *loaded
+                .entry(ck)
+                .or_insert_with(|| jni::is_chunk_loaded(env, world, ck.0, ck.1).unwrap_or(false));
+            if !is_loaded {
+                // Nothing can change in an unticked chunk: grace-stamp and
+                // revisit next wave. Costs no wave budget.
+                state.stream.lock().unwrap().mark_scanned(ccx, ccz, now);
+                continue;
+            }
+            budget -= 1;
+            sampled += 1;
+            // Cheap probe first: only a moved surface pays for the full
+            // color sample (material/biome JNI + string marshalling).
+            // A same-height top-block material swap stays unpainted until
+            // the height moves (documented v6.2 limitation).
+            let moved = match jni::probe_height(env, world, wx as i32, wz as i32) {
+                Some(y) => {
+                    let s = state.stream.lock().unwrap();
+                    match s.get(ccx, ccz) {
+                        Some(c) => c.height != y.clamp(-64, 1023) as i16,
+                        None => false,
+                    }
+                }
+                None => true, // probe failed (mid-tick unload): let scan_cell decide
+            };
+            let before = {
+                let s = state.stream.lock().unwrap();
+                s.get(ccx, ccz).map(|c| Streamer::encode_words(&c))
+            };
+            if moved {
+                scan_cell(state, env, world, ccx, ccz, wx as i32, wz as i32, false);
+            }
+            state.stream.lock().unwrap().mark_scanned(ccx, ccz, now);
+            let after = {
+                let s = state.stream.lock().unwrap();
+                s.get(ccx, ccz).map(|c| Streamer::encode_words(&c))
+            };
+            if before != after {
+                edits += 1;
+            }
+        }
+    }
+    state.stream.lock().unwrap().rescan_count(sampled, edits);
+}
+
+/// Sample one world column into the disk store. Returns true when the cell
+/// was actually sampled (the chunk was loaded); false means the column is
+/// in an unloaded chunk and nothing was written.
+///
+/// `queue_force`: when the chunk is unloaded, admit it to the seedgen queue
+/// (native_gen) and/or the async force-load frontier. The v6.2 rescan wave
+/// passes `false` — a rescan must never queue generation (it only visits
+/// loaded chunks anyway; a mid-tick unload must stay silent).
 #[allow(clippy::too_many_arguments)] // disk coords + world coords + gate
 fn scan_cell(
     state: &Arc<State>,
@@ -367,50 +505,62 @@ fn scan_cell(
     cz: u32,
     wx: i32,
     wz: i32,
-    allow_force: bool,
-) {
-    if let Some((y, liquid, material, biome)) = jni::sample_surface(env, world, wx, wz) {
-        let rgb = crate::palette::surface_color(&material, &biome, liquid);
-        let cell = Cell {
-            height: y.clamp(-64, 1023) as i16,
-            water: liquid,
-            valid: true,
-            provisional: false,
-            rgb,
-        };
-        {
-            let mut s = state.stream.lock().unwrap();
-            // SEEDGEN fidelity: a real chunk replacing a native provisional
-            // cell — count the upgrade and whether the encoded words moved.
-            let prev = s.get(cx, cz);
-            let was_prov = prev.map(|c| c.valid && c.provisional).unwrap_or(false);
-            s.set_cell(cx, cz, cell);
-            if was_prov {
-                state.prov_upgraded.fetch_add(1, Ordering::Relaxed);
-                if let Some(p) = prev {
-                    if Streamer::encode_words(&p) != Streamer::encode_words(&cell) {
-                        state.prov_diffs.fetch_add(1, Ordering::Relaxed);
-                    }
+    queue_force: bool,
+) -> bool {
+    let Some((y, liquid, material, biome)) = jni::sample_surface(env, world, wx, wz) else {
+        if queue_force {
+            // SEEDGEN (v5.7, v5.8 LAZY ARM): the first unloaded cell arms the
+            // native generator (bootstrap no-ops after the first attempt), so
+            // the pre-join "stream armed" marker is no longer delayed by the
+            // ~20-class MethodHandle resolve. The chunk then fills on OUR
+            // worker threads — vanilla noise+surface, no tickets, zero TPS
+            // impact; cells land provisional and the rescan wave (v6.2) or
+            // the loaded-chunk sampler upgrades them when the server
+            // generates the real chunk.
+            if state.cfg.native_gen {
+                if !crate::seedgen::tried(state) {
+                    crate::seedgen::bootstrap(state, env, world);
+                }
+                if !crate::seedgen::enqueue(state, wx >> 4, wz >> 4) {
+                    force_chunk_for(state, env, world, wx >> 4, wz >> 4);
+                }
+            } else {
+                force_chunk_for(state, env, world, wx >> 4, wz >> 4);
+            }
+        }
+        // Unloaded chunk, nothing sampled. With queue_force=false (v6.2
+        // rescan path) the cell silently skips — no tickets, no churn.
+        return false;
+    };
+    let rgb = crate::palette::surface_color(&material, &biome, liquid);
+    let cell = Cell {
+        height: y.clamp(-64, 1023) as i16,
+        water: liquid,
+        valid: true,
+        provisional: false,
+        rgb,
+    };
+    {
+        let mut s = state.stream.lock().unwrap();
+        // SEEDGEN fidelity: a real chunk replacing a native provisional
+        // cell — count the upgrade and whether the encoded words moved.
+        let prev = s.get(cx, cz);
+        let was_prov = prev.map(|c| c.valid && c.provisional).unwrap_or(false);
+        s.set_cell(cx, cz, cell);
+        // v6.2: a sampled cell is fresh — the rescan wave skips it until
+        // it ages past rescan_ticks.
+        let now = state.tick_no.load(Ordering::Relaxed);
+        s.mark_scanned(cx, cz, now);
+        if was_prov {
+            state.prov_upgraded.fetch_add(1, Ordering::Relaxed);
+            if let Some(p) = prev {
+                if Streamer::encode_words(&p) != Streamer::encode_words(&cell) {
+                    state.prov_diffs.fetch_add(1, Ordering::Relaxed);
                 }
             }
         }
-    } else if state.cfg.native_gen {
-        // SEEDGEN (v5.7, v5.8 LAZY ARM): the first unloaded cell arms the
-        // native generator (bootstrap no-ops after the first attempt), so
-        // the pre-join "stream armed" marker is no longer delayed by the
-        // ~20-class MethodHandle resolve. The chunk then fills on OUR
-        // worker threads — vanilla noise+surface, no tickets, zero TPS
-        // impact; cells land provisional and the loaded-chunk sampler
-        // upgrades them when the server generates the real chunk.
-        if !crate::seedgen::tried(state) {
-            crate::seedgen::bootstrap(state, env, world);
-        }
-        if !crate::seedgen::enqueue(state, wx >> 4, wz >> 4) && allow_force {
-            force_chunk_for(state, env, world, wx >> 4, wz >> 4);
-        }
-    } else if allow_force {
-        force_chunk_for(state, env, world, wx >> 4, wz >> 4);
     }
+    true
 }
 
 fn force_chunk_for(
@@ -477,8 +627,9 @@ fn sample_chunk(
             if valid {
                 continue;
             }
-            scan_cell(state, env, world, ccx, ccz, wx, wz, true);
-            samples += 1;
+            if scan_cell(state, env, world, ccx, ccz, wx, wz, true) {
+                samples += 1;
+            }
         }
     }
     samples
@@ -788,7 +939,7 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     if !tick.is_multiple_of(100) {
         return;
     }
-    let (valid, laps, total_cells, cone_c, zone_c, dirty_c, dirty_q) = {
+    let (valid, laps, total_cells, cone_c, zone_c, dirty_c, dirty_q, rescan_c, rescan_e) = {
         let s = state.stream.lock().unwrap();
         (
             s.valid_cells(),
@@ -798,6 +949,8 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
             s.zone_cells,
             s.dirty_streams,
             s.dirty_pending,
+            s.rescan_cells,
+            s.rescan_edits,
         )
     };
     // v5.5 frontier diagnostics: wish = in-flight FORCED tickets,
@@ -856,7 +1009,7 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     state.server.set_meta(valid, total_cells);
     let p0 = players.first();
     crate::log_info(&format!(
-        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}), spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} {cache_stat}",
+        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}) rescan {rescan_c}c/{rescan_e}e, spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} {cache_stat}",
         jni::STREAM_SPAWNED.load(Ordering::Relaxed),
         jni::STREAM_FAILED.load(Ordering::Relaxed),
         p0.map(|p| format!("yaw {:.0} pitch {:.0}", p.yaw, p.pitch))
@@ -1239,8 +1392,8 @@ mod tests {
 
     #[test]
     fn pack_builds_at_boot_without_world() {
-        // The v5 pack is shader-only: it must build with NO world, NO atlas,
-        // NO scan data — the whole point of sky-grid streaming.
+        // The v5 pack is shader-only: it must build with NO world, NO scan
+        // data — the whole point of sky-grid streaming.
         let st = State::new(Config::parse(""));
         assert!(st.pack.read().unwrap().is_none());
         assert_eq!(st.phase.load(Ordering::SeqCst), PHASE_BOOT);

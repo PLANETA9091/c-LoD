@@ -2,7 +2,7 @@
 #extension GL_ARB_separate_shader_objects : require
 #include <minecraft:globals.glsl>
 
-// c-LoD v5.1 SKY-GRID BIT-STREAM capture pass.
+// c-LoD v6.2 SKY-GRID BIT-STREAM capture pass.
 //
 // The server streams LOD cells as villager-sparkle particles (the only
 // texture the 26.3 software rasterizers draw — dust quads die with
@@ -17,9 +17,17 @@
 // This pass decodes ONE word back into its persistent 256x256 target (1 px
 // = 1 cell). For the pixel's cell it re-projects all 16 sub-particle
 // positions onto the screen (probe camera) and strobes every projection
-// against the bright villager-green hue, then OR-merges the decoded word
-// into the previous value. Anything not strobed keeps its old value; the
-// stream self-heals on the next lap.
+// against the bright villager-green hue, then merges the decoded word into
+// the previous value. Anything not strobed keeps its old value; the stream
+// self-heals on the next lap.
+//
+// v6.2 EDIT PROTOCOL: the OR-merge can never LOSE bits, so a changed word
+// would corrupt forever. Every edit therefore ships one RESET electron on
+// a third plane (Y=100, between the data planes — mode 2 of this shader
+// writes the clod_reset flag). A flagged cell REPLACES its word the first
+// time the fresh decode completes (all four slots strobed); partial
+// decodes keep the legacy OR self-heal, and once replaced, further ORs of
+// the same word are idempotent for the rest of the electron's lifetime.
 //
 // v5.3: the old sky-depth rejection (dep < 1e-6) is GONE. 26.3 reversed-Z
 // reads the bare sky as depth 0 and the carrier (translucent sheet) never
@@ -32,9 +40,10 @@
 // to build the eraser mask.
 
 uniform sampler2D InSampler;      // minecraft:main color (dust hue strobe)
-uniform sampler2D InDepthSampler; // minecraft:main depth (in-front-of-geometry test)
+uniform sampler2D InDepthSampler; // minecraft:main depth (unused since v5.3, kept for the chain schema)
 uniform sampler2D PrevSampler;    // previous plane target (persistent)
 uniform sampler2D RotSampler;     // clod_rot_a (camera + fog channel)
+uniform sampler2D ResetSampler;   // clod_reset (v6.2 edit-reset flags, this frame)
 
 // v5.0.3: SamplerInfo never existed as a client UBO — it stayed zeroed
 // (the whole capture wrote cell (0,0), the march divided by zero).
@@ -46,7 +55,8 @@ layout(std140) uniform ClodGrid {
     vec4 GridInfo;
 };
 
-// x = cell size, y = sub quantum (cell/4), z = device depth near, w = word (0 = HI, 1 = LO)
+// x = cell size, y = sub quantum (cell/4), z = device depth near (data
+// modes) or the RESET plane Y (mode 2), w = word (0 = HI, 1 = LO, 2 = reset)
 layout(std140) uniform ClodStream {
     vec4 StreamInfo;
 };
@@ -56,29 +66,18 @@ layout(location = 0) out vec4 fragColor;
 
 const float PI = 3.14159265358979;
 
-void main() {
-    ivec2 px = ivec2(clamp(texCoord, 0.0, 1.0) * vec2(256.0));
-    px = clamp(px, ivec2(0), ivec2(vec2(256.0)) - 1);
+// One cell word probe: re-project the cell's 16 sub-particle positions at
+// `planeY`, strobe each against the carrier hue and OR the decoded 2-bit
+// values into the word. anyHit = at least one sub-position strobed this
+// frame; allSlots = every Z slot strobed (a COMPLETE word — the v6.2
+// replace gate). The strobe is the v5.3.1 5-tap cross on the UN-FOGGED
+// color; geometry must match stream.rs::word_spawns exactly.
+void probe_word(vec2 cellWorld, float planeY, float sub, out uint word, out bool anyHit, out bool allSlots) {
+    word = 0u;
+    anyHit = false;
+    allSlots = true;
 
-    // Probe camera: the LIVE camera from the sky camera-channel (clod_rot_a,
-    // written by the sky override every frame): R = az/2pi,
-    // G = (el+pi/2)/pi, B = conf, A = (fov-5)/115*254. The v5.0.0 hard-coded
-    // bench pose (yaw=180, pitch=-5, fov=70) decoded NOTHING the moment the
-    // player turned — the projections missed every particle.
     vec4 rotP = texelFetch(RotSampler, ivec2(0, 0), 0);
-    if (rotP.b < 0.25) {
-        // v5.3.1 BLIND-CAMERA GATE: the camera channel is measured from sky
-        // pixels and its confidence decays once no sky is in view. Decoding
-        // with a stale pose would OR random hue noise into the persistent
-        // words and stamp garbage into the eraser mask. Pass the previous
-        // state through instead; the stream self-heals on the next sky view
-        // (confidence jumps back to 1 on the first valid row, frame-exact).
-        // The server-side spawn gate (stream.rs spawn_visible) stops feeding
-        // dots into sky-blind frustums, so there is nothing to decode here
-        // anyway — this gate keeps the buffers honest while conf decays.
-        fragColor = texelFetch(PrevSampler, px, 0);
-        return;
-    }
     float az = rotP.r * 2.0 * PI;
     float el = rotP.g * PI - PI * 0.5;
     float fov = 5.0 + rotP.a * 115.0;
@@ -110,17 +109,10 @@ void main() {
     float endDistance = max(fogLive ? vanRD : 128.0, 320.0) * 1.7320508;
     float maxFog = clamp(endDistance * invEndFogDelta + startDelta, 0.0, 1.0);
 
-    float cell = StreamInfo.x;
-    float sub = StreamInfo.y;
-    float near = StreamInfo.z;
-    vec2 cellWorld = GridInfo.xy + (vec2(px) + 0.5) * cell;
-
-    uint word = 0u;
-    bool anyHit = false;
-
-    // v5.1: one plane per pass — the HI word decodes on the high layer,
-    // the LO word on the low layer (single carrier hue).
-    float planeY = StreamInfo.w < 0.5 ? GridInfo.z : GridInfo.w;
+    bool slot0 = false;
+    bool slot1 = false;
+    bool slot2 = false;
+    bool slot3 = false;
 
     for (int qz = 0; qz < 4; ++qz) {
         for (int qx = 0; qx < 4; ++qx) {
@@ -132,6 +124,7 @@ void main() {
             vec3 d = P - cam;
             float z = dot(d, F);
             if (z < 2.0) {
+                allSlots = false;
                 continue; // behind / too close
             }
             vec2 ndc = vec2(
@@ -139,6 +132,7 @@ void main() {
                 dot(d, U) / (z * tanH)
             );
             if (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0) {
+                allSlots = false;
                 continue; // off screen
             }
             vec2 sc = ndc * 0.5 + 0.5;
@@ -167,22 +161,94 @@ void main() {
                 }
             }
             if (!dust) {
+                allSlots = false;
                 continue;
             }
             word |= uint(qx) << (14 - 2 * qz);
             anyHit = true;
+            if (qz == 0) slot0 = true;
+            else if (qz == 1) slot1 = true;
+            else if (qz == 2) slot2 = true;
+            else slot3 = true;
         }
     }
+    allSlots = allSlots && slot0 && slot1 && slot2 && slot3;
+}
+
+void main() {
+    ivec2 px = ivec2(clamp(texCoord, 0.0, 1.0) * vec2(256.0));
+    px = clamp(px, ivec2(0), ivec2(vec2(256.0)) - 1);
+
+    float cell = StreamInfo.x;
+    float sub = StreamInfo.y;
+    vec2 cellWorld = GridInfo.xy + (vec2(px) + 0.5) * cell;
+
+    // Probe camera gate: the LIVE camera from the sky camera-channel
+    // (clod_rot_a, written by the sky override every frame): R = az/2pi,
+    // G = (el+pi/2)/pi, B = conf, A = (fov-5)/115*254. The v5.0.0
+    // hard-coded bench pose (yaw=180, pitch=-5, fov=70) decoded NOTHING
+    // the moment the player turned — the projections missed every particle.
+    vec4 rotP = texelFetch(RotSampler, ivec2(0, 0), 0);
+    // ---- v6.2 mode 2: the edit-reset plane --------------------------------
+    // Probe the cell's 16 sub-positions at the reset Y (StreamInfo.z for
+    // this pass) and flag the cell when ANY of them strobes. A reset
+    // electron is a COMMAND, not data: one dot suffices and partial
+    // strobes mean the same thing — unlike data words, nothing here may
+    // OR-accumulate. A blind camera flags nothing (the data captures
+    // decode nothing either).
+    if (StreamInfo.w >= 1.5) {
+        if (rotP.b < 0.25) {
+            fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+            return;
+        }
+        uint w;
+        bool hit;
+        bool all;
+        probe_word(cellWorld, StreamInfo.z, sub, w, hit, all);
+        fragColor = vec4(hit ? 1.0 : 0.0, 0.0, 0.0, 1.0);
+        return;
+    }
+    if (rotP.b < 0.25) {
+        // v5.3.1 BLIND-CAMERA GATE: the camera channel is measured from sky
+        // pixels and its confidence decays once no sky is in view. Decoding
+        // with a stale pose would OR random hue noise into the persistent
+        // words and stamp garbage into the eraser mask. Pass the previous
+        // state through instead; the stream self-heals on the next sky view
+        // (confidence jumps back to 1 on the first valid row, frame-exact).
+        // The server-side spawn gate (stream.rs spawn_visible) stops feeding
+        // dots into sky-blind frustums, so there is nothing to decode here
+        // anyway — this gate keeps the buffers honest while conf decays.
+        fragColor = texelFetch(PrevSampler, px, 0);
+        return;
+    }
+
+    // v5.1: one plane per pass — the HI word decodes on the high layer,
+    // the LO word on the low layer (single carrier hue).
+    float planeY = StreamInfo.w < 0.5 ? GridInfo.z : GridInfo.w;
+
+    uint word;
+    bool anyHit;
+    bool allSlots;
+    probe_word(cellWorld, planeY, sub, word, anyHit, allSlots);
 
     vec4 prev = texelFetch(PrevSampler, px, 0);
     uint prevByte = uint(prev.r * 255.0 + 0.5);
-    uint outByte = anyHit ? (prevByte | (word >> 8)) : prevByte;
+    bool reset = texelFetch(ResetSampler, px, 0).r > 0.5;
+    uint fresh = word >> 8;
+    uint outByte = prevByte;
+    if (anyHit) {
+        // v6.2 EDIT PROTOCOL: after a reset electron, a COMPLETE fresh
+        // decode REPLACES the OR-merged word (an edit must be able to
+        // lose bits — a refresh cannot, that is what OR is for). Partial
+        // decodes keep the legacy OR self-heal.
+        outByte = (reset && allSlots) ? fresh : (prevByte | fresh);
+    }
     float mark = anyHit ? 1.0 : prev.a;
-    // .b = the FRESH word (this frame, not OR-merged) for the eraser mask.
+    // .b = the FRESH word (this frame, not merged) for the eraser mask.
     fragColor = vec4(
         float(outByte) / 255.0,
         anyHit ? 1.0 : 0.0,
-        float(word >> 8) / 255.0,
+        float(fresh) / 255.0,
         mark
     );
 }

@@ -6,8 +6,8 @@
 // renderer.
 //
 // For every pixel that shows sky (device depth ~ 0) we march a view ray
-// against the streamed heightfield. There is NO atlas in the resource pack:
-// the heightfield lives in two persistent post-chain target pairs
+// against the streamed heightfield. The resource pack carries ZERO world
+// data: the heightfield lives in two persistent post-chain target pairs
 // (clod_h_a/b heights, clod_c_a/b colors, 256x256, 1 px = 1 cell) that the
 // earlier capture passes of this very chain fill every frame by decoding the
 // dust-particle sky-grid (see assets/glsl/capture.fsh). The data arrives as
@@ -52,8 +52,8 @@ layout(std140) uniform ClodGrid {
 };
 
 // x = region blocks, y = cell size, z = sea level, w = max terrain height
-layout(std140) uniform ClodAtlas {
-    vec4 AtlasInfo;
+layout(std140) uniform ClodRegion {
+    vec4 RegionInfo;
 };
 
 // x = lod near (blocks), y = max terrain height, z = sea level, w = min confidence
@@ -154,7 +154,7 @@ float smooth_w2(float t) {
 // for "no data" (void, never decoded). Water cells stream their real
 // surface height; the water FLAG lives in the color word (idx 216).
 float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
-    float cell = AtlasInfo.y;             // blocks per cell
+    float cell = RegionInfo.y;             // blocks per cell
     ivec2 celli = ivec2(floor((xz - GridInfo.xy) / cell)); // 0..255
     ok = false;
     water = false;
@@ -388,10 +388,10 @@ void main() {
 
     vec3 cam = vec3(CameraBlockPos) + CameraOffset;
 
-    float region = AtlasInfo.x;
-    float cell = AtlasInfo.y;
-    float sea = AtlasInfo.z;
-    float maxY = AtlasInfo.w;
+    float region = RegionInfo.x;
+    float cell = RegionInfo.y;
+    float sea = RegionInfo.z;
+    float maxY = RegionInfo.w;
     float near = LodParams.x;
 
     // The march spans two regions in every direction (the 2x2 slot grid);

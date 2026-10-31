@@ -4,8 +4,9 @@
 //! data: LOD cells are painted with the REAL surface colors of the world
 //! (vanilla map-style block colors, biome-tinted grass/foliage/water), so the
 //! distant terrain reads as Minecraft terrain instead of a flat two-tone
-//! gradient. Runs once per scanned atlas cell on the main thread; the result
-//! is baked into the static pack (`atlas_col.png`) — zero runtime cost.
+//! gradient. Runs once per sampled cell at scan time; the result rides the
+//! bit-stream as a 6x6x6 RGB lattice index on the LO dust plane — the pack
+//! itself carries zero colors, zero textures.
 
 /// Vanilla-ish grass tint per biome (grass top / foliage base multiply).
 fn grass_tint(biome: &str) -> [u8; 3] {
@@ -66,7 +67,7 @@ fn mul(base: [u8; 3], tint: [u8; 3]) -> [u8; 3] {
     ]
 }
 
-/// Final surface color for one atlas cell.
+/// Final surface color for one scanned LOD cell.
 ///
 /// `material` is the Bukkit `Material.name()` of the top block, `biome` the
 /// Bukkit `Biome.name()` of the column. Unknown names fall through keyword

@@ -106,6 +106,8 @@ pub fn build(cfg: &Config) -> Pack {
             "__SUB__",
             fmt_f(cfg.cell_size as f32 / crate::stream::SUB_PER_CELL as f32),
         ),
+        // v6.2 edit-reset plane (must match src/stream.rs exactly).
+        ("__RESET_Y__", fmt_f(crate::stream::RESET_Y as f32)),
     ];
 
     let lod_terrain_json = substitute(lod_terrain_tpl, &map);
@@ -246,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn chain_has_stream_passes_and_no_atlas_inputs() {
+    fn chain_has_stream_passes_and_no_texture_inputs() {
         let cfg = Config::parse("");
         let pack = build(&cfg);
         let entries = zip_entries(&pack.zip);
@@ -274,6 +276,21 @@ mod tests {
         assert!(
             !chain.contains("ScanBox"),
             "the static scan box is gone (sky-grid)"
+        );
+        // v6.2: the last "atlas" is gone — the marcher's UBO is ClodRegion.
+        assert!(
+            !chain.contains("ClodAtlas") && !chain.contains("AtlasInfo"),
+            "the atlas UBO must stay renamed (ClodRegion/RegionInfo)"
+        );
+        // v6.2 edit protocol: the reset pass flags edited cells for the
+        // frame, so it must run BEFORE the four data captures that read it.
+        let reset = chain.find("\"output\": \"clod_reset\"").unwrap();
+        let first_capture_read = chain
+            .find("\"target\": \"clod_reset\"")
+            .expect("data captures must read clod_reset");
+        assert!(
+            reset < first_capture_read,
+            "the reset pass must precede the data captures"
         );
         // v5.3.2 zero-residual: the mask must sit between the last capture
         // and the march, read BOTH capture rounds' fresh words plus the raw

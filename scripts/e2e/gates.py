@@ -2,11 +2,11 @@
 """E2E gate assertions for the c-LoD boot log (live-server job).
 
 Map-carrier streaming architecture (v5.0). Gates (all hard):
-  G1  the module injected pre-kernel          [c-LoD] booting: atlas ...
+  G1  the module injected pre-kernel          [c-LoD] booting: sky-grid disk ...
   G2  the runtime admitted it                 pipeline ready: 1 module hook(s)
   G3  the kernel came up and the loop started [c-LoD] kernel ready — starting engine loop
   G4  the Paper JNI surface resolved          [c-LoD] JNI bridge resolved: true
-  G5  the atlas world resolved                [c-LoD] atlas world: <name>
+  G5  the streaming world resolved             [c-LoD] streaming world: <name>
   G6  the BASE pack was finalized (rev 0)     [c-LoD] pack finalized (base rev 0): ...
   G7  streaming discipline: revisions are throttled and monotonic — every
       'pack rebuilt (stream rev N)' has N increasing by 1, and no rebuild

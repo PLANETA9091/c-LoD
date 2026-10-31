@@ -1,6 +1,6 @@
 //! Minimal ZIP (STORE method) writer + CRC-32, for the generated resource
-//! pack. Vanilla Minecraft accepts stored entries; atlas PNG is already
-//! compressed, so STORE keeps the writer dependency-free and fast.
+//! pack. Vanilla Minecraft accepts stored entries; the shaders and JSON
+//! chains are tiny, so STORE keeps the writer dependency-free and fast.
 
 pub fn crc32(data: &[u8]) -> u32 {
     // Slice-by-one table, computed once.

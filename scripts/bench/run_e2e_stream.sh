@@ -5,7 +5,7 @@
 #   0. server already booted + base pack finalized (boot_server.sh)
 #   1. HTTP baseline: /clod-pack.info shows revision 0
 #   2. client joins, accepts the FIRST pack (the only click of the run)
-#   3. base state shot: the atlas corners are unscanned -> no LOD there
+#   3. base state shot: the disk corners are unscanned -> no LOD there
 #   4. tp the player into the far corner -> chunks load -> player-centric
 #      scan fills the corner -> revision rebuilds -> pack re-pushed
 #   5. THE CRITICAL ASSERTION: the client re-downloads and applies the new
@@ -47,7 +47,7 @@ sleep 12
 shot "$SHOTS/s01_base_applied.png"
 grep -ci "resource pack" /tmp/client.log || true
 
-# 3. world state + BASE shot from the atlas center (corner still void).
+# 3. world state + BASE shot from the disk center (corner still void).
 # Wait out the spawn-region revisions first: the player keeps chunks loaded
 # around spawn, so rev 1..N fire here — the corner revision must be NEW.
 srv "gamerule doDaylightCycle false"

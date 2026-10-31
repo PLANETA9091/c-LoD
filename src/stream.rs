@@ -40,6 +40,16 @@
 //! versus the v5.3.3 constant lap, with edits still propagating in
 //! seconds. Passing NO views keeps the legacy full-disk lap (diagnostics,
 //! no-player self-heal).
+//!
+//! v6.2 LIVE EDITS: the client's buffers OR-merge decoded words, so a
+//! changed cell word can never LOSE bits on refresh — an edit must be
+//! REPLACED atomically. Every dirty stream therefore carries one extra
+//! RESET electron on a third sky plane (Y = RESET_Y, between the two
+//! data planes): the capture's reset pass flags that cell for the frame,
+//! and the data captures swap OR-merge for a direct write once the fresh
+//! word decodes complete (all four slots strobed). Partial decodes keep
+//! the legacy OR self-heal; a complete decode after a reset is idempotent
+//! while the reset electron lives out its particle lifetime.
 
 /// Sub-cell lattice: 4 positions per axis inside one cell.
 pub const SUB_PER_CELL: f64 = 4.0;
@@ -54,6 +64,13 @@ pub const PLANE_HI_Y: f64 = LAYER_Y[1];
 pub const PLANE_LO_Y: f64 = LAYER_Y[0];
 /// Water color index in the 6x6x6 lattice.
 pub const COLOR_WATER: u16 = 216;
+
+/// v6.2 edit-reset plane: midway between the two data planes. Same 3D
+/// eye distance as the average data dot (the spawn gate and the decode
+/// band treat it identically), but its dots project away from every data
+/// probe point — the data captures never see them and the dedicated
+/// reset pass never sees data dots. Only DIRTY streams spawn here.
+pub const RESET_Y: f64 = 100.0;
 
 /// v5.3 proximity culling: particles never spawn within this radius (blocks,
 /// 3D, eye-centered) of a player. MUST stay well below the capture's decode
@@ -244,6 +261,16 @@ pub struct Streamer {
     pub dirty_streams: u64,
     /// Zone-sweep cells streamed since boot (diagnostics).
     pub zone_cells: u64,
+    /// v6.2 live rescan: engine tick each cell was last SAMPLED at
+    /// (0 = never). The rescan wave re-samples stale cells of loaded
+    /// chunks so post-boot edits reach the LOD without a relog.
+    last_scan: Vec<u64>,
+    /// v6.2 rescan wave cursor (row-major, wraps like `cursor`).
+    rescan_cursor: u64,
+    /// v6.2 diagnostics: cells re-sampled by the rescan wave / edits it
+    /// caught (encoded words changed).
+    pub rescan_cells: u64,
+    pub rescan_edits: u64,
 }
 
 impl Streamer {
@@ -269,7 +296,52 @@ impl Streamer {
             dirty_pending: 0,
             dirty_streams: 0,
             zone_cells: 0,
+            last_scan: vec![0; n],
+            rescan_cursor: 0,
+            rescan_cells: 0,
+            rescan_edits: 0,
         }
+    }
+
+    /// v6.2: is this cell due for a live rescan? Never-sampled cells are
+    /// always due (they include seedgen provisional fills, which the wave
+    /// upgrades the moment their chunk loads); `period == 0` disables the
+    /// wave entirely (the v6.1 paint-once behavior).
+    pub fn scan_due(&self, cx: u32, cz: u32, now: u64, period: u64) -> bool {
+        if period == 0 {
+            return false;
+        }
+        let side = self.side as usize;
+        match self.last_scan.get(cz as usize * side + cx as usize) {
+            Some(&t) => t == 0 || now.saturating_sub(t) >= period,
+            None => false,
+        }
+    }
+
+    /// v6.2: record that this cell was sampled (paint or rescan) at `now`.
+    pub fn mark_scanned(&mut self, cx: u32, cz: u32, now: u64) {
+        let side = self.side as usize;
+        if cx as usize >= side || cz as usize >= side {
+            return;
+        }
+        if let Some(t) = self.last_scan.get_mut(cz as usize * side + cx as usize) {
+            *t = now;
+        }
+    }
+
+    /// v6.2 diagnostics for the rescan wave: cells sampled / edits caught.
+    pub fn rescan_count(&mut self, cells: u64, edits: u64) {
+        self.rescan_cells += cells;
+        self.rescan_edits += edits;
+    }
+
+    /// v6.2 rescan wave cursor: the next row-major cell offset to consider.
+    /// Advancing is unconditional (fresh cells skip for free), so the wave
+    /// covers the whole disk evenly regardless of the due-gate.
+    pub fn rescan_next(&mut self, total: u64) -> u64 {
+        let t = self.rescan_cursor % total;
+        self.rescan_cursor += 1;
+        t
     }
 
     pub fn cells(&self) -> u64 {
@@ -397,8 +469,9 @@ impl Streamer {
         self.view_cache = Some((eye, look, list.into_iter().map(|(_, i)| i).collect()));
     }
 
-    /// Spawn the particle batch of one cell (4 HI-plane + 4 LO-plane spawns).
-    fn push_cell_spawns(&mut self, idx: u32, sub: f64, now: u64) {
+    /// Spawn the particle batch of one cell (4 HI-plane + 4 LO-plane
+    /// spawns; `edit` adds the v6.2 RESET electron for dirty streams).
+    fn push_cell_spawns(&mut self, idx: u32, sub: f64, now: u64, edit: bool) {
         let side = self.side as usize;
         let cx = (idx as usize % side) as u32;
         let cz = (idx as usize / side) as u32;
@@ -417,6 +490,17 @@ impl Streamer {
         // so the capture pass tells words apart by plane height.
         Self::word_spawns(hword, cxw, czw, sub, LAYER_Y[1], &mut self.batch);
         Self::word_spawns(cword, cxw, czw, sub, LAYER_Y[0], &mut self.batch);
+        if edit {
+            // v6.2 RESET electron: one dot at the (qx=0, qz=0) probe
+            // position on the reset plane. The client's reset pass flags
+            // the cell for the frame and the data captures replace the
+            // OR-merged word once the fresh decode completes.
+            self.batch.push(Spawn {
+                x: cxw - 1.5 * sub,
+                y: RESET_Y,
+                z: czw - 1.5 * sub,
+            });
+        }
         let idx = idx as usize;
         self.last_stream[idx] = now;
         if self.dirty[idx] {
@@ -506,7 +590,7 @@ impl Streamer {
                     continue; // already streamed via the cone/sweep phases
                 }
                 if self.decodable_by_any(idx, views) {
-                    self.push_cell_spawns(idx_u32, sub, now);
+                    self.push_cell_spawns(idx_u32, sub, now, true);
                     self.dirty_streams += 1;
                 } else {
                     // Nobody can decode it now — keep it queued for later.
@@ -545,7 +629,7 @@ impl Streamer {
                 if now.wrapping_sub(self.last_stream[idx]) < VIEW_REFRESH_TICKS {
                     continue; // fresh enough — the client still holds it
                 }
-                self.push_cell_spawns(idx_u32, sub, now);
+                self.push_cell_spawns(idx_u32, sub, now, false);
                 self.cone_cells += 1;
             }
         }
@@ -578,7 +662,7 @@ impl Streamer {
             } else if self.last_stream[idx] == now {
                 continue; // already streamed this tick by the cone phase
             }
-            self.push_cell_spawns(t as u32, sub, now);
+            self.push_cell_spawns(t as u32, sub, now, false);
         }
         if self.cursor >= total {
             self.cursor %= total;
@@ -652,6 +736,57 @@ mod tests {
         let c = cell(64, false, [0, 0, 0]);
         let (h, _) = Streamer::encode_words(&c);
         assert_eq!(h >> 8, 128);
+    }
+
+    #[test]
+    fn rescan_due_and_mark_semantics() {
+        let mut s = Streamer::new(0.0, 0.0, 64, 4);
+        s.set_cell(1, 1, cell(70, false, [1, 2, 3]));
+        // period 0 = the wave is off entirely (v6.1 paint-once behavior).
+        assert!(!s.scan_due(1, 1, 100, 0));
+        // Never-sampled cells are due immediately (seedgen provisional
+        // fills included — the wave upgrades them once their chunk loads).
+        assert!(s.scan_due(1, 1, 100, 40));
+        s.mark_scanned(1, 1, 100);
+        assert!(!s.scan_due(1, 1, 100, 40));
+        assert!(!s.scan_due(1, 1, 139, 40), "fresh cell is not due");
+        assert!(s.scan_due(1, 1, 140, 40), "age >= period is due");
+        // Out-of-disk coords never panic and never report due.
+        assert!(!s.scan_due(999, 1, 100, 40));
+    }
+
+    #[test]
+    fn dirty_edit_stream_carries_reset_electron() {
+        let mut s = Streamer::new(0.0, 0.0, 64, 4);
+        s.set_cell(2, 2, cell(70, false, [1, 2, 3]));
+        // The view decodes cell (2,2): both plane probes sit in the band
+        // and inside the frustum cone (see decodable_by_any geometry).
+        let views = [ViewHint {
+            eye: [10.0, 100.0, 60.0],
+            look: [0.0, 0.0, -1.0],
+            now: 10,
+        }];
+        // Refresh streams (paint/cone/zone) carry NO reset electron.
+        let b: Vec<Spawn> = s.tick_batch(64, &views).to_vec();
+        assert!(!b.is_empty());
+        assert!(
+            b.iter().all(|p| p.y != RESET_Y),
+            "refresh streams must not spawn reset electrons"
+        );
+        // A REAL edit (words changed): the dirty phase must stream the
+        // cell with exactly ONE reset electron on the reset plane.
+        s.set_cell(2, 2, cell(80, false, [9, 9, 9]));
+        assert_eq!(s.dirty_pending, 1);
+        let b: Vec<Spawn> = s.tick_batch(64, &views).to_vec();
+        let resets: Vec<&Spawn> = b.iter().filter(|p| p.y == RESET_Y).collect();
+        assert_eq!(resets.len(), 1, "an edit streams exactly one reset dot");
+        assert_eq!(s.dirty_pending, 0, "the edit was streamed");
+        // The reset dot sits at the (qx=0, qz=0) probe position: one sub
+        // quantum up-left from the cell center.
+        let r = resets[0];
+        let (wx, wz) = s.cell_origin(2, 2);
+        assert!((r.x - (wx + 2.0 - 1.5)).abs() < 1e-9);
+        assert!((r.z - (wz + 2.0 - 1.5)).abs() < 1e-9);
     }
 
     #[test]

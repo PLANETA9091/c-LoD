@@ -4,7 +4,7 @@
 //! to `cplugin_init`). Every knob has a working default, so an empty options
 //! string produces a functional module.
 //!
-//! v5.0: the atlas/window/revision knobs are GONE — the pack is a static
+//! v5.0: the window/revision knobs are GONE — the pack is a static
 //! shader-only artifact and the world data streams as dust particles over
 //! the sky-grid planes. What remains is the streaming geometry + pacing.
 
@@ -31,6 +31,13 @@ pub struct Config {
     pub cell_size: i32,
     /// Heightmap cells scanned per engine tick (main-thread JNI budget).
     pub scan_budget: u32,
+    /// v6.2 LIVE EDITS: engine ticks between rescan waves over the streamed
+    /// disk. The wave re-samples stale cells of LOADED chunks (a cheap
+    /// height probe; full color sample only when the surface moved), so
+    /// blocks placed after server start reach the LOD without a relog.
+    /// 0 = off (the v6.1 paint-once behavior). Full-disk wave cost at the
+    /// default: ~1638 probes/tick worst case, only inside loaded chunks.
+    pub rescan_ticks: u64,
     /// v5.5 frontier: NEW chunk-gen requests admitted per engine tick. The
     /// old fixed 4 starved the chunk system's worker pool whenever a full
     /// ring's worth of chunks wanted generating at once.
@@ -110,6 +117,7 @@ impl Default for Config {
             region_blocks: 512,
             cell_size: 2,
             scan_budget: 4096,
+            rescan_ticks: 40,
             gen_budget: 16,
             gen_wish: 512,
             particles_per_tick: 2048,
@@ -179,6 +187,11 @@ impl Config {
         }
         if let Some(v) = get("scan_budget").and_then(|v| v.parse::<u32>().ok()) {
             cfg.scan_budget = v.clamp(64, 65536);
+        }
+        if let Some(v) = get("rescan_ticks").and_then(|v| v.parse::<u64>().ok()) {
+            // 0 keeps the wave off; anything else is at least 5 ticks and
+            // at most 2 minutes (a slower wave just delays edit detection).
+            cfg.rescan_ticks = if v == 0 { 0 } else { v.clamp(5, 2400) };
         }
         if let Some(v) = get("gen_budget").and_then(|v| v.parse::<u32>().ok()) {
             cfg.gen_budget = v.clamp(1, 256);
@@ -370,6 +383,18 @@ mod tests {
         assert_eq!(c.region_blocks, 512);
         let c = Config::parse("region_blocks=1024;cell_size=3");
         assert_eq!(c.cell_size, 2, "non-pow2 cell rejected");
+    }
+
+    #[test]
+    fn rescan_ticks_knob() {
+        let c = Config::parse("");
+        assert_eq!(c.rescan_ticks, 40, "v6.2 live-edit wave default");
+        let c = Config::parse("rescan_ticks=0");
+        assert_eq!(c.rescan_ticks, 0, "0 disables the wave (v6.1 behavior)");
+        let c = Config::parse("rescan_ticks=1");
+        assert_eq!(c.rescan_ticks, 5, "clamp to a sane minimum");
+        let c = Config::parse("rescan_ticks=99999");
+        assert_eq!(c.rescan_ticks, 2400);
     }
 
     #[test]

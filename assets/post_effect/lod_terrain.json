@@ -7,6 +7,7 @@
         "clod_h_b": { "width": 256, "height": 256, "persistent": true },
         "clod_c_a": { "width": 256, "height": 256, "persistent": true },
         "clod_c_b": { "width": 256, "height": 256, "persistent": true },
+        "clod_reset": {},
         "clod_mask": {},
         "clod_swap": {}
     },
@@ -46,6 +47,26 @@
                 { "sampler_name": "Prev", "target": "clod_h_b" },
                 { "sampler_name": "Rot", "target": "clod_rot_a" }
             ],
+            "output": "clod_reset",
+            "uniforms": {
+                "ClodGrid": [
+                    { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __PLANE_HI_Y__, __PLANE_LO_Y__] }
+                ],
+                "ClodStream": [
+                    { "name": "StreamInfo", "type": "vec4", "value": [__CELL__, __SUB__, __RESET_Y__, 2.0] }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/capture",
+            "inputs": [
+                { "sampler_name": "In", "target": "minecraft:main" },
+                { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
+                { "sampler_name": "Prev", "target": "clod_h_b" },
+                { "sampler_name": "Rot", "target": "clod_rot_a" },
+                { "sampler_name": "Reset", "target": "clod_reset" }
+            ],
             "output": "clod_h_a",
             "uniforms": {
                 "ClodGrid": [
@@ -63,7 +84,8 @@
                 { "sampler_name": "In", "target": "minecraft:main" },
                 { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
                 { "sampler_name": "Prev", "target": "clod_c_b" },
-                { "sampler_name": "Rot", "target": "clod_rot_a" }
+                { "sampler_name": "Rot", "target": "clod_rot_a" },
+                { "sampler_name": "Reset", "target": "clod_reset" }
             ],
             "output": "clod_c_a",
             "uniforms": {
@@ -82,7 +104,8 @@
                 { "sampler_name": "In", "target": "minecraft:main" },
                 { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
                 { "sampler_name": "Prev", "target": "clod_h_a" },
-                { "sampler_name": "Rot", "target": "clod_rot_a" }
+                { "sampler_name": "Rot", "target": "clod_rot_a" },
+                { "sampler_name": "Reset", "target": "clod_reset" }
             ],
             "output": "clod_h_b",
             "uniforms": {
@@ -101,7 +124,8 @@
                 { "sampler_name": "In", "target": "minecraft:main" },
                 { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
                 { "sampler_name": "Prev", "target": "clod_c_a" },
-                { "sampler_name": "Rot", "target": "clod_rot_a" }
+                { "sampler_name": "Rot", "target": "clod_rot_a" },
+                { "sampler_name": "Reset", "target": "clod_reset" }
             ],
             "output": "clod_c_b",
             "uniforms": {
@@ -150,8 +174,8 @@
                 "ClodGrid": [
                     { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __PLANE_HI_Y__, __PLANE_LO_Y__] }
                 ],
-                "ClodAtlas": [
-                    { "name": "AtlasInfo", "type": "vec4", "value": [__REGION_BLOCKS__, __CELL__, __SEA_LEVEL__, __MAX_HEIGHT__] }
+                "ClodRegion": [
+                    { "name": "RegionInfo", "type": "vec4", "value": [__REGION_BLOCKS__, __CELL__, __SEA_LEVEL__, __MAX_HEIGHT__] }
                 ],
                 "ClodParams": [
                     { "name": "LodParams", "type": "vec4", "value": [__LOD_NEAR__, __MAX_HEIGHT__, __SEA_LEVEL__, __MIN_CONF__] }

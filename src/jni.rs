@@ -1023,8 +1023,9 @@ pub fn is_chunk_loaded(env: Env, world: jobject, cx: i32, cz: i32) -> Option<boo
     Some(v)
 }
 
-/// Diagnostic: direct getHighestBlockYAt probe.
-#[allow(dead_code)]
+/// Diagnostic: direct getHighestBlockYAt probe. v6.2: the rescan wave's
+/// cheap first probe — one JNI call decides whether the surface moved and
+/// only then a full sample_surface pays for material/biome lookups.
 pub fn probe_height(env: Env, world: jobject, x: i32, z: i32) -> Option<i32> {
     let wid = world_ids(env, world)?;
     let y = env.call_int_method(world, wid.m_highest_block, &[ji(x), ji(z)]);
@@ -1059,7 +1060,7 @@ pub fn sample_height(env: Env, world: jobject, x: i32, z: i32) -> Option<(i32, b
     // Only sample loaded chunks: getHighestBlockYAt would otherwise force
     // synchronous chunk generation and stall the main thread for minutes.
     // Unloaded cells stay invalid and get picked up by later sweeps (the
-    // scan task wraps around the atlas) once players load those chunks.
+    // scan task wraps around the disk) once players load those chunks.
     let loaded = env.call_boolean_method(world, wid.m_chunk_loaded, &[ji(x >> 4), ji(z >> 4)]);
     if env.exception_check() {
         env.exception_clear();
