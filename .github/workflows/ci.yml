@@ -189,18 +189,25 @@ jobs:
           cp paper.jar dist/versions/paper-26.3.jar
       - name: Build c-LoD host plugin (ClodEdits needs one enabled plugin)
         run: |
-          # v6.4.6.1: paper.jar is a paperclip BOOTSTRAP — 565 entries, zero
-          # API classes (javac -cp paper.jar failed: cannot find symbol
-          # JavaPlugin). Compile against the real paper-api build that
-          # matches the server build (metadata's last -stable line).
+          # v6.4.6.2: paper.jar is a paperclip BOOTSTRAP (no API classes) and
+          # paper-api alone is not enough either — JavaPlugin's hierarchy
+          # pulls adventure (Plugin -> Keyed -> Namespaced), javac dies with
+          # 'cannot access Namespaced'. Verified locally with temurin 25:
+          # paper-api + adventure-api + adventure-key (all 26.3.build.235 /
+          # 5.2.0) compile ClodHost.class cleanly.
           APIV=$(curl -s https://repo.papermc.io/repository/maven-public/io/papermc/paper/paper-api/maven-metadata.xml \
             | grep -o "26\.3\.build\.[0-9]*-stable" | tail -1)
           echo "paper-api: $APIV"
-          curl -sL -o paper-api.jar \
-            "https://repo.papermc.io/repository/maven-public/io/papermc/paper/paper-api/${APIV}/paper-api-${APIV}.jar"
-          test -s paper-api.jar || { echo "paper-api download failed"; exit 1; }
+          B="https://repo.papermc.io/repository/maven-public"
+          curl -sL -o paper-api.jar "$B/io/papermc/paper/paper-api/${APIV}/paper-api-${APIV}.jar"
+          curl -sL -o adventure-api.jar "$B/net/kyori/adventure-api/5.2.0/adventure-api-5.2.0.jar"
+          curl -sL -o adventure-key.jar "$B/net/kyori/adventure-key/5.2.0/adventure-key-5.2.0.jar"
+          for j in paper-api adventure-api adventure-key; do
+            test -s "$j.jar" || { echo "$j.jar download failed"; exit 1; }
+          done
           mkdir -p dist/plugins hostout
-          javac -cp paper-api.jar -d hostout scripts/java/host/ClodHost.java \
+          javac -cp paper-api.jar:adventure-api.jar:adventure-key.jar \
+            -d hostout scripts/java/host/ClodHost.java \
             || { echo "javac failed"; exit 1; }
           jar cf dist/plugins/clodhost.jar -C hostout clod -C scripts/java/host plugin.yml
       - name: Assemble dist root
@@ -388,18 +395,25 @@ jobs:
       # to be enabled.
       - name: Build c-LoD host plugin (ClodEdits needs one enabled plugin)
         run: |
-          # v6.4.6.1: paper.jar is a paperclip BOOTSTRAP — 565 entries, zero
-          # API classes (javac -cp paper.jar failed: cannot find symbol
-          # JavaPlugin). Compile against the real paper-api build that
-          # matches the server build (metadata's last -stable line).
+          # v6.4.6.2: paper.jar is a paperclip BOOTSTRAP (no API classes) and
+          # paper-api alone is not enough either — JavaPlugin's hierarchy
+          # pulls adventure (Plugin -> Keyed -> Namespaced), javac dies with
+          # 'cannot access Namespaced'. Verified locally with temurin 25:
+          # paper-api + adventure-api + adventure-key (all 26.3.build.235 /
+          # 5.2.0) compile ClodHost.class cleanly.
           APIV=$(curl -s https://repo.papermc.io/repository/maven-public/io/papermc/paper/paper-api/maven-metadata.xml \
             | grep -o "26\.3\.build\.[0-9]*-stable" | tail -1)
           echo "paper-api: $APIV"
-          curl -sL -o paper-api.jar \
-            "https://repo.papermc.io/repository/maven-public/io/papermc/paper/paper-api/${APIV}/paper-api-${APIV}.jar"
-          test -s paper-api.jar || { echo "paper-api download failed"; exit 1; }
+          B="https://repo.papermc.io/repository/maven-public"
+          curl -sL -o paper-api.jar "$B/io/papermc/paper/paper-api/${APIV}/paper-api-${APIV}.jar"
+          curl -sL -o adventure-api.jar "$B/net/kyori/adventure-api/5.2.0/adventure-api-5.2.0.jar"
+          curl -sL -o adventure-key.jar "$B/net/kyori/adventure-key/5.2.0/adventure-key-5.2.0.jar"
+          for j in paper-api adventure-api adventure-key; do
+            test -s "$j.jar" || { echo "$j.jar download failed"; exit 1; }
+          done
           mkdir -p dist/plugins hostout
-          javac -cp paper-api.jar -d hostout scripts/java/host/ClodHost.java \
+          javac -cp paper-api.jar:adventure-api.jar:adventure-key.jar \
+            -d hostout scripts/java/host/ClodHost.java \
             || { echo "javac failed"; exit 1; }
           jar cf dist/plugins/clodhost.jar -C hostout clod -C scripts/java/host plugin.yml
       - name: Assemble dist root (fixed seed; view-distance 4 keeps the marker zone pure-LOD)
