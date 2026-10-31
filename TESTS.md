@@ -5,18 +5,19 @@ CI (`.github/workflows/ci.yml`) runs layers 1–4 on every push; the `e2e-live`
 job additionally runs layer 5 on `master`. Layers 6–7 are the local
 real-client harness (a genuine vanilla 26.3 client under Xvfb — CI has no GPU).
 
-## 1. Rust unit tests — `cargo test` (69 tests)
+## 1. Rust unit tests — `cargo test` (72 tests)
 
 | module | count | what they pin |
 |--------|------:|---------------|
 | `src/stream.rs` | 18 | 16-bit word packing (4 particles/word, X-sub = data bits, Z-sub = slot), HI/LO plane layout, delta-zone scheduling, cone admission, lap coverage; v6.2 rescan due/mark semantics + the dirty edit stream carrying exactly ONE reset electron at the (qx=0,qz=0) probe position |
 | `src/engine.rs` | 8 | `wish_admit` ledger (dup reject, backlog cap, per-tick budget, v5.5 window parameter), frontier math |
 | `src/seedgen.rs` | 12 | SeedQueue dedup/order/close + v5.9 `pop_batch` drain; bit-contract vs `ClodSeedgen.pack()` (height/liquid/ordinals/valid bit, bit budget); v5.9 `chunkBatch` payload parsing (header, statuses, zero-filled failed segments, corruption rejects) |
-| `src/config.rs` | 10 | `CLOD_OPTS` parsing + clamps (gen_budget 1..256, gen_wish 32..4096, particles_per_tick, disk geometry, native_threads/seedgen_batch, native_dust/native_trees, rescan_ticks 0/off + 5..2400) |
+| `src/config.rs` | 11 | `CLOD_OPTS` parsing + clamps (gen_budget 1..256, gen_wish 32..4096, particles_per_tick, disk geometry, native_threads/seedgen_batch, native_dust/native_trees/native_edits, rescan_ticks 0/off + 5..2400) |
 | `src/packgen.rs` | 5 | the pack builds byte-deterministically, 13 entries, ZERO textures/PNGs, capture chain present; v6.2: reset pass precedes the data captures, ClodAtlas/AtlasInfo stay renamed to ClodRegion/RegionInfo |
 | `src/palette.rs` | 4 | surface → RGB mapping incl. water/foliage tints |
 | `src/sha1.rs` | 4 | SHA-1 correctness (RFC vectors + pack-sized inputs) |
 | `src/http.rs` | 2 | embedded pack server routes/metadata |
+| `src/edits.rs` | 2 | v6.3 event push: ring unpack mirrors `ClodEdits.push` bit-for-bit (26-bit two's complement x/z, negatives, edges); ring drain segments (wrap, exact-capacity, masked tail) |
 | `src/zipw.rs` | 3 | zip writer: entry order, stored sizes |
 
 ```bash
@@ -38,7 +39,13 @@ bash scripts/java/build.sh          # javac --release 17: the embedded seedgen
 ## 2b. SEEDGEN helper preflight — `scripts/java/preflight/run.sh`
 
 The v5.8–v6.1 Java helper against a mock `net.minecraft` hierarchy — no Paper
-needed. 61 checks per run × two JVMs: `chunk()` vs `chunkBatch()` bit-parity,
+needed. 61 terrain checks per run — plus, since v6.3, a 31-check `PreflightEdits`
+run (single JVM) for the event-push helper: the registration ladder (Bukkit
+missing → -1, no enabled plugin → 0 pending, first enabled plugin wins), the
+13-handler surface, the world identity guard, the 26-bit two's-complement
+ring packing with negative coordinates, monotonic head across a full wrap,
+and the multi-block payloads (explosions, pistons, structure growth, liquid
+from-to). Then the original v5.8–v6.1 run: 61 checks per run × two JVMs: `chunk()` vs `chunkBatch()` bit-parity,
 batch structure (statuses, zero-filled throwing segments, `n_ok`), `tabVer`
 monotonicity, buffer/NoiseChunk close discipline, void semantics — the
 affine-stride fast path vs a non-affine (Fisher–Yates) layout falling back,

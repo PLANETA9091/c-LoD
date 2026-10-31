@@ -547,7 +547,7 @@ fn attach_daemon() -> Option<JniEnv> {
 // ---------------------------------------------------------------------------
 
 /// The stashed app loader as a jobject (Class.forName's third arg).
-fn loader_obj() -> jobject {
+pub(crate) fn loader_obj() -> jobject {
     *LOADER.lock().unwrap() as jobject
 }
 
@@ -1538,6 +1538,37 @@ unsafe fn define_helper(
     clear_if_pending(env);
     let cls = jobj(cls_o)?;
     let cls = env.new_global_ref(cls) as jobject;
+    // v6.3 FIX (latent v6.1 bug): the trees pass instantiates the nested
+    // GenModel (the InvocationHandler behind the WorldGenLevel proxy), so
+    // the nested class must be defined through the SAME loader — the outer
+    // defineClass alone made every `new GenModel` throw
+    // NoClassDefFoundError at runtime, which runFeatures' catch swallowed
+    // and every chunk silently degraded to terrain-only. (The preflight
+    // never caught it: its classpath directory holds the whole javac
+    // output, nested class included.)
+    const HELPER_GENMODEL: &[u8] = include_bytes!("../java/ClodSeedgen$GenModel.class");
+    let name_gm = env.new_string_utf("clod.ClodSeedgen$GenModel")?;
+    let arr_gm = env.new_byte_array(HELPER_GENMODEL.len() as i32)?;
+    let bytes_gm: &[i8] =
+        std::slice::from_raw_parts(HELPER_GENMODEL.as_ptr() as *const i8, HELPER_GENMODEL.len());
+    env.set_byte_array_region(arr_gm, 0, HELPER_GENMODEL.len() as i32, bytes_gm);
+    clear_if_pending(env);
+    let cls_gm_o = env.call_object_method(
+        loader,
+        m_define,
+        &[
+            jv(name_gm),
+            jv(arr_gm as jobject),
+            ji(0),
+            ji(HELPER_GENMODEL.len() as i32),
+        ],
+    );
+    clear_if_pending(env);
+    let nested_ok = jobj(cls_gm_o).is_some();
+    if !nested_ok {
+        eprintln!("[c-LoD] seedgen helper: nested GenModel define failed — trees disabled");
+    }
+    let feats = feats && nested_ok;
     let m_init = sgstep!(
         "m_helper_init",
         env.get_static_method_id(

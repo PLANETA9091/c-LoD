@@ -20,6 +20,7 @@
 //!      tiers) — the only dynamic part, pure `/posteffect`.
 
 mod config;
+mod edits;
 mod engine;
 mod http;
 mod jni;
@@ -74,7 +75,7 @@ pub unsafe extern "C" fn cplugin_init(
         cfg.region_blocks, cfg.cell_size, cfg.http_port, cfg.fov, cfg.particles_per_tick
     ));
     log_info(
-        "c-LoD v6.0: NATIVE DUST WIRE — shader-only pack pushed once, world data rides cached dust packets in one bundle per player",
+        "c-LoD v6.3: EVENT PUSH — block events feed the dirty phase within one engine tick; shader-only pack, one bundle per player",
     );
 
     let st = engine::State::new(cfg);

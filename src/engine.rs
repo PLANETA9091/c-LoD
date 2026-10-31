@@ -70,6 +70,8 @@ pub struct State {
     /// delta between native noise+surface and the full generated chunk —
     /// trees, carvers, structures).
     pub prov_diffs: AtomicU64,
+    /// v6.3 EVENT PUSH: the Java listener ring (main thread only) + state.
+    pub edits: crate::edits::Edits,
     /// v6.0 NATIVE DUST WIRE: the shared cache of prebuilt particle packets
     /// (one object per unique spawn position, global refs, LRU-bounded).
     /// Main-thread-only content behind a Mutex to match the State style.
@@ -137,6 +139,7 @@ impl State {
             seedgen: Mutex::new(None),
             prov_upgraded: AtomicU64::new(0),
             prov_diffs: AtomicU64::new(0),
+            edits: crate::edits::Edits::new(),
             pkt_cache: Mutex::new(crate::wire::PacketCache::new()),
         })
     }
@@ -158,6 +161,10 @@ pub fn tick(state: &Arc<State>, env: Env) {
     ensure_boot(state, env);
     arm_from_config(state);
     stream_scan(state, env);
+    // v6.3 EVENT PUSH: block events land in the ring the moment they fire;
+    // drain + re-sample BEFORE the stream step so the edit's dirty cell
+    // rides this very tick's batch (with its reset electron).
+    crate::edits::step(state, env);
     poll_forced(state, env);
     stream_step(state, env);
     manage_players(state, env);
@@ -497,7 +504,7 @@ fn rescan_wave(
 /// passes `false` — a rescan must never queue generation (it only visits
 /// loaded chunks anyway; a mid-tick unload must stay silent).
 #[allow(clippy::too_many_arguments)] // disk coords + world coords + gate
-fn scan_cell(
+pub(crate) fn scan_cell(
     state: &Arc<State>,
     env: Env,
     world: jvmti_bindings::jni::jobject,
@@ -677,7 +684,7 @@ fn poll_forced(state: &Arc<State>, env: Env) {
 }
 
 /// World block coords -> disk cell coords (None when outside the disk).
-fn world_to_cell(s: &Streamer, wx: i32, wz: i32) -> Option<(u32, u32)> {
+pub(crate) fn world_to_cell(s: &Streamer, wx: i32, wz: i32) -> Option<(u32, u32)> {
     let cell = s.cell_size;
     let side = s.side as i32;
     let cx = (((wx as f64 - s.origin_x) / cell as f64).floor() as i32).clamp(0, side - 1);
@@ -1004,12 +1011,26 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
         "legacy"
     };
     let cache_stat = state.pkt_cache.lock().unwrap().stat();
+    // v6.3 edit-push diagnostics: channel state + drained pushes/cells/edits.
+    let (e_state, e_pushes, e_cells, e_edits, e_drops) = (
+        state.edits.state(),
+        state.edits.pushes.load(Ordering::Relaxed),
+        state.edits.cells.load(Ordering::Relaxed),
+        state.edits.edits.load(Ordering::Relaxed),
+        state.edits.drops.load(Ordering::Relaxed),
+    );
+    let e_char = match e_state {
+        crate::edits::EV_LIVE => "+",
+        crate::edits::EV_DEFINING => "~",
+        crate::edits::EV_FAILED => "-",
+        _ => ".",
+    };
     // v5.2.2: /clod-pack.info serves LIVE scan counters (it used to
     // report the boot-time cells=0 forever).
     state.server.set_meta(valid, total_cells);
     let p0 = players.first();
     crate::log_info(&format!(
-        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}) rescan {rescan_c}c/{rescan_e}e, spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} {cache_stat}",
+        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}) rescan {rescan_c}c/{rescan_e}e, edits {e_char}{e_pushes}p/{e_cells}c/{e_edits}e drop {e_drops}, spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} {cache_stat}",
         jni::STREAM_SPAWNED.load(Ordering::Relaxed),
         jni::STREAM_FAILED.load(Ordering::Relaxed),
         p0.map(|p| format!("yaw {:.0} pitch {:.0}", p.yaw, p.pitch))

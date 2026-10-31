@@ -104,6 +104,13 @@ pub struct Config {
     /// feature surface fails to resolve — cells stay terrain-only (the
     /// v5.9 output, bit-for-bit).
     pub native_trees: bool,
+    /// v6.3 EVENT PUSH: a Bukkit event listener (java/ClodEdits, stable
+    /// PluginManager API) feeds every block change into a ring the engine
+    /// drains next tick — edits reach the dirty phase in ONE engine tick
+    /// instead of waiting rescan_ticks. Needs at least one enabled plugin
+    /// as the registration host; without one (or on any failure) the v6.2
+    /// rescan wave stays the detector, so this knob can never regress.
+    pub native_edits: bool,
 }
 
 impl Default for Config {
@@ -142,6 +149,7 @@ impl Default for Config {
             seedgen_batch: 8,
             native_dust: true,
             native_trees: true,
+            native_edits: true,
         }
     }
 }
@@ -276,6 +284,9 @@ impl Config {
         if let Some(v) = get("native_trees") {
             cfg.native_trees = matches!(v.trim(), "1" | "true" | "yes" | "on");
         }
+        if let Some(v) = get("native_edits") {
+            cfg.native_edits = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
         cfg
     }
 }
@@ -375,6 +386,16 @@ mod tests {
         assert!(!c.native_trees, "terrain-only v5.9 output selectable");
         let c = Config::parse("native_trees=on");
         assert!(c.native_trees);
+    }
+
+    #[test]
+    fn native_edits_knob() {
+        let c = Config::parse("");
+        assert!(c.native_edits, "v6.3 event push defaults ON");
+        let c = Config::parse("native_edits=false");
+        assert!(!c.native_edits, "wave-only detection selectable");
+        let c = Config::parse("native_edits=1");
+        assert!(c.native_edits);
     }
 
     #[test]

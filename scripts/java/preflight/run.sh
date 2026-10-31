@@ -58,5 +58,13 @@ FAST_A=$(grep COLUMNS "$OUT/affine.txt"); FAST_W=$(grep COLUMNS "$OUT/weird.txt"
 echo "$FAST_A" | grep -qv "fast=0 " || { echo "FAIL: fast path never taken (affine)"; exit 1; }
 echo "$FAST_W" | grep -q "fast=0 " || { echo "FAIL: fallback never taken (weird)"; exit 1; }
 echo "$FAST_A / $FAST_W"
+# v6.3: the edits helper (Bukkit event push) against the mock org.bukkit
+# tree — registration ladder, world guard, ring packing/monotonic head,
+# multi-block payloads. Independent of the terrain layouts (single run).
+"$JAVAC" --release 17 -Xlint:-rawtypes -cp "$OUT/classes" \
+    -d "$OUT/classes" "$ROOT/java/ClodEdits.java"
+"$JAVAC" -cp "$OUT/classes" -d "$OUT/classes" PreflightEdits.java
+java -cp "$OUT/classes" PreflightEdits
+
 echo "---"
 echo "PREFLIGHT OK: affine == weird (cells $SHA_A), tables identical, both stride paths exercised"
