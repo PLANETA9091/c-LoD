@@ -120,7 +120,7 @@ stop_stack() {
 # anonymous-visible decision timeline — this is the whole point of layer 8
 # forensics: a red X with no logs is worthless.
 dump_summary() {
-  local rc=$?
+  # rc was captured by the EXIT trap BEFORE stop_stack ran
   sum ""
   sum "### boot / stream"
   sum '```'
