@@ -270,3 +270,39 @@ layer precisely:
   - Coverage: 76 Rust tests (debug_cell knob + the debug_window mapping,
     words, age=MAX for never-streamed, out-of-disk clamp), fmt/clippy
     green, the http route tested (503 until armed, verbatim body after).
+
+### v6.5.3 — run #204 verdict: LEG 2 PASS — the marker is REAL; the killer was the particle pool
+
+Run 41298864989 delivered the breakthrough the sky-hole forensics were
+built for:
+
+  - **LEG 2 PASS, failures=0** — `marker STILL visible after relog
+    (probe 0)`. A FRESH client (empty buffers, empty particle pool)
+    re-decodes the marker footprint instantly and it survives the session
+    change. The transport, the encode, the strobe, the paint — the whole
+    product chain is correct.
+  - **Leg 1 still missed it: the long-lived client never got the edit.**
+    The steady-state refresh stream (cone every 3 s + zone every 30 s,
+    thousands of dots/tick) saturates the vanilla client's particle pool;
+    new spawns are REJECTED once the cap is hit. The edit's reset
+    electron + fresh dots arrived into a full pool and never rendered —
+    the marker became undeliverable precisely on the client that had been
+    watching for it. (#203's sky-hole was the same saturation plus one
+    unlucky frame: a phantom-complete decode replaced the cell with zero
+    and the recovery dots were then rejected — hence the permanent hole.)
+  - **The fix: the EDIT WINDOW (v6.5.3).** When a decodable dirty cell
+    streams, the cone/zone phases go silent for EDIT_WINDOW_TICKS (200 =
+    10 s) — the client's pool drains (dots live 3-5 s) and the edit batch
+    renders into free slots. While the window is armed the WHOLE wire
+    budget serves dirty cells (was: half). The window re-arms only while
+    decodable dirty cells actually stream, so an undecodable backlog
+    (the boot-era provisional upgrades, ~13k cells) can never starve the
+    steady state. `ewin` rides the stream diag line.
+  - Covered by `edit_window_silences_steady_state_and_recovers`: the edit
+    batch carries the reset electron (y == RESET_Y), the window arms,
+    the steady state stays silent inside it, and cone streaming resumes
+    after expiry. 77 Rust tests, fmt/clippy green.
+
+What the next visual run must show: leg 1 catches the marker within its
+first probes (the edit lands in one tick + one window), leg 2 keeps
+passing, and the sky-hole class is closed for good.

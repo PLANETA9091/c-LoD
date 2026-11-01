@@ -223,6 +223,19 @@ pub const VIEW_REFRESH_TICKS: u64 = 60;
 /// dirty phase), and turn refills do NOT wait for it (the cone phase).
 pub const ZONE_REFRESH_TICKS: u64 = 600;
 
+/// v6.5.3 EDIT WINDOW: once a decodable dirty cell streamed, the cone/zone
+/// phases go SILENT for this many ticks. Why: run #204 proved the vanilla
+/// client's particle pool SATURATES under the steady-state refresh stream
+/// (thousands of dots/tick vs the engine's particle cap) and then REJECTS
+/// new spawns — an edit's reset electron + fresh dots arrived into a full
+/// pool, never rendered, and the marker became undeliverable on the
+/// long-lived client (leg 1) while a FRESH client decoded it instantly
+/// (leg 2 PASS). A ~10 s quiet window drains the pool (dots live 3-5 s),
+/// so the edit batch renders into free slots. Re-armed only while decodable
+/// dirty cells actually stream — an undecodable backlog never starves the
+/// steady state.
+pub const EDIT_WINDOW_TICKS: u64 = 200;
+
 /// The whole streaming state (server side): one fixed disk of cells plus
 /// the phase cursor of the particle stream.
 pub struct Streamer {
@@ -259,6 +272,9 @@ pub struct Streamer {
     pub dirty_pending: usize,
     /// Dirty-phase cells streamed since boot (diagnostics).
     pub dirty_streams: u64,
+    /// v6.5.3: ticks of cone/zone silence left in the current edit window
+    /// (see EDIT_WINDOW_TICKS). 0 = the steady state runs.
+    pub edit_window: u64,
     /// Zone-sweep cells streamed since boot (diagnostics).
     pub zone_cells: u64,
     /// v6.2 live rescan: engine tick each cell was last SAMPLED at
@@ -295,6 +311,7 @@ impl Streamer {
             dirty_queue: std::collections::VecDeque::new(),
             dirty_pending: 0,
             dirty_streams: 0,
+            edit_window: 0,
             zone_cells: 0,
             last_scan: vec![0; n],
             rescan_cursor: 0,
@@ -628,8 +645,17 @@ impl Streamer {
         let zone_mode = !views.is_empty();
 
         // ---- phase 0: dirty delta (v5.4) ------------------------------------
+        // v6.5.3: the edit window ticks down first; phase 0 re-arms it when
+        // a decodable dirty cell actually streamed (the client's particle
+        // pool gets the quiet time it needs to drain).
+        self.edit_window = self.edit_window.saturating_sub(1);
+        let mut edit_streamed = 0u64;
         if zone_mode && self.dirty_pending > 0 {
-            let cap = budget / 2;
+            let cap = if self.edit_window > 0 {
+                budget // edit mode: the whole wire serves the edit batch
+            } else {
+                budget / 2
+            };
             let q_len = self.dirty_queue.len();
             for _ in 0..q_len {
                 if self.batch.len() >= cap {
@@ -645,77 +671,86 @@ impl Streamer {
                 if self.decodable_by_any(idx, views) {
                     self.push_cell_spawns(idx_u32, sub, now, true);
                     self.dirty_streams += 1;
+                    edit_streamed += 1;
                 } else {
                     // Nobody can decode it now — keep it queued for later.
                     self.dirty_queue.push_back(idx_u32);
                 }
             }
         }
-
-        // ---- phase 1: cone priority (v5.3.3) -------------------------------
-        if let Some(v) = views.first() {
-            let rebuild = match self.view_cache {
-                Some((ceye, clook, _)) => {
-                    let dx = ceye[0] - v.eye[0];
-                    let dz = ceye[2] - v.eye[2];
-                    dx * dx + dz * dz > 64.0 || dot3(ceye, clook, v.look) < 0.9962
-                    // > ~5 deg
-                }
-                None => true,
-            };
-            if rebuild {
-                self.rebuild_view_cache(v.eye, v.look);
-            }
-            let half_budget = budget / 2;
-            // Clone the index list: spawning mutates self, the cached slice
-            // cannot be borrowed across push_cell_spawns.
-            let list: Vec<u32> = self
-                .view_cache
-                .as_ref()
-                .map(|(_, _, l)| l.clone())
-                .unwrap_or_default();
-            for idx_u32 in list {
-                if self.batch.len() >= half_budget {
-                    break;
-                }
-                let idx = idx_u32 as usize;
-                if now.wrapping_sub(self.last_stream[idx]) < VIEW_REFRESH_TICKS {
-                    continue; // fresh enough — the client still holds it
-                }
-                self.push_cell_spawns(idx_u32, sub, now, false);
-                self.cone_cells += 1;
-            }
+        if edit_streamed > 0 {
+            self.edit_window = EDIT_WINDOW_TICKS;
         }
 
-        // ---- phase 2: zone sweep (v5.4) / legacy row-major lap -------------
-        // zone_mode: only decodable cells cost budget (age-gated like the
-        // cone — the client's persistent buffers still hold fresh words).
-        // Legacy mode (no views): stream every valid cell (diagnostics,
-        // self-heal with nobody online).
-        let mut steps = 0u64;
-        while self.batch.len() < budget && steps < total {
-            let t = self.cursor % total;
-            self.cursor += 1;
-            steps += 1;
-            let idx = t as usize;
-            if !self.cells[idx].valid {
-                continue;
-            }
-            if zone_mode {
-                if self.last_stream[idx] != 0
-                    && now.wrapping_sub(self.last_stream[idx]) < ZONE_REFRESH_TICKS
-                {
-                    continue; // fresh enough — the client still holds it
+        // ---- phase 1: cone priority (v5.3.3) -------------------------------
+        // v6.5.3: SKIPPED inside an edit window — every spawn the steady
+        // state makes competes with the edit's dots for the client's
+        // saturated particle pool (run #204: the edit became undeliverable).
+        if self.edit_window == 0 {
+            if let Some(v) = views.first() {
+                let rebuild = match self.view_cache {
+                    Some((ceye, clook, _)) => {
+                        let dx = ceye[0] - v.eye[0];
+                        let dz = ceye[2] - v.eye[2];
+                        dx * dx + dz * dz > 64.0 || dot3(ceye, clook, v.look) < 0.9962
+                        // > ~5 deg
+                    }
+                    None => true,
+                };
+                if rebuild {
+                    self.rebuild_view_cache(v.eye, v.look);
                 }
-                // last_stream == 0: never streamed — always sweep-eligible.
-                if !self.decodable_by_any(idx, views) {
-                    continue; // no player can decode it — zero budget
+                let half_budget = budget / 2;
+                // Clone the index list: spawning mutates self, the cached
+                // slice cannot be borrowed across push_cell_spawns.
+                let list: Vec<u32> = self
+                    .view_cache
+                    .as_ref()
+                    .map(|(_, _, l)| l.clone())
+                    .unwrap_or_default();
+                for idx_u32 in list {
+                    if self.batch.len() >= half_budget {
+                        break;
+                    }
+                    let idx = idx_u32 as usize;
+                    if now.wrapping_sub(self.last_stream[idx]) < VIEW_REFRESH_TICKS {
+                        continue; // fresh enough — the client still holds it
+                    }
+                    self.push_cell_spawns(idx_u32, sub, now, false);
+                    self.cone_cells += 1;
                 }
-                self.zone_cells += 1;
-            } else if self.last_stream[idx] == now {
-                continue; // already streamed this tick by the cone phase
             }
-            self.push_cell_spawns(t as u32, sub, now, false);
+
+            // ---- phase 2: zone sweep (v5.4) / legacy row-major lap ---------
+            // zone_mode: only decodable cells cost budget (age-gated like the
+            // cone — the client's persistent buffers still hold fresh words).
+            // Legacy mode (no views): stream every valid cell (diagnostics,
+            // self-heal with nobody online).
+            let mut steps = 0u64;
+            while self.batch.len() < budget && steps < total {
+                let t = self.cursor % total;
+                self.cursor += 1;
+                steps += 1;
+                let idx = t as usize;
+                if !self.cells[idx].valid {
+                    continue;
+                }
+                if zone_mode {
+                    if self.last_stream[idx] != 0
+                        && now.wrapping_sub(self.last_stream[idx]) < ZONE_REFRESH_TICKS
+                    {
+                        continue; // fresh enough — the client still holds it
+                    }
+                    // last_stream == 0: never streamed — always sweep-eligible.
+                    if !self.decodable_by_any(idx, views) {
+                        continue; // no player can decode it — zero budget
+                    }
+                    self.zone_cells += 1;
+                } else if self.last_stream[idx] == now {
+                    continue; // already streamed this tick by the cone phase
+                }
+                self.push_cell_spawns(t as u32, sub, now, false);
+            }
         }
         if self.cursor >= total {
             self.cursor %= total;
@@ -1335,6 +1370,71 @@ mod tests {
             assert!(sp.x >= cx - half && sp.x <= cx + half);
             assert!(sp.z >= cz - half && sp.z <= cz + half);
         }
+    }
+
+    /// v6.5.3: the EDIT WINDOW — a decodable dirty cell streams with its
+    /// reset electron and the cone/zone phases go silent for
+    /// EDIT_WINDOW_TICKS so the client's particle pool drains (run #204:
+    /// the edit's dots were rejected by the saturated pool and the marker
+    /// became undeliverable on a long-lived client while a fresh client
+    /// decoded it instantly). After the window the steady state resumes.
+    #[test]
+    fn edit_window_silences_steady_state_and_recovers() {
+        let (cx, cz, region) = (-930.0, 796.0, 512);
+        let half = f64::from(region) * 0.5;
+        let mut s = Streamer::new(cx - half, cz - half, region, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]));
+            }
+        }
+        let view_at = |now: u64| ViewHint {
+            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            look: look_dir(-90.0, 5.0),
+            now,
+        };
+        // the steady state runs (nothing dirty yet)
+        let v = view_at(400);
+        let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        assert!(s.cone_cells + s.zone_cells > 0, "steady state must stream");
+        assert_eq!(s.edit_window, 0, "no edits -> no window");
+
+        // THE EDIT: the disk-center cell (decodable, dead ahead) changes.
+        s.set_cell(128, 128, cell(170, false, [142, 33, 33]));
+        assert_eq!(s.dirty_pending, 1);
+        let v = view_at(401);
+        let batch: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        assert!(
+            batch.iter().any(|sp| sp.y == RESET_Y),
+            "the reset electron must ride the edit batch"
+        );
+        assert_eq!(s.edit_window, EDIT_WINDOW_TICKS, "the window arms");
+        let cone_after_edit = s.cone_cells;
+
+        // while the window is armed the cone/zone phases add nothing
+        let v = view_at(402);
+        let batch: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        assert!(
+            batch.is_empty(),
+            "edit window must silence the steady state"
+        );
+        assert_eq!(
+            s.cone_cells, cone_after_edit,
+            "no cone streams in the window"
+        );
+
+        // the window expires and the steady state resumes
+        for t in 403..(403 + EDIT_WINDOW_TICKS + 5) {
+            let v = view_at(t);
+            let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        }
+        assert_eq!(s.edit_window, 0, "the window must expire");
+        assert!(
+            s.cone_cells > cone_after_edit,
+            "the steady state resumes after the window ({} -> {})",
+            cone_after_edit,
+            s.cone_cells
+        );
     }
 
     /// v6.5.2: the /clod-cells forensics window — world->disk coord mapping,
