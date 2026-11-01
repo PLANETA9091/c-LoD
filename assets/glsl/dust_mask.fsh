@@ -194,7 +194,27 @@ void main() {
     bool bandOK = (tHi >= 24.0 && tHi <= 128.0) || (tLo >= 24.0 && tLo <= 128.0);
     if (marked < 0.5) {
         vec3 raw = texture(InSampler, texCoord).rgb;
-        if (raw.g > 0.45 && raw.g > raw.r + 0.08 && raw.g > raw.b + 0.08) {
+        // v6.5 fog-invariant arm alongside the v5.3.2 absolute hue gate:
+        // fogged stale dots (measured (0.46, 0.54, 0.70) on CI) fail
+        // raw.g > raw.b + 0.08 but keep their (g-b) excess over their OWN
+        // backdrop — fog scales dot and ring alike. Same 4-diagonal 3 px
+        // mean as the capture strobe.
+        vec2 scrPx = vec2(ScreenSize);
+        ivec2 basePx = ivec2(clamp(texCoord * scrPx, vec2(0.0), scrPx - 1.0));
+        float ringGB = 0.0;
+        for (int d = 0; d < 4; ++d) {
+            ivec2 o = d == 0 ? ivec2(3, 3)
+                    : d == 1 ? ivec2(-3, 3)
+                    : d == 2 ? ivec2(3, -3)
+                    : ivec2(-3, -3);
+            ivec2 q = clamp(basePx + o, ivec2(0), ivec2(scrPx) - 1);
+            vec3 s = texelFetch(InSampler, q, 0).rgb;
+            ringGB += s.g - s.b;
+        }
+        ringGB *= 0.25;
+        bool absolute = raw.g > 0.45 && raw.g > raw.r + 0.08 && raw.g > raw.b + 0.08;
+        bool relative = (raw.g - raw.b) - ringGB > 0.06 && raw.g > raw.r + 0.02;
+        if (absolute || relative) {
             marked = 1.0;
             radius = bandOK ? 3.0 : 2.0;
         }

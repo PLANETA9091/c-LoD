@@ -145,6 +145,31 @@ void probe_word(vec2 cellWorld, float planeY, float sub, out uint word, out bool
             // renderer applied; (1-f) is clamped so deep-fog noise never
             // explodes.
             vec2 texel = 1.0 / ScreenSize;
+            // v6.5 FOG-INVARIANT RING: the mean (g-b) of the 4 diagonal
+            // texels ~3 px out. Fog is a per-depth lerp toward one color, so
+            // it scales the dot and its backdrop IDENTICALLY — the (g-b)
+            // contrast between them survives as contrast * (1-f) while every
+            // absolute hue threshold dies (measured on CI run 41260665463:
+            // day-lit core (0.46, 0.54, 0.70) — b-dominant, the sky-blue fog
+            // wins the absolute gate even after the un-fog when group B is
+            // missing). Sky ring (g-b) ~ -0.35, fogged carrier ~ +0.4*(1-f):
+            // the margin 0.06 holds to f ~ 0.85, far past the decode band.
+            // The mean damps a neighboring dot landing in one diagonal
+            // (sub-quantum spacing ~3.5 px at 75 m: one polluted tap of
+            // four costs a quarter of its contrast).
+            vec2 scrPx = vec2(ScreenSize);
+            ivec2 basePx = ivec2(clamp(sc * scrPx, vec2(0.0), scrPx - 1.0));
+            float ringGB = 0.0;
+            for (int d = 0; d < 4; ++d) {
+                ivec2 o = d == 0 ? ivec2(3, 3)
+                        : d == 1 ? ivec2(-3, 3)
+                        : d == 2 ? ivec2(3, -3)
+                        : ivec2(-3, -3);
+                ivec2 q = clamp(basePx + o, ivec2(0), ivec2(scrPx) - 1);
+                vec3 s = texelFetch(InSampler, q, 0).rgb;
+                ringGB += s.g - s.b;
+            }
+            ringGB *= 0.25;
             float fog = clamp(z * invEndFogDelta + startDelta, 0.0, maxFog) * fogOpacity;
             bool dust = false;
             for (int t = 0; t < 5; ++t) {
@@ -155,7 +180,15 @@ void probe_word(vec2 cellWorld, float planeY, float sub, out uint word, out bool
                     : vec2(0.0, -0.75 * texel.y);
                 vec3 raw = texture(InSampler, sc + off).rgb;
                 vec3 pc = (raw - fogTint * fog) / max(1.0 - fog, 0.15);
-                if (pc.g > 0.40 && pc.g > pc.r + 0.08 && pc.g > pc.b + 0.08) {
+                // v6.5 two arms: the v5.3.1 absolute hue test on the
+                // un-fogged color (precise when the group B fog payload is
+                // alive) OR the fog-invariant local contrast (immune to a
+                // dead payload and to the cylindrical-vs-forward fog model
+                // mismatch). Neutrals fail the second arm on g > r; sky
+                // fails on contrast ~ 0 (the ring IS the backdrop).
+                bool absolute = pc.g > 0.40 && pc.g > pc.r + 0.08 && pc.g > pc.b + 0.08;
+                bool relative = (raw.g - raw.b) - ringGB > 0.06 && raw.g > raw.r + 0.02;
+                if (absolute || relative) {
                     dust = true;
                     break;
                 }

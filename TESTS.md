@@ -173,3 +173,30 @@ reaching the capture pass on llvmpipe. The next iteration must either
 verify/repair the sky-override on renderpearl or make the strobe
 fog-robust — deliberately NOT patched blind: the strobe is a product
 contract (5-tap cross, v5.3.1), not a CI knob.
+
+### v6.5 — the fog-invariant strobe arm (the gap closed by physics, not loosening)
+
+The ledger's second sanctioned path, taken without touching the 5-tap cross
+contract. Fog is a per-depth lerp toward ONE color, so it scales the dot and
+its backdrop identically: the absolute hue of a fogged carrier dies
+(measured core g−b = −0.16, the sky wins) but the (g−b) CONTRAST between the
+dot and its own backdrop survives as contrast × (1−f). capture.fsh and
+dust_mask.fsh now run BOTH arms:
+
+  - absolute (v5.3.1, unchanged): the un-fogged color must beat
+    g > 0.40, g > r + 0.08, g > b + 0.08 — precise when the group B fog
+    payload is alive;
+  - relative (v6.5, fog-invariant): the pixel's (g−b) must beat the mean
+    (g−b) of the 4 diagonal texels ~3 px out by 0.06, plus g > r + 0.02 to
+    exclude neutrals/shadows. Sky fails on contrast ≈ 0 (the ring IS the
+    backdrop), foliage fails the same way, one neighboring dot in a diagonal
+    costs only a quarter of its contrast (the mean).
+
+Numeric check on the measured CI core (0.46, 0.54, 0.70): absolute arm FAILS
+both sub-gates (the blindness), relative arm +0.190 > 0.06 PASSES. Villager
+green swept under fog f = 0..0.85 stays above the margin everywhere
+(0.75 → 0.11), far past the server decode band. Validated by glslang 16.6.0
+(all 11 shaders + the renderpearl sampler rule). What the next visual run
+must show: the strobe score leaves zero with the SAME dot geometry and the
+SAME 5-tap cross — if it does not, the fog was never the killer and the
+group-B repair path reopens with the un-fog now provably not the bottleneck.
