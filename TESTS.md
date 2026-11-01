@@ -7,12 +7,12 @@ runs layer 8 there too — a real vanilla 26.3 client under Xvfb + Mesa
 llvmpipe on the runner (no GPU needed, software GL is enough for 640×360).
 Layers 6–7 remain the richer local real-client harness.
 
-## 1. Rust unit tests — `cargo test` (74 tests)
+## 1. Rust unit tests — `cargo test` (80 tests)
 
 | module | count | what they pin |
 |--------|------:|---------------|
-| `src/stream.rs` | 19 | 16-bit word packing (4 particles/word, X-sub = data bits, Z-sub = slot), HI/LO plane layout, delta-zone scheduling, cone admission, lap coverage; v6.2 rescan due/mark semantics + the dirty edit stream carrying exactly ONE reset electron at the (qx=0,qz=0) probe position; v6.4.2 center-anchored disk (config center -> Streamer origin) streams from an off-center vantage |
-| `src/engine.rs` | 8 | `wish_admit` ledger (dup reject, backlog cap, per-tick budget, v5.5 window parameter), frontier math |
+| `src/stream.rs` | 23 | 16-bit word packing (4 particles/word, X-sub = data bits, Z-sub = slot), HI/LO plane layout, delta-zone scheduling, cone admission, lap coverage; v6.2 rescan due/mark semantics + the dirty edit stream carrying exactly ONE reset electron at the (qx=0,qz=0) probe position; v6.4.2 center-anchored disk (config center -> Streamer origin) streams from an off-center vantage; v6.6 ROUND-ROBIN cone — the frustum budget rotates across ALL views (prefix of each tick's batch belongs to the served view's band+frustum, opposite frustums make the assertion unambiguous), and the per-view cone caches are matched by eye/look geometry — player-order flips reuse them and a 20-view churn burst degrades to transparent rebuilds, never to starved players |
+| `src/engine.rs` | 9 | `wish_admit` ledger (dup reject, backlog cap, per-tick budget, v5.5 window parameter), frontier math; v6.6 wire-budget window math (`bytes_per_sec`: honest 0 on empty windows, exact averages at both tick cadences) |
 | `src/seedgen.rs` | 12 | SeedQueue dedup/order/close + v5.9 `pop_batch` drain; bit-contract vs `ClodSeedgen.pack()` (height/liquid/ordinals/valid bit, bit budget); v5.9 `chunkBatch` payload parsing (header, statuses, zero-filled failed segments, corruption rejects) |
 | `src/config.rs` | 11 | `CLOD_OPTS` parsing + clamps (gen_budget 1..256, gen_wish 32..4096, particles_per_tick, disk geometry, native_threads/seedgen_batch, native_dust/native_trees/native_edits, rescan_ticks 0/off + 5..2400) |
 | `src/packgen.rs` | 5 | the pack builds byte-deterministically, 13 entries, ZERO textures/PNGs, capture chain present; v6.2: reset pass precedes the data captures, ClodAtlas/AtlasInfo stay renamed to ClodRegion/RegionInfo |
@@ -356,3 +356,31 @@ screen, or a local bench reproduction with a buffer readback) and find
 which step turns 0xEA00 into 0 — the strobe positions, the reset/replace
 gate, or the merge. Deliberately NOT patched blind — the same ledger rule
 that held for the fog.
+
+### v6.6 — ALL-LOD fairness + the network budget
+
+The atlas is confirmed dead (packgen's ClodAtlas guard, zero-texture zip,
+pack pushed once per join) and the stream is the only data path. v6.6
+makes the stream fair for every client and measurable on the wire:
+
+  - ROUND-ROBIN CONE (stream.rs): the frustum-priority phase served
+    `views[0]` only — N-1 players waited on the 60 s zone sweep for turn
+    refills. The cone budget now rotates across the whole audience: one
+    view owns the half budget per tick (single-player fill speed
+    unchanged), the cursor hands it to the next view every tick, and
+    every tracked view keeps its own near-first cone cache matched by
+    eye/look drift (<= 8 blocks / <= ~5 deg) — player-list order can
+    never invalidate a cache, and a 16-cache cap survives spectator
+    churn with transparent rebuilds. Tests:
+    `cone_budget_rotates_round_robin_across_views` (opposite frustums
+    make the per-tick prefix assertion unambiguous) and
+    `cone_caches_survive_order_flips_and_view_churn` (order flips reuse
+    caches; 20 one-off eyes; the tracked views keep cone service).
+  - NETWORK BUDGET (engine.rs + jni.rs): `WIRE_BYTES` counts estimated
+    payload bytes since boot — delivered packets × the measured
+    level_particles cost (54 B, run 41304650106 ledger) + per-chunk
+    bundle envelopes (16 B) — in BOTH the bundle wire and the legacy
+    fallback. `stream_diag` turns the 100-tick delta into an average
+    `~N kB/s` right on the wire line; `bytes_per_sec` is pure and
+    unit-tested (`bytes_per_sec_window_math`). 80 Rust tests, fmt/clippy
+    green.

@@ -76,6 +76,10 @@ pub struct State {
     /// (one object per unique spawn position, global refs, LRU-bounded).
     /// Main-thread-only content behind a Mutex to match the State style.
     pub pkt_cache: Mutex<crate::wire::PacketCache>,
+    /// v6.6 diag window: WIRE_BYTES value + engine tick at the last
+    /// stream_diag — the deltas turn the counter into kB/s for ops.
+    pub diag_wire_bytes: AtomicU64,
+    pub diag_wire_tick: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -105,7 +109,6 @@ pub struct PlayerState {
     /// (a flaky channel must not cost a JNI storm every tick).
     pub wire_fails: u32,
 }
-
 /// Engine ticks between the join and the single pack push.
 const PACK_PUSH_DELAY_TICKS: u64 = 40;
 
@@ -146,6 +149,8 @@ impl State {
             prov_diffs: AtomicU64::new(0),
             edits: crate::edits::Edits::new(),
             pkt_cache: Mutex::new(crate::wire::PacketCache::new()),
+            diag_wire_bytes: AtomicU64::new(0),
+            diag_wire_tick: AtomicU64::new(0),
         })
     }
 }
@@ -1025,6 +1030,14 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
         "legacy"
     };
     let cache_stat = state.pkt_cache.lock().unwrap().stat();
+    // v6.6 NETWORK BUDGET: the wire-byte delta over the diag window becomes
+    // an average kB/s — the transport's footprint is a first-class metric.
+    let wb = jni::WIRE_BYTES.load(Ordering::Relaxed);
+    let prev_b = state.diag_wire_bytes.swap(wb, Ordering::Relaxed);
+    let prev_t = state.diag_wire_tick.swap(tick, Ordering::Relaxed);
+    let dt = tick.saturating_sub(prev_t);
+    let db = wb.saturating_sub(prev_b);
+    let kbps = bytes_per_sec(db, dt, state.cfg.tick_ms) / 1024;
     // v6.3 edit-push diagnostics: channel state + drained pushes/cells/edits.
     let (e_state, e_pushes, e_cells, e_edits, e_drops) = (
         state.edits.state(),
@@ -1054,7 +1067,7 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     }
     let p0 = players.first();
     crate::log_info(&format!(
-        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}) ewin {} rescan {rescan_c}c/{rescan_e}e, edits {e_char}{e_pushes}p/{e_cells}c/{e_edits}e drop {e_drops}, spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} {cache_stat}",
+        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}) ewin {} rescan {rescan_c}c/{rescan_e}e, edits {e_char}{e_pushes}p/{e_cells}c/{e_edits}e drop {e_drops}, spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} ~{kbps} kB/s {cache_stat}",
         state.stream.lock().unwrap().edit_window,
         jni::STREAM_SPAWNED.load(Ordering::Relaxed),
         jni::STREAM_FAILED.load(Ordering::Relaxed),
@@ -1249,6 +1262,7 @@ fn stream_step(state: &Arc<State>, env: Env) {
                 }
                 if unsafe { jni::spawn_particle(env, handle, sp.x, sp.y, sp.z) } {
                     spawned += 1;
+                    jni::WIRE_BYTES.fetch_add(PARTICLE_WIRE_BYTES, Ordering::Relaxed);
                 }
             }
         }
@@ -1272,6 +1286,24 @@ const WIRE_FAIL_LIMIT: u32 = 3;
 /// sizes; the wire chunks large batches at 1024 to stay far below any
 /// client-side guard while keeping the envelope cost negligible.
 const WIRE_BUNDLE_MAX: i32 = 1024;
+/// v6.6 NETWORK BUDGET: the measured vanilla `level_particles` packet on
+/// the wire (CI run 41304650106 ledger — 54 bytes each) and a per-chunk
+/// bundle envelope estimate. The wire accounting multiplies the delivered
+/// packet count by these so ops can see the transport's kB/s footprint
+/// (stream_diag) without touching the Netty pipeline.
+pub const PARTICLE_WIRE_BYTES: u64 = 54;
+pub const BUNDLE_WIRE_BYTES: u64 = 16;
+
+/// v6.6: average payload bytes per second over a diag window. Pure math
+/// (unit-tested): 0 when the window is empty or the tick length is 0.
+pub fn bytes_per_sec(delta_bytes: u64, delta_ticks: u64, tick_ms: u64) -> u64 {
+    if delta_ticks == 0 || tick_ms == 0 {
+        return 0;
+    }
+    delta_bytes
+        .saturating_mul(1000)
+        .saturating_div(delta_ticks.saturating_mul(tick_ms))
+}
 
 /// v6.0 NATIVE DUST WIRE delivery for one player: fill a fresh ArrayList
 /// with the gated batch's cached packets and send them as (chunked)
@@ -1359,6 +1391,10 @@ fn wire_deliver(
         }
     }
     jni::WIRE_SPAWNED.fetch_add(added, Ordering::Relaxed);
+    jni::WIRE_BYTES.fetch_add(
+        added * PARTICLE_WIRE_BYTES + (chunks as u64) * BUNDLE_WIRE_BYTES,
+        Ordering::Relaxed,
+    );
     Some(added)
 }
 
@@ -1400,6 +1436,22 @@ mod tests {
     fn pack_url_uses_base() {
         let st = State::new(Config::parse("pack_base_url=http://x.example;http_port=1"));
         assert_eq!(pack_url(&st), "http://x.example/clod-pack.zip");
+    }
+
+    /// v6.6: the wire-budget window math — bytes over a tick window at the
+    /// configured engine tick length becomes an honest average per second.
+    #[test]
+    fn bytes_per_sec_window_math() {
+        // The bench cadence (10 tps): 5400 bytes over 10 ticks of 100 ms
+        // = 1 s -> 5400 B/s.
+        assert_eq!(bytes_per_sec(5400, 10, 100), 5400);
+        // Default 1 s ticks: 54_000 bytes over 100 ticks = 100 s -> 540 B/s.
+        assert_eq!(bytes_per_sec(54_000, 100, 1000), 540);
+        // Empty window or zero tick length: no divide-by-zero, honest 0.
+        assert_eq!(bytes_per_sec(1000, 0, 100), 0);
+        assert_eq!(bytes_per_sec(1000, 10, 0), 0);
+        // Sub-byte-per-tick traffic rounds down without panicking.
+        assert_eq!(bytes_per_sec(1, 10_000, 1000), 0);
     }
 
     #[test]

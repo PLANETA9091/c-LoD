@@ -1381,6 +1381,13 @@ pub static STREAM_FAILED: std::sync::atomic::AtomicU64 = std::sync::atomic::Atom
 pub static WIRE_SPAWNED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub static WIRE_BUNDLES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub static WIRE_FAILED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// v6.6 NETWORK BUDGET: estimated payload bytes pushed to clients since
+/// boot (both the bundle wire and the legacy fallback). The per-particle
+/// cost is the measured vanilla `level_particles` packet on the wire
+/// (CI run 41304650106 ledger: 54 bytes each); the bundle envelope adds
+/// the per-chunk framing estimate. The engine diag turns the counter
+/// into kB/s — the transport's network footprint is now visible to ops.
+pub static WIRE_BYTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Resolve the NMS surface once (main thread). Returns true when usable.
 pub fn nms_warmup(env: Env) -> bool {

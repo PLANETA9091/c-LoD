@@ -50,6 +50,16 @@
 //! word decodes complete (all four slots strobed). Partial decodes keep
 //! the legacy OR self-heal; a complete decode after a reset is idempotent
 //! while the reset electron lives out its particle lifetime.
+//!
+//! v6.6 ALL-LOD FAIRNESS: the cone phase served `views[0]` only — with N
+//! players online, N-1 of them got no frustum priority and their turn
+//! refills waited on the 60 s zone sweep. The cone budget now rotates
+//! ROUND-ROBIN across the audience: one view owns the cone budget per
+//! tick (the same subjective fill speed as the single-player case), the
+//! cursor hands it to the next view on the next tick, and every tracked
+//! view keeps its own rebuilt cone cache (matched by eye/look drift, so
+//! player-list order can never break reuse). ALL LODs stream, and the
+//! wire serves every client fairly.
 
 /// Sub-cell lattice: 4 positions per axis inside one cell.
 pub const SUB_PER_CELL: f64 = 4.0;
@@ -280,9 +290,12 @@ pub struct Streamer {
     last_stream: Vec<u64>,
     /// Internal tick counter when no engine tick is supplied.
     tick_counter: u64,
-    /// Cached cone cells (near-first) + the eye/look they were built for;
-    /// rebuilt only when the eye moves > 8 blocks or the look turns > 5 deg.
-    view_cache: Option<([f64; 3], [f64; 3], Vec<u32>)>,
+    /// v6.6: one rebuilt cone list per tracked view (see ConeCache). Views
+    /// are matched by eye/look drift, not by index — the player list order
+    /// changes between ticks and must not invalidate caches.
+    view_caches: Vec<ConeCache>,
+    /// v6.6: round-robin cursor over the views slice for the cone phase.
+    cone_cursor: usize,
     /// Cone-phase cells streamed since boot (diagnostics).
     pub cone_cells: u64,
     /// v5.4: cells flagged for re-stream (real edits, words differ).
@@ -329,7 +342,8 @@ impl Streamer {
             laps: 0,
             last_stream: vec![0; n],
             tick_counter: 0,
-            view_cache: None,
+            view_caches: Vec::new(),
+            cone_cursor: 0,
             cone_cells: 0,
             dirty: vec![false; n],
             dirty_queue: std::collections::VecDeque::new(),
@@ -509,11 +523,12 @@ impl Streamer {
 
     /// Rebuild the cone cache (v5.3.3): every valid cell whose HI or LO
     /// probe point sits inside the decode band [CULL_RADIUS, ZONE_FAR] (3D
-    /// from the eye) AND inside the frustum cone. Sorted near-first. Rebuilt
-    /// only when the eye moved > 8 blocks or the look turned > 5 deg. The
+    /// from the eye) AND inside the frustum cone. Sorted near-first. The
     /// test is the per-player spawn gate geometry (cos_half_cone), so every
-    /// cone-phase spawn passes the gate — no budget is wasted on culled dots.
-    fn rebuild_view_cache(&mut self, eye: [f64; 3], look: [f64; 3]) {
+    /// cone-phase spawn passes the gate — no budget is wasted on culled
+    /// dots. v6.6: builds the list for ONE tracked view (see ConeCache);
+    /// the caller stores it next to the eye/look it was built for.
+    fn build_cone_list(&self, eye: [f64; 3], look: [f64; 3]) -> Vec<u32> {
         let side = self.side;
         let cell = self.cell_size as f64;
         let cos_half = cos_half_cone();
@@ -561,7 +576,21 @@ impl Streamer {
             }
         }
         list.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-        self.view_cache = Some((eye, look, list.into_iter().map(|(_, i)| i).collect()));
+        list.into_iter().map(|(_, i)| i).collect()
+    }
+
+    /// v6.6: the cache slot whose eye/look still matches this view (eye
+    /// within 8 blocks and the look within ~5 deg) — the same drift
+    /// tolerances the v5.3.3 single-cache rebuild used. Matching by
+    /// GEOMETRY, not by index: the player list order changes between
+    /// ticks (joins, leaves, Bukkit ordering) and must never invalidate
+    /// a still-valid cache.
+    fn find_cache_slot(&self, eye: [f64; 3], look: [f64; 3]) -> Option<usize> {
+        self.view_caches.iter().position(|c| {
+            let dx = c.eye[0] - eye[0];
+            let dz = c.eye[2] - eye[2];
+            dx * dx + dz * dz <= 64.0 && dot_v(c.look, look) >= 0.9962
+        })
     }
 
     /// Spawn the particle batch of one cell (4 HI-plane + 4 LO-plane
@@ -774,50 +803,59 @@ impl Streamer {
             }
         }
 
-        // ---- phase 1: cone priority (v5.3.3) -------------------------------
+        // ---- phase 1: cone priority (v5.3.3, v6.6 ROUND-ROBIN) -------------
         // v6.5.3: SKIPPED inside an edit window — every spawn the steady
         // state makes competes with the edit's dots for the client's
         // saturated particle pool (run #204: the edit became undeliverable).
-        if self.edit_window == 0 {
-            if let Some(v) = views.first() {
-                let rebuild = match self.view_cache {
-                    Some((ceye, clook, _)) => {
-                        let dx = ceye[0] - v.eye[0];
-                        let dz = ceye[2] - v.eye[2];
-                        dx * dx + dz * dz > 64.0 || dot3(ceye, clook, v.look) < 0.9962
-                        // > ~5 deg
+        // v6.6: the cone budget rotates across ALL views — the old code
+        // served views[0] only, so N-1 players waited on the 60 s zone
+        // sweep for their turn refills. One view owns the half budget per
+        // tick (single-player fill speed is unchanged), the cursor hands
+        // it to the next view every tick, and each tracked view keeps its
+        // own cone cache matched by eye/look drift.
+        if self.edit_window == 0 && !views.is_empty() {
+            let vi = self.cone_cursor % views.len();
+            self.cone_cursor = self.cone_cursor.wrapping_add(1);
+            let v = views[vi];
+            let slot = match self.find_cache_slot(v.eye, v.look) {
+                Some(s) => s,
+                None => {
+                    let list = self.build_cone_list(v.eye, v.look);
+                    if self.view_caches.len() >= MAX_CONE_CACHES {
+                        self.view_caches.remove(0); // drop the oldest track
                     }
-                    None => true,
-                };
-                if rebuild {
-                    self.rebuild_view_cache(v.eye, v.look);
+                    self.view_caches.push(ConeCache {
+                        eye: v.eye,
+                        look: v.look,
+                        list,
+                    });
+                    self.view_caches.len() - 1
                 }
-                let half_budget = budget / 2;
-                // Clone the index list: spawning mutates self, the cached
-                // slice cannot be borrowed across push_cell_spawns.
-                let list: Vec<u32> = self
-                    .view_cache
-                    .as_ref()
-                    .map(|(_, _, l)| l.clone())
-                    .unwrap_or_default();
-                for idx_u32 in list {
-                    if self.batch.len() >= half_budget {
-                        break;
-                    }
-                    let idx = idx_u32 as usize;
-                    if now.wrapping_sub(self.last_stream[idx]) < VIEW_REFRESH_TICKS {
-                        continue; // fresh enough — the client still holds it
-                    }
-                    self.push_cell_spawns(idx_u32, sub, now, false);
-                    self.cone_cells += 1;
+            };
+            let half_budget = budget / 2;
+            // Clone the index list: spawning mutates self, the cached
+            // slice cannot be borrowed across push_cell_spawns.
+            let list: Vec<u32> = self.view_caches[slot].list.clone();
+            for idx_u32 in list {
+                if self.batch.len() >= half_budget {
+                    break;
                 }
+                let idx = idx_u32 as usize;
+                if now.wrapping_sub(self.last_stream[idx]) < VIEW_REFRESH_TICKS {
+                    continue; // fresh enough — the client still holds it
+                }
+                self.push_cell_spawns(idx_u32, sub, now, false);
+                self.cone_cells += 1;
             }
+        }
 
-            // ---- phase 2: zone sweep (v5.4) / legacy row-major lap ---------
-            // zone_mode: only decodable cells cost budget (age-gated like the
-            // cone — the client's persistent buffers still hold fresh words).
-            // Legacy mode (no views): stream every valid cell (diagnostics,
-            // self-heal with nobody online).
+        // ---- phase 2: zone sweep (v5.4) / legacy row-major lap -------------
+        // zone_mode: only decodable cells cost budget (age-gated like the
+        // cone — the client's persistent buffers still hold fresh words).
+        // Legacy mode (no views): stream every valid cell (diagnostics,
+        // self-heal with nobody online). v6.5.3: also silent inside the
+        // edit window — the released dots' lifetime must pass undisturbed.
+        if self.edit_window == 0 {
             let mut steps = 0u64;
             while self.batch.len() < budget && steps < total {
                 let t = self.cursor % total;
@@ -852,10 +890,27 @@ impl Streamer {
     }
 }
 
-/// Cosine between two unit-ish vectors (look vectors are unit).
-fn dot3(_a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> f64 {
-    b[0] * c[0] + b[1] * c[1] + b[2] * c[2]
+/// v6.6: dot product of two look vectors (both unit — no divide).
+fn dot_v(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
+
+/// v6.6 per-view cone cache: the rebuilt near-first cell list plus the
+/// eye/look it was built for. Cached lists are reused while the eye moved
+/// <= 8 blocks and the look turned <= ~5 deg (see find_cache_slot); any
+/// larger drift rebuilds the list for that view only — the other views'
+/// caches stay valid.
+struct ConeCache {
+    eye: [f64; 3],
+    look: [f64; 3],
+    list: Vec<u32>,
+}
+
+/// v6.6 cap on tracked cone caches. A busy server has a handful of
+/// players; the cap bounds the rebuild cost even if views churn (a
+/// spectator teleporting every tick builds at most one new cache per
+/// tick, the oldest track is dropped first).
+const MAX_CONE_CACHES: usize = 16;
 
 #[cfg(test)]
 mod tests {
@@ -1153,6 +1208,102 @@ mod tests {
             now,
             age_ticks: u64::MAX, // a settled client — the edit window may arm
         }
+    }
+
+    /// v6.6 ROUND-ROBIN CONE: the frustum priority must rotate across ALL
+    /// views. The old code served views[0] only — with two players looking
+    /// in opposite directions the second one waited on the 60 s zone sweep
+    /// for every turn refill. The prefix of each tick's batch belongs to
+    /// the cone phase (phase order), so the served view is observable: on
+    /// its tick the cone prefix must lie in THAT view's band + frustum.
+    #[test]
+    fn cone_budget_rotates_round_robin_across_views() {
+        let mut s = Streamer::new(0.0, 0.0, 256, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]));
+            }
+        }
+        // A: west half looking south (+Z, yaw 0); B: east half looking
+        // north (-Z, yaw 180). Opposite frustums — no spawn can pass both
+        // cone tests, so the prefix classification is unambiguous.
+        let a = vhint(60.0, 60.0, 0.0, 0.0, 100);
+        let b = vhint(196.0, 196.0, 180.0, 0.0, 100);
+        let in_cone_of = |sp: &Spawn, v: &ViewHint| {
+            let dx = sp.x - v.eye[0];
+            let dy = sp.y - v.eye[1];
+            let dz = sp.z - v.eye[2];
+            let d2 = dx * dx + dy * dy + dz * dz;
+            let inv = 1.0 / d2.sqrt();
+            let cone =
+                (dx * v.look[0] + dy * v.look[1] + dz * v.look[2]) * inv > cos_half_cone() - 0.02;
+            let band = d2 > (CULL_RADIUS - 4.0) * (CULL_RADIUS - 4.0)
+                && d2 <= (ZONE_FAR + 4.0) * (ZONE_FAR + 4.0);
+            cone && band
+        };
+        // Tick 1 serves view 0 (A): the cone prefix must be A's.
+        let b1: Vec<Spawn> = s.tick_batch(256, &[a, b]).to_vec();
+        assert!(s.cone_cells > 0, "view A's cone must stream on its tick");
+        let prefix1 = &b1[..(s.cone_cells as usize * 8).min(b1.len())];
+        assert!(!prefix1.is_empty());
+        assert!(
+            prefix1.iter().all(|sp| in_cone_of(sp, &a)),
+            "tick 1 cone prefix must serve view A"
+        );
+        // Tick 2 serves view 1 (B): the cone prefix must be B's — this is
+        // the round-robin contract the views[0]-only code broke.
+        let before = s.cone_cells;
+        let b2: Vec<Spawn> = s.tick_batch(256, &[a, b]).to_vec();
+        let served = s.cone_cells - before;
+        assert!(served > 0, "view B's cone must stream on its own tick");
+        let prefix2 = &b2[..(served as usize * 8).min(b2.len())];
+        assert!(
+            prefix2.iter().all(|sp| in_cone_of(sp, &b)),
+            "tick 2 cone prefix must serve view B (round-robin)"
+        );
+    }
+
+    /// v6.6: per-view cone caches are matched by GEOMETRY (eye/look drift),
+    /// not by list index — flipping the player-list order between ticks
+    /// must reuse the caches, and a burst of one-off spectator views must
+    /// not break the tracked players (the cache cap evicts, the next
+    /// served tick rebuilds transparently).
+    #[test]
+    fn cone_caches_survive_order_flips_and_view_churn() {
+        let mut s = Streamer::new(0.0, 0.0, 256, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]));
+            }
+        }
+        let a = vhint(60.0, 60.0, 0.0, 0.0, 100);
+        let b = vhint(196.0, 196.0, 180.0, 0.0, 100);
+        // Build both caches in [a, b] order.
+        let _ = s.tick_batch(2048, &[a, b]);
+        let _ = s.tick_batch(2048, &[a, b]);
+        // Order flip: B first. Both views must keep receiving cone service.
+        let c1 = s.cone_cells;
+        let _ = s.tick_batch(2048, &[b, a]);
+        let _ = s.tick_batch(2048, &[b, a]);
+        assert!(s.cone_cells > c1, "order flip must not starve the cones");
+        // Churn: 20 distinct spectator eyes (new cache each tick, the cap
+        // evicts the oldest tracks). Past VIEW_REFRESH_TICKS the players'
+        // cone cells come due again — the (evicted) caches must rebuild
+        // and serve, not vanish with the churn.
+        for i in 0..20u64 {
+            let sp = vhint(120.0 + f64::from(i as i16), 120.0, 90.0, 0.0, 100 + i);
+            let _ = s.tick_batch(256, &[sp]);
+        }
+        let late = 100 + VIEW_REFRESH_TICKS + 30;
+        let a2 = vhint(60.0, 60.0, 0.0, 0.0, late);
+        let b2 = vhint(196.0, 196.0, 180.0, 0.0, late);
+        let c2 = s.cone_cells;
+        let _ = s.tick_batch(2048, &[a2, b2]);
+        let _ = s.tick_batch(2048, &[a2, b2]);
+        assert!(
+            s.cone_cells > c2,
+            "tracked views must keep cone service after cache churn"
+        );
     }
 
     /// v5.3.3: cone-phase spawns precede the legacy lap and stay inside the
