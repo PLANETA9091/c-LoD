@@ -505,7 +505,11 @@ if [ "${LINK_ERR:-0}" -gt 0 ] || [ "${DISPATCH_ERR:-0}" -gt 0 ]; then
 fi
 if [ "$FAILURES" = "0" ] && [ "$FOUND1" = "1" ] && [ "$FOUND2" = "1" ]; then
   echo "CI VISUAL: ALL LEGS PASS"
+  # v6.6.2: the evidence rides the artifact (GITHUB_STEP_SUMMARY is not
+  # downloadable via the API) — server belief, diag dumps, verdicts.
+  cp "$SUMMARY" "$SHOTS/summary.md" 2>/dev/null || true
   exit 0
 fi
 echo "CI VISUAL: FAILED (failures=$FAILURES leg1=$FOUND1 leg2=$FOUND2)"
+cp "$SUMMARY" "$SHOTS/summary.md" 2>/dev/null || true
 exit 1

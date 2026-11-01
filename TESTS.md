@@ -422,3 +422,37 @@ FRESH decodable cells -> no hold, immediate streaming). The harness now
 dumps `stream: tick` diag lines right after the fill and after the
 probe loop, so the next run's summary shows ewin/dirty/q on both ends
 of the edit. 82 Rust tests, fmt/clippy green.
+
+### v6.6.2 — the sparse-word fragility and the rebeat
+
+Run 41328418191 (v6.6.1) moved the verdict: the recency fix WORKED (the
+window armed at the fill — recomputing the 10-tps clock makes tick 6700's
+ewin 0 the normal post-expiry state), but the marker STILL rendered
+wrong — and this time on BOTH legs, with a shape/color split that finally
+exposed the transport's single-point fragility:
+
+  - The fresh relog client painted the marker as a TALL column in the
+    WRONG color (dark navy ≈ index 0 fogged) — the HEIGHT word decoded,
+    the COLOR word did not.
+  - RED_CONCRETE = color index 2 = cword 0x0200 = exactly ONE active
+    slot-dot of four (the height word 0xEA00 has three — loss-tolerant
+    under OR-merge). Lose that one dot (pool rejection, strobe, fog) and
+    the client decodes color 0 (black) -> fogged navy — on any client,
+    fresh ones included (run 1 decoded red=167, run 2 missed the same
+    dot: a coin flip per run).
+  - A refresh lap without a complete decode OR-merges the old ocean bits
+    back over the partial new word — the wrong color persists.
+
+The engine-side mitigation — v6.6.2 REBEAT: the hold/release path
+schedules ONE retry for every streamed edit cell (REBEAT_DELAY_TICKS=40
+after the release); the rebeat re-dirties them (fresh stamp), cuts the
+post silence, and reruns the whole sequence — the client gets a second
+complete-decode chance with a fresh reset electron. `pending_rebeat`
+keeps the retry a retry (the rebeat release never re-schedules). Test:
+the edit-window test now pins the full two-beat timeline (second release
+carries the reset, dirty_pending returns to 0, the window expires, the
+rebeat does not loop). The harness copies its summary (server belief,
+diag dumps, verdicts) into the artifact as `summary.md` —
+GITHUB_STEP_SUMMARY is not API-downloadable. 82 Rust tests, fmt/clippy
+green. Backlog: instrument the client capture (the ledger's frontier) to
+make the per-dot loss observable and the replace protocol verifiable.

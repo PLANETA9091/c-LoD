@@ -276,6 +276,24 @@ pub const EDIT_HOLD_MAX_BATCH: u64 = 100;
 /// (20 s at 10 tps) re-arms the window even with a huge backlog.
 pub const RECENT_EDIT_TICKS: u64 = 200;
 
+/// v6.6.2 REBEAT: one extra beat of the same edit, this many ticks after
+/// the release. Why: the CI visual run 41328418141 exposed the transport's
+/// single-point fragility — a SPARSE color word (RED_CONCRETE = index 2 =
+/// 0x0200) has exactly ONE active slot-dot of four; if that one dot is
+/// lost (pool rejection, strobe, fog), the client decodes color index 0
+/// (black) and the column renders fogged-black/navy while its HEIGHT word
+/// (0xEA00, three active dots — loss-tolerant under OR-merge) paints a
+/// tall column in the WRONG color on every client, fresh ones included.
+/// The rebeat re-dirties the just-streamed edit cells once, cuts the post
+/// silence, and runs the whole hold→release sequence again — the client
+/// gets a second complete-decode chance (with a fresh reset electron)
+/// while the operator is still watching. p and 1-(1-p)^2 measured: run 1
+/// decoded red, run 2 missed the same dot — a second beat roughly squares
+/// the miss away.
+pub const REBEAT_DELAY_TICKS: u64 = 40;
+/// Cap on pending rebeat entries (the marker edits are tens of cells).
+pub const REBEAT_MAX: usize = 512;
+
 /// v6.5.3: a client younger than this never gets the edit window — its
 /// particle pool is still filling and cone/zone are its only paint source
 /// (60 s at the engine's 10 tps).
@@ -319,6 +337,16 @@ pub struct Streamer {
     dirty_since: Vec<u64>,
     /// FIFO over dirty cells (phase 0 order = edit order).
     dirty_queue: std::collections::VecDeque<u32>,
+    /// v6.6.2: (cell, tick when to re-dirty it) — the ONE extra beat of the
+    /// edit protocol. Scheduled by the hold/release path only; the rebeat
+    /// release never re-schedules (one retry, not a loop).
+    rebeat: std::collections::VecDeque<(u32, u64)>,
+    /// v6.6.2: true while the CURRENT hold's release may schedule rebeats
+    /// (set at the decision arm, consumed by the release).
+    rebeat_armed: bool,
+    /// v6.6.2: the upcoming arm comes from a rebeat re-dirty — its release
+    /// must not schedule another rebeat (one retry, not a loop).
+    pending_rebeat: bool,
     /// Cells currently marked dirty (fast skip when 0).
     pub dirty_pending: usize,
     /// Dirty-phase cells streamed since boot (diagnostics).
@@ -365,6 +393,9 @@ impl Streamer {
             dirty: vec![false; n],
             dirty_since: vec![0; n],
             dirty_queue: std::collections::VecDeque::new(),
+            rebeat: std::collections::VecDeque::new(),
+            rebeat_armed: false,
+            pending_rebeat: false,
             dirty_pending: 0,
             dirty_streams: 0,
             edit_window: 0,
@@ -661,16 +692,20 @@ impl Streamer {
     /// the idle paths share it. Pops the dirty queue once, streams every
     /// decodable cell (edit=true — the reset electron rides along), keeps
     /// undecodable cells queued. Reports how many cells streamed and whether
-    /// the phase cap was hit (the wave signature).
+    /// the phase cap was hit (the wave signature). v6.6.2: when
+    /// `schedule_rebeat` is set (the genuine-edit release only), every
+    /// streamed cell gets ONE retry entry — the rebeat re-dirties it
+    /// REBEAT_DELAY_TICKS later for a second complete-decode chance.
     fn stream_dirty(
         &mut self,
         cap: usize,
         views: &[ViewHint],
-        sub: f64,
         now: u64,
         edit_streamed: &mut u64,
         dirty_cap_hit: &mut bool,
+        schedule_rebeat: bool,
     ) {
+        let sub = self.cell_size as f64 / SUB_PER_CELL;
         let q_len = self.dirty_queue.len();
         for _ in 0..q_len {
             if self.batch.len() >= cap {
@@ -688,6 +723,9 @@ impl Streamer {
                 self.push_cell_spawns(idx_u32, sub, now, true);
                 self.dirty_streams += 1;
                 *edit_streamed += 1;
+                if schedule_rebeat && self.rebeat.len() < REBEAT_MAX {
+                    self.rebeat.push_back((idx_u32, now + REBEAT_DELAY_TICKS));
+                }
             } else {
                 // Nobody can decode it now — keep it queued for later.
                 self.dirty_queue.push_back(idx_u32);
@@ -759,6 +797,31 @@ impl Streamer {
         let budget = budget.max(8);
         let zone_mode = !views.is_empty();
 
+        // ---- v6.6.2 REBEAT: the edit protocol's one retry -----------------
+        // Cells the first release streamed come due REBEAT_DELAY_TICKS
+        // later: re-dirty them (fresh stamp), cut the post silence, and
+        // let the decision below re-run the hold→release sequence. The
+        // rebeat release never schedules further rebeats (one retry).
+        let mut rebeat_rearmed = false;
+        while let Some(&(idx, at)) = self.rebeat.front() {
+            if now < at {
+                break;
+            }
+            self.rebeat.pop_front();
+            let i = idx as usize;
+            if !self.dirty[i] {
+                self.dirty[i] = true;
+                self.dirty_since[i] = now;
+                self.dirty_queue.push_back(idx);
+                self.dirty_pending += 1;
+                self.pending_rebeat = true;
+                rebeat_rearmed = true;
+            }
+        }
+        if rebeat_rearmed {
+            self.edit_window = 0;
+        }
+
         // ---- phase 0: dirty delta (v5.4) + the v6.5.3 edit window ----------
         // Runs #202-#206 measured the real killer: the steady-state refresh
         // stream saturates the vanilla client's particle pool, so an edit's
@@ -790,7 +853,15 @@ impl Streamer {
                 // hold reaches zero (same tick, below).
                 self.edit_hold -= 1;
                 if self.edit_hold == 0 {
-                    self.stream_dirty(cap, views, sub, now, &mut edit_streamed, &mut dirty_cap_hit);
+                    let schedule_rebeat = self.rebeat_armed;
+                    self.stream_dirty(
+                        cap,
+                        views,
+                        now,
+                        &mut edit_streamed,
+                        &mut dirty_cap_hit,
+                        schedule_rebeat,
+                    );
                     if edit_streamed > 0 && !dirty_cap_hit && !fresh_audience {
                         self.edit_window = EDIT_WINDOW_TICKS; // beat 3
                     }
@@ -801,7 +872,14 @@ impl Streamer {
             } else if fresh_audience {
                 // A fresh client's pool is empty and cone/zone are its only
                 // paint — stream dirty cells straight through, never hold.
-                self.stream_dirty(cap, views, sub, now, &mut edit_streamed, &mut dirty_cap_hit);
+                self.stream_dirty(
+                    cap,
+                    views,
+                    now,
+                    &mut edit_streamed,
+                    &mut dirty_cap_hit,
+                    false,
+                );
             } else {
                 // Idle: decide between a genuine edit (HOLD first) and
                 // everything else (waves, undecodable backlog — stream now).
@@ -825,11 +903,22 @@ impl Streamer {
                 }
                 if decodable_waiting > 0 && decodable_waiting <= EDIT_HOLD_MAX_BATCH {
                     // A genuine edit: start the drain, release in
-                    // EDIT_HOLD_TICKS ticks.
+                    // EDIT_HOLD_TICKS ticks. v6.6.2: the first release may
+                    // schedule the rebeat (one retry); an arm driven by a
+                    // rebeat re-dirty must not (pending_rebeat was set).
+                    self.rebeat_armed = !self.pending_rebeat;
+                    self.pending_rebeat = false;
                     self.edit_hold = EDIT_HOLD_TICKS;
                     self.edit_window = EDIT_HOLD_TICKS + EDIT_WINDOW_TICKS;
                 } else {
-                    self.stream_dirty(cap, views, sub, now, &mut edit_streamed, &mut dirty_cap_hit);
+                    self.stream_dirty(
+                        cap,
+                        views,
+                        now,
+                        &mut edit_streamed,
+                        &mut dirty_cap_hit,
+                        false,
+                    );
                 }
             }
         }
@@ -1749,12 +1838,37 @@ mod tests {
             s.cone_cells, cone_after_edit,
             "no cone streams in the post window"
         );
-        // the window expires and the steady state resumes
-        for t in (403 + EDIT_HOLD_TICKS)..(403 + EDIT_HOLD_TICKS + EDIT_WINDOW_TICKS + 5) {
+        // v6.6.2 REBEAT: REBEAT_DELAY_TICKS after the release the streamed
+        // cells re-dirty ONCE, the post silence is cut and the whole
+        // hold→release sequence reruns — a second complete-decode chance
+        // for a fragile sparse color word (RED index 2 = one active dot).
+        let rb = 401 + EDIT_HOLD_TICKS + REBEAT_DELAY_TICKS;
+        let v = view_at(rb);
+        let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        assert_eq!(
+            s.edit_hold, EDIT_HOLD_TICKS,
+            "the rebeat must re-arm the hold"
+        );
+        let mut second_reset = 0u64;
+        for t in (rb + 1)..(rb + EDIT_HOLD_TICKS + 2) {
+            let v = view_at(t);
+            let batch: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+            if batch.iter().any(|sp| sp.y == RESET_Y) {
+                second_reset += 1;
+            }
+        }
+        assert_eq!(
+            second_reset, 1,
+            "the second beat must release with its reset electron"
+        );
+        assert_eq!(s.dirty_pending, 0, "the rebeat released the edit again");
+        // ...and it must NOT loop: tick past the second post window — the
+        // window expires and nothing re-dirties.
+        for t in (rb + EDIT_HOLD_TICKS + 2)..(rb + EDIT_HOLD_TICKS + EDIT_WINDOW_TICKS + 10) {
             let v = view_at(t);
             let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
         }
-        assert_eq!(s.edit_window, 0, "the window must expire");
+        assert_eq!(s.edit_window, 0, "the window must expire (no rebeat loop)");
         assert!(
             s.cone_cells > cone_after_edit,
             "the steady state resumes after the window ({} -> {})",
