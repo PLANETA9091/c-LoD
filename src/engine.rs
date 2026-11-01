@@ -1099,18 +1099,32 @@ fn stream_step(state: &Arc<State>, env: Env) {
     // v5.4 DELTA-ZONE: every player's live camera is a view — views[0]
     // drives the cone-priority phase, ALL views define the decodable set
     // (dirty phase + zone sweep never spend budget outside it).
-    let views: Vec<crate::stream::ViewHint> = players
-        .iter()
-        .map(|p| crate::stream::ViewHint {
-            eye: [
-                f64::from(p.bx) + 0.5,
-                f64::from(p.by) + 1.62,
-                f64::from(p.bz) + 0.5,
-            ],
-            look: crate::stream::look_dir(p.yaw, p.pitch),
-            now: state.tick_no.load(Ordering::Relaxed),
-        })
-        .collect();
+    let views: Vec<crate::stream::ViewHint> = {
+        let per_player = state.per_player.lock().unwrap();
+        players
+            .iter()
+            .map(|p| {
+                let now = state.tick_no.load(Ordering::Relaxed);
+                // v6.5.3: the edit window never arms for a fresh client —
+                // its particle pool is empty and cone/zone are its only
+                // paint source. Unknown players count as fresh (safe side).
+                let joined = per_player
+                    .get(&p.uuid)
+                    .map(|st| st.joined_tick)
+                    .unwrap_or(now);
+                crate::stream::ViewHint {
+                    eye: [
+                        f64::from(p.bx) + 0.5,
+                        f64::from(p.by) + 1.62,
+                        f64::from(p.bz) + 0.5,
+                    ],
+                    look: crate::stream::look_dir(p.yaw, p.pitch),
+                    now,
+                    age_ticks: now.saturating_sub(joined),
+                }
+            })
+            .collect()
+    };
     let batch: Vec<crate::stream::Spawn> = {
         let mut s = state.stream.lock().unwrap();
         s.tick_batch(state.cfg.particles_per_tick as usize, &views)

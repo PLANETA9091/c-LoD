@@ -209,6 +209,11 @@ pub struct ViewHint {
     pub look: [f64; 3],
     /// Engine tick of this call (age bookkeeping).
     pub now: u64,
+    /// v6.5.3: ticks since THIS client joined (0 = brand-new join). The
+    /// edit window must never arm while a fresh client is the audience —
+    /// its particle pool is empty and cone/zone are its ONLY paint source
+    /// (run #205: the window starved the initial paint and leg 2 regressed).
+    pub age_ticks: u64,
 }
 
 /// A decodable cell (cone or zone sweep) is re-streamed at most once per
@@ -235,6 +240,11 @@ pub const ZONE_REFRESH_TICKS: u64 = 600;
 /// dirty cells actually stream — an undecodable backlog never starves the
 /// steady state.
 pub const EDIT_WINDOW_TICKS: u64 = 200;
+
+/// v6.5.3: a client younger than this never gets the edit window — its
+/// particle pool is still filling and cone/zone are its only paint source
+/// (60 s at the engine's 10 tps).
+pub const FRESH_CLIENT_TICKS: u64 = 600;
 
 /// The whole streaming state (server side): one fixed disk of cells plus
 /// the phase cursor of the particle stream.
@@ -645,11 +655,15 @@ impl Streamer {
         let zone_mode = !views.is_empty();
 
         // ---- phase 0: dirty delta (v5.4) ------------------------------------
-        // v6.5.3: the edit window ticks down first; phase 0 re-arms it when
-        // a decodable dirty cell actually streamed (the client's particle
-        // pool gets the quiet time it needs to drain).
+        // v6.5.3: the edit window ticks down first; phase 0 re-arms it for a
+        // GENUINE edit — a small dirty batch for a settled client (the pool
+        // needs the quiet time to drain). A WAVE (the boot-time provisional
+        // upgrades, a forceload) saturates the phase cap and never arms it;
+        // a fresh client never arms it (cone/zone are its only paint).
         self.edit_window = self.edit_window.saturating_sub(1);
+        let fresh_audience = views.iter().any(|v| v.age_ticks < FRESH_CLIENT_TICKS);
         let mut edit_streamed = 0u64;
+        let mut dirty_cap_hit = false;
         if zone_mode && self.dirty_pending > 0 {
             let cap = if self.edit_window > 0 {
                 budget // edit mode: the whole wire serves the edit batch
@@ -659,6 +673,7 @@ impl Streamer {
             let q_len = self.dirty_queue.len();
             for _ in 0..q_len {
                 if self.batch.len() >= cap {
+                    dirty_cap_hit = self.dirty_pending > 0;
                     break;
                 }
                 let Some(idx_u32) = self.dirty_queue.pop_front() else {
@@ -678,7 +693,7 @@ impl Streamer {
                 }
             }
         }
-        if edit_streamed > 0 {
+        if edit_streamed > 0 && !dirty_cap_hit && !fresh_audience {
             self.edit_window = EDIT_WINDOW_TICKS;
         }
 
@@ -853,6 +868,7 @@ mod tests {
             eye: [10.0, 100.0, 60.0],
             look: [0.0, 0.0, -1.0],
             now: 10,
+            age_ticks: u64::MAX,
         }];
         // Refresh streams (paint/cone/zone) carry NO reset electron.
         let b: Vec<Spawn> = s.tick_batch(64, &views).to_vec();
@@ -1045,6 +1061,7 @@ mod tests {
             eye: [x, 64.0 + 1.62, z],
             look: look_dir(yaw_deg as f32, pitch_deg as f32),
             now,
+            age_ticks: u64::MAX, // a settled client — the edit window may arm
         }
     }
 
@@ -1357,6 +1374,7 @@ mod tests {
             eye: [cx - 75.0, 150.0 + 1.62, cz],
             look: look_dir(-90.0, 5.0),
             now: 400,
+            age_ticks: u64::MAX,
         };
         let b: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
         assert!(
@@ -1392,6 +1410,7 @@ mod tests {
             eye: [cx - 75.0, 150.0 + 1.62, cz],
             look: look_dir(-90.0, 5.0),
             now,
+            age_ticks: u64::MAX, // settled client
         };
         // the steady state runs (nothing dirty yet)
         let v = view_at(400);
@@ -1434,6 +1453,36 @@ mod tests {
             "the steady state resumes after the window ({} -> {})",
             cone_after_edit,
             s.cone_cells
+        );
+
+        // v6.5.3 gates: a FRESH audience (empty pool, needs the steady state
+        // to paint) never arms the window, even on a real edit...
+        s.set_cell(128, 128, cell(90, false, [142, 33, 33]));
+        let fresh = ViewHint {
+            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            look: look_dir(-90.0, 5.0),
+            now: 5000,
+            age_ticks: 10, // joined 1 s ago
+        };
+        let _: Vec<Spawn> = s.tick_batch(2048, &[fresh]).to_vec();
+        assert_eq!(
+            s.edit_window, 0,
+            "a fresh client must keep cone/zone running (they are its only paint)"
+        );
+        // ...and a WAVE (hundreds of decodable dirty cells in one tick) never
+        // arms it either — the phase cap saturates, which is the wave
+        // signature, and waves feed the initial paint.
+        for cz in 120..140u32 {
+            for cx in 120..140u32 {
+                s.set_cell(cx, cz, cell(80, false, [100, 100, 100]));
+            }
+        }
+        assert!(s.dirty_pending > 256, "test must build a wave");
+        let v = view_at(5001);
+        let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        assert_eq!(
+            s.edit_window, 0,
+            "a dirty wave must not silence the steady state"
         );
     }
 

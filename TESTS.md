@@ -271,38 +271,46 @@ layer precisely:
     words, age=MAX for never-streamed, out-of-disk clamp), fmt/clippy
     green, the http route tested (503 until armed, verbatim body after).
 
-### v6.5.3 — run #204 verdict: LEG 2 PASS — the marker is REAL; the killer was the particle pool
+### v6.5.3 — LEG 2 PASS proved the marker real; the gated edit window targets the particle pool
 
-Run 41298864989 delivered the breakthrough the sky-hole forensics were
-built for:
+Two runs closed this iteration:
 
-  - **LEG 2 PASS, failures=0** — `marker STILL visible after relog
-    (probe 0)`. A FRESH client (empty buffers, empty particle pool)
-    re-decodes the marker footprint instantly and it survives the session
-    change. The transport, the encode, the strobe, the paint — the whole
-    product chain is correct.
-  - **Leg 1 still missed it: the long-lived client never got the edit.**
-    The steady-state refresh stream (cone every 3 s + zone every 30 s,
-    thousands of dots/tick) saturates the vanilla client's particle pool;
-    new spawns are REJECTED once the cap is hit. The edit's reset
-    electron + fresh dots arrived into a full pool and never rendered —
-    the marker became undeliverable precisely on the client that had been
-    watching for it. (#203's sky-hole was the same saturation plus one
-    unlucky frame: a phantom-complete decode replaced the cell with zero
-    and the recovery dots were then rejected — hence the permanent hole.)
-  - **The fix: the EDIT WINDOW (v6.5.3).** When a decodable dirty cell
-    streams, the cone/zone phases go silent for EDIT_WINDOW_TICKS (200 =
-    10 s) — the client's pool drains (dots live 3-5 s) and the edit batch
-    renders into free slots. While the window is armed the WHOLE wire
-    budget serves dirty cells (was: half). The window re-arms only while
-    decodable dirty cells actually stream, so an undecodable backlog
-    (the boot-era provisional upgrades, ~13k cells) can never starve the
-    steady state. `ewin` rides the stream diag line.
-  - Covered by `edit_window_silences_steady_state_and_recovers`: the edit
-    batch carries the reset electron (y == RESET_Y), the window arms,
-    the steady state stays silent inside it, and cone streaming resumes
-    after expiry. 77 Rust tests, fmt/clippy green.
+  - **#204 (41298864989): LEG 2 PASS, failures=0** — `marker STILL visible
+    after relog (probe 0)`. A FRESH client (empty buffers, empty particle
+    pool) re-decodes the marker footprint instantly and it survives the
+    session change. Transport, encode, strobe, paint — the product chain
+    is correct end to end.
+  - **#205 (41300574740): the first window draft REGRESSED leg 2** (paint=0
+    everywhere — the fresh client never got its initial paint). The draft
+    armed the window on ANY decodable dirty stream, and the boot-era
+    backlog (~13k provisional-upgrade cells) kept arming it, starving the
+    cone/zone phases that are a fresh client's ONLY paint source.
 
-What the next visual run must show: leg 1 catches the marker within its
-first probes (the edit lands in one tick + one window), leg 2 keeps
-passing, and the sky-hole class is closed for good.
+The measured killer (leg 1, #202-#204): the steady-state refresh stream
+(cone 3 s + zone 30 s, thousands of dots/tick) saturates the vanilla
+client's particle pool; new spawns are REJECTED once the cap is hit, so
+the edit's reset electron + fresh dots never render on a long-lived client
+(#203's permanent sky-hole = the same saturation plus one phantom-complete
+zero-replace whose recovery dots were then rejected).
+
+**The final v6.5.3 window arms ONLY when all three hold:**
+
+  1. decodable dirty cells actually streamed this tick (re-arm condition);
+  2. the dirty phase did NOT hit its spawn cap — a cap-saturated phase is
+     the WAVE signature (boot upgrades, forceload), and waves must keep
+     the steady state painting;
+  3. the audience is SETTLED (every view older than FRESH_CLIENT_TICKS =
+     600 ticks) — a fresh client's pool is empty and cone/zone are its
+     only paint source (`age_ticks` rides ViewHint from the per-player
+     joined tick; unknown players count as fresh, safe side).
+
+While armed: the whole wire budget serves dirty cells (was half), cone and
+zone stay silent for EDIT_WINDOW_TICKS (200 = 10 s) — the pool drains
+(dots live 3-5 s) and the edit batch renders into free slots. `ewin` rides
+the stream diag line.
+
+Covered by `edit_window_silences_steady_state_and_recovers`: the edit batch
+carries the reset electron (y == RESET_Y), the window arms for a settled
+client, the steady state stays silent inside it, cone streaming resumes
+after expiry, a fresh audience never arms it, and a 400-cell wave never
+arms it. 77 Rust tests, fmt/clippy green.
