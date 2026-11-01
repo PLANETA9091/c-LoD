@@ -391,6 +391,59 @@ impl Streamer {
         )
     }
 
+    /// v6.5.2 CI FORENSICS: dump a window of cells around a world coordinate
+    /// — height/water/valid/rgb, the encoded words the streamer would send,
+    /// the last-stream age and the dirty flag. Served by /clod-cells so a CI
+    /// run can compare the SERVER's belief about a cell (what it streams)
+    /// with what the client actually painted. Run #203: the client showed a
+    /// permanent SKY HOLE at the marker footprint (stable across 24 probes
+    /// AND a fresh relog decode) while the dome around it painted — this
+    /// dump separates "the server streams garbage/never re-streams" from
+    /// "the server streams the right words and the client fails to decode".
+    pub fn debug_window(&self, wx: i32, wz: i32, radius: u32, now: u64) -> String {
+        let cell = self.cell_size as f64;
+        let ccx = (((wx as f64 - self.origin_x) / cell).floor().max(0.0)) as u32;
+        let ccz = (((wz as f64 - self.origin_z) / cell).floor().max(0.0)) as u32;
+        let side = self.side;
+        let mut out =
+            String::from("# cx cz wx wz height water valid rgb last_age dirty hword cword\n");
+        let x0 = ccx.saturating_sub(radius);
+        let z0 = ccz.saturating_sub(radius);
+        let x1 = (ccx + radius).min(side - 1);
+        let z1 = (ccz + radius).min(side - 1);
+        for z in z0..=z1 {
+            for x in x0..=x1 {
+                let idx = (z * side + x) as usize;
+                let Some(c) = self.cells.get(idx) else {
+                    continue;
+                };
+                let (ox, oz) = self.cell_origin(x, z);
+                let age = if self.last_stream[idx] == 0 {
+                    u64::MAX
+                } else {
+                    now.wrapping_sub(self.last_stream[idx])
+                };
+                let (h, w) = Self::encode_words(c);
+                out.push_str(&format!(
+                    "{} {} {} {} {} {} {} {:?} {} {} {:#06x} {:#06x}\n",
+                    x,
+                    z,
+                    ox as i32,
+                    oz as i32,
+                    c.height,
+                    c.water as u8,
+                    c.valid as u8,
+                    c.rgb,
+                    age,
+                    self.dirty[idx] as u8,
+                    h,
+                    w
+                ));
+            }
+        }
+        out
+    }
+
     /// Encode one cell into its two 16-bit words (HI height, LO color).
     pub fn encode_words(cell: &Cell) -> (u16, u16) {
         let h = (i32::from(cell.height) + 64).clamp(0, 255) as u16;
@@ -1282,5 +1335,51 @@ mod tests {
             assert!(sp.x >= cx - half && sp.x <= cx + half);
             assert!(sp.z >= cz - half && sp.z <= cz + half);
         }
+    }
+
+    /// v6.5.2: the /clod-cells forensics window — world->disk coord mapping,
+    /// the encoded words, the last-stream age and the dirty flag must all
+    /// reflect what the scheduler would actually do for a cell.
+    #[test]
+    fn debug_window_reports_server_belief() {
+        let (cx, cz, region) = (-930.0, 796.0, 512);
+        let half = f64::from(region) * 0.5;
+        let mut s = Streamer::new(cx - half, cz - half, region, 2);
+        // the disk origin lands at (-1186, 540); the named center (-930,796)
+        // is cell (128, 128) for cell_size 2.
+        s.set_cell(128, 128, cell(170, false, [142, 33, 33]));
+        s.set_cell(127, 128, cell(62, true, [10, 20, 30]));
+        let dump = s.debug_window(-930, 796, 1, 1000);
+        assert!(dump.contains("# cx cz wx wz height water valid rgb last_age dirty hword cword"));
+        let center = dump
+            .lines()
+            .find(|l| l.starts_with("128 128 "))
+            .expect("center row");
+        assert!(center.contains(" 170 "), "{center}");
+        assert!(center.contains(" 0 1 "), "water=0 valid=1: {center}");
+        assert!(center.starts_with("128 128 -930 796 "), "{center}");
+        // height 170 -> byte 234 = 0xea; the HI word is 0xea00.
+        assert!(
+            center.contains("0xea00"),
+            "HI word must be 0xea00: {center}"
+        );
+        // the dirty flag is visible and initially clear after set_cell
+        // (set_cell marks dirty only on a word CHANGE vs the previous cell).
+        let water_row = dump
+            .lines()
+            .find(|l| l.starts_with("127 128 "))
+            .expect("water row");
+        assert!(water_row.contains(" 1 1 "), "water=1 valid=1: {water_row}");
+        // never-streamed cells report age u64::MAX (no bogus 0).
+        assert!(
+            center.contains(" 18446744073709551615 "),
+            "age must be u64::MAX: {center}"
+        );
+        // out-of-disk worlds clamp inside the grid instead of panicking.
+        let edge = s.debug_window(-99999, 99999, 1, 0);
+        assert!(
+            edge.lines().count() >= 1,
+            "clamped dump must still emit rows"
+        );
     }
 }

@@ -9,6 +9,11 @@
 //!   GET /clod-pack.zip    the pack (ETag = SHA-1, X-Clod-Revision header)
 //!   GET /clod-pack.sha1   current SHA-1 hex (plain text)
 //!   GET /clod-pack.info   revision/cells/sha1/bytes summary (plain text)
+//!   GET /clod-cells       v6.5.2 CI forensics: the disk-cell window around
+//!                         the configured debug_cell (height/water/valid/rgb,
+//!                         encoded words, last-stream age, dirty flag) — the
+//!                         SERVER's belief about what it streams, to compare
+//!                         against what the client painted
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -26,6 +31,8 @@ pub struct PackMeta {
 pub struct PackServer {
     pub bytes: RwLock<Arc<Vec<u8>>>,
     pub meta: RwLock<PackMeta>,
+    /// v6.5.2: the /clod-cells debug window (empty until debug_cell is set).
+    pub cells_debug: RwLock<String>,
 }
 
 impl PackServer {
@@ -33,6 +40,7 @@ impl PackServer {
         Arc::new(Self {
             bytes: RwLock::new(Arc::new(Vec::new())),
             meta: RwLock::new(PackMeta::default()),
+            cells_debug: RwLock::new(String::new()),
         })
     }
 
@@ -53,6 +61,14 @@ impl PackServer {
         if let Ok(mut m) = self.meta.write() {
             m.cells = cells;
             m.total_cells = total_cells;
+        }
+    }
+
+    /// v6.5.2: refresh the /clod-cells debug window (engine-side, every
+    /// stream_diag beat when debug_cell is configured).
+    pub fn set_cells_debug(&self, dump: String) {
+        if let Ok(mut d) = self.cells_debug.write() {
+            *d = dump;
         }
     }
 
@@ -166,11 +182,28 @@ fn handle(mut stream: TcpStream, srv: &PackServer) -> std::io::Result<()> {
             .into_bytes();
             write_plain(&mut stream, &body)
         }
+        "/clod-cells" => {
+            let empty = srv.cells_debug.read().map(|d| d.is_empty()).unwrap_or(true);
+            if empty {
+                return write_status(
+                    &mut stream,
+                    503,
+                    "service unavailable",
+                    b"cells debug window not configured (set debug_cell=x,z)",
+                );
+            }
+            let body = srv
+                .cells_debug
+                .read()
+                .map(|d| d.clone().into_bytes())
+                .unwrap_or_default();
+            write_plain(&mut stream, &body)
+        }
         _ => write_status(
             &mut stream,
             404,
             "not found",
-            b"c-LoD: use /clod-pack.zip, /clod-pack.sha1, /clod-pack.info",
+            b"c-LoD: use /clod-pack.zip, /clod-pack.sha1, /clod-pack.info, /clod-cells",
         ),
     }
 }
@@ -249,6 +282,19 @@ mod tests {
         // 404 path
         let resp = get(18401, "/nope");
         assert!(String::from_utf8_lossy(&resp).starts_with("HTTP/1.1 404"));
+
+        // v6.5.2: /clod-cells stays 503 until a window is configured, then
+        // serves the engine's dump verbatim.
+        let resp = get(18401, "/clod-cells");
+        assert!(
+            String::from_utf8_lossy(&resp).starts_with("HTTP/1.1 503"),
+            "{resp:?}"
+        );
+        srv.set_cells_debug("# cx cz\n1 2\n".into());
+        let resp = get(18401, "/clod-cells");
+        let text = String::from_utf8_lossy(&resp);
+        assert!(text.starts_with("HTTP/1.1 200 OK"), "{text}");
+        assert!(text.contains("# cx cz"), "{text}");
 
         drop(h);
     }

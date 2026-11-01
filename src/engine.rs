@@ -1042,6 +1042,16 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     // v5.2.2: /clod-pack.info serves LIVE scan counters (it used to
     // report the boot-time cells=0 forever).
     state.server.set_meta(valid, total_cells);
+    // v6.5.2 CI forensics: when debug_cell is configured, refresh the
+    // /clod-cells window (the server's belief about the cells it streams)
+    // on the same 100-tick beat.
+    if let Some((dx, dz)) = state.cfg.debug_cell {
+        let dump = {
+            let s = state.stream.lock().unwrap();
+            s.debug_window(dx, dz, 6, tick)
+        };
+        state.server.set_cells_debug(dump);
+    }
     let p0 = players.first();
     crate::log_info(&format!(
         "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}) rescan {rescan_c}c/{rescan_e}e, edits {e_char}{e_pushes}p/{e_cells}c/{e_edits}e drop {e_drops}, spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} {cache_stat}",

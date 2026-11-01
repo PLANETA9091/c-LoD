@@ -111,6 +111,13 @@ pub struct Config {
     /// as the registration host; without one (or on any failure) the v6.2
     /// rescan wave stays the detector, so this knob can never regress.
     pub native_edits: bool,
+    /// v6.5.2 CI FORENSICS: world x/z of a cell window served by
+    /// /clod-cells (height/water/valid/rgb/words/last-stream age/dirty).
+    /// Lets a CI run compare the SERVER's belief about a cell with what
+    /// the client painted. None = the endpoint stays 503 (production
+    /// default — no window, no cost beyond one RwLock<String>).
+    /// CLOD_OPTS: debug_cell_x=<x>;debug_cell_z=<z> (both or neither).
+    pub debug_cell: Option<(i32, i32)>,
 }
 
 impl Default for Config {
@@ -150,6 +157,7 @@ impl Default for Config {
             native_dust: true,
             native_trees: true,
             native_edits: true,
+            debug_cell: None,
         }
     }
 }
@@ -287,6 +295,12 @@ impl Config {
         if let Some(v) = get("native_edits") {
             cfg.native_edits = matches!(v.trim(), "1" | "true" | "yes" | "on");
         }
+        // v6.5.2: debug_cell=x,z — the /clod-cells window center.
+        if let (Some(x), Some(z)) = (get("debug_cell_x"), get("debug_cell_z")) {
+            if let (Ok(x), Ok(z)) = (x.trim().parse::<i32>(), z.trim().parse::<i32>()) {
+                cfg.debug_cell = Some((x, z));
+            }
+        }
         cfg
     }
 }
@@ -396,6 +410,20 @@ mod tests {
         assert!(!c.native_edits, "wave-only detection selectable");
         let c = Config::parse("native_edits=1");
         assert!(c.native_edits);
+    }
+
+    #[test]
+    fn debug_cell_window_knob() {
+        // v6.5.2 forensics: off by default, both halves required, negatives
+        // (the usual disk centers) parse through.
+        let c = Config::parse("");
+        assert_eq!(c.debug_cell, None, "no window unless configured");
+        let c = Config::parse("debug_cell_x=-930");
+        assert_eq!(c.debug_cell, None, "a lone x must not arm the window");
+        let c = Config::parse("debug_cell_x=-930;debug_cell_z=796");
+        assert_eq!(c.debug_cell, Some((-930, 796)));
+        let c = Config::parse("debug_cell_x=0;debug_cell_z=64");
+        assert_eq!(c.debug_cell, Some((0, 64)));
     }
 
     #[test]

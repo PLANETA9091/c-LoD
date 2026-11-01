@@ -195,6 +195,10 @@ done
 
 # ---- 1. boot the stack (fifo console, gates) --------------------------------
 sum "### c-LoD visual run ($CENTER, marker=$MARKER, vantage $VX,$VY yaw $VYAW)"
+# v6.5.2: arm the /clod-cells forensics window on the marker center — the
+# run can then compare the SERVER's belief about the marker cells (what it
+# streams) with what the client painted.
+export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ}"
 CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" || {
   echo "FAIL: boot/gates"; tail -40 /tmp/server.log; exit 1; }
 sum "- boot + gates OK ($(date -u +%H:%M:%S))"
@@ -373,6 +377,17 @@ fi
 grep -iE "Changed [0-9]+ block|Filled" /tmp/server.log | tail -1 \
   || note "fill summary not in log (probe loop decides)"
 sum "- fill issued: 5x$((FILL_Y1 - FILL_Y0 + 1))x5 $MARKER at $CX,$CZ (zone forceloaded ±48)"
+# v6.5.2 forensics: the SERVER's belief about the marker cells right after
+# the fill — heights/valid/words before any probe claims anything.
+sleep 3
+CELLS_DUMP=$(curl -s "http://127.0.0.1:8199/clod-cells" || true)
+{ echo ""
+  echo "### /clod-cells AFTER FILL (server belief)"
+  echo '```'
+  printf '%s\n' "$CELLS_DUMP" | head -18
+  echo '```'
+} >> "$SUMMARY"
+echo "cells dump captured (after fill): $(printf '%s\n' "$CELLS_DUMP" | grep -c '^[0-9-]' || true) rows"
 srv "time set noon"  # v6.4.8: the probe loop must run in daylight
 PROBE_LOG="$SHOTS/probe_counts.txt"; : > "$PROBE_LOG"
 for k in $(seq 0 23); do
@@ -455,6 +470,16 @@ echo "=== client log pack markers ==="
 grep -iE "pack|post|reload" /tmp/client.log | tail -8 || true
 echo "=== server stream counters ==="
 grep -E "stream|cells|laps|edits" /tmp/server.log | tail -8 || true
+# v6.5.2 forensics: the server's belief AFTER the probe loop — if the
+# marker cells read height=170/valid here while the screen stayed sky,
+# the failure is on the client decode side, not the stream.
+CELLS_DUMP2=$(curl -s "http://127.0.0.1:8199/clod-cells" || true)
+{ echo ""
+  echo "### /clod-cells AFTER PROBES (server belief)"
+  echo '```'
+  printf '%s\n' "$CELLS_DUMP2" | head -18
+  echo '```'
+} >> "$SUMMARY"
 # v6.5.1: the edit-channel killer (run 41293241318) fired AFTER the boot
 # gates — "listener registered" was green while every event dispatch threw
 # IncompatibleClassChangeError inside ClodEdits.pushBlock (2405 times). The

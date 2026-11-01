@@ -238,3 +238,35 @@ Fixes, each verified locally:
     `Could not pass event`; the visual verdict gates both counters over
     the FULL session log (the boot window ends before the first fluid
     tick, which is how #202 slipped through).
+
+### v6.5.2 — run #203 verdict: the edit channel is ALIVE; the marker paints as a sky hole
+
+Run 41295840160 (v6.5.1) settled the edit channel and isolated the next
+layer precisely:
+
+  - **The v6.5.1 fix works on CI.** `edits +5611p/4130c/1047e drop 0`
+    (in #202: `+0p` forever) — the fill registered 1047 edit events, the
+    dirty phase pushed 5611 particles, zero drops; G10's new counters
+    stayed clean. The renderer probe is green again (end_rod burst
+    144 px close; far-probe 0 is a sensitivity question — end_rod sparks
+    are sub-pixel at 75 m — tracked separately).
+  - **The marker painted as a SKY HOLE, not red.** The strip through the
+    marker (x 628..653, exactly the 5-block footprint at 75 m) flipped
+    from painted ocean (32,45,76) to vanilla sky (176,204,255) — stable
+    across all 24 edit probes AND all 12 relog probes, while the dome
+    around it repainted fully after the relog (255k px). So a FRESH
+    client decode also leaves the marker footprint empty: the decode
+    pipeline cannot reproduce the server's post-fill state there.
+  - **The forensics moved server-side.** New `debug_cell_x/z` CLOD_OPTS
+    arm a `/clod-cells` window (one RwLock, refreshed on the 100-tick
+    diag beat): per-cell height/water/valid/rgb + the exact hword/cword
+    the streamer would send + last-stream age + dirty flag. The visual
+    script now dumps the window AFTER the fill and AFTER the probes into
+    the step summary. Next-run discriminator: if the server shows
+    height=170 valid hword=0xea00 while the screen stays sky, the
+    failure is client-side decode of those dots; if the server shows
+    ocean/stale words, the edit never reached the disk store. Either
+    answer closes a whole branch of speculation.
+  - Coverage: 76 Rust tests (debug_cell knob + the debug_window mapping,
+    words, age=MAX for never-streamed, out-of-disk clamp), fmt/clippy
+    green, the http route tested (503 until armed, verbatim body after).
