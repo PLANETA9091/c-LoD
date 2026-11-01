@@ -219,7 +219,7 @@ PYEOF
 # "uniform sampler2D X;" in the shader must have an input named X minus
 # the "Sampler" suffix, and every input must be used by the shader.
 python3 - <<'PYEOF'
-import re, sys
+import json, re, sys
 from pathlib import Path
 ok = True
 for chain in sorted(Path("assets/post_effect").glob("*.json")):

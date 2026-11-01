@@ -217,8 +217,13 @@ accept_pack_prompt leg1 60
 sleep 15
 
 # ---- 3. deterministic world state + stream liveness -------------------------
+# v6.4.8: 'time set 6000' put the 26.3 world in NIGHT (different tick scale —
+# the v6.4.7 shots are a starfield), the dimmed carrier dots fail the
+# capture strobe (pc.g > 0.40) and the decode goes blind. 'noon' is the
+# vanilla literal — daytime in ANY version. Re-issued before every shot
+# batch below; 20-min days drift slowly enough that a batch stays bright.
 srv "gamerule doDaylightCycle false"
-srv "time set 6000"
+srv "time set noon"
 srv "weather clear"
 srv "gamemode spectator Stepan"
 CELLS=0
@@ -285,6 +290,7 @@ sum "- paint settled=$SETTLED (wire ${LAST_WIRE}p)"
 DRIFT=999999
 for t in 1 2 3 4 5 6; do
   assert_online "baseline try $t" || exit 1
+  srv "time set noon"  # v6.4.8: keep the strobe bright across the tries
   srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"
   sleep 6
   shot 10_before_edit || exit 1
@@ -320,6 +326,7 @@ fi
 grep -iE "Changed [0-9]+ block|Filled" /tmp/server.log | tail -1 \
   || note "fill summary not in log (probe loop decides)"
 sum "- fill issued: 5x$((FILL_Y1 - FILL_Y0 + 1))x5 $MARKER at $CX,$CZ (zone forceloaded ±48)"
+srv "time set noon"  # v6.4.8: the probe loop must run in daylight
 PROBE_LOG="$SHOTS/probe_counts.txt"; : > "$PROBE_LOG"
 for k in $(seq 0 23); do
   assert_online "edit probe $k" || exit 1
@@ -369,7 +376,7 @@ accept_pack_prompt leg2 30
 assert_online "after leg-2 pack accept" || exit 1
 sleep 15
 assert_online "15 s after leg-2 pack accept" || exit 1
-srv "time set 6000"
+srv "time set noon"  # v6.4.8: was 'time set 6000' — night in the 26.3 scale
 srv "gamemode spectator Stepan"
 srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"
 sleep 30   # fresh session: the dust must re-deliver the persisted disk
