@@ -107,6 +107,44 @@ shot() { # name
     && note "shot $1" || { fail "screenshot $1 failed"; return 1; }
 }
 
+# v6.7 CAPTURE LENS forensics: crop the right strip (the lens panels) from a
+# screenshot and count the CLIENT-DECODED marker colors in it — the client's
+# belief, immune to in-world fog/angle. Signatures (debug_lens.fsh):
+#   lens_red   ~ (102,0,0)   = color lattice idx 2 (RED_CONCRETE) COMMITTED
+#   lens_black ~ (0,0,0)     = idx 0 committed (the lost-single-dot signature)
+#   lens_water ~ (70,130,240)= idx 216 water committed
+#   lens_dark  ~ (31,31,31)  = never-marked cells (no word ever committed)
+lens_metrics() { # shot_name -> prints lens_red=N lens_black=N lens_water=N lens_dark=N, saves crop
+  python3 - "$SHOTS/$1.png" "$SHOTS/lens_$1.png" <<'PYEOF' 2>/dev/null || { echo "lens_red=? lens_black=? lens_water=? lens_dark=?"; return 0; }
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB')
+# Panel geometry (debug_lens.fsh, 1280x720): 320x320 px each on the right
+# edge, GL y is bottom-up -> screenshot rows are flipped. Count ONLY inside
+# the two panel rects — scene pixels in the surrounding strip must never
+# pollute the signatures (a night sky is exactly lens_black-black).
+PX0, PW = 952, 320
+COLOR_ROWS = range(392, 712)   # GL y 8..328  (panel A: color)
+HEIGHT_ROWS = range(64, 384)   # GL y 336..656 (panel B: height)
+crop = im.crop((940, 50, 1280, 720))
+crop.save(sys.argv[2])
+px = im.load()
+red = black = water = dark = 0
+for y in list(COLOR_ROWS) + list(HEIGHT_ROWS):
+    for x in range(PX0 + 1, PX0 + PW - 1):
+        r, g, b = px[x, y]
+        if 85 <= r <= 120 and g <= 25 and b <= 25:
+            red += 1
+        elif r <= 8 and g <= 8 and b <= 8:
+            black += 1
+        elif 55 <= r <= 90 and 110 <= g <= 150 and 220 <= b <= 255:
+            water += 1
+        elif 24 <= r <= 40 and 24 <= g <= 40 and 24 <= b <= 40:
+            dark += 1
+print(f"lens_red={red} lens_black={black} lens_water={water} lens_dark={dark}")
+PYEOF
+}
+
 paint_px() { # a.png b.png -> changed pixel count, ALWAYS a single line
   # v6.4.2 FIX: visual_diff.py asserts against --min-change and exits 1 when
   # below it; with the 2000000000 sentinel the assertion always fired, and
@@ -197,8 +235,11 @@ done
 sum "### c-LoD visual run ($CENTER, marker=$MARKER, vantage $VX,$VY yaw $VYAW)"
 # v6.5.2: arm the /clod-cells forensics window on the marker center — the
 # run can then compare the SERVER's belief about the marker cells (what it
-# streams) with what the client painted.
-export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ}"
+# streams) with what the client painted. v6.7: also arm the CAPTURE LENS —
+# the client's committed decode state rides every probe screenshot as two
+# panels on the right edge (color lattice + height bytes), so a lost dot
+# (the v6.6.2 fragility) is VISIBLE as lens_black instead of guessed.
+export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=true"
 CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" || {
   echo "FAIL: boot/gates"; tail -40 /tmp/server.log; exit 1; }
 sum "- boot + gates OK ($(date -u +%H:%M:%S))"
@@ -401,14 +442,15 @@ PROBE_LOG="$SHOTS/probe_counts.txt"; : > "$PROBE_LOG"
 for k in $(seq 0 23); do
   assert_online "edit probe $k" || exit 1
   shot "12_after_edit_probe$k" || exit 1
+  LM=$(lens_metrics "12_after_edit_probe$k")
   python3 "$BENCH_DIR/visual_diff.py" \
        "$SHOTS/10_before_edit.png" "$SHOTS/12_after_edit_probe$k.png" \
        --probe red --min-probe "$MIN_PROBE" --min-change "$MIN_CHANGE" \
        --out "$SHOTS/diff_live_edit.png" > /tmp/probe_out.txt 2>&1
   PC=$(grep -o 'probe\[red\] px = [0-9]*' /tmp/probe_out.txt | grep -o '[0-9]*$')
   PS=$(grep -o 'paint px = [0-9]*' /tmp/probe_out.txt | grep -o '[0-9]*$')
-  echo "probe$k red=${PC:-?} paint=${PS:-?}" >> "$PROBE_LOG"
-  sum "- probe $k: red=${PC:-?} paint=${PS:-?} (need red>=$MIN_PROBE paint>=$MIN_CHANGE)"
+  echo "probe$k red=${PC:-?} paint=${PS:-?} $LM" >> "$PROBE_LOG"
+  sum "- probe $k: red=${PC:-?} paint=${PS:-?} $LM (need red>=$MIN_PROBE paint>=$MIN_CHANGE)"
   if grep -q "VISUAL OK" /tmp/probe_out.txt; then
     FOUND1=1
     note "marker VISIBLE on screen after edit (probe $k, ~$((k * 5 + 5)) s)"
@@ -457,6 +499,7 @@ sleep 30   # fresh session: the dust must re-deliver the persisted disk
 for k in $(seq 0 11); do
   assert_online "relog probe $k" || exit 1
   shot "13_after_relog_probe$k" || exit 1
+  LM=$(lens_metrics "13_after_relog_probe$k")
   # leg 2 asserts the MARKER COLOR on screen (probe only): scene drift between
   # sessions is allowed to move non-marker pixels
   python3 "$BENCH_DIR/visual_diff.py" \
@@ -464,8 +507,8 @@ for k in $(seq 0 11); do
        --probe red --min-probe "$MIN_PROBE" --min-change 0 \
        --out "$SHOTS/diff_after_relog.png" > /tmp/probe_out.txt 2>&1
   PC=$(grep -o 'probe\[red\] px = [0-9]*' /tmp/probe_out.txt | grep -o '[0-9]*$')
-  echo "relog_probe$k red=${PC:-?}" >> "$PROBE_LOG"
-  sum "- relog probe $k: red=${PC:-?} (need >= $MIN_PROBE)"
+  echo "relog_probe$k red=${PC:-?} $LM" >> "$PROBE_LOG"
+  sum "- relog probe $k: red=${PC:-?} $LM (need >= $MIN_PROBE)"
   if grep -q "VISUAL OK" /tmp/probe_out.txt; then
     FOUND2=1
     note "marker STILL visible after relog (probe $k)"

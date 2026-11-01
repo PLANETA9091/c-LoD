@@ -57,7 +57,16 @@ fn substitute(template: &str, map: &[(&str, String)]) -> String {
 }
 
 pub fn build(cfg: &Config) -> Pack {
-    let lod_terrain_tpl = include_str!("../assets/post_effect/lod_terrain.json");
+    // v6.7 CAPTURE LENS: `debug_lens=true` swaps in the debug chain (the
+    // capture-lens pass appended after the blit) and ships its shader. The
+    // production pack is byte-identical to the pre-v6.7 artifact; the debug
+    // pack's SHA differs (one-time re-push on the CI runner — expected).
+    let debug_lens = cfg.debug_lens;
+    let lod_terrain_tpl = if debug_lens {
+        include_str!("../assets/post_effect/lod_terrain_debug.json")
+    } else {
+        include_str!("../assets/post_effect/lod_terrain.json")
+    };
     let atmosphere_tpl = include_str!("../assets/post_effect/atmosphere.json");
 
     // 26.3 veil window in EYE-SPACE BLOCKS: the veil starts taking over just
@@ -121,6 +130,30 @@ pub fn build(cfg: &Config) -> Pack {
         ("__RESET_Y__", fmt_f(crate::stream::RESET_Y as f32)),
     ];
 
+    // v6.7 lens window: 64x64 cells around the debug window center (the
+    // /clod-cells center when set, else the disk center), clamped into the
+    // fixed 256x256 capture target.
+    if debug_lens {
+        let side = (cfg.region_blocks / cfg.cell_size.max(1)).clamp(1, 256);
+        let win = 64i32.min(side);
+        let (ccx, ccz) = cfg.debug_cell.unwrap_or((side / 2, side / 2));
+        let lx = (ccx - win / 2).clamp(0, side - win).max(0);
+        let lz = (ccz - win / 2).clamp(0, side - win).max(0);
+        let mut m2 = map;
+        m2.push(("__LENS_X__", fmt_f(lx as f32)));
+        m2.push(("__LENS_Z__", fmt_f(lz as f32)));
+        m2.push(("__LENS_WIN__", fmt_f(win as f32)));
+        return build_zip(lod_terrain_tpl, atmosphere_tpl, m2, debug_lens);
+    }
+    build_zip(lod_terrain_tpl, atmosphere_tpl, map, debug_lens)
+}
+
+fn build_zip(
+    lod_terrain_tpl: &str,
+    atmosphere_tpl: &str,
+    map: Vec<(&str, String)>,
+    debug_lens: bool,
+) -> Pack {
     let lod_terrain_json = substitute(lod_terrain_tpl, &map);
     let atmosphere_json = substitute(atmosphere_tpl, &map);
 
@@ -132,13 +165,19 @@ pub fn build(cfg: &Config) -> Pack {
     let lod_terrain = include_str!("../assets/glsl/lod_terrain.fsh");
     let clod_blit = include_str!("../assets/glsl/clod_blit.fsh");
     let atmosphere = include_str!("../assets/glsl/atmosphere.fsh");
+    // v6.7: the capture lens ships ONLY in the debug pack.
+    let debug_lens_fsh = if debug_lens {
+        Some(include_str!("../assets/glsl/debug_lens.fsh"))
+    } else {
+        None
+    };
     // Camera channel: the vanilla sky core-shader override.
     let sky_vsh = include_str!("../assets/glsl/sky.vsh");
     let sky_fsh = include_str!("../assets/glsl/sky.fsh");
 
     // 26.3 pack.mcmeta schema (see v3 notes): min_format/max_format mandatory
     // for formats > 64; 97 = resource_major of 26.3.
-    let mcmeta = "{\"pack\":{\"description\":\"c-LoD v5 sky-grid streamed LOD (shader-only pack, zero textures, world data rides dust particles)\",\"min_format\":97,\"max_format\":97}}".to_string();
+    let mcmeta = "{\"pack\":{\"description\":\"c-LoD v6 live-delta streamed LOD (shader-only pack, zero textures, world data rides dust particles)\",\"min_format\":97,\"max_format\":97}}".to_string();
 
     let mut zip = ZipWriter::new();
     zip.add("pack.mcmeta", mcmeta.as_bytes());
@@ -173,6 +212,9 @@ pub fn build(cfg: &Config) -> Pack {
         "assets/clod/shaders/post/atmosphere.fsh",
         atmosphere.as_bytes(),
     );
+    if let Some(lens) = debug_lens_fsh {
+        zip.add("assets/clod/shaders/post/debug_lens.fsh", lens.as_bytes());
+    }
     zip.add("assets/minecraft/shaders/core/sky.vsh", sky_vsh.as_bytes());
     zip.add("assets/minecraft/shaders/core/sky.fsh", sky_fsh.as_bytes());
     let zip_bytes = zip.finish();
@@ -256,6 +298,65 @@ mod tests {
         let b = build(&Config::parse(""));
         assert_eq!(a.zip, b.zip, "pack bytes must be deterministic");
         assert_eq!(a.sha1_hex, b.sha1_hex);
+    }
+
+    #[test]
+    fn debug_lens_pack_ships_lens_production_does_not() {
+        // v6.7: the capture lens is CI-only. The production pack must stay
+        // byte-identical to the pre-lens artifact (no debug_lens.fsh entry,
+        // no lens pass, no ClodLens UBO); the debug pack carries all three
+        // and substitutes the lens window tokens.
+        let prod = build(&Config::parse(""));
+        let prod_entries = zip_entries(&prod.zip);
+        let names: Vec<String> = prod_entries.iter().map(|(n, _)| n.clone()).collect();
+        assert_eq!(names.len(), 13, "production entry count fixed");
+        assert!(!names.iter().any(|n| n.contains("debug_lens")));
+        let chain = String::from_utf8_lossy(
+            &prod_entries
+                .iter()
+                .find(|(n, _)| n == "assets/clod/post_effect/lod_terrain.json")
+                .unwrap()
+                .1,
+        );
+        assert!(
+            !chain.contains("debug_lens"),
+            "lens pass in production chain"
+        );
+        assert!(!chain.contains("ClodLens"), "lens UBO in production chain");
+
+        let dbg = build(&Config::parse(
+            "debug_lens=true;debug_cell_x=100;debug_cell_z=200",
+        ));
+        let entries = zip_entries(&dbg.zip);
+        assert_eq!(
+            entries.len(),
+            14,
+            "debug pack = production + debug_lens.fsh"
+        );
+        assert!(entries
+            .iter()
+            .any(|(n, _)| n == "assets/clod/shaders/post/debug_lens.fsh"));
+        let chain = String::from_utf8_lossy(
+            &entries
+                .iter()
+                .find(|(n, _)| n == "assets/clod/post_effect/lod_terrain.json")
+                .unwrap()
+                .1,
+        );
+        assert!(chain.contains("clod:post/debug_lens"), "lens pass missing");
+        assert!(chain.contains("ClodLens"), "lens UBO missing");
+        // Window: center cell (100,200) -> min corner (68,168), win 64.
+        assert!(
+            chain.contains("[68, 168, 64, 5.0]"),
+            "lens window tokens: {chain}"
+        );
+        // Determinism holds for the debug pack too.
+        let dbg2 = build(&Config::parse(
+            "debug_lens=true;debug_cell_x=100;debug_cell_z=200",
+        ));
+        assert_eq!(dbg.zip, dbg2.zip);
+        // And its SHA differs from production (one-time re-push on arm).
+        assert_ne!(dbg.sha1_hex, prod.sha1_hex);
     }
 
     #[test]

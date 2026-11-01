@@ -118,6 +118,11 @@ pub struct Config {
     /// default — no window, no cost beyond one RwLock<String>).
     /// CLOD_OPTS: debug_cell_x=<x>;debug_cell_z=<z> (both or neither).
     pub debug_cell: Option<(i32, i32)>,
+    /// v6.7 CAPTURE LENS: ship the debug chain whose final pass draws the
+    /// client's committed capture targets (color + height windows) onto the
+    /// screen. CI-only observability — the pack SHA changes (one re-push on
+    /// the runner), production stays debug_lens=false forever.
+    pub debug_lens: bool,
 }
 
 impl Default for Config {
@@ -158,6 +163,7 @@ impl Default for Config {
             native_trees: true,
             native_edits: true,
             debug_cell: None,
+            debug_lens: false,
         }
     }
 }
@@ -301,6 +307,10 @@ impl Config {
                 cfg.debug_cell = Some((x, z));
             }
         }
+        // v6.7: debug_lens=true — ship the capture-lens debug chain.
+        if let Some(v) = get("debug_lens") {
+            cfg.debug_lens = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
         cfg
     }
 }
@@ -424,6 +434,18 @@ mod tests {
         assert_eq!(c.debug_cell, Some((-930, 796)));
         let c = Config::parse("debug_cell_x=0;debug_cell_z=64");
         assert_eq!(c.debug_cell, Some((0, 64)));
+    }
+
+    #[test]
+    fn debug_lens_knob() {
+        // v6.7: the capture lens ships only when explicitly armed.
+        assert!(!Config::parse("").debug_lens, "production default is off");
+        for v in ["1", "true", "yes", "on"] {
+            assert!(Config::parse(&format!("debug_lens={v}")).debug_lens, "{v}");
+        }
+        for v in ["0", "false", "off", ""] {
+            assert!(!Config::parse(&format!("debug_lens={v}")).debug_lens, "{v}");
+        }
     }
 
     #[test]
