@@ -314,11 +314,17 @@ done
 # particles AT ALL. Summon two bursts from the console (no stream involved):
 #   close — 20 blocks in front of the camera, well inside any fog start;
 #   far   — exactly at the marker zone, where the real carriers land.
-# The shots land in the artifact; the greenish counts go to the step summary.
+# v6.5.1: the carrier color moved from villager green to END_ROD white. The
+# dust eraser's color net now fires on ANY green-excess dot (v6.5
+# fog-invariant arm — run 41293241318 proved it by erasing the probe's own
+# happy_villager column down to 6 px), so a green probe can no longer see
+# the renderer behind the eraser. White sparks are invisible to both eraser
+# arms and still answer the only question this probe asks: does the
+# renderer draw console particles here at all?
 note "particle render probe (console bursts)"
 BURST_CLOSE_X=$((VX + 20))
-srv "particle minecraft:happy_villager $BURST_CLOSE_X 150 $CZ 0.2 0.2 0.2 0 400 force"
-srv "particle minecraft:villager_happy $((CX - 1)) 150 $CZ 0.2 0.2 0.2 0 400 force"
+srv "particle minecraft:end_rod $BURST_CLOSE_X 150 $CZ 0.2 0.2 0.2 0 400 force"
+srv "particle minecraft:end_rod $((CX - 1)) 150 $CZ 0.2 0.2 0.2 0 400 force"
 sleep 1
 shot 09_burst_close || exit 1
 python3 - <<'PYEOF' | tee -a "$SUMMARY"
@@ -328,11 +334,11 @@ px = im.load(); n = 0
 for y in range(180, 540):
     for x in range(320, 960):
         r, g, b = (c / 255.0 for c in px[x, y])
-        if g > r + 0.02 and g > b + 0.02 and g > 0.15:
+        if min(r, g, b) > 0.75 and max(r, g, b) - min(r, g, b) < 0.15:
             n += 1
-print(f"- burst_close greenish px: {n} (renderer alive if > 50)")
+print(f"- burst_close white px: {n} (renderer alive if > 50)")
 PYEOF
-srv "particle minecraft:happy_villager $((CX - 2)) 150 $CZ 1 1 1 0 1200 force"
+srv "particle minecraft:end_rod $((CX - 2)) 150 $CZ 1 1 1 0 1200 force"
 sleep 1
 shot 09b_burst_far || exit 1
 python3 - <<'PYEOF' | tee -a "$SUMMARY"
@@ -342,9 +348,9 @@ px = im.load(); n = 0
 for y in range(180, 540):
     for x in range(320, 960):
         r, g, b = (c / 255.0 for c in px[x, y])
-        if g > r + 0.02 and g > b + 0.02 and g > 0.15:
+        if min(r, g, b) > 0.75 and max(r, g, b) - min(r, g, b) < 0.15:
             n += 1
-print(f"- burst_far greenish px: {n} (carriers visible in the marker zone if > 20)")
+print(f"- burst_far white px: {n} (renderer alive in the marker zone if > 20)")
 PYEOF
 
 # ---- 5. THE LIVE EDIT (no relog!) + probe loop -------------------------------
@@ -449,6 +455,17 @@ echo "=== client log pack markers ==="
 grep -iE "pack|post|reload" /tmp/client.log | tail -8 || true
 echo "=== server stream counters ==="
 grep -E "stream|cells|laps|edits" /tmp/server.log | tail -8 || true
+# v6.5.1: the edit-channel killer (run 41293241318) fired AFTER the boot
+# gates — "listener registered" was green while every event dispatch threw
+# IncompatibleClassChangeError inside ClodEdits.pushBlock (2405 times). The
+# verdict sees the FULL session log, so the linkage/dispatch errors are
+# gated here, not only in the boot gates.
+LINK_ERR=$(grep -cE "NoSuchMethodError|NoClassDefFoundError|IncompatibleClassChangeError" /tmp/server.log || true)
+DISPATCH_ERR=$(grep -c "Could not pass event" /tmp/server.log || true)
+sum "- edit channel: $LINK_ERR linkage errors, $DISPATCH_ERR failed event dispatches (both must be 0)"
+if [ "${LINK_ERR:-0}" -gt 0 ] || [ "${DISPATCH_ERR:-0}" -gt 0 ]; then
+  fail "the edit channel threw $LINK_ERR linkage / $DISPATCH_ERR dispatch errors — the event push cannot be trusted this run"
+fi
 if [ "$FAILURES" = "0" ] && [ "$FOUND1" = "1" ] && [ "$FOUND2" = "1" ]; then
   echo "CI VISUAL: ALL LEGS PASS"
   exit 0

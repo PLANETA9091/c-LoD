@@ -6,6 +6,8 @@ import clod.ClodEdits;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.MockBlock;
+import org.bukkit.block.MockBlockState;
 import org.bukkit.block.BlockState;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -66,9 +68,9 @@ public final class PreflightEdits {
         Method place2 = handler(l, "onPlace2", true); // absent — must be null
         check("handler lookup negative", place2 == null);
         int h0 = head();
-        place.invoke(l, new BlockPlaceEvent(new Block(other, 1, 64, 1)));
+        place.invoke(l, new BlockPlaceEvent(new MockBlock(other, 1, 64, 1)));
         check("foreign world dropped", head() == h0);
-        place.invoke(l, new BlockPlaceEvent(new Block(world, 100, 70, 200)));
+        place.invoke(l, new BlockPlaceEvent(new MockBlock(world, 100, 70, 200)));
         check("place pushes one column", head() == h0 + 1);
         long v = ringAt(head() - 1);
         check("place packs x=100", (int) (v & 0x3FFFFFFL) == 100);
@@ -76,7 +78,7 @@ public final class PreflightEdits {
 
         // -- 5. negative coordinates round trip ----------------------------
         int h1 = head();
-        place.invoke(l, new BlockPlaceEvent(new Block(world, -5000, 64, -12345678)));
+        place.invoke(l, new BlockPlaceEvent(new MockBlock(world, -5000, 64, -12345678)));
         long n = ringAt(head() - 1);
         int ux = (int) (n & 0x3FFFFFFL);
         if (ux >= 1 << 25) ux -= 1 << 26;
@@ -89,16 +91,16 @@ public final class PreflightEdits {
         Method fromTo = handler(l, "onFromTo");
         int h2 = head();
         fromTo.invoke(l, new BlockFromToEvent(
-                new Block(world, 1, 63, 1), new Block(world, 2, 63, 1)));
+                new MockBlock(world, 1, 63, 1), new MockBlock(world, 2, 63, 1)));
         check("from-to pushes two columns", head() == h2 + 2);
 
         // -- 7. explosion payloads (mixed worlds) ----------------------------
         Method boom = handler(l, "onEntityExplode");
         List<Block> blocks = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
-            blocks.add(new Block(world, 10 + i, 64, 10));
+            blocks.add(new MockBlock(world, 10 + i, 64, 10));
         }
-        blocks.add(new Block(other, 0, 64, 0));
+        blocks.add(new MockBlock(other, 0, 64, 0));
         int h3 = head();
         boom.invoke(l, new EntityExplodeEvent(blocks));
         check("explosion pushes in-world columns only", head() == h3 + 5);
@@ -110,7 +112,7 @@ public final class PreflightEdits {
         Method piston = handler(l, "onPistonExtend");
         List<BlockState> states = new ArrayList<>();
         for (int i = 0; i < 3; i++) {
-            states.add(new BlockState(world, 40 + i, 64, 40));
+            states.add(new MockBlockState(world, 40 + i, 64, 40));
         }
         int h4 = head();
         piston.invoke(l, new BlockPistonExtendEvent(states));
@@ -130,7 +132,7 @@ public final class PreflightEdits {
         // -- 10. head monotonicity + ring wrap -------------------------------
         int h6 = head();
         for (int i = 0; i < ClodEdits.CAP + 7; i++) {
-            place.invoke(l, new BlockPlaceEvent(new Block(world, i, 64, i)));
+            place.invoke(l, new BlockPlaceEvent(new MockBlock(world, i, 64, i)));
         }
         check("head advanced past a full wrap", head() == h6 + ClodEdits.CAP + 7);
         long last = ringAt(head() - 1);

@@ -200,3 +200,41 @@ green swept under fog f = 0..0.85 stays above the margin everywhere
 must show: the strobe score leaves zero with the SAME dot geometry and the
 SAME 5-tap cross — if it does not, the fog was never the killer and the
 group-B repair path reopens with the un-fog now provably not the bottleneck.
+
+### v6.5.1 — run #202 verdict: the strobe fix WORKED; it exposed the real killer
+
+Run 41293241318 (v6.5) answered the ledger's verdict rule:
+
+  - **The fog WAS the killer, and the dome now paints.** For the first time
+    on CI the screen shows non-sky content below the horizon (~60k px at
+    the vantage where vanilla terrain cannot reach — view-distance 4 = 64
+    blocks, the camera sits at y=150). In run #201 the same shots were
+    100% sky (red=0, green=0, sky=230400 per frame). The decode works.
+  - The relative arm ALSO proved itself on the eraser side: the probe's
+    own console burst of happy_villager particles dropped to 6 px — the
+    color net now eats ANY green-excess dot, exactly its product job. The
+    probe moved to `minecraft:end_rod` + a bright-white count so the
+    renderer probe stops measuring the eraser.
+  - **The legs still failed — root cause #2, named by the JVM:**
+    `IncompatibleClassChangeError: Found interface org.bukkit.block.Block,
+    but class was expected` in `ClodEdits.pushBlock` — 2405 failed event
+    dispatches, the marker fill created ZERO edit events (`1127e` before
+    and after the fill), so the marker cells were never re-streamed and
+    there was nothing new to decode. The mock tree declared
+    `org.bukkit.block.Block` / `BlockState` as final classes; in Bukkit
+    both are interfaces, javac emitted `invokevirtual`, the JVM refused
+    the dispatch. (Boot gates missed it: the boot log window ends before
+    the first fluid tick.)
+
+Fixes, each verified locally:
+
+  - mock `Block` / `BlockState` are now shape-exact interfaces; the
+    preflight doubles live in `MockBlock` / `MockBlockState`; rebuilt
+    `ClodEdits.class` emits `invokeinterface` (javac 21 — the CI freshness
+    toolchain; ClodSeedgen classes reproduce byte-identically);
+  - the edits preflight passes: 61 terrain checks + `EDIT_PUSH checks=31
+    failed=0` (registration ladder, world guard, ring packing, wrap);
+  - `gates.py` G10 counts `IncompatibleClassChangeError` and
+    `Could not pass event`; the visual verdict gates both counters over
+    the FULL session log (the boot window ends before the first fluid
+    tick, which is how #202 slipped through).

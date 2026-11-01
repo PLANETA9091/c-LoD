@@ -2,33 +2,16 @@ package org.bukkit.block;
 
 import org.bukkit.World;
 
-// Mock of org.bukkit.block.BlockState (piston/structure-grow payloads).
-public final class BlockState {
-    private final World world;
-    private final int x;
-    private final int y;
-    private final int z;
+// Mock of org.bukkit.block.BlockState — SHAPE-EXACT with the real API:
+// BlockState is an INTERFACE in Bukkit and carries getX/getY/getZ/getWorld
+// (verified against the Paper javadoc). The concrete test double lives in
+// MockBlockState (preflight-only).
+public interface BlockState {
+    World getWorld();
 
-    public BlockState(World world, int x, int y, int z) {
-        this.world = world;
-        this.x = x;
-        this.y = y;
-        this.z = z;
-    }
+    int getX();
 
-    public World getWorld() {
-        return world;
-    }
+    int getY();
 
-    public int getX() {
-        return x;
-    }
-
-    public int getY() {
-        return y;
-    }
-
-    public int getZ() {
-        return z;
-    }
+    int getZ();
 }

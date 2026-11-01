@@ -96,8 +96,23 @@ def main(path: str) -> int:
                 "G9 playerless arm: transport idle-clean + native fill",
                 "STREAM_FAILED nonzero on a playerless boot",
             )
-    nse = log.count("NoSuchMethodError") + log.count("NoClassDefFoundError")
-    need(nse == 0, "G10 no JNI linkage errors", f"{nse} linkage errors in the boot log")
+    # v6.5.1: IncompatibleClassChangeError joins the linkage family (run
+    # 41293241318: the edits helper's mock-compiled bytecode called
+    # invokevirtual on the INTERFACE org.bukkit.block.Block — every block
+    # event died with "Found interface ... but class was expected" while
+    # every other gate stayed green). A failed event dispatch means the
+    # edit channel is dead even when registration looked fine.
+    nse = (
+        log.count("NoSuchMethodError")
+        + log.count("NoClassDefFoundError")
+        + log.count("IncompatibleClassChangeError")
+    )
+    evf = log.count("Could not pass event")
+    need(
+        nse == 0 and evf == 0,
+        "G10 no linkage / event-dispatch errors",
+        f"{nse} linkage errors, {evf} 'Could not pass event' in the boot log",
+    )
 
     # v5.8 observability: the native filler + helper state (informational —
     # the fill numbers are re-measured, not asserted here).
