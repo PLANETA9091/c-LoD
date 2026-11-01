@@ -141,3 +141,35 @@ sRGB GLX shim, then runs `scripts/bench/run_ci_visual.sh`:
 Screenshots, diff composites and both logs upload as the `visual-evidence`
 artifact on every run. The palette counterpart of the probe is pinned by the
 `concrete_family_carries_the_dye` unit test.
+
+### v6.4.9 status — the honest gate ledger (runs 41241839232..41260665463)
+
+The job's hard-earned guardrails, each proven by a failed run:
+
+| Guardrail | Run that forced it |
+| --- | --- |
+| baseline waits for `cells=X/Y` scan completion + 6 tries (v6.4.4) | 41237303358 — wire-quiet fired mid-wave |
+| `defineClass` resolved on `java.lang.ClassLoader`, not `Class` (v6.4.5) | 41237303358 — EV_FAILED x600 blind |
+| `ClodHost` plugin (paper-api + adventure-api + adventure-key, NOT the paperclip bootstrap) + hard `listener registered` gate (v6.4.6/6.4.6.2) | 41244761570/41247538200 |
+| `assert_online` around every shot — a menu screenshot is never evidence (v6.4.6) | 41241839232 — both green legs were the autumn-PANORAMA: the client disconnected 2-19 s after the pack push and the red detector fed on the foliage |
+| renderpearl rule: every declared sampler must be in the pass inputs — `ResetSampler` on the mode-2 capture pass; static gate in check_glsl.sh (v6.4.7) | 41248401337 — `ShaderCompileException: Unable to find shader defined uniform (ResetSampler)`, client died mid-reload |
+| client renderer/network loggers on DEBUG via log4j2-ci.xml (v6.4.6) | every INFO-only run named nothing |
+| `time set noon` (26.3 tick scale makes 6000 night; `doDaylightCycle` is not a 26.3 gamerule) (v6.4.8) | 41253590698 — starfield shots |
+| console `particle` bursts close/at-marker in the artifact (v6.4.9) | 41256576023 — 446k packets accepted, 2 greenish px |
+
+**Proven ON the CI client (run 41260665463):** the client lives 11 minutes
+to OUR kick (the disconnect class is dead), pipelines compile silently
+(zero ShaderCompileException), the event push registers (e2e-live is green
+on both boots — `edits +0p`, EV_LIVE), the stream delivers (1.5M particles,
+2.5M rescanned cells, the disk carries the marker), and the 26.3/llvmpipe
+particle renderer DOES draw the villager carrier (the console burst is a
+visible particle column at both 20 and 75 blocks).
+
+**Open (the layer-8 gap):** the capture strobe still scores zero — the
+day-lit carriers are fog-washed toward the sky blue (measured core color
+(0.46, 0.54, 0.70), b-dominant, while the strobe requires g > b + 0.08),
+which points at the rot-channel fog payload (sky-override group B) not
+reaching the capture pass on llvmpipe. The next iteration must either
+verify/repair the sky-override on renderpearl or make the strobe
+fog-robust — deliberately NOT patched blind: the strobe is a product
+contract (5-tap cross, v5.3.1), not a CI knob.
