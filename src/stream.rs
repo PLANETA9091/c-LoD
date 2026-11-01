@@ -241,6 +241,17 @@ pub const ZONE_REFRESH_TICKS: u64 = 600;
 /// steady state.
 pub const EDIT_WINDOW_TICKS: u64 = 200;
 
+/// v6.5.3: beat 1 — the wire goes silent this many ticks BEFORE the edit
+/// batch releases, so the client's saturated particle pool drains (dots
+/// live 3-5 s) and the batch renders into free slots (run #206: the batch
+/// went out into the still-full pool and never rendered).
+pub const EDIT_HOLD_TICKS: u64 = 60;
+
+/// v6.5.3: more decodable dirty cells waiting than this is a WAVE (the
+/// boot-time provisional upgrades, a forceload) — waves feed the initial
+/// paint and must never trigger the hold/release sequence.
+pub const EDIT_HOLD_MAX_BATCH: u64 = 100;
+
 /// v6.5.3: a client younger than this never gets the edit window — its
 /// particle pool is still filling and cone/zone are its only paint source
 /// (60 s at the engine's 10 tps).
@@ -285,6 +296,9 @@ pub struct Streamer {
     /// v6.5.3: ticks of cone/zone silence left in the current edit window
     /// (see EDIT_WINDOW_TICKS). 0 = the steady state runs.
     pub edit_window: u64,
+    /// v6.5.3: ticks left in the drain HOLD before the edit batch releases
+    /// (see EDIT_HOLD_TICKS). 0 = not holding.
+    pub edit_hold: u64,
     /// Zone-sweep cells streamed since boot (diagnostics).
     pub zone_cells: u64,
     /// v6.2 live rescan: engine tick each cell was last SAMPLED at
@@ -322,6 +336,7 @@ impl Streamer {
             dirty_pending: 0,
             dirty_streams: 0,
             edit_window: 0,
+            edit_hold: 0,
             zone_cells: 0,
             last_scan: vec![0; n],
             rescan_cursor: 0,
@@ -590,6 +605,44 @@ impl Streamer {
         self.streamed_cells += 1;
     }
 
+    /// v6.5.3: the dirty-phase release loop, factored out so the hold and
+    /// the idle paths share it. Pops the dirty queue once, streams every
+    /// decodable cell (edit=true — the reset electron rides along), keeps
+    /// undecodable cells queued. Reports how many cells streamed and whether
+    /// the phase cap was hit (the wave signature).
+    fn stream_dirty(
+        &mut self,
+        cap: usize,
+        views: &[ViewHint],
+        sub: f64,
+        now: u64,
+        edit_streamed: &mut u64,
+        dirty_cap_hit: &mut bool,
+    ) {
+        let q_len = self.dirty_queue.len();
+        for _ in 0..q_len {
+            if self.batch.len() >= cap {
+                *dirty_cap_hit = self.dirty_pending > 0;
+                break;
+            }
+            let Some(idx_u32) = self.dirty_queue.pop_front() else {
+                break;
+            };
+            let idx = idx_u32 as usize;
+            if !self.dirty[idx] {
+                continue; // already streamed via the cone/sweep phases
+            }
+            if self.decodable_by_any(idx, views) {
+                self.push_cell_spawns(idx_u32, sub, now, true);
+                self.dirty_streams += 1;
+                *edit_streamed += 1;
+            } else {
+                // Nobody can decode it now — keep it queued for later.
+                self.dirty_queue.push_back(idx_u32);
+            }
+        }
+    }
+
     /// v5.4: is this cell decodable by ANY of the views right now? The same
     /// geometry as the per-player spawn gate / the cone cache membership:
     /// BOTH plane probe points inside the decode band [CULL_RADIUS+2,
@@ -654,12 +707,20 @@ impl Streamer {
         let budget = budget.max(8);
         let zone_mode = !views.is_empty();
 
-        // ---- phase 0: dirty delta (v5.4) ------------------------------------
-        // v6.5.3: the edit window ticks down first; phase 0 re-arms it for a
-        // GENUINE edit — a small dirty batch for a settled client (the pool
-        // needs the quiet time to drain). A WAVE (the boot-time provisional
-        // upgrades, a forceload) saturates the phase cap and never arms it;
-        // a fresh client never arms it (cone/zone are its only paint).
+        // ---- phase 0: dirty delta (v5.4) + the v6.5.3 edit window ----------
+        // Runs #202-#206 measured the real killer: the steady-state refresh
+        // stream saturates the vanilla client's particle pool, so an edit's
+        // reset electron + fresh dots get REJECTED on a long-lived client.
+        // A genuine edit (a SMALL batch of decodable dirty cells for a
+        // SETTLED audience) runs a three-beat sequence:
+        //   1. HOLD (EDIT_HOLD_TICKS): cone/zone go silent FIRST — the pool
+        //      drains (dots live 3-5 s) — the edit batch itself WAITS;
+        //   2. RELEASE: the batch streams into the drained pool;
+        //   3. POST window (EDIT_WINDOW_TICKS): silence covers the released
+        //      dots' lifetime so nothing competes with their render.
+        // A WAVE (the boot-time provisional upgrades, a forceload — many
+        // decodable dirty cells) and a FRESH client (empty pool, cone/zone
+        // are its only paint) never hold: they stream straight through.
         self.edit_window = self.edit_window.saturating_sub(1);
         let fresh_audience = views.iter().any(|v| v.age_ticks < FRESH_CLIENT_TICKS);
         let mut edit_streamed = 0u64;
@@ -670,31 +731,47 @@ impl Streamer {
             } else {
                 budget / 2
             };
-            let q_len = self.dirty_queue.len();
-            for _ in 0..q_len {
-                if self.batch.len() >= cap {
-                    dirty_cap_hit = self.dirty_pending > 0;
-                    break;
+            if self.edit_hold > 0 {
+                // Beat 1: the drain — the wire stays silent so the client's
+                // saturated particle pool empties (dots live 3-5 s); the
+                // edit batch WAITS. The release happens on the tick the
+                // hold reaches zero (same tick, below).
+                self.edit_hold -= 1;
+                if self.edit_hold == 0 {
+                    self.stream_dirty(cap, views, sub, now, &mut edit_streamed, &mut dirty_cap_hit);
+                    if edit_streamed > 0 && !dirty_cap_hit && !fresh_audience {
+                        self.edit_window = EDIT_WINDOW_TICKS; // beat 3
+                    }
                 }
-                let Some(idx_u32) = self.dirty_queue.pop_front() else {
-                    break;
-                };
-                let idx = idx_u32 as usize;
-                if !self.dirty[idx] {
-                    continue; // already streamed via the cone/sweep phases
+            } else if self.edit_window > 0 {
+                // Beat 3: post-release silence — the released dots' lifetime
+                // must pass with no competition. New edits wait here.
+            } else if fresh_audience {
+                // A fresh client's pool is empty and cone/zone are its only
+                // paint — stream dirty cells straight through, never hold.
+                self.stream_dirty(cap, views, sub, now, &mut edit_streamed, &mut dirty_cap_hit);
+            } else {
+                // Idle: decide between a genuine edit (HOLD first) and
+                // everything else (waves, undecodable backlog — stream now).
+                let mut decodable_waiting = 0u64;
+                for &idx in self.dirty_queue.iter() {
+                    let i = idx as usize;
+                    if self.dirty[i] && self.decodable_by_any(i, views) {
+                        decodable_waiting += 1;
+                        if decodable_waiting > EDIT_HOLD_MAX_BATCH {
+                            break; // a wave — the count no longer matters
+                        }
+                    }
                 }
-                if self.decodable_by_any(idx, views) {
-                    self.push_cell_spawns(idx_u32, sub, now, true);
-                    self.dirty_streams += 1;
-                    edit_streamed += 1;
+                if decodable_waiting > 0 && decodable_waiting <= EDIT_HOLD_MAX_BATCH {
+                    // A genuine edit: start the drain, release in
+                    // EDIT_HOLD_TICKS ticks.
+                    self.edit_hold = EDIT_HOLD_TICKS;
+                    self.edit_window = EDIT_HOLD_TICKS + EDIT_WINDOW_TICKS;
                 } else {
-                    // Nobody can decode it now — keep it queued for later.
-                    self.dirty_queue.push_back(idx_u32);
+                    self.stream_dirty(cap, views, sub, now, &mut edit_streamed, &mut dirty_cap_hit);
                 }
             }
-        }
-        if edit_streamed > 0 && !dirty_cap_hit && !fresh_audience {
-            self.edit_window = EDIT_WINDOW_TICKS;
         }
 
         // ---- phase 1: cone priority (v5.3.3) -------------------------------
@@ -878,10 +955,23 @@ mod tests {
             "refresh streams must not spawn reset electrons"
         );
         // A REAL edit (words changed): the dirty phase must stream the
-        // cell with exactly ONE reset electron on the reset plane.
+        // cell with exactly ONE reset electron on the reset plane — after
+        // the v6.5.3 hold/release sequence (a settled client drains first).
         s.set_cell(2, 2, cell(80, false, [9, 9, 9]));
         assert_eq!(s.dirty_pending, 1);
-        let b: Vec<Spawn> = s.tick_batch(64, &views).to_vec();
+        let mut b: Vec<Spawn> = Vec::new();
+        for t in 11..(11 + EDIT_HOLD_TICKS + 2) {
+            let views = [ViewHint {
+                eye: [10.0, 100.0, 60.0],
+                look: [0.0, 0.0, -1.0],
+                now: t,
+                age_ticks: u64::MAX,
+            }];
+            let batch = s.tick_batch(64, &views).to_vec();
+            if !batch.is_empty() {
+                b = batch;
+            }
+        }
         let resets: Vec<&Spawn> = b.iter().filter(|p| p.y == RESET_Y).collect();
         assert_eq!(resets.len(), 1, "an edit streams exactly one reset dot");
         assert_eq!(s.dirty_pending, 0, "the edit was streamed");
@@ -1210,9 +1300,19 @@ mod tests {
         assert_eq!(s.dirty_pending, 1);
         // Tiny budget: ONLY the dirty cell may stream (phase 0 cap = 4
         // cells at budget 32, and the dirty cell is first in the queue).
-        let v2 = vhint(128.0, 128.0, 0.0, 0.0, 101);
-        let b: Vec<Spawn> = s.tick_batch(32, &[v2]).to_vec();
-        assert_eq!(s.dirty_pending, 0, "edited cell must stream immediately");
+        let _v2 = vhint(128.0, 128.0, 0.0, 0.0, 101);
+        // v6.5.3: a genuine edit for a settled client runs hold -> release —
+        // the wire is silent for EDIT_HOLD_TICKS (the pool drains), then the
+        // batch releases into the clean pool.
+        let mut b: Vec<Spawn> = Vec::new();
+        for t in 101..(101 + EDIT_HOLD_TICKS + 2) {
+            let v = vhint(128.0, 128.0, 0.0, 0.0, t);
+            let batch = s.tick_batch(32, &[v]).to_vec();
+            if !batch.is_empty() {
+                b = batch;
+            }
+        }
+        assert_eq!(s.dirty_pending, 0, "edited cell must stream after the hold");
         assert_eq!(s.dirty_streams, 1);
         let (wx, wz) = s.cell_origin(ex, ez);
         assert!(b.len() >= 8);
@@ -1338,9 +1438,16 @@ mod tests {
             "out-of-zone dirty cell must wait (budget never wasted)"
         );
         assert_eq!(s.dirty_pending, 1, "still queued");
-        // Turn 180 degrees (vanilla yaw 180 = -Z): now decodable -> phase 0.
-        let v3 = vhint(128.0, 128.0, 180.0, 0.0, 102);
-        let b: Vec<Spawn> = s.tick_batch(2048, &[v3]).to_vec();
+        // Turn 180 degrees (vanilla yaw 180 = -Z): now decodable -> the
+        // v6.5.3 decision scan finds it, the hold runs, then it releases.
+        let mut b: Vec<Spawn> = Vec::new();
+        for t in 102..(102 + EDIT_HOLD_TICKS + 2) {
+            let v = vhint(128.0, 128.0, 180.0, 0.0, t);
+            let batch = s.tick_batch(2048, &[v]).to_vec();
+            if !batch.is_empty() {
+                b = batch;
+            }
+        }
         assert_eq!(s.dirty_streams, before + 1);
         assert_eq!(s.dirty_pending, 0);
         let (wx, wz) = s.cell_origin(66, 20);
@@ -1421,29 +1528,42 @@ mod tests {
         // THE EDIT: the disk-center cell (decodable, dead ahead) changes.
         s.set_cell(128, 128, cell(170, false, [142, 33, 33]));
         assert_eq!(s.dirty_pending, 1);
+        // Beat 1 — HOLD: the wire goes silent FIRST (the pool drains), the
+        // edit batch waits; the window covers hold + post.
         let v = view_at(401);
+        let batch: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        assert!(batch.is_empty(), "the hold must silence the wire first");
+        assert_eq!(s.edit_hold, EDIT_HOLD_TICKS, "the hold arms");
+        assert_eq!(
+            s.edit_window,
+            EDIT_HOLD_TICKS + EDIT_WINDOW_TICKS,
+            "the window covers hold + post"
+        );
+        for t in 402..(401 + EDIT_HOLD_TICKS) {
+            let v = view_at(t);
+            let batch: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+            assert!(batch.is_empty(), "the hold stays silent (t={t})");
+        }
+        assert_eq!(s.edit_hold, 1, "one hold tick left (it releases in-tick)");
+        // Beat 2 — RELEASE: the next tick's decrement hits zero and the
+        // batch streams into the drained pool IN THE SAME TICK.
+        let v = view_at(401 + EDIT_HOLD_TICKS);
         let batch: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
         assert!(
             batch.iter().any(|sp| sp.y == RESET_Y),
-            "the reset electron must ride the edit batch"
+            "the reset electron must ride the released edit batch"
         );
-        assert_eq!(s.edit_window, EDIT_WINDOW_TICKS, "the window arms");
         let cone_after_edit = s.cone_cells;
-
-        // while the window is armed the cone/zone phases add nothing
-        let v = view_at(402);
+        // Beat 3 — POST: silence covers the released dots' lifetime.
+        let v = view_at(402 + EDIT_HOLD_TICKS);
         let batch: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
-        assert!(
-            batch.is_empty(),
-            "edit window must silence the steady state"
-        );
+        assert!(batch.is_empty(), "the post window must stay silent");
         assert_eq!(
             s.cone_cells, cone_after_edit,
-            "no cone streams in the window"
+            "no cone streams in the post window"
         );
-
         // the window expires and the steady state resumes
-        for t in 403..(403 + EDIT_WINDOW_TICKS + 5) {
+        for t in (403 + EDIT_HOLD_TICKS)..(403 + EDIT_HOLD_TICKS + EDIT_WINDOW_TICKS + 5) {
             let v = view_at(t);
             let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
         }

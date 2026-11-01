@@ -271,9 +271,9 @@ layer precisely:
     words, age=MAX for never-streamed, out-of-disk clamp), fmt/clippy
     green, the http route tested (503 until armed, verbatim body after).
 
-### v6.5.3 — LEG 2 PASS proved the marker real; the gated edit window targets the particle pool
+### v6.5.3 — LEG 2 PASS proved the marker real; the hold→release edit window targets the particle pool
 
-Two runs closed this iteration:
+Three runs closed this iteration:
 
   - **#204 (41298864989): LEG 2 PASS, failures=0** — `marker STILL visible
     after relog (probe 0)`. A FRESH client (empty buffers, empty particle
@@ -285,32 +285,41 @@ Two runs closed this iteration:
     armed the window on ANY decodable dirty stream, and the boot-era
     backlog (~13k provisional-upgrade cells) kept arming it, starving the
     cone/zone phases that are a fresh client's ONLY paint source.
+  - **#206 (41302289900): the gates fixed the regression (LEG 2 PASS
+    again) but leg 1 stayed red** — the window armed AFTER the edit batch
+    had already gone out into the still-saturated pool. The silence came
+    too late: the dots lived and died unrendered.
 
-The measured killer (leg 1, #202-#204): the steady-state refresh stream
+The measured killer (leg 1, #202-#206): the steady-state refresh stream
 (cone 3 s + zone 30 s, thousands of dots/tick) saturates the vanilla
 client's particle pool; new spawns are REJECTED once the cap is hit, so
 the edit's reset electron + fresh dots never render on a long-lived client
 (#203's permanent sky-hole = the same saturation plus one phantom-complete
 zero-replace whose recovery dots were then rejected).
 
-**The final v6.5.3 window arms ONLY when all three hold:**
+**The final v6.5.3 sequence for a GENUINE edit — HOLD, RELEASE, POST:**
 
-  1. decodable dirty cells actually streamed this tick (re-arm condition);
-  2. the dirty phase did NOT hit its spawn cap — a cap-saturated phase is
-     the WAVE signature (boot upgrades, forceload), and waves must keep
-     the steady state painting;
-  3. the audience is SETTLED (every view older than FRESH_CLIENT_TICKS =
-     600 ticks) — a fresh client's pool is empty and cone/zone are its
-     only paint source (`age_ticks` rides ViewHint from the per-player
-     joined tick; unknown players count as fresh, safe side).
+  - **HOLD (EDIT_HOLD_TICKS = 60, 6 s):** the decision scan (idle ticks
+    only) counts decodable dirty cells; a SMALL batch (≤ 100 — a wave
+    breaks the scan early) for a SETTLED audience (every view older than
+    FRESH_CLIENT_TICKS = 600 ticks) silences the wire FIRST — the pool
+    drains while the edit batch WAITS;
+  - **RELEASE:** the hold's last tick streams the batch into the drained
+    pool (reset electrons ride along);
+  - **POST (EDIT_WINDOW_TICKS = 200, 20 s):** silence covers the released
+    dots' lifetime so nothing competes with their render.
 
-While armed: the whole wire budget serves dirty cells (was half), cone and
-zone stay silent for EDIT_WINDOW_TICKS (200 = 10 s) — the pool drains
-(dots live 3-5 s) and the edit batch renders into free slots. `ewin` rides
-the stream diag line.
+Waves (the boot-time provisional upgrades, a forceload — the decodable
+count exceeds the cap or the scan's 100 ceiling) and fresh clients stream
+straight through, never hold: waves feed the initial paint, and cone/zone
+are a fresh client's only paint source. `ewin` rides the stream diag line;
+`stream_dirty` factors the release loop shared by the hold, the fresh and
+the idle paths.
 
-Covered by `edit_window_silences_steady_state_and_recovers`: the edit batch
-carries the reset electron (y == RESET_Y), the window arms for a settled
-client, the steady state stays silent inside it, cone streaming resumes
-after expiry, a fresh audience never arms it, and a 400-cell wave never
-arms it. 77 Rust tests, fmt/clippy green.
+Covered by `edit_window_silences_steady_state_and_recovers` (the full
+three-beat timeline: arm, silent hold, in-tick release with the reset
+electron, silent post, expiry, steady state resumed; fresh audience never
+arms; a 400-cell wave never arms) plus the updated hold-aware edits of
+`changed_cell_streams_first`, `dirty_edit_stream_carries_reset_electron`
+and `dirty_cell_out_of_zone_waits_for_a_view`. 77 Rust tests, fmt/clippy
+green.
