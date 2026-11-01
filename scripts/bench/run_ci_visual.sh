@@ -306,6 +306,47 @@ done
 [ "$DRIFT" -le 1500 ] 2>/dev/null \
   || fail "no stable baseline after 6 tries (drift=$DRIFT) — the A/B would lie"
 
+# ---- 4b. PARTICLE RENDER PROBE (v6.4.9, separates two failure domains) ------
+# Run 41256576023: the client accepted 446k level_particles packets but the
+# frame had TWO greenish pixels. Day fog washes the villager green into the
+# sky blue (g/b crosses over), so the capture strobe cannot tell — but FIRST
+# we must know whether the 26.3/llvmpipe particle renderer draws these
+# particles AT ALL. Summon two bursts from the console (no stream involved):
+#   close — 20 blocks in front of the camera, well inside any fog start;
+#   far   — exactly at the marker zone, where the real carriers land.
+# The shots land in the artifact; the greenish counts go to the step summary.
+note "particle render probe (console bursts)"
+BURST_CLOSE_X=$((VX + 20))
+srv "particle minecraft:happy_villager $BURST_CLOSE_X 150 $CZ 0.2 0.2 0.2 0 400 force"
+srv "particle minecraft:villager_happy $((CX - 1)) 150 $CZ 0.2 0.2 0.2 0 400 force"
+sleep 1
+shot 09_burst_close || exit 1
+python3 - <<'PYEOF' | tee -a "$SUMMARY"
+from PIL import Image
+im = Image.open(f"{__import__('os').environ.get('SHOTS','/home/runner/mc-test/shots/ci-visual')}/09_burst_close.png").convert('RGB')
+px = im.load(); n = 0
+for y in range(180, 540):
+    for x in range(320, 960):
+        r, g, b = (c / 255.0 for c in px[x, y])
+        if g > r + 0.02 and g > b + 0.02 and g > 0.15:
+            n += 1
+print(f"- burst_close greenish px: {n} (renderer alive if > 50)")
+PYEOF
+srv "particle minecraft:happy_villager $((CX - 2)) 150 $CZ 1 1 1 0 1200 force"
+sleep 1
+shot 09b_burst_far || exit 1
+python3 - <<'PYEOF' | tee -a "$SUMMARY"
+from PIL import Image
+im = Image.open(f"{__import__('os').environ.get('SHOTS','/home/runner/mc-test/shots/ci-visual')}/09b_burst_far.png").convert('RGB')
+px = im.load(); n = 0
+for y in range(180, 540):
+    for x in range(320, 960):
+        r, g, b = (c / 255.0 for c in px[x, y])
+        if g > r + 0.02 and g > b + 0.02 and g > 0.15:
+            n += 1
+print(f"- burst_far greenish px: {n} (carriers visible in the marker zone if > 20)")
+PYEOF
+
 # ---- 5. THE LIVE EDIT (no relog!) + probe loop -------------------------------
 note "placing $MARKER column at $CX,$CZ (y $FILL_Y0..$FILL_Y1)"
 # v6.4.2 FIX (CI visual run 2026-10-31): the marker zone sits 100 blocks from
