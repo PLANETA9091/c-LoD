@@ -1967,7 +1967,10 @@ unsafe fn gen_column(
             provisional: true,
             rgb,
         };
-        state.stream.lock().unwrap().set_cell(ccx, ccz, cell);
+        // v6.6.1: stamp 0 — a native fill is boot/wave material (its chunk
+        // batch lands before any audience exists), never a genuine edit;
+        // the loaded-chunk sampler re-stamps with the live tick on upgrade.
+        state.stream.lock().unwrap().set_cell(ccx, ccz, cell, 0);
         Ok(true)
     })();
     let _ = env.pop_local_frame(std::ptr::null_mut());
@@ -2100,7 +2103,9 @@ unsafe fn gen_batch(
                         provisional: true,
                         rgb,
                     };
-                    stream.set_cell(ccx, ccz, c);
+                    // v6.6.1: stamp 0 — the batch worker has no engine clock;
+                    // provisional batch fills are wave material by design.
+                    stream.set_cell(ccx, ccz, c, 0);
                     written += 1;
                 }
             }

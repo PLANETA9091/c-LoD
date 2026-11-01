@@ -262,6 +262,20 @@ pub const EDIT_HOLD_TICKS: u64 = 60;
 /// paint and must never trigger the hold/release sequence.
 pub const EDIT_HOLD_MAX_BATCH: u64 = 100;
 
+/// v6.6.1 EDIT RECENCY: only dirty cells YOUNGER than this participate in
+/// the hold/release decision. Why: the v6.6 CI visual run measured the
+/// boot-era backlog (~12k seedgen-upgrade cells) still sitting in the
+/// dirty queue at fill time — the queue-wide decision scan counted its
+/// decodable members (> 100) and classified the GENUINE 25-cell marker
+/// edit as a wave, so the hold/release drain never ran and the edit dots
+/// went out into the still-saturated client pool (red=17 px on every
+/// probe, while a fresh relog decode painted red=167 — the words were
+/// right, the silence was missing). Backlog cells are wave material by
+/// definition: they already waited minutes, 20 s more of the steady
+/// state costs nothing. A real edit enqueued in the last 200 ticks
+/// (20 s at 10 tps) re-arms the window even with a huge backlog.
+pub const RECENT_EDIT_TICKS: u64 = 200;
+
 /// v6.5.3: a client younger than this never gets the edit window — its
 /// particle pool is still filling and cone/zone are its only paint source
 /// (60 s at the engine's 10 tps).
@@ -300,6 +314,9 @@ pub struct Streamer {
     pub cone_cells: u64,
     /// v5.4: cells flagged for re-stream (real edits, words differ).
     dirty: Vec<bool>,
+    /// v6.6.1: engine tick each cell was marked dirty at (0 = not dirty).
+    /// Ages the backlog out of the hold/release decision (RECENT_EDIT_TICKS).
+    dirty_since: Vec<u64>,
     /// FIFO over dirty cells (phase 0 order = edit order).
     dirty_queue: std::collections::VecDeque<u32>,
     /// Cells currently marked dirty (fast skip when 0).
@@ -346,6 +363,7 @@ impl Streamer {
             cone_cursor: 0,
             cone_cells: 0,
             dirty: vec![false; n],
+            dirty_since: vec![0; n],
             dirty_queue: std::collections::VecDeque::new(),
             dirty_pending: 0,
             dirty_streams: 0,
@@ -413,7 +431,10 @@ impl Streamer {
         self.cells.get(cz as usize * side + cx as usize).copied()
     }
 
-    pub fn set_cell(&mut self, cx: u32, cz: u32, cell: Cell) {
+    /// v6.6.1: `now` (the engine tick of the write) ages the dirty mark —
+    /// the hold/release decision counts only RECENT_EDIT_TICKS-young cells,
+    /// so the boot-era backlog can never mask a genuine edit as a wave.
+    pub fn set_cell(&mut self, cx: u32, cz: u32, cell: Cell, now: u64) {
         let side = self.side as usize;
         if cx as usize >= side || cz as usize >= side {
             return;
@@ -432,6 +453,7 @@ impl Streamer {
                 let old = Self::encode_words(&prev);
                 if old != words && !self.dirty[idx] {
                     self.dirty[idx] = true;
+                    self.dirty_since[idx] = now;
                     self.dirty_queue.push_back(idx as u32);
                     self.dirty_pending += 1;
                 }
@@ -629,6 +651,7 @@ impl Streamer {
         self.last_stream[idx] = now;
         if self.dirty[idx] {
             self.dirty[idx] = false;
+            self.dirty_since[idx] = 0;
             self.dirty_pending = self.dirty_pending.saturating_sub(1);
         }
         self.streamed_cells += 1;
@@ -782,10 +805,18 @@ impl Streamer {
             } else {
                 // Idle: decide between a genuine edit (HOLD first) and
                 // everything else (waves, undecodable backlog — stream now).
+                // v6.6.1: the decision counts only RECENT dirty cells — the
+                // boot-era backlog (minutes old, still queued) is wave
+                // material and must not outvote the genuine edit (the v6.6
+                // CI run: 12k backlog cells made every edit look like a
+                // wave and the drain never ran).
                 let mut decodable_waiting = 0u64;
                 for &idx in self.dirty_queue.iter() {
                     let i = idx as usize;
-                    if self.dirty[i] && self.decodable_by_any(i, views) {
+                    if self.dirty[i]
+                        && now.saturating_sub(self.dirty_since[i]) < RECENT_EDIT_TICKS
+                        && self.decodable_by_any(i, views)
+                    {
                         decodable_waiting += 1;
                         if decodable_waiting > EDIT_HOLD_MAX_BATCH {
                             break; // a wave — the count no longer matters
@@ -976,7 +1007,7 @@ mod tests {
     #[test]
     fn rescan_due_and_mark_semantics() {
         let mut s = Streamer::new(0.0, 0.0, 64, 4);
-        s.set_cell(1, 1, cell(70, false, [1, 2, 3]));
+        s.set_cell(1, 1, cell(70, false, [1, 2, 3]), 0);
         // period 0 = the wave is off entirely (v6.1 paint-once behavior).
         assert!(!s.scan_due(1, 1, 100, 0));
         // Never-sampled cells are due immediately (seedgen provisional
@@ -993,7 +1024,7 @@ mod tests {
     #[test]
     fn dirty_edit_stream_carries_reset_electron() {
         let mut s = Streamer::new(0.0, 0.0, 64, 4);
-        s.set_cell(2, 2, cell(70, false, [1, 2, 3]));
+        s.set_cell(2, 2, cell(70, false, [1, 2, 3]), 0);
         // The view decodes cell (2,2): both plane probes sit in the band
         // and inside the frustum cone (see decodable_by_any geometry).
         let views = [ViewHint {
@@ -1012,7 +1043,7 @@ mod tests {
         // A REAL edit (words changed): the dirty phase must stream the
         // cell with exactly ONE reset electron on the reset plane — after
         // the v6.5.3 hold/release sequence (a settled client drains first).
-        s.set_cell(2, 2, cell(80, false, [9, 9, 9]));
+        s.set_cell(2, 2, cell(80, false, [9, 9, 9]), 11);
         assert_eq!(s.dirty_pending, 1);
         let mut b: Vec<Spawn> = Vec::new();
         for t in 11..(11 + EDIT_HOLD_TICKS + 2) {
@@ -1045,7 +1076,12 @@ mod tests {
         // Fill the whole disk with valid cells.
         for cz in 0..128u32 {
             for cx in 0..128u32 {
-                s.set_cell(cx, cz, cell(64 + (cx % 8) as i16, false, [100, 100, 100]));
+                s.set_cell(
+                    cx,
+                    cz,
+                    cell(64 + (cx % 8) as i16, false, [100, 100, 100]),
+                    0,
+                );
             }
         }
         // 2048 particles / tick = 256 cells (4 height + 4 color = 8/cell).
@@ -1070,8 +1106,8 @@ mod tests {
     fn void_cells_cost_nothing() {
         let mut s = Streamer::new(0.0, 0.0, 64, 4);
         // Only 2 valid cells on the disk.
-        s.set_cell(0, 0, cell(70, false, [90, 90, 90]));
-        s.set_cell(15, 15, cell(80, true, [0, 0, 200]));
+        s.set_cell(0, 0, cell(70, false, [90, 90, 90]), 0);
+        s.set_cell(15, 15, cell(80, true, [0, 0, 200]), 0);
         let b: Vec<Spawn> = s.tick_batch(2048, &[]).to_vec();
         // 2 cells x (4 height + 4 color) particles each.
         assert_eq!(b.len(), 16);
@@ -1178,7 +1214,7 @@ mod tests {
     #[test]
     fn batch_positions_on_sub_lattice() {
         let mut s = Streamer::new(100.0, -40.0, 64, 4);
-        s.set_cell(3, 5, cell(70, false, [200, 100, 50]));
+        s.set_cell(3, 5, cell(70, false, [200, 100, 50]), 0);
         let b: Vec<Spawn> = s.tick_batch(2048, &[]).to_vec();
         assert_eq!(b.len(), 8);
         let sub = 4.0 / SUB_PER_CELL; // 1.0
@@ -1221,7 +1257,7 @@ mod tests {
         let mut s = Streamer::new(0.0, 0.0, 256, 2);
         for cz in 0..256u32 {
             for cx in 0..256u32 {
-                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]));
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
             }
         }
         // A: west half looking south (+Z, yaw 0); B: east half looking
@@ -1273,7 +1309,7 @@ mod tests {
         let mut s = Streamer::new(0.0, 0.0, 256, 2);
         for cz in 0..256u32 {
             for cx in 0..256u32 {
-                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]));
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
             }
         }
         let a = vhint(60.0, 60.0, 0.0, 0.0, 100);
@@ -1313,7 +1349,7 @@ mod tests {
         let mut s = Streamer::new(0.0, 0.0, 256, 2);
         for cz in 0..256u32 {
             for cx in 0..256u32 {
-                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]));
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
             }
         }
         // Player at the disk center, looking +Z, level pitch.
@@ -1355,7 +1391,7 @@ mod tests {
         let mut s = Streamer::new(0.0, 0.0, 256, 2);
         for cz in 0..256u32 {
             for cx in 0..256u32 {
-                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]));
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
             }
         }
         let v = vhint(128.0, 128.0, 0.0, 0.0, 100);
@@ -1397,7 +1433,7 @@ mod tests {
         let mut s = Streamer::new(0.0, 0.0, 256, 2);
         for cz in 0..256u32 {
             for cx in 0..256u32 {
-                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]));
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
             }
         }
         // Face +Z first, then turn to -X (vanilla yaw 90).
@@ -1436,7 +1472,7 @@ mod tests {
         let mut s = Streamer::new(0.0, 0.0, 256, 2);
         for cz in 0..256u32 {
             for cx in 0..256u32 {
-                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]));
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
             }
         }
         let v = vhint(128.0, 128.0, 0.0, 0.0, 100);
@@ -1447,7 +1483,7 @@ mod tests {
         // cells (region 256 / cell 2), so (66,100) is in, (128,*) would be
         // out of the grid entirely.
         let (ex, ez) = (66u32, 100u32);
-        s.set_cell(ex, ez, cell(90, false, [200, 100, 50]));
+        s.set_cell(ex, ez, cell(90, false, [200, 100, 50]), 101);
         assert_eq!(s.dirty_pending, 1);
         // Tiny budget: ONLY the dirty cell may stream (phase 0 cap = 4
         // cells at budget 32, and the dirty cell is first in the queue).
@@ -1487,22 +1523,22 @@ mod tests {
     #[test]
     fn unchanged_rewrites_stay_clean() {
         let mut s = Streamer::new(0.0, 0.0, 64, 4);
-        s.set_cell(0, 0, cell(70, false, [100, 100, 100]));
+        s.set_cell(0, 0, cell(70, false, [100, 100, 100]), 0);
         assert_eq!(s.dirty_pending, 0, "initial fill is painting, not editing");
         // Same words again: still clean.
-        s.set_cell(0, 0, cell(70, false, [100, 100, 100]));
+        s.set_cell(0, 0, cell(70, false, [100, 100, 100]), 0);
         assert_eq!(s.dirty_pending, 0);
         // Real edit (height changed on a live cell) -> dirty.
-        s.set_cell(0, 0, cell(90, false, [100, 100, 100]));
+        s.set_cell(0, 0, cell(90, false, [100, 100, 100]), 0);
         assert_eq!(s.dirty_pending, 1);
         // Stream it (legacy lap): dirty cleared.
         let _ = s.tick_batch(2048, &[]);
         assert_eq!(s.dirty_pending, 0);
         // Rewrite with the same words AFTER the send: stays clean.
-        s.set_cell(0, 0, cell(90, false, [100, 100, 100]));
+        s.set_cell(0, 0, cell(90, false, [100, 100, 100]), 0);
         assert_eq!(s.dirty_pending, 0, "identical words must not re-queue");
         // And a real change re-queues it.
-        s.set_cell(0, 0, cell(90, true, [100, 100, 100]));
+        s.set_cell(0, 0, cell(90, true, [100, 100, 100]), 0);
         assert_eq!(s.dirty_pending, 1);
     }
 
@@ -1514,7 +1550,7 @@ mod tests {
         let mut s = Streamer::new(0.0, 0.0, 256, 2);
         for cz in 0..256u32 {
             for cx in 0..256u32 {
-                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]));
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
             }
         }
         // Warm up: 50 ticks fully paint the decodable set (the cone list is
@@ -1572,14 +1608,14 @@ mod tests {
         let mut s = Streamer::new(0.0, 0.0, 256, 2);
         for cz in 0..256u32 {
             for cx in 0..256u32 {
-                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]));
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
             }
         }
         let v = vhint(128.0, 128.0, 0.0, 0.0, 100);
         let _ = s.tick_batch(2048, &[v]);
         // Edit BEHIND the player's back (north, -Z): not decodable now.
         // (66,20) sits ~88 blocks behind the eye — valid grid cell.
-        s.set_cell(66, 20, cell(95, false, [200, 50, 50]));
+        s.set_cell(66, 20, cell(95, false, [200, 50, 50]), 101);
         assert_eq!(s.dirty_pending, 1);
         let v2 = vhint(128.0, 128.0, 0.0, 0.0, 101);
         let before = s.dirty_streams;
@@ -1621,7 +1657,7 @@ mod tests {
         let mut s = Streamer::new(cx - half, cz - half, region, 2);
         for cz in 0..256u32 {
             for cx in 0..256u32 {
-                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]));
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
             }
         }
         // the CI vantage: 75 blocks west of the named center (v6.4.2 — the
@@ -1661,7 +1697,7 @@ mod tests {
         let mut s = Streamer::new(cx - half, cz - half, region, 2);
         for cz in 0..256u32 {
             for cx in 0..256u32 {
-                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]));
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
             }
         }
         let view_at = |now: u64| ViewHint {
@@ -1677,7 +1713,7 @@ mod tests {
         assert_eq!(s.edit_window, 0, "no edits -> no window");
 
         // THE EDIT: the disk-center cell (decodable, dead ahead) changes.
-        s.set_cell(128, 128, cell(170, false, [142, 33, 33]));
+        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 401);
         assert_eq!(s.dirty_pending, 1);
         // Beat 1 — HOLD: the wire goes silent FIRST (the pool drains), the
         // edit batch waits; the window covers hold + post.
@@ -1728,7 +1764,7 @@ mod tests {
 
         // v6.5.3 gates: a FRESH audience (empty pool, needs the steady state
         // to paint) never arms the window, even on a real edit...
-        s.set_cell(128, 128, cell(90, false, [142, 33, 33]));
+        s.set_cell(128, 128, cell(90, false, [142, 33, 33]), 5001);
         let fresh = ViewHint {
             eye: [cx - 75.0, 150.0 + 1.62, cz],
             look: look_dir(-90.0, 5.0),
@@ -1745,7 +1781,7 @@ mod tests {
         // signature, and waves feed the initial paint.
         for cz in 120..140u32 {
             for cx in 120..140u32 {
-                s.set_cell(cx, cz, cell(80, false, [100, 100, 100]));
+                s.set_cell(cx, cz, cell(80, false, [100, 100, 100]), 5001);
             }
         }
         assert!(s.dirty_pending > 256, "test must build a wave");
@@ -1754,6 +1790,111 @@ mod tests {
         assert_eq!(
             s.edit_window, 0,
             "a dirty wave must not silence the steady state"
+        );
+    }
+
+    /// v6.6.1 EDIT RECENCY: the boot-era backlog (minutes-old dirty cells
+    /// still queued) must not outvote a genuine fresh edit in the
+    /// hold/release decision. The v6.6 CI visual run measured exactly that
+    /// pollution: ~12k backlog cells made the decision scan classify the
+    /// 25-cell marker edit as a wave, the drain never ran, and the
+    /// long-lived client never rendered the edit (red=17 px on every probe)
+    /// while a fresh relog decode painted it (red=167) — the words were
+    /// right, the silence was missing. 150 STALE decodable dirty cells + 1
+    /// fresh edit must ARM the hold; the old queue-wide scan would have
+    /// counted 151 and streamed straight through.
+    #[test]
+    fn stale_backlog_yields_the_edit_window() {
+        let mut s = Streamer::new(0.0, 0.0, 256, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
+            }
+        }
+        // View A (west-looking — the strip is behind it, never decodable
+        // by A) is the only audience during the backlog's aging — the 150
+        // stale cells stay queued for the whole warm-up.
+        // The stale backlog: 150 cells ALL inside B's band+cone (|dx| <=
+        // 60 at dz 32..38, d in (30..110)), marked dirty at tick 1000.
+        // They must be decodable-by-B so the OLD code would have counted
+        // them; that is the regression being pinned.
+        for i in 0..150u32 {
+            let cx = 45 + i % 50; // world x 90..188
+            let cz = 80 + i / 50; // world z 160..165
+            s.set_cell(cx, cz, cell(90 + (i % 8) as i16, false, [90, 90, 90]), 1000);
+        }
+        assert_eq!(s.dirty_pending, 150);
+        // Age the backlog past RECENT_EDIT_TICKS with A alone watching.
+        for t in 1000..1400u64 {
+            let v = vhint(40.0, 64.0, 90.0, 0.0, t);
+            let _: Vec<Spawn> = s.tick_batch(256, &[v]).to_vec();
+        }
+        assert_eq!(s.dirty_pending, 150, "the backlog must survive A's watch");
+        // View B arrives: its band covers the backlog AND the fresh edit.
+        // The fresh edit (1 recent decodable cell) must win the window.
+        let b = vhint(128.0, 128.0, 0.0, 0.0, 1500);
+        s.set_cell(66, 84, cell(170, false, [142, 33, 33]), 1500);
+        assert_eq!(s.dirty_pending, 151);
+        let a2 = vhint(40.0, 64.0, 90.0, 0.0, 1500);
+        let batch: Vec<Spawn> = s.tick_batch(256, &[a2, b]).to_vec();
+        assert!(
+            batch.is_empty(),
+            "a genuine edit must silence the wire first (the hold)"
+        );
+        assert_eq!(
+            s.edit_hold, EDIT_HOLD_TICKS,
+            "the hold must arm despite the stale backlog"
+        );
+        assert_eq!(
+            s.edit_window,
+            EDIT_HOLD_TICKS + EDIT_WINDOW_TICKS,
+            "the window covers hold + post"
+        );
+        // Release: the fresh edit streams (with its reset electron), the
+        // stale backlog stays queued for the wave path.
+        let mut released = false;
+        for t in 1501..(1501 + EDIT_HOLD_TICKS + 2) {
+            let b = vhint(128.0, 128.0, 0.0, 0.0, t);
+            let a2 = vhint(40.0, 64.0, 90.0, 0.0, t);
+            let batch: Vec<Spawn> = s.tick_batch(256, &[a2, b]).to_vec();
+            if batch.iter().any(|sp| sp.y == RESET_Y) {
+                released = true;
+            }
+        }
+        assert!(released, "the fresh edit must release with its reset dot");
+        assert!(
+            s.dirty_pending >= 100,
+            "the stale backlog stays queued (wave material, not silently dropped)"
+        );
+    }
+
+    /// v6.6.1: a FRESH wave (> 100 young decodable dirty cells in one tick)
+    /// still streams straight through — recency gating must not turn the
+    /// boot wave / a forceload / a flood into 60-tick silences.
+    #[test]
+    fn fresh_wave_still_streams_through() {
+        let mut s = Streamer::new(0.0, 0.0, 256, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
+            }
+        }
+        // 150 fresh decodable dirty cells in the view's band+cone (|dx|
+        // <= 60 at dz 32..38 — every cell decodable), all marked at the
+        // decision tick: a wave by the EDIT_HOLD_MAX_BATCH signature.
+        for i in 0..150u32 {
+            let cx = 40 + i % 50; // world x 80..178
+            let cz = 80 + i / 50; // world z 160..165
+            s.set_cell(cx, cz, cell(90 + (i % 8) as i16, false, [90, 90, 90]), 1000);
+        }
+        assert_eq!(s.dirty_pending, 150);
+        let v = vhint(128.0, 128.0, 0.0, 0.0, 1000);
+        let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        assert_eq!(s.edit_hold, 0, "a fresh wave never holds");
+        assert_eq!(s.edit_window, 0, "a fresh wave never silences the wire");
+        assert!(
+            s.dirty_streams > 0,
+            "the wave must stream immediately (the initial paint depends on it)"
         );
     }
 
@@ -1767,8 +1908,8 @@ mod tests {
         let mut s = Streamer::new(cx - half, cz - half, region, 2);
         // the disk origin lands at (-1186, 540); the named center (-930,796)
         // is cell (128, 128) for cell_size 2.
-        s.set_cell(128, 128, cell(170, false, [142, 33, 33]));
-        s.set_cell(127, 128, cell(62, true, [10, 20, 30]));
+        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 0);
+        s.set_cell(127, 128, cell(62, true, [10, 20, 30]), 0);
         let dump = s.debug_window(-930, 796, 1, 1000);
         assert!(dump.contains("# cx cz wx wz height water valid rgb last_age dirty hword cword"));
         let center = dump

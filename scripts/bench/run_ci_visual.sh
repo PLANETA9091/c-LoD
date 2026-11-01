@@ -388,6 +388,14 @@ CELLS_DUMP=$(curl -s "http://127.0.0.1:8199/clod-cells" || true)
   echo '```'
 } >> "$SUMMARY"
 echo "cells dump captured (after fill): $(printf '%s\n' "$CELLS_DUMP" | grep -c '^[0-9-]' || true) rows"
+# v6.6.1 forensics: the scheduler's state RIGHT AFTER the fill — did the
+# edit window arm (ewin > 0), how many cells went out via the dirty phase,
+# how deep is the queue (the v6.6 run: q~12k boot backlog outvoted the
+# edit and the window never armed). The line repeats after probe0 so the
+# release/drain is visible on both ends.
+sleep 4
+echo "### stream diag after fill:" >> "$SUMMARY"
+grep "stream: tick" /tmp/server.log | tail -2 >> "$SUMMARY" || true
 srv "time set noon"  # v6.4.8: the probe loop must run in daylight
 PROBE_LOG="$SHOTS/probe_counts.txt"; : > "$PROBE_LOG"
 for k in $(seq 0 23); do
@@ -414,6 +422,10 @@ NOW_JOIN=$(join_count)
 [ "$FOUND1" = "1" ] && [ "$NOW_JOIN" = "$JOIN1" ] \
   && echo "LEG 1 PASS: the edit reached the LOD paint with zero relogs" \
   && sum "- **LEG 1 PASS** (zero relogs)"
+# v6.6.1 forensics (second beat): the scheduler state after the probe loop —
+# did the hold/release window run during the probes (ewin, dirty_streams).
+echo "### stream diag after probes:" >> "$SUMMARY"
+grep "stream: tick" /tmp/server.log | tail -3 >> "$SUMMARY" || true
 grep -E "edits \+[0-9]+p/[0-9]+c/[0-9]+e" /tmp/server.log | tail -2 || true
 
 # ---- 6. leg 2: kick + rejoin, the marker must persist ------------------------

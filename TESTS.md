@@ -7,11 +7,11 @@ runs layer 8 there too — a real vanilla 26.3 client under Xvfb + Mesa
 llvmpipe on the runner (no GPU needed, software GL is enough for 640×360).
 Layers 6–7 remain the richer local real-client harness.
 
-## 1. Rust unit tests — `cargo test` (80 tests)
+## 1. Rust unit tests — `cargo test` (82 tests)
 
 | module | count | what they pin |
 |--------|------:|---------------|
-| `src/stream.rs` | 23 | 16-bit word packing (4 particles/word, X-sub = data bits, Z-sub = slot), HI/LO plane layout, delta-zone scheduling, cone admission, lap coverage; v6.2 rescan due/mark semantics + the dirty edit stream carrying exactly ONE reset electron at the (qx=0,qz=0) probe position; v6.4.2 center-anchored disk (config center -> Streamer origin) streams from an off-center vantage; v6.6 ROUND-ROBIN cone — the frustum budget rotates across ALL views (prefix of each tick's batch belongs to the served view's band+frustum, opposite frustums make the assertion unambiguous), and the per-view cone caches are matched by eye/look geometry — player-order flips reuse them and a 20-view churn burst degrades to transparent rebuilds, never to starved players |
+| `src/stream.rs` | 25 | 16-bit word packing (4 particles/word, X-sub = data bits, Z-sub = slot), HI/LO plane layout, delta-zone scheduling, cone admission, lap coverage; v6.2 rescan due/mark semantics + the dirty edit stream carrying exactly ONE reset electron at the (qx=0,qz=0) probe position; v6.4.2 center-anchored disk (config center -> Streamer origin) streams from an off-center vantage; v6.6 ROUND-ROBIN cone — the frustum budget rotates across ALL views (prefix of each tick's batch belongs to the served view's band+frustum, opposite frustums make the assertion unambiguous), and the per-view cone caches are matched by eye/look geometry — player-order flips reuse them and a 20-view churn burst degrades to transparent rebuilds, never to starved players; v6.6.1 EDIT RECENCY — 150 STALE decodable dirty cells cannot outvote a fresh edit in the hold/release decision (`stale_backlog_yields_the_edit_window`), while a fresh 150-cell wave still streams straight through (`fresh_wave_still_streams_through`) |
 | `src/engine.rs` | 9 | `wish_admit` ledger (dup reject, backlog cap, per-tick budget, v5.5 window parameter), frontier math; v6.6 wire-budget window math (`bytes_per_sec`: honest 0 on empty windows, exact averages at both tick cadences) |
 | `src/seedgen.rs` | 12 | SeedQueue dedup/order/close + v5.9 `pop_batch` drain; bit-contract vs `ClodSeedgen.pack()` (height/liquid/ordinals/valid bit, bit budget); v5.9 `chunkBatch` payload parsing (header, statuses, zero-filled failed segments, corruption rejects) |
 | `src/config.rs` | 11 | `CLOD_OPTS` parsing + clamps (gen_budget 1..256, gen_wish 32..4096, particles_per_tick, disk geometry, native_threads/seedgen_batch, native_dust/native_trees/native_edits, rescan_ticks 0/off + 5..2400) |
@@ -384,3 +384,41 @@ makes the stream fair for every client and measurable on the wire:
     `~N kB/s` right on the wire line; `bytes_per_sec` is pure and
     unit-tested (`bytes_per_sec_window_math`). 80 Rust tests, fmt/clippy
     green.
+
+### v6.6.1 — the CI visual verdict and the recency fix
+
+Run 41325368226 (v6.6) delivered the sharpest evidence yet, and a
+verdict: 10/11 jobs green; the `visual` job FAILED leg 1 but PASSED
+leg 2 — and the two halves finally separate the failure:
+
+  - LEG 2 (fresh client, red=167 px ≥ 150): the relog decode PAINTS the
+    red column (visible in `13_after_relog_probe0.png` — a fogged red
+    column against sky). The streamed words are CORRECT; the v6.5.4
+    "decodes to 0 on every client" pathology is GONE.
+  - LEG 1 (long-lived client, red=17 px × 24 probes over 3 min): the
+    live edit never recolors the marker. The before/after frames show
+    only the transport's own dot strip over the ocean — the capture
+    buffers keep the pre-edit words (OR-merge cannot lose bits; the
+    reset-electron replace never rendered).
+  - Root cause (from the diag numbers): the dirty queue still held the
+    boot-era backlog (q 11942 at tick 6500, dirty stuck at 1061, edits
+    +4658p/3400c/986e) — the queue-wide hold/release decision counted
+    its decodable members (> 100) and classified the genuine ~25-cell
+    marker edit as a WAVE. No hold, no drain, no silence: the edit dots
+    went out into the running refresh stream (the #204 saturation
+    mechanism) and were never rendered.
+
+The fix — v6.6.1 EDIT RECENCY: `set_cell` stamps `dirty_since` (the
+engine tick of the write); the hold/release decision counts only cells
+younger than RECENT_EDIT_TICKS = 200 (20 s at 10 tps). Boot backlog is
+wave material by definition (it already waited minutes) and keeps
+streaming straight through; a genuine edit re-arms the window even with
+a 12k backlog. Seedgen fills stamp 0 (never genuine edits); the engine
+scan path stamps the live tick. Tests:
+`stale_backlog_yields_the_edit_window` (150 stale decodable cells + 1
+fresh edit -> the hold ARMS, the edit releases with its reset electron,
+the backlog stays queued) and `fresh_wave_still_streams_through` (150
+FRESH decodable cells -> no hold, immediate streaming). The harness now
+dumps `stream: tick` diag lines right after the fill and after the
+probe loop, so the next run's summary shows ewin/dirty/q on both ends
+of the edit. 82 Rust tests, fmt/clippy green.

@@ -563,10 +563,13 @@ pub(crate) fn scan_cell(
         // cell — count the upgrade and whether the encoded words moved.
         let prev = s.get(cx, cz);
         let was_prov = prev.map(|c| c.valid && c.provisional).unwrap_or(false);
-        s.set_cell(cx, cz, cell);
+        // v6.6.1: the write's tick ages the dirty mark — event-push edits
+        // (fresh) qualify for the hold/release window, boot-era fills age
+        // out of the decision like the backlog they are.
+        let now = state.tick_no.load(Ordering::Relaxed);
+        s.set_cell(cx, cz, cell, now);
         // v6.2: a sampled cell is fresh — the rescan wave skips it until
         // it ages past rescan_ticks.
-        let now = state.tick_no.load(Ordering::Relaxed);
         s.mark_scanned(cx, cz, now);
         if was_prov {
             state.prov_upgraded.fetch_add(1, Ordering::Relaxed);
