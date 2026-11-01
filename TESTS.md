@@ -323,3 +323,36 @@ arms; a 400-cell wave never arms) plus the updated hold-aware edits of
 `changed_cell_streams_first`, `dirty_edit_stream_carries_reset_electron`
 and `dirty_cell_out_of_zone_waits_for_a_view`. 77 Rust tests, fmt/clippy
 green.
+
+### v6.5.4 — run #207 verdict: the hold→release sequence worked end to end; the last unknown is client-side
+
+Run 41304650106 (the full v6.5.3) is the cleanest evidence yet, from the
+full server.log timeline:
+
+  - tick 4700 (ewin 0, q 10274) → **the fill (12:13:42)** → tick 4800
+    (**ewin 260 — the FULL arm, hold+post, on the very fill**) → the hold
+    froze the wire (792610 → 792799 = exactly the marker's 21 cells × 9
+    dots) → **the release (~tick 4850): dirty_streams 1266 → 1287** — 21
+    cells with their reset electrons went out into the DRAINED pool → the
+    post window ran (wire frozen through tick 5000) → a second small edit
+    re-armed the window at tick 8100 on its own. The scheduler did
+    everything right.
+  - The client received the packets (level_particles IN, 54 bytes each).
+    And the result is STILL the sky hole: the marker strip flipped from
+    painted ocean (32,45,76) to vanilla sky (176,204,255), paint=3679 px
+    stable, on the watched client AND on a fresh relog decode. leg2 is
+    also flaky across runs (#204/#206 PASS, #205/#207 FAIL) — a harness
+    timing question (the relog probe window), separate from leg 1.
+
+So the remaining unknown is now razor-thin: the server sends the right
+words (hword 0xEA00 = height 170, cword 0x0200 = red concrete — pinned by
+the debug_window unit test), the dots reach the client, and every client —
+including one decoding from scratch through cone/zone, with no edit
+protocol involved — decodes THOSE cells to height 0 while decoding their
+ocean predecessors (hword 0x7E00) and all neighbors correctly. The decode
+math treats the new word differently: the next iteration must instrument
+the capture itself (a CI-only debug overlay reading clod_h back onto the
+screen, or a local bench reproduction with a buffer readback) and find
+which step turns 0xEA00 into 0 — the strobe positions, the reset/replace
+gate, or the merge. Deliberately NOT patched blind — the same ledger rule
+that held for the fog.
