@@ -220,6 +220,31 @@ float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
     return mix(avg, s2 / c2, w2);
 }
 
+// voxy-evidence-deltas: water shore factor (evidence:
+// docs/voxy-evidence/ref2_ocean_horizon.jpg — shallows read lighter/cyan near
+// shores, open water deepens toward the measured #1c335d): fraction of LAND
+// cells among the 4-neighbors of a water cell.
+float water_shore(ivec2 celli) {
+    float land = 0.0;
+    float cnt = 0.0;
+    ivec2 nb[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
+    for (int i = 0; i < 4; ++i) {
+        ivec2 q = celli + nb[i];
+        if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, ivec2(256)))) {
+            continue;
+        }
+        vec4 cq = texelFetch(ColBufSampler, q, 0);
+        if (cq.a < 0.5) {
+            continue;
+        }
+        cnt += 1.0;
+        if (floor(cq.r * 255.0 + 0.5) <= 215.5) {
+            land += 1.0;
+        }
+    }
+    return cnt > 0.0 ? land / cnt : 0.0;
+}
+
 // Surface color of one streamed cell: the 6x6x6 RGB lattice decode.
 // Water (idx 216) returns a negative sentinel — the caller uses its own
 // water fallback color.
@@ -509,12 +534,36 @@ void main() {
     hU = hU < -1.0e7 ? hC : hU;
     vec3 nrm = normalize(vec3(hL - hR, 2.0 * cell, hD - hU));
 
+    // voxy-evidence-deltas: AO proxy (evidence: voxy post/ssao.comp BASIC —
+    // one probe along the quad normal, angle -> pow(ao,0.15) ->
+    // (1-ao)/3 + 2/3: darkening is HARD-CAPPED at 1/3, the 2/3 floor).
+    // Heightfield equivalent of the 0.5-block normal probe: per-cell
+    // concavity from the same four neighbor heights the normal already
+    // uses — zero extra fetches. Flat water concavity = 0, the sea stays
+    // untouched like Voxy's AO over the flat sea quads.
+    // NOTE: the concavity->ao scale below is the ONLY invented mapping here
+    // (Voxy probes real geometry; we approximate with cell-relative
+    // concavity) — ships only after a voxy-reference visual verdict.
+    float cav = clamp((hC - (hL + hR + hD + hU) * 0.25) / max(cell * 3.0, 1.0), 0.0, 1.0);
+    float ao = 1.0 - cav * (1.0 / 3.0);
+
     // ---- COLOR: the Voxy model -------------------------------------------
     bool colWater;
     vec3 col = color_at(tc, sw, sw2, colWater);
     float hn = clamp((hitPos.y - sea) / max(maxY - sea, 1.0), 0.0, 1.0);
-    vec3 fallback = (isWater || colWater) ? ColWater.rgb : mix(ColLow.rgb, ColHigh.rgb, smoothstep(0.15, 0.9, hn));
-    vec3 albedo = colWater ? fallback : (col.r < 0.0 ? fallback : col);
+    bool wtr = isWater || colWater;
+    vec3 fallback;
+    if (wtr) {
+        // voxy-evidence-deltas: shore gradient (evidence:
+        // docs/voxy-evidence/ref2 — shallows lighter, open water #1c335d).
+        // NOTE: 0.85/1.3 multipliers are calibration to the measured
+        // palette, pending the voxy-reference visual verdict.
+        float shore = water_shore(tc);
+        fallback = ColWater.rgb * mix(0.85, 1.3, shore);
+    } else {
+        fallback = mix(ColLow.rgb, ColHigh.rgb, smoothstep(0.15, 0.9, hn));
+    }
+    vec3 albedo = wtr ? fallback : (col.r < 0.0 ? fallback : col);
 
     // Vanilla face shade (meshing weights: up 1.0 / z 0.8 / x 0.6) applied
     // through the height-gradient normal, exactly like Voxy's baked quads.
@@ -534,7 +583,7 @@ void main() {
     } else {
         lightRGB = vanilla_lightmap0_15(6000.0); // pre-first-frame: noon
     }
-    vec3 lit = albedo * face * lightRGB;
+    vec3 lit = albedo * face * ao * lightRGB;
 
     // NormalRenderPipeline.finish: linear fog over the environmental pair,
     // saturated at max(vanillaRD, 320) * sqrt(3) blocks (3D distance).
@@ -562,6 +611,14 @@ void main() {
     float rd = fogLive ? max(vanRD, 64.0) : 128.0;
     float gate = smoothstep(rd * 0.92, rd * 1.10, tHit);
 
-    vec3 outCol = mix(mix(scene.rgb, lit, fade * gate), scene.rgb, fadeOut);
+    // voxy-evidence-deltas: edge haze band (evidence:
+    // docs/voxy-evidence/ref2 — the disk edge sits in a pale band of the
+    // vanilla fog colour #c0d7ff, 82% of the band pixels): inside the
+    // fade-out zone the LOD color pulls toward fogTint (the live vanilla
+    // fog color) before the scene mix, reproducing the pale band.
+    // NOTE: the 0.8 pull strength is calibration, pending the
+    // voxy-reference visual verdict.
+    vec3 edgeCol = mix(lit, fogTint, 0.8 * fadeOut);
+    vec3 outCol = mix(scene.rgb, edgeCol, fade * gate);
     fragColor = vec4(outCol, scene.a);
 }
