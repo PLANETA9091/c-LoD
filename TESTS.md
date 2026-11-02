@@ -39,6 +39,35 @@ bash scripts/java/build.sh          # javac --release 17: the embedded seedgen
                                     # (CI `javahelper` diffs the SHA-1)
 ```
 
+## 2c. VOXY visual reference — CI job `voxy-reference` (layer 9)
+
+The user call: the marcher's look must be judged against the REAL Voxy mod,
+not against inventions (the homemade "voxy-grade" shading was reverted for
+exactly that). The evidence stand (see `docs/voxy-visual-model.md` for the
+extracted model with file:line citations):
+
+- `scripts/bench/setup_client_voxy.sh` — vanilla runtime + Fabric loader
+  0.20.1 + fabric-api 0.165.0 + sodium 0.9.2 (a hard voxy dependency) +
+  voxy 0.2.20-beta, all pinned; deterministic `voxy-config.json`.
+- `scripts/bench/run_server_voxy.sh` — PLAIN Paper 26.3 (no c-LoD module: no
+  pack push, no dust transport in the reference frames), seed `clodbench2026`
+  — the same world the c-LoD visual leg paints.
+- `scripts/bench/run_client_voxy.sh` — Xvfb + llvmpipe + the sRGB shim +
+  KnotClient; `MESA_GL_VERSION_OVERRIDE=4.6` AND
+  `MESA_GLSL_VERSION_OVERRIDE=460` (llvmpipe's GLSL compiler caps at 4.50
+  while voxy ships `#version 460` compute shaders — verified live).
+- `scripts/bench/run_voxy_shots.sh` — join → noon lock → spectator → the
+  SAME vantage matrix as the c-LoD leg (center -930,796) →
+  `~/mc-test/voxy-shots/`.
+- CI: job `voxy-reference` (master + workflow_dispatch), uploads the
+  `voxy-reference-shots` artifact; `continue-on-error` while the recipe
+  settles (voxy-on-llvmpipe is experimental), NOT part of the strict gate.
+
+Extracted so far from the voxy source: per-quad real voxel light sampled
+against the live vanilla lightmap, axis-aligned quad normals, full-frame
+SSAO (photon-vision, radius 1.5, pow 2.5), vanilla fog pair + 10% xz fade
+(the fog/fade were already byte-exact in our marcher).
+
 ## 2b. SEEDGEN helper preflight — `scripts/java/preflight/run.sh`
 
 The v5.8–v6.1 Java helper against a mock `net.minecraft` hierarchy — no Paper

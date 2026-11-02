@@ -515,6 +515,78 @@ jobs:
             || echo "WARN: verdict feed push failed (non-fatal)"
           exit 0
 
+  voxy-reference:
+    name: voxy visual reference (ground truth for the marcher look)
+    # The user call: c-LoD must look like Voxy, and that judgment needs
+    # EVIDENCE — the real Voxy mod (0.2.20-beta, MC 26.3) rendered by a real
+    # Fabric client against the same pinned-seed world the c-LoD visual leg
+    # uses (clodbench2026, disk center -930,796). This job boots a PLAIN
+    # Paper server (no c-LoD module: no pack push, no dust), joins it with a
+    # Fabric 26.3 client carrying Fabric API + Sodium 0.9.2 + Voxy, lets the
+    # WorldImporter mesh the loaded chunks and shoots the SAME vantage
+    # matrix. Evidence only — not a strict gate while the comparison harness
+    # matures (Voxy-on-llvmpipe needs the GLSL 4.60 override; flakiness is
+    # expected while the recipe settles).
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
+    continue-on-error: true
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - name: X11 + software GL + python deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb ffmpeg libgl1 libglx-mesa0 libgl1-mesa-dri libxtst6
+          python3 -m pip install --quiet --user pillow
+      - name: sRGB GLX shim
+        run: |
+          mkdir -p ~/mc-test/shim
+          gcc -shared -fPIC -O2 -o ~/mc-test/shim/libGL.so.1 scripts/bench/libclodgl.c -ldl
+      - name: Restore vanilla 26.3 client cache (~600 MB)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/mc-test/client
+          key: mc263-client-voxy-v1
+      - name: Vanilla 26.3 client runtime (official manifest, ~600 MB)
+        run: python3 scripts/bench/setup_client.py
+      - name: Fabric layer (loader + fabric-api + sodium + voxy)
+        env:
+          VOXY_RD: "8"
+          VOXY_THREADS: "2"
+        run: bash scripts/bench/setup_client_voxy.sh
+      - name: Save client+fabric cache (always — the download is the expensive part)
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ~/mc-test/client
+          key: mc263-client-voxy-v1
+      - name: "VOXY REFERENCE — clean server + voxy client + shot matrix"
+        env:
+          VOXY_SERVER_XMX: "1G"
+          VOXY_CLIENT_XMX: "2500M"
+          VOXY_CLIENT_DIRECT: "768M"
+          VOXY_RD: "8"
+          VOXY_THREADS: "2"
+          VOXY_MESH_WAIT: "240"
+          VOXY_LAP_WAIT: "120"
+        run: |
+          export CLOD_JAVA="$JAVA_HOME/bin/java"
+          bash scripts/bench/run_voxy_shots.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: voxy-reference-shots
+          path: |
+            /home/runner/mc-test/voxy-shots/
+            /tmp/voxy_client.log
+            /tmp/voxy_server.log
+          if-no-files-found: warn
+
   strict:
     name: strictness gate (all green)
     needs: [fmt, clippy, test, glsl, build, packaging, e2e-live, visual]
