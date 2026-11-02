@@ -635,3 +635,16 @@ scratch remote 9/9: normal, racer-on-top, prune-3). The voxy setup
 traces its internal steps into the same steps.log the failure marker
 carries (the 2-second fabric-layer death now names its stage). 87 tests,
 fmt/clippy green.
+
+v6.8.5 STEP TRACES CLOSE BOTH DEATHS (CI): the v6.8.4 traces earned their
+keep on their first run (#225, 41468940410). (1) The voxy failure marker
+named its 2-second fabric-layer killer precisely: "running fabric
+installer" and nothing after — the setup script fell back to
+~/tools/jdk25/bin/java because the fabric-layer step never exported
+CLOD_JAVA; the path does not exist on the runner, exit 127, set -e end.
+Fix: the step exports CLOD_JAVA="$JAVA_HOME/bin/java". (2) The control
+job died BEFORE its own step (no summary.md -> the publisher would have
+been silent) — every control step now traces into ~/mc-test/control-
+steps.log and the publisher publishes a FAILURE marker (trace tail) when
+the summary never appears, closing the last silent-hole variant. 87
+tests, fmt/clippy green.

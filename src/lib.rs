@@ -75,7 +75,7 @@ pub unsafe extern "C" fn cplugin_init(
         cfg.region_blocks, cfg.cell_size, cfg.http_port, cfg.fov, cfg.particles_per_tick
     ));
     log_info(
-        "c-LoD v6.8.4: FROZEN-FRAME CONTROL ARM — the v6.8.3 screenshots (run 41464836708) exposed the truth: the pack client's frame freezes mid-boot with LIVE lens panels (red words already in the color lattice), so RENDERER DEAD was a dead frame SWAP, not a dead GL — the new visual-control CI job runs the SAME client against PLAIN Paper (CLOD_CONTROL=1: no module, no pack) and answers with the same console bursts + a 12 s frame-motion probe: pack chain guilty if the pack-free client draws, environment guilty if it freezes too; the voxy setup now traces its steps into the same steps.log (the 2-second fabric-layer death gets named)",
+        "c-LoD v6.8.5: STEP TRACES CLOSE BOTH DEATHS — the voxy marker (run 41468940410) named its 2-second fabric-layer killer: without CLOD_JAVA the setup fell back to a nonexistent ~/tools/jdk25/bin/java (exit 127); the fabric step now exports the runner JDK — and the control job's pre-step death (no summary at all) gets its own steps trace plus a failure marker in the ci-verdicts feed when the summary never appears; voxy-reference should finally reach its first boot on CI next run",
     );
 
     let st = engine::State::new(cfg);

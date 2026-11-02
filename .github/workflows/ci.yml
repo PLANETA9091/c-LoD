@@ -562,18 +562,26 @@ jobs:
           java-version: "25"
       - name: X11 + software GL + python deps
         run: |
+          # v6.8.5: per-step trace — the #225 control death happened BEFORE
+          # its own step (no summary -> no publish), the trace names it.
+          mkdir -p ~/mc-test
+          echo "$(date -u +%FT%TZ) control X11+GL+pip start" >> ~/mc-test/control-steps.log
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb ffmpeg libgl1 libglx-mesa0 libgl1-mesa-dri mesa-utils
           python3 -m pip install --quiet --user pillow python-xlib
+          echo "$(date -u +%FT%TZ) control X11+GL+pip ok" >> ~/mc-test/control-steps.log
       - name: Fetch Paper 26.3
         run: |
+          echo "$(date -u +%FT%TZ) control fetch-paper start" >> ~/mc-test/control-steps.log
           URL=$(curl -s https://fill.papermc.io/v3/projects/paper/versions/26.3/builds/latest \
             | python3 -c "import json,sys;print(json.load(sys.stdin)['downloads']['server:default']['url'])")
           curl -sL -o paper.jar "$URL"
           mkdir -p dist/versions
           cp paper.jar dist/versions/paper-26.3.jar
+          echo "$(date -u +%FT%TZ) control fetch-paper ok" >> ~/mc-test/control-steps.log
       - name: Prepare control dist (eula + offline server.properties; the module path is deliberately absent)
         run: |
+          echo "$(date -u +%FT%TZ) control prepare-dist start" >> ~/mc-test/control-steps.log
           printf 'eula=true\n' > dist/eula.txt
           {
             echo 'online-mode=false'
@@ -582,10 +590,13 @@ jobs:
             echo 'server-port=25565'
             echo 'motd=c-LoD CI control'
           } > dist/server.properties
+          echo "$(date -u +%FT%TZ) control prepare-dist ok" >> ~/mc-test/control-steps.log
       - name: sRGB GLX shim
         run: |
+          echo "$(date -u +%FT%TZ) control shim start" >> ~/mc-test/control-steps.log
           mkdir -p ~/mc-test/shim
           gcc -shared -fPIC -O2 -o ~/mc-test/shim/libGL.so.1 scripts/bench/libclodgl.c -ldl
+          echo "$(date -u +%FT%TZ) control shim ok" >> ~/mc-test/control-steps.log
       - name: Restore vanilla 26.3 client cache (~600 MB)
         uses: actions/cache/restore@v4
         with:
@@ -684,6 +695,10 @@ jobs:
           VOXY_THREADS: "2"
         run: |
           echo "$(date -u +%FT%TZ) fabric layer start" >> ~/mc-test/voxy-steps.log
+          # v6.8.5 FIX (run 41468940410 marker): without CLOD_JAVA the setup
+          # script falls back to ~/tools/jdk25/bin/java which does NOT exist
+          # on the runner — the fabric installer died in 2 s, exit 127.
+          export CLOD_JAVA="$JAVA_HOME/bin/java"
           bash scripts/bench/setup_client_voxy.sh
           echo "$(date -u +%FT%TZ) fabric layer ok" >> ~/mc-test/voxy-steps.log
       - name: Save client+fabric cache (always — the download is the expensive part)
