@@ -359,6 +359,13 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
     timeout-minutes: 50
+    # v6.7.2 VERDICT FEED: the run summary/probe counts are committed to the
+    # ci-verdicts branch (contents: write) — readable over raw CDN with NO
+    # API quota (the artifacts/log endpoints were repeatedly rate-limited
+    # for the sandbox egress IPs; the verdict must never be auth-walled
+    # again).
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -467,6 +474,46 @@ jobs:
             /tmp/client.log
             /tmp/server.log
           if-no-files-found: warn
+      - name: Publish verdict feed (ci-verdicts branch)
+        if: always()
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_NO: ${{ github.run_number }}
+        run: |
+          # Best-effort by design: the feed must never flip the job's real
+          # verdict. summary.md + probe_counts.txt are small text files; the
+          # branch serves them via raw.githubusercontent.com (no API quota).
+          SRC=/home/runner/mc-test/shots/ci-visual
+          if [ ! -f "$SRC/summary.md" ]; then
+            echo "no summary.md — nothing to publish"
+            exit 0
+          fi
+          git config user.name "ci-verdict-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git fetch origin ci-verdicts 2>/dev/null || true
+          rm -rf /tmp/vfeed
+          git worktree add --detach /tmp/vfeed HEAD
+          ( cd /tmp/vfeed && git checkout --orphan ci-verdicts && git rm -rf --quiet . 2>/dev/null || true )
+          if git show-ref --verify --quiet refs/remotes/origin/ci-verdicts; then
+            ( cd /tmp/vfeed \
+              && git rm -rf --quiet . 2>/dev/null || true \
+              && git checkout -B ci-verdicts origin/ci-verdicts )
+          fi
+          cp "$SRC/summary.md" /tmp/vfeed/run-${RUN_ID}.md
+          cp "$SRC/summary.md" /tmp/vfeed/latest.md
+          [ -f "$SRC/probe_counts.txt" ] && cp "$SRC/probe_counts.txt" /tmp/vfeed/run-${RUN_ID}-probes.txt || true
+          {
+            echo "# c-LoD visual verdicts"
+            echo
+            echo "- run ${RUN_ID} (#${RUN_NO}) ${GITHUB_SHA::7} $(date -u +%FT%TZ): $(grep -c FAIL "$SRC/summary.md" || true) FAIL lines in summary"
+          } > /tmp/vfeed/index.md
+          cd /tmp/vfeed
+          git add -A
+          git commit -m "verdict: run ${RUN_ID} (${GITHUB_SHA::7})" || echo "no changes"
+          git push origin ci-verdicts \
+            && echo "verdict feed updated" \
+            || echo "WARN: verdict feed push failed (non-fatal)"
+          exit 0
 
   strict:
     name: strictness gate (all green)

@@ -142,6 +142,20 @@ Screenshots, diff composites and both logs upload as the `visual-evidence`
 artifact on every run. The palette counterpart of the probe is pinned by the
 `concrete_family_carries_the_dye` unit test.
 
+### v6.7.2 VERDICT FEED — the summary is never auth-walled again
+
+Three verdict cycles in a row (v6.6.1 -> v6.7.1) lost their conclusions to
+GitHub API rate limiting on the shared sandbox egress IPs: the artifacts
+and job-log endpoints answer `403 rate limit exceeded` for hours at a
+time, exactly when the next cron wake-up needs to read them. The `visual`
+job now ends with a best-effort step that commits `summary.md` and
+`probe_counts.txt` to the **`ci-verdicts` branch** (`permissions:
+contents: write`, run-id-named files + `latest.md` + `index.md`). The
+branch is plain git: every consumer — cron wake-ups, CI itself, any
+machine — reads it over `raw.githubusercontent.com` with a `git fetch`,
+NO API quota involved. The step is non-fatal by construction (`exit 0`,
+push failures warn only): the feed can never flip the job's real verdict.
+
 ### v6.4.9 status — the honest gate ledger (runs 41241839232..41260665463)
 
 The job's hard-earned guardrails, each proven by a failed run:

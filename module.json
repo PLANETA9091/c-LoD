@@ -1,5 +1,5 @@
 {
   "id": "lod",
-  "version": "6.7.1",
-  "description": "True server-side LOD: shader-only pack pushed once, all world data streams as sky-grid dust particles (SKY-GRID BIT-STREAM). No Display entities, no textures, no repacks."
+  "version": "6.7.2",
+  "description": "True server-side LOD: shader-only pack pushed once, all world data streams as sky-grid dust particles (SKY-GRID BIT-STREAM). No Display entities, no textures, no repacks. Live edits ride the stream (event push + delta beats); capture lens observes the client decode; CI verdicts publish to the ci-verdicts branch."
 }
