@@ -377,7 +377,10 @@ jobs:
       - name: X11 + software GL + python deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq xvfb ffmpeg libgl1 libglx-mesa0 libgl1-mesa-dri
+          # mesa-utils (glxinfo): v6.8.3 rides the GL stack version in the
+          # verdict — a runner Mesa/llvmpipe bump is a prime suspect for a
+          # client that renders nothing.
+          sudo apt-get install -y -qq xvfb ffmpeg libgl1 libglx-mesa0 libgl1-mesa-dri mesa-utils
           python3 -m pip install --quiet --user pillow python-xlib
       - name: Build module (release)
         run: cargo build --release
@@ -502,6 +505,26 @@ jobs:
           cp "$SRC/summary.md" /tmp/vfeed/run-${RUN_ID}.md
           cp "$SRC/summary.md" /tmp/vfeed/latest.md
           [ -f "$SRC/probe_counts.txt" ] && cp "$SRC/probe_counts.txt" /tmp/vfeed/run-${RUN_ID}-probes.txt || true
+          # v6.8.3 EYES IN THE FEED: four downscaled JPEGs ride the verdict —
+          # the close burst (the renderer pulse), its far twin, the pre-edit
+          # baseline and the last probe. Three RENDERER DEAD verdicts in a
+          # row (41449086366/41454021639/41454056043) were judged on white-px
+          # counters alone; a picture separates a black frame (dead GL) from
+          # a live scene with no particles (dead particle render) instantly.
+          for pair in "09_burst_close:burst" "09b_burst_far:far" "10_before_edit:baseline" "12_after_edit_probe23:last"; do
+            IMG="${pair%%:*}"; TAG="${pair##*:}"
+            [ -f "$SRC/$IMG.png" ] || continue
+            # the converter lives in a repo file — a heredoc on column 1
+            # would break the YAML block scalar (found by the local gate)
+            python3 scripts/bench/jpg_to_feed.py "$SRC/$IMG.png" "/tmp/vfeed/run-${RUN_ID}-${TAG}.jpg" 2>/dev/null || true
+          done
+          # keep the feed light: drop everything beyond the newest 3 runs
+          ls /tmp/vfeed/run-*.md 2>/dev/null | sort | head -n -3 | while read -r old; do
+            R=$(basename "$old" .md)
+            rm -f /tmp/vfeed/"$R".md /tmp/vfeed/"$R"-probes.txt \
+                  /tmp/vfeed/"$R"-burst.jpg /tmp/vfeed/"$R"-far.jpg \
+                  /tmp/vfeed/"$R"-baseline.jpg /tmp/vfeed/"$R"-last.jpg
+          done
           {
             echo "# c-LoD visual verdicts"
             echo
@@ -545,25 +568,39 @@ jobs:
           java-version: "25"
       - name: X11 + software GL + python deps
         run: |
+          # v6.8.3 per-step trace: a pre-boot death used to leave no branch at
+          # all (41454056043 died here in 76 s); the marker now carries this
+          # log so the step names itself without any API access.
+          mkdir -p ~/mc-test
+          echo "$(date -u +%FT%TZ) X11+GL+pip start" >> ~/mc-test/voxy-steps.log
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb ffmpeg libgl1 libglx-mesa0 libgl1-mesa-dri libxtst6
           python3 -m pip install --quiet --user pillow
+          echo "$(date -u +%FT%TZ) X11+GL+pip ok" >> ~/mc-test/voxy-steps.log
       - name: sRGB GLX shim
         run: |
+          echo "$(date -u +%FT%TZ) sRGB shim start" >> ~/mc-test/voxy-steps.log
           mkdir -p ~/mc-test/shim
           gcc -shared -fPIC -O2 -o ~/mc-test/shim/libGL.so.1 scripts/bench/libclodgl.c -ldl
+          echo "$(date -u +%FT%TZ) sRGB shim ok" >> ~/mc-test/voxy-steps.log
       - name: Restore vanilla 26.3 client cache (~600 MB)
         uses: actions/cache/restore@v4
         with:
           path: ~/mc-test/client
           key: mc263-client-voxy-v1
       - name: Vanilla 26.3 client runtime (official manifest, ~600 MB)
-        run: python3 scripts/bench/setup_client.py
+        run: |
+          echo "$(date -u +%FT%TZ) setup_client start" >> ~/mc-test/voxy-steps.log
+          python3 scripts/bench/setup_client.py
+          echo "$(date -u +%FT%TZ) setup_client ok" >> ~/mc-test/voxy-steps.log
       - name: Fabric layer (loader + fabric-api + sodium + voxy)
         env:
           VOXY_RD: "8"
           VOXY_THREADS: "2"
-        run: bash scripts/bench/setup_client_voxy.sh
+        run: |
+          echo "$(date -u +%FT%TZ) fabric layer start" >> ~/mc-test/voxy-steps.log
+          bash scripts/bench/setup_client_voxy.sh
+          echo "$(date -u +%FT%TZ) fabric layer ok" >> ~/mc-test/voxy-steps.log
       - name: Save client+fabric cache (always — the download is the expensive part)
         if: always()
         continue-on-error: true
@@ -581,8 +618,10 @@ jobs:
           VOXY_MESH_WAIT: "240"
           VOXY_LAP_WAIT: "120"
         run: |
+          echo "$(date -u +%FT%TZ) voxy leg start" >> ~/mc-test/voxy-steps.log
           export CLOD_JAVA="$JAVA_HOME/bin/java"
           bash scripts/bench/run_voxy_shots.sh
+          echo "$(date -u +%FT%TZ) voxy leg ok" >> ~/mc-test/voxy-steps.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

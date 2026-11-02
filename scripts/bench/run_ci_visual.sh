@@ -247,6 +247,12 @@ done
 
 # ---- 1. boot the stack (fifo console, gates) --------------------------------
 sum "### c-LoD visual run ($CENTER, marker=$MARKER, vantage $VX,$VY yaw $VYAW)"
+# v6.8.3: the GL stack version rides the verdict — a runner image update
+# (Mesa/llvmpipe bump) is a prime suspect for a client that renders
+# nothing, and the death window (v6.6.2 live -> v6.7.2 dead) contains
+# NO repo change that touches the production pack.
+GLINFO=$(xvfb-run -a glxinfo -B 2>/dev/null | grep -aiE "opengl version|llvmpipe|mesa " | head -4 | tr '\n' ';' || true)
+sum "- GL: ${GLINFO:-unavailable (glxinfo/xvfb-run missing)}"
 # v6.5.2: arm the /clod-cells forensics window on the marker center — the
 # run can then compare the SERVER's belief about the marker cells (what it
 # streams) with what the client painted. v6.7: also arm the CAPTURE LENS —
@@ -466,7 +472,7 @@ PYEOF
         echo "### client log forensics (pipeline/particle/atlas lines — v6.8.2)"
         echo '```'
         grep -av "level_particles" /tmp/client.log 2>/dev/null \
-          | grep -iaE "pipeline|compil|shader|particle|atlas|stitch|exception|error|disconnect|shutdown|reload" \
+          | grep -iaE "pipeline|compil|shader|particle|atlas|stitch|exception|error|disconnect|shutdown|reload|LWJGL|OpenGL|Mesa|llvmpipe" \
           | tail -50 || true
         echo '```'
       } >> "$SUMMARY"
@@ -624,7 +630,7 @@ grep -iE "pack|post|reload" /tmp/client.log | tail -8 || true
   echo "### client log forensics (pipeline/particle/atlas — v6.8.2)"
   echo '```'
   grep -av "level_particles" /tmp/client.log 2>/dev/null \
-    | grep -iaE "pipeline|compil|shader|particle|atlas|stitch|exception|error|disconnect|shutdown|reload" \
+    | grep -iaE "pipeline|compil|shader|particle|atlas|stitch|exception|error|disconnect|shutdown|reload|LWJGL|OpenGL|Mesa|llvmpipe" \
     | tail -50 || true
   echo '```'
 } >> "$SUMMARY"

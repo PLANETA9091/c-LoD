@@ -595,3 +595,23 @@ filtered) ride the verdict feed always. The voxy feed publishes a failure
 marker (log tails) on zero-shot runs — a failed leg is no longer
 indistinguishable from "hasn't run yet". Rust code untouched: 87 tests,
 fmt/clippy green.
+
+v6.8.3 EYES IN THE FEED (harness/CI): the verdicts stop being blind.
+(1) The ci-verdicts branch carries four downscaled 640 px JPEGs per run
+(burst / far / baseline / last probe, scripts/bench/jpg_to_feed.py) plus
+the GL stack version (xvfb-run glxinfo) and the client's own LWJGL/OpenGL/
+Mesa lines in the forensics grep — three RENDERER DEAD verdicts
+(41449086366 / 41454021639 / 41454056043) were judged on white-px
+counters alone; a picture separates a dead GL from a live scene with no
+particles instantly. (2) The voxy feed publishes the failure marker with
+a per-step trace on EVERY zero-shot outcome: run 41454056043 died 76 s
+in — BEFORE run_voxy_shots.sh's mkdir — and the old early-exit left no
+branch at all, indistinguishable from "hasn't run yet"; each voxy step
+now appends start/ok lines to ~/mc-test/voxy-steps.log and the marker
+carries it (publisher self-tested on a scratch remote: missing dir,
+empty dir, success + prune-5 — 12/12). (3) Death-window forensics
+recorded: the last live run is v6.6.2 (paint=3679), the first dead one
+v6.7.2 (paint=114, close=2); the v6.6.2->v6.7.0 diff touches no
+production-pack byte (packgen pins the 13-entry artifact by test) — the
+prime suspect moves to the runner image (Mesa/llvmpipe bump), which the
+new GL line will name. Rust code untouched: 87 tests, fmt/clippy green.

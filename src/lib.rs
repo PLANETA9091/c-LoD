@@ -75,7 +75,7 @@ pub unsafe extern "C" fn cplugin_init(
         cfg.region_blocks, cfg.cell_size, cfg.http_port, cfg.fov, cfg.particles_per_tick
     ));
     log_info(
-        "c-LoD v6.8.2: RENDERER FORENSICS — the debug lens replaced the blit pass (reading minecraft:main while writing it was a framebuffer feedback loop, GL UB) and the preflight now separates a dead pipeline (lens_zero=1: no particle EVER rendered) from pool saturation (lens committed, fresh spawns rejected): the 3x RENDERER DEAD runs can finally say WHY",
+        "c-LoD v6.8.3: EYES IN THE FEED — three RENDERER DEAD verdicts were judged on white-px counters alone; the ci-verdicts branch now carries four downscaled screenshots per run (burst/far/baseline/last) plus the GL stack version (a runner Mesa bump is a prime suspect — the death window v6.6.2 live -> v6.7.2 dead touches no production-pack byte, the 13-entry artifact is pinned byte-identical by test); the voxy feed publishes a failure marker with a per-step trace on EVERY zero-shot outcome (run 41454056043 died 76 s in, before the shots dir existed, and left no branch at all)",
     );
 
     let st = engine::State::new(cfg);
