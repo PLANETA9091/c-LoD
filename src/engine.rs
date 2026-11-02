@@ -60,6 +60,18 @@ pub struct State {
     pub idle_ticks: AtomicU32,
     /// Set once the streamer origin was fixed and particles are flying.
     pub stream_armed: AtomicU8,
+    /// v5.3 live push: valid cells re-sampled by the rescan sweep since boot.
+    pub rescanned_cells: AtomicU64,
+    /// v5.3 live push: cell deltas detected and streamed at the batch head.
+    pub live_deltas: AtomicU64,
+    /// v5.3: OR-inexact deltas pending since the last rebuild pulse (height
+    /// decreases / color flips — the client renders them exactly only via a
+    /// full-strobe frame or a rebuild pulse).
+    pub merge_unsafe: AtomicU64,
+    /// Engine tick of the last rebuild pulse.
+    pub rebuild_last: AtomicU64,
+    /// Rebuild pulses fired since boot (diagnostics).
+    pub rebuild_pulses: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -116,6 +128,11 @@ impl State {
             streamed_cells: AtomicU64::new(0),
             idle_ticks: AtomicU32::new(0),
             stream_armed: AtomicU8::new(0),
+            rescanned_cells: AtomicU64::new(0),
+            live_deltas: AtomicU64::new(0),
+            merge_unsafe: AtomicU64::new(0),
+            rebuild_last: AtomicU64::new(0),
+            rebuild_pulses: AtomicU64::new(0),
         })
     }
 }
@@ -135,9 +152,11 @@ pub fn tick(state: &Arc<State>, env: Env) {
     }
     ensure_boot(state, env);
     stream_scan(state, env);
+    rescan_step(state, env);
     poll_forced(state, env);
     stream_step(state, env);
     manage_players(state, env);
+    maybe_rebuild(state, env);
     // Idle throttling: with nobody online the engine loop sleeps 10x longer
     // between ticks (the scheduling churn of an idle server was implicated
     // in native crashes after the last player left). per_player holds one
@@ -447,6 +466,168 @@ fn poll_forced(state: &Arc<State>, env: Env) {
     }
 }
 
+/// v5.3 LIVE EVENT PUSH: player-centric rescan of already-valid cells.
+///
+/// The first scan fills each cell once and never looks back — a block
+/// placed after boot never reached the stream. This sweep re-samples valid
+/// cells near players (edits cluster around players; the far field is
+/// invisible to the particle carrier anyway): `rescan_targets` advances a
+/// fair row-major cursor gated by player radius (skips are free), each
+/// picked cell is re-sampled through the SAME heightmap probe as the first
+/// scan, and `set_cell_checked` turns any word change into a DELTA that
+/// streams at the batch head next tick. No event listeners, no relog, no
+/// repack — the LOD picture tracks the live world.
+fn rescan_step(state: &Arc<State>, env: Env) {
+    if state.phase.load(Ordering::SeqCst) != PHASE_LIVE {
+        return;
+    }
+    if state.cfg.rescan_budget == 0 || state.cfg.rescan_radius < 8.0 {
+        return;
+    }
+    let world_handle = *state.world_obj.lock().unwrap();
+    if world_handle == 0 {
+        return;
+    }
+    let players = jni::players(env);
+    if players.is_empty() {
+        return;
+    }
+    let world = unsafe { as_obj(world_handle) };
+    let anchors: Vec<(f64, f64)> = players.iter().map(|p| (p.bx as f64, p.bz as f64)).collect();
+    let targets: Vec<(u32, u32)> = {
+        let mut s = state.stream.lock().unwrap();
+        s.rescan_targets(
+            &anchors,
+            state.cfg.rescan_radius,
+            state.cfg.rescan_budget as usize,
+            state.cfg.rescan_skips as usize,
+        )
+    };
+    if targets.is_empty() {
+        return;
+    }
+    let mut rescanned = 0u64;
+    let mut deltas = 0u64;
+    let mut unsafe_deltas = 0u64;
+    for (cx, cz) in targets {
+        let (wx, wz) = {
+            let s = state.stream.lock().unwrap();
+            s.cell_origin(cx, cz)
+        };
+        if let Some((y, liquid, material, biome)) =
+            jni::sample_surface(env, world, wx as i32, wz as i32)
+        {
+            let rgb = crate::palette::surface_color(&material, &biome, liquid);
+            let change = {
+                let mut s = state.stream.lock().unwrap();
+                s.set_cell_checked(
+                    cx,
+                    cz,
+                    Cell {
+                        height: y.clamp(-64, 1023) as i16,
+                        water: liquid,
+                        valid: true,
+                        rgb,
+                    },
+                )
+            };
+            if change.changed {
+                deltas += 1;
+                if !change.or_safe {
+                    unsafe_deltas += 1;
+                }
+            }
+            rescanned += 1;
+        }
+        // None: chunk unloaded since the first scan — the LOD keeps the
+        // last known picture (never invalidate: particles cannot unpaint).
+    }
+    if rescanned > 0 {
+        state
+            .rescanned_cells
+            .fetch_add(rescanned, Ordering::Relaxed);
+        if deltas > 0 {
+            state.live_deltas.fetch_add(deltas, Ordering::Relaxed);
+            state
+                .merge_unsafe
+                .fetch_add(unsafe_deltas, Ordering::Relaxed);
+            crate::log_info(&format!(
+                "live push: {} cells re-sampled, {} deltas ({} OR-inexact) -> delta head next tick",
+                rescanned, deltas, unsafe_deltas
+            ));
+        }
+    }
+}
+
+/// v5.3 rebuild pulse: the blunt-but-exact backstop for OR-inexact deltas.
+///
+/// The client merges streamed words into persistent targets; a partial
+/// strobe OR-merges, so bit-drop changes (height decreases, color flips)
+/// can leave stale bits until a full-strobe frame lands. When enough of
+/// them pile up, ONE remove+add of the terrain effect (the proven v5.1.1
+/// reconcile — and the e2e-proven capture-buffer wipe) clears every
+/// target; the refresh lap refills exact data and the changed cells
+/// re-stream at the delta head immediately. Rate-limited by tick interval.
+fn maybe_rebuild(state: &Arc<State>, env: Env) {
+    if state.cfg.rebuild_interval_ticks == 0 {
+        return; // pulses disabled
+    }
+    let pending = state.merge_unsafe.load(Ordering::Relaxed);
+    if pending < state.cfg.rebuild_min_unsafe as u64 {
+        return;
+    }
+    let now = state.tick_no.load(Ordering::Relaxed);
+    let last = state.rebuild_last.load(Ordering::Relaxed);
+    if now.saturating_sub(last) < state.cfg.rebuild_interval_ticks {
+        return;
+    }
+    let keys = state.keys.lock().unwrap().clone();
+    let Some(keys) = keys else { return };
+    if keys.terrain == 0 {
+        return;
+    }
+    let pack = state.pack.read().unwrap().is_some();
+    if !pack {
+        return;
+    }
+    let mut pulsers = 0u32;
+    for p in jni::players(env) {
+        let st = state
+            .per_player
+            .lock()
+            .unwrap()
+            .get(&p.uuid)
+            .cloned()
+            .unwrap_or_default();
+        if !st.terrain_on {
+            continue;
+        }
+        if let Some(handle) = jni::player_by_uuid(env, &p.uuid) {
+            let tkey = unsafe { as_obj(keys.terrain) };
+            let rm = jni::remove_effect(env, handle, tkey);
+            let add = jni::add_effect(env, handle, tkey);
+            pulsers += u32::from(add);
+            crate::log_info(&format!(
+                "rebuild pulse for {} (remove -> {}, add -> {}): capture targets cleared, lap refills exact data",
+                p.uuid, rm, add
+            ));
+        }
+    }
+    if pulsers > 0 {
+        let redirtied = {
+            let mut s = state.stream.lock().unwrap();
+            s.redirty_recent()
+        };
+        state.rebuild_last.store(now, Ordering::Relaxed);
+        state.merge_unsafe.store(0, Ordering::Relaxed);
+        state.rebuild_pulses.fetch_add(1, Ordering::Relaxed);
+        crate::log_info(&format!(
+            "rebuild pulse done: {} players, {} changed cells re-queued at delta head",
+            pulsers, redirtied
+        ));
+    }
+}
+
 /// World block coords -> disk cell coords (None when outside the disk).
 fn world_to_cell(s: &Streamer, wx: i32, wz: i32) -> Option<(u32, u32)> {
     let cell = s.cell_size;
@@ -705,10 +886,13 @@ fn stream_step(state: &Arc<State>, env: Env) {
         ));
     }
 
-    // Spawn the next batch to every player (the disk is shared).
+    // Spawn the next batch to every player (the disk is shared). Player
+    // anchors order the DELTA channel nearest-player-first (v5.3).
+    let anchors: Vec<(f64, f64)> = players.iter().map(|p| (p.bx as f64, p.bz as f64)).collect();
     let batch: Vec<crate::stream::Spawn> = {
         let mut s = state.stream.lock().unwrap();
-        s.tick_batch(state.cfg.particles_per_tick as usize).to_vec()
+        s.tick_batch_for(state.cfg.particles_per_tick as usize, &anchors)
+            .to_vec()
     };
     if batch.is_empty() {
         return;
@@ -731,19 +915,27 @@ fn stream_step(state: &Arc<State>, env: Env) {
     // Rate-limited diagnostics.
     let tick = state.tick_no.load(Ordering::Relaxed);
     if tick.is_multiple_of(100) {
-        let (valid, laps, total_cells) = {
+        let (valid, laps, total_cells, dirty, deltas) = {
             let s = state.stream.lock().unwrap();
-            (s.valid_cells(), s.laps, s.cells())
+            (
+                s.valid_cells(),
+                s.laps,
+                s.cells(),
+                s.dirty_now(),
+                s.delta_cells,
+            )
         };
         // v5.2.2: /clod-pack.info serves LIVE scan counters (it used to
         // report the boot-time cells=0 forever).
         state.server.set_meta(valid, total_cells);
         crate::log_info(&format!(
-            "stream: tick {tick} {valid}/{total_cells} cells, lap {}, +{spawned} particles ({} players), spawned {} / failed {}",
+            "stream: tick {tick} {valid}/{total_cells} cells, lap {}, +{spawned} particles ({} players), spawned {} / failed {}; v5.3 delta: queued {dirty}, delivered {deltas}, rescanned {}, pulses {}",
             laps,
             players.len(),
             jni::STREAM_SPAWNED.load(Ordering::Relaxed),
             jni::STREAM_FAILED.load(Ordering::Relaxed),
+            state.rescanned_cells.load(Ordering::Relaxed),
+            state.rebuild_pulses.load(Ordering::Relaxed),
         ));
     }
 }

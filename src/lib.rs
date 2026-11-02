@@ -9,8 +9,8 @@
 //!      EXACTLY ONCE per session — never rebuilt, never re-pushed.
 //!   3. Players receive the pack once (`setResourcePack`, stable SHA-1).
 //!   4. Every LOD byte streams at runtime as DUST PARTICLES over two sky
-//!      planes above the disk (SKY-GRID BIT-STREAM): HI Y=260 carries the
-//!      8-bit height word, LO Y=272 the 8-bit color index; 4 particles =
+//!      planes above the disk (SKY-GRID BIT-STREAM): HI Y=120 carries the
+//!      8-bit height word, LO Y=80 the 8-bit color index; 4 particles =
 //!      one 16-bit word, sub-cell position = bits. The pack's capture
 //!      shaders decode them against the depth buffer into persistent
 //!      targets; `clod:lod_terrain` raymarches the heightfield from the
@@ -18,6 +18,15 @@
 //!   5. `clod:atmosphere` hides the render-distance edge with a depth veil.
 //!      Per tick the engine switches chains per player (Off / Veil / Full
 //!      tiers) — the only dynamic part, pure `/posteffect`.
+//!
+//! v5.3 LIVE DELTA STREAM: the stream is live, not a boot-time snapshot.
+//! A player-centric rescan sweep re-samples valid cells near players every
+//! tick (world edits need no event listener, no relog, no repack); changed
+//! cells ride the DELTA channel at the batch head (nearest player first);
+//! the capture shader replaces a byte atomically when all four word slots
+//! strobe in one frame (exact updates), and a rate-limited rebuild pulse
+//! (remove+add reconcile) wipes client targets when OR-inexact deltas pile
+//! up — the lap refills exact data.
 
 mod config;
 mod engine;
@@ -72,7 +81,7 @@ pub unsafe extern "C" fn cplugin_init(
         cfg.region_blocks, cfg.cell_size, cfg.http_port, cfg.fov, cfg.particles_per_tick
     ));
     log_info(
-        "c-LoD v5.0: SKY-GRID BIT-STREAM — shader-only pack pushed once, world data rides dust particles",
+        "c-LoD v5.3: LIVE DELTA STREAM — shader-only pack pushed once, world data rides dust particles, edits rescan+delta without relog",
     );
 
     let st = engine::State::new(cfg);

@@ -65,6 +65,23 @@ pub struct Config {
     pub color_veil: [f32; 3],
     /// Upper bound on terrain height used to cull rays early.
     pub max_height: i32,
+    /// v5.3 live push: already-valid cells re-sampled per engine tick
+    /// (player-centric rescan sweep — this is what turns world edits into
+    /// stream deltas without any event listener).
+    pub rescan_budget: u32,
+    /// Radius (blocks) around any player inside which valid cells are
+    /// re-sampled. Edits cluster around players; the far field is
+    /// invisible to the particle carrier anyway.
+    pub rescan_radius: f64,
+    /// Rescan cursor positions (skips) allowed per tick: out-of-radius and
+    /// void cells cost a skip, not a sample.
+    pub rescan_skips: u32,
+    /// v5.3 rebuild pulse: fire a one-shot remove+add of the terrain effect
+    /// (wipes the client's persistent capture targets; the lap refills
+    /// exact data) only when at least this many OR-inexact deltas piled up.
+    pub rebuild_min_unsafe: u32,
+    /// Minimum engine ticks between rebuild pulses.
+    pub rebuild_interval_ticks: u64,
 }
 
 impl Default for Config {
@@ -95,6 +112,11 @@ impl Default for Config {
             snow_line: 0.78,
             color_veil: [0.62, 0.74, 0.86],
             max_height: 320,
+            rescan_budget: 256,
+            rescan_radius: 128.0,
+            rescan_skips: 4096,
+            rebuild_min_unsafe: 16,
+            rebuild_interval_ticks: 1800,
         }
     }
 }
@@ -203,6 +225,21 @@ impl Config {
         if let Some(v) = get("max_height").and_then(|v| v.parse::<i32>().ok()) {
             cfg.max_height = v.clamp(64, 1024);
         }
+        if let Some(v) = get("rescan_budget").and_then(|v| v.parse::<u32>().ok()) {
+            cfg.rescan_budget = v.clamp(0, 65536);
+        }
+        if let Some(v) = get("rescan_radius").and_then(|v| v.parse::<f64>().ok()) {
+            cfg.rescan_radius = v.clamp(8.0, 4096.0);
+        }
+        if let Some(v) = get("rescan_skips").and_then(|v| v.parse::<u32>().ok()) {
+            cfg.rescan_skips = v.clamp(16, 262_144);
+        }
+        if let Some(v) = get("rebuild_min_unsafe").and_then(|v| v.parse::<u32>().ok()) {
+            cfg.rebuild_min_unsafe = v;
+        }
+        if let Some(v) = get("rebuild_interval_ticks").and_then(|v| v.parse::<u64>().ok()) {
+            cfg.rebuild_interval_ticks = v.clamp(0, 2_000_000);
+        }
         cfg
     }
 }
@@ -275,5 +312,27 @@ mod tests {
     fn color_scale_255() {
         let c = Config::parse("color_veil=160/190/220");
         assert!((c.color_veil[0] - 160.0 / 255.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn live_push_knobs_parse() {
+        let c = Config::parse("");
+        assert_eq!(c.rescan_budget, 256);
+        assert_eq!(c.rescan_radius, 128.0);
+        assert_eq!(c.rescan_skips, 4096);
+        assert_eq!(c.rebuild_min_unsafe, 16);
+        assert_eq!(c.rebuild_interval_ticks, 1800);
+        let c = Config::parse(
+            "rescan_budget=512;rescan_radius=256;rescan_skips=8192;rebuild_min_unsafe=4;rebuild_interval_ticks=600",
+        );
+        assert_eq!(c.rescan_budget, 512);
+        assert_eq!(c.rescan_radius, 256.0);
+        assert_eq!(c.rescan_skips, 8192);
+        assert_eq!(c.rebuild_min_unsafe, 4);
+        assert_eq!(c.rebuild_interval_ticks, 600);
+        // Clamps hold.
+        let c = Config::parse("rescan_budget=999999;rescan_radius=0.5");
+        assert_eq!(c.rescan_budget, 65536);
+        assert_eq!(c.rescan_radius, 8.0);
     }
 }

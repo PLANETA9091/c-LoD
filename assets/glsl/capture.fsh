@@ -18,9 +18,13 @@
 // = 1 cell). For the pixel's cell it re-projects all 16 sub-particle
 // positions onto the screen (probe camera), strobes every projection: the
 // pixel must sit in front of geometry (device depth > 0), and its main
-// color must match the bright villager-green hue — then OR-merges the
-// decoded word into the previous value. Anything not strobed keeps its old
-// value; the stream self-heals on the next lap.
+// color must match the bright villager-green hue — then merges the
+// decoded word into the previous value. v5.3 merge rule: when ALL FOUR
+// slots of the word strobe in ONE frame, the byte is REPLACED atomically
+// (exact live-delta delivery — height decreases and color flips land
+// correctly); partial strobes OR-merge as before (idempotent for the
+// unchanged refresh lap). Anything not strobed keeps its old value; the
+// stream self-heals on the next lap.
 
 uniform sampler2D InSampler;      // minecraft:main color (dust hue strobe)
 uniform sampler2D InDepthSampler; // minecraft:main depth (in-front-of-geometry test)
@@ -81,6 +85,7 @@ void main() {
     vec2 cellWorld = GridInfo.xy + (vec2(px) + 0.5) * cell;
 
     uint word = 0u;
+    uint slots = 0u;
     bool anyHit = false;
 
     // v5.1: one plane per pass — the HI word decodes on the high layer,
@@ -123,13 +128,20 @@ void main() {
                 continue;
             }
             word |= uint(qx) << (14 - 2 * qz);
+            slots |= 1u << uint(qz);
             anyHit = true;
         }
     }
 
     vec4 prev = texelFetch(PrevSampler, px, 0);
     uint prevByte = uint(prev.r * 255.0 + 0.5);
-    uint outByte = anyHit ? (prevByte | (word >> 8)) : prevByte;
+    // v5.3: all four slots strobed in this frame -> the byte is complete
+    // and fresh: REPLACE (exact deltas). Otherwise keep the OR-merge
+    // (idempotent for lap refresh, best-effort for partial deltas).
+    bool full = slots == 0xFu;
+    uint outByte = full
+        ? (word >> 8)
+        : (anyHit ? (prevByte | (word >> 8)) : prevByte);
     float mark = anyHit ? 1.0 : prev.a;
     fragColor = vec4(float(outByte) / 255.0, anyHit ? 1.0 : 0.0, 0.0, mark);
 }
