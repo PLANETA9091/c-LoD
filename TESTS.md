@@ -648,3 +648,20 @@ been silent) — every control step now traces into ~/mc-test/control-
 steps.log and the publisher publishes a FAILURE marker (trace tail) when
 the summary never appears, closing the last silent-hole variant. 87
 tests, fmt/clippy green.
+
+v6.8.6 EVERY SILENT DEATH NAMED (CI): run #226 (41472301678) proved the
+traces pay for themselves AND exposed two deaths they could not name.
+(1) The voxy leg died in <=1 s after "voxy leg start" — fabric layer
+finally OK (v6.8.5 fix worked), but the leg's own stdout went only to
+the API-gated step log: the feed saw start-then-nothing. The leg now
+tees everything into voxy-leg.log, traces every stage into
+voxy-steps.log, and run_server_voxy.sh's Paper download is
+--fail --retry 3 with the API's own words on any refusal (the bare
+`curl -s | python3` pipeline was the only untraced instant-death
+candidate before voxy_server.log exists). (2) The control pulse died in
+8.5 untraced minutes — its GITHUB_STEP_SUMMARY lands in the shots dir
+only at the end; the leg now tees into control-leg.log and traces
+sanity/boot/client/probes; the setup_client step got its start/ok trace.
+Both failure markers carry the leg logs (publisher self-tested on a
+scratch remote: voxy marker + leg.log in run dir; control marker +
+leg.log). 87 tests, fmt/clippy green.

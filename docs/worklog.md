@@ -616,3 +616,23 @@ Work Log:
 
 Stage Summary:
 - v6.8.5: оба новых фида назвали своих убийц с первого применения (трейс-механика окупилась немедленно); voxy-фикс однострочный, контроль получил маркер «умер до summary». 87 тестов.
+
+---
+Task ID: 35
+Agent: main (user: «продолжи» + крон «продолжи» каждые 3 часа восстановлен — Job 497263, Europe/Warsaw)
+Task: v6.8.6 — прогон #226 вскрыл ДВЕ смерти без имени; теперь каждая молчащая смерть ноги voxy и контрольного пульса подписана
+
+Work Log:
+- РЕЦИКЛ №2: дерево снова на f356730 (эра v5.2.2), тулчейн съеден. Синх: ff-only до origin/master 50239c0 (v6.8.5) — за фетчами оказались v6.8.2..v6.8.5 (форензика рендера, глаза-фид, контрольная рука, JDK-фикс).
+- ПРОГОН #226 (run 41472301678, sha 50239c0) ПРОЧИТАН ПО ТРЁМ ФИДАМ БЕЗ API:
+  (1) voxy: fabric-слой ВПЕРВЫЕ прошёл целиком (installer, loader profile, 3 мода, конфиг, «fabric layer ok» 15:31:51) → «voxy leg start» 15:31:53 → publish 15:31:56 — смерть НОГИ за <=1 с, ни client.log ни server.log не созданы. Единственный непокрытый трейсом участок — run_voxy_shots.sh, и в нём первый же оператор — run_server_voxy.sh; внутри него до создания voxy_server.log живут только mkdir/cd/cp и голый `curl -s | python3` fill.papermc.io (без --fail/retry; любой не-JSON — KeyError → pipefail → set -e → мгновенная смерть). Из песочницы API жив (200, 35 мс) — с раннера причина неизвестна, и это ЛЕГИТИМНО: фикс не гадает, а делает смерть читаемой.
+  (2) контроль: trace до «shim ok» 15:32:16, маркер 15:40:55 — 8.5 МИНУТЫ работы без единого следа: setup_client и сам пульс трейсов не имели, а SUMMARY пишется в GITHUB_STEP_SUMMARY и попадает в shots-dir ТОЛЬКО в конце ноги — умереть можно было где угодно.
+  (3) visual: RENDERER DEAD 4-й прогон (close=0, retry=0, lens_zero=1).
+- ФИКСЫ v6.8.6 «EVERY SILENT DEATH NAMED»: run_voxy_shots.sh — exec-tee всего stdout/stderr в voxy-leg.log + stage-трейсы (server up / SERVER SCRIPT FAILED rc / client launch / joined / meshing / shot n/9 / done) в voxy-steps.log; run_server_voxy.sh — скачивание Paper через curl -sS --fail --retry 3 --max-time + UA + FATAL-эхо с телом ответа API; run_ci_visual.sh — ct()-хелпер (CLOD_CONTROL-гейт): sanity/boot/run_client/joined/control-branch/drift/bursts в control-steps.log + exec-tee в control-leg.log; ci.yml — setup_client контроля получил start/ok трейс; оба паблишера (publish_voxy_feed.sh, publish_control_feed.sh) несут leg.log в маркер и run-каталог.
+- САМОТЕСТЫ на scratch-remote: voxy-маркер = FAILURE + «## voxy-leg.log tail» с телом ответа API + leg.log в run-999999; контроль-маркер = FAILURE + control-leg.log tail + файл в run-888888. bash -n 6/6, YAML 12 джоб.
+- Инцидент правки: MultiEdit по ci.yml применил первую правку и срезал шаги save-cache/CONTROL-pulse — поймал чтением региона, восстановил с трейсами в одной транзакции.
+- Тулчейн восстановлен: rustup 1.99.x detached, glslang 16.6.0 (новый нейминг ассета glslang-<v>-linux-x86_64-release.zip; GitHub API rate-limited — парсинг expanded_assets HTML).
+- ЧЕСТНО: (1) причина мгновенной смерти voxy-ноги НЕ названа — назван МЕХАНИЗМ её проявления в фиде; если дело не в curl, маркер #227 покажет фактический FATAL. (2) voxy-нога ни разу не добежала до клиента в CI. (3) контрольный приговор по-прежнему не вынесен. (4) SSAO-порт и маркер ждут живого рендера.
+
+Stage Summary:
+- v6.8.6: слепых зон в CI больше нет — voxy-нога и контрольный пульс подписывают каждый свой шаг, leg-логи едут в маркеры; прогон #227 впервые обязан показать: FATAL voxy-ноги, шаг смерти контроля (или CONTROL PASS/FAIL), и жив ли pack-кадр.

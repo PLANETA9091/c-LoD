@@ -65,6 +65,18 @@ sum() { echo "$*" >> "$SUMMARY"; }
 fail() { echo "FAIL: $*"; FAILURES=$((FAILURES + 1)); sum "- **FAIL:** $*"; }
 note() { echo "--- $*"; }
 
+# v6.8.6 CONTROL LEGIBILITY: the control arm's GITHUB_STEP_SUMMARY only
+# lands in $SHOTS/summary.md at the END of the leg — run 41472301678 died
+# somewhere in 8.5 minutes of untraced work and the feed could only say
+# "no summary". Every control stage now names itself into control-steps.log
+# (no-op on the main visual leg), and the whole leg tees into
+# control-leg.log below — the publisher carries both.
+ct() { [ "${CLOD_CONTROL:-0}" = "1" ] && echo "$(date -u +%FT%TZ) control pulse: $1" >> "$HOME/mc-test/control-steps.log" || true; }
+if [ "${CLOD_CONTROL:-0}" = "1" ]; then
+  exec > >(tee -a "$HOME/mc-test/control-leg.log") 2>&1
+  echo "$(date -u +%FT%TZ) control pulse: leg start (stdout/stderr teed to control-leg.log)" >> "$HOME/mc-test/control-steps.log"
+fi
+
 srv() { echo "$1" > /tmp/server.in; }
 
 wait_log() { # pattern file timeout_loops
@@ -265,6 +277,7 @@ for f in "$D/launcher.jar" "$HOME/mc-test/shim/libGL.so.1" \
   if [ "${CLOD_CONTROL:-0}" = "1" ] && [ "$f" = "$D/launcher.jar" ]; then continue; fi
   [ -e "$f" ] || { echo "FAIL: missing $f"; exit 2; }
 done
+ct "sanity ok (boot_server next)"
 
 # ---- 1. boot the stack (fifo console, gates) --------------------------------
 sum "### c-LoD visual run ($CENTER, marker=$MARKER, vantage $VX,$VY yaw $VYAW)"
@@ -284,6 +297,7 @@ export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=true"
 CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" || {
   echo "FAIL: boot/gates"; tail -40 /tmp/server.log; exit 1; }
 sum "- boot + gates OK ($(date -u +%H:%M:%S))"
+ct "boot ok"
 # v6.8.4: the control server has no c-LoD module — no sky-grid line exists;
 # boot_server.sh already gated the vanilla boot on Paper's own 'Done ('
 if [ "${CLOD_CONTROL:-0}" = "1" ]; then
@@ -296,10 +310,12 @@ fi
 
 # ---- 2. client #1: join, accept pack ----------------------------------------
 bash "$BENCH_DIR/run_client.sh" || fail "run_client.sh exited nonzero"
+ct "run_client launch issued"
 wait_log "Stepan joined the game" /tmp/server.log 240 || {
   echo "FAIL: client never joined"; tail -30 /tmp/client.log; exit 1; }
 note "client joined (leg 1)"
 sum "- joined session 1 ($(date -u +%H:%M:%S))"
+ct "client joined"
 # v6.4.2 FIX: the relog guard baseline must be captured AFTER the join it
 # guards — captured before, it was 0 and the guard read "0 -> 1" (the join
 # itself) and failed every run ("join count changed mid-test").
@@ -314,6 +330,7 @@ JOIN1=$(join_count)
 # does the vanilla renderer draw here at all?
 if [ "${CLOD_CONTROL:-0}" = "1" ]; then
   sum "- mode: CONTROL (vanilla server, no pack — differential arm)"
+  ct "control branch entered"
   srv "gamerule doDaylightCycle false"
   srv "time set noon"
   srv "gamemode spectator Stepan"
@@ -324,12 +341,14 @@ if [ "${CLOD_CONTROL:-0}" = "1" ]; then
   shot 11_baseline_settle || exit 1
   DRIFT=$(paint_px "$SHOTS/10_before_edit.png" "$SHOTS/11_baseline_settle.png")
   echo "- baseline try 1: drift=${DRIFT:-?} px" | tee -a "$SUMMARY"
+  ct "baseline drift measured (${DRIFT:-?} px)"
   if [ "${DRIFT:-9999}" -le 3 ] 2>/dev/null; then
     sum "- frame motion: drift=0 px on a PACK-FREE client — the frame freezes WITHOUT the pack too (environment suspect)"
   else
     sum "- frame motion: drift=${DRIFT} px — the pack-free client repaints (the renderer loop is alive)"
   fi
   note "control: particle render probe (console bursts)"
+  ct "console bursts fire"
   srv "particle minecraft:end_rod $((VX + 20)) 150 $CZ 0.2 0.2 0.2 0 400 force"
   srv "particle minecraft:end_rod $((CX - 1)) 150 $CZ 0.2 0.2 0.2 0 400 force"
   sleep 1

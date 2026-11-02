@@ -25,9 +25,21 @@ mkdir -p "$D"
 cd "$D"
 if [ -z "$PAPER_JAR" ]; then
   echo "fetching Paper 26.3 (no local jar found)"
-  URL=$(curl -s https://fill.papermc.io/v3/projects/paper/versions/26.3/builds/latest \
-    | python3 -c "import json,sys;print(json.load(sys.stdin)['downloads']['server:default']['url'])")
-  curl -sL -o "$D/paper-26.3.jar" "$URL"
+  # v6.8.6: run 41472301678's leg died in <=1 s — the prime suspect is this
+  # bare `curl -s | python3` pipeline (no --fail, no retry, no error body:
+  # any non-JSON API answer kills the leg under set -e BEFORE voxy_server.log
+  # even exists, and the feed sees only "voxy leg start"). Now every step
+  # names itself and carries the API's own words into voxy-leg.log.
+  API_JSON=$(curl -sS --fail --retry 3 --retry-delay 2 --max-time 30 \
+    -H 'User-Agent: c-LoD-ci/6.8.6 (github.com/PLANETA9091/c-LoD)' \
+    https://fill.papermc.io/v3/projects/paper/versions/26.3/builds/latest) || {
+    echo "FATAL: papermc API request failed (curl rc=$?) — response body (if any) printed above"; exit 1; }
+  URL=$(echo "$API_JSON" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['downloads']['server:default']['url'])") || {
+    echo "FATAL: papermc API response not parseable / missing server:default (first 300 bytes):"
+    echo "$API_JSON" | head -c 300; echo; exit 1; }
+  echo "api ok, downloading $(echo "$API_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("name","paper build ?"))' 2>/dev/null || echo 'paper build ?')"
+  curl -sS --fail --retry 3 --retry-delay 2 --max-time 300 -o "$D/paper-26.3.jar" "$URL" || {
+    echo "FATAL: Paper jar download failed: $URL"; exit 1; }
   PAPER_JAR="$D/paper-26.3.jar"
 fi
 cp -f "$PAPER_JAR" ./paper-26.3.jar

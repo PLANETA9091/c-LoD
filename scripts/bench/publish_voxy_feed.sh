@@ -25,6 +25,9 @@ SRC="${1:-/home/runner/mc-test/voxy-shots}"
 RUN_ID="${2:-unknown}"
 RUN_NO="${3:-}"
 STEPS_LOG="$HOME/mc-test/voxy-steps.log"
+# v6.8.6: the leg's own stdout/stderr (run_voxy_shots.sh tees everything)
+# — the marker's only window into a death the per-step trace does not name.
+LEG_LOG="$HOME/mc-test/voxy-leg.log"
 
 SHA7=unknown
 if [ -n "${GITHUB_SHA:-}" ]; then SHA7="${GITHUB_SHA:0:7}"; fi
@@ -79,11 +82,12 @@ publish_failure_marker() {
   cp /tmp/voxy_client.log "/tmp/xfeed/run-${RUN_ID}/client.log" 2>/dev/null || true
   cp /tmp/voxy_server.log "/tmp/xfeed/run-${RUN_ID}/server.log" 2>/dev/null || true
   [ -f "$STEPS_LOG" ] && cp "$STEPS_LOG" "/tmp/xfeed/run-${RUN_ID}/steps.log" 2>/dev/null || true
+  [ -f "$LEG_LOG" ] && cp "$LEG_LOG" "/tmp/xfeed/run-${RUN_ID}/leg.log" 2>/dev/null || true
   {
     echo "# voxy reference run ${RUN_ID} (#${RUN_NO}) — FAILURE (no shots) $(date -u +%FT%TZ)"
     echo
     echo "The job produced zero screenshots (shots dir exists: $([ -d "$SRC" ] && echo yes || echo NO), sha ${SHA7})."
-    echo "See run-${RUN_ID}/ for client.log, server.log and steps.log (tails below)."
+    echo "See run-${RUN_ID}/ for client.log, server.log, steps.log and leg.log (tails below)."
     echo
     echo "## steps.log tail (per-step trace written by the job steps)"
     echo '```'
@@ -98,6 +102,11 @@ publish_failure_marker() {
     echo "## server.log tail"
     echo '```'
     tail -40 /tmp/voxy_server.log 2>/dev/null || echo "(no server log)"
+    echo '```'
+    echo
+    echo "## voxy-leg.log tail (the leg's own stdout/stderr)"
+    echo '```'
+    tail -30 "$LEG_LOG" 2>/dev/null || echo "(no leg log — the death predates the v6.8.6 tee)"
     echo '```'
   } > /tmp/xfeed/latest.md
   prune_runs

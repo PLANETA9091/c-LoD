@@ -603,7 +603,13 @@ jobs:
           path: ~/mc-test/client
           key: mc263-client-v1
       - name: Vanilla 26.3 client runtime (official manifest, ~600 MB)
-        run: python3 scripts/bench/setup_client.py
+        run: |
+          # v6.8.6: this step had NO trace — run 41472301678's control death
+          # (trace ended at "shim ok") could not distinguish "setup died" from
+          # "the pulse itself died". Both control legs now trace.
+          echo "$(date -u +%FT%TZ) control setup_client start" >> ~/mc-test/control-steps.log
+          python3 scripts/bench/setup_client.py
+          echo "$(date -u +%FT%TZ) control setup_client ok" >> ~/mc-test/control-steps.log
       - name: Save vanilla client cache (always — the download is the expensive part)
         if: always()
         continue-on-error: true
@@ -617,6 +623,9 @@ jobs:
         run: |
           export CLOD_JAVA="$JAVA_HOME/bin/java"
           export CLOD_CONTROL=1
+          # v6.8.6: the leg itself tees into ~/mc-test/control-leg.log and
+          # traces its stages into control-steps.log (run_ci_visual.sh) —
+          # the publisher carries both when no summary.md appears.
           bash scripts/bench/run_ci_visual.sh
       - uses: actions/upload-artifact@v4
         if: always()

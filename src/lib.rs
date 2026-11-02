@@ -75,7 +75,7 @@ pub unsafe extern "C" fn cplugin_init(
         cfg.region_blocks, cfg.cell_size, cfg.http_port, cfg.fov, cfg.particles_per_tick
     ));
     log_info(
-        "c-LoD v6.8.5: STEP TRACES CLOSE BOTH DEATHS — the voxy marker (run 41468940410) named its 2-second fabric-layer killer: without CLOD_JAVA the setup fell back to a nonexistent ~/tools/jdk25/bin/java (exit 127); the fabric step now exports the runner JDK — and the control job's pre-step death (no summary at all) gets its own steps trace plus a failure marker in the ci-verdicts feed when the summary never appears; voxy-reference should finally reach its first boot on CI next run",
+        "c-LoD v6.8.6: EVERY SILENT DEATH NAMED — run 41472301678 killed the voxy leg in <=1 s (trace: start then nothing) and the control pulse in 8.5 untraced minutes: the voxy leg now tees its whole stdout/stderr into voxy-leg.log and traces every stage (server up / client joined / shot n/9) into voxy-steps.log, the Paper download in run_server_voxy.sh is --fail --retry 3 with the API's own words on any refusal; the control pulse tees into control-leg.log and traces sanity/boot/client/probes; both failure markers carry the leg logs — the feed can no longer be blinded by a death it cannot read",
     );
 
     let st = engine::State::new(cfg);

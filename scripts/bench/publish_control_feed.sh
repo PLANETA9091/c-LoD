@@ -39,6 +39,9 @@ if [ ! -f "$SRC/summary.md" ]; then
     fi
     mkdir -p "/tmp/cfeed/run-${RUN_ID}"
     cp "$HOME/mc-test/control-steps.log" "/tmp/cfeed/run-${RUN_ID}/control-steps.log" 2>/dev/null || true
+    # v6.8.6: the pulse leg's own stdout/stderr (run_ci_visual.sh tees it
+    # when CLOD_CONTROL=1) — names a death the per-step trace does not.
+    cp "$HOME/mc-test/control-leg.log" "/tmp/cfeed/run-${RUN_ID}/control-leg.log" 2>/dev/null || true
     {
       echo "# control run ${RUN_ID} (#${RUN_NO}) — FAILURE (no summary) $(date -u +%FT%TZ)"
       echo
@@ -48,6 +51,11 @@ if [ ! -f "$SRC/summary.md" ]; then
       echo "## control-steps.log tail"
       echo '```'
       tail -30 "$HOME/mc-test/control-steps.log" 2>/dev/null || echo "(no steps log)"
+      echo '```'
+      echo
+      echo "## control-leg.log tail (the pulse leg's own stdout/stderr)"
+      echo '```'
+      tail -30 "$HOME/mc-test/control-leg.log" 2>/dev/null || echo "(no leg log — the death predates the v6.8.6 tee)"
       echo '```'
     } > "/tmp/cfeed/run-${RUN_ID}-control.md"
     cd /tmp/cfeed
