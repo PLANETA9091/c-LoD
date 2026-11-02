@@ -14,27 +14,40 @@ C="$HOME/mc-test/client"
 JAVA="${CLOD_JAVA:-$HOME/tools/jdk25/bin/java}"
 BENCH="$(cd "$(dirname "$0")" && pwd)"
 
+# v6.8.4: the job-level steps trace only knows "fabric layer start" — the
+# 2-second death (run 41464836708 marker) needs the steps INSIDE this script
+# named. Every stage appends to the same steps.log the marker publishes.
+trace() { echo "$(date -u +%FT%TZ) voxy-setup: $*" >> "${VOXY_STEPS_LOG:-$HOME/mc-test/voxy-steps.log}"; }
+
 mkdir -p "$C/mods"
 
 # 1. The installer needs the vanilla version JSON next to the jar
 #    (setup_client.py copies only 26.3.jar).
 if [ ! -f "$C/versions/26.3/26.3.json" ]; then
+  trace "copying version json"
   cp "$BENCH/26.3.json" "$C/versions/26.3/26.3.json"
 fi
+trace "version json ok"
 
 # 2. Fabric loader profile (KnotClient; Knot runtime-remaps the game jar on
 #    first boot and caches it under .fabric/).
 if [ ! -f "$C/versions/fabric-loader-0.20.1-26.3/fabric-loader-0.20.1-26.3.json" ]; then
+  trace "downloading fabric installer"
   curl -sL --max-time 60 -o /tmp/fabric-installer.jar \
     "https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.0/fabric-installer-1.1.0.jar"
+  trace "running fabric installer"
   "$JAVA" -jar /tmp/fabric-installer.jar client -dir "$C" -mcversion 26.3 -loader 0.20.1 -noprofile
+  trace "fabric installer done"
 fi
+trace "loader profile ok"
 
 fetch_mod() { # url, dest — skip when already present and non-empty
+  trace "mod fetch check: $(basename "$2")"
   if [ ! -s "$2" ]; then
     curl -sL --max-time 120 -o "$2" "$1"
   fi
   test -s "$2"
+  trace "mod ok: $(basename "$2")"
 }
 
 # 3. Mods — pinned versions, all verified present for MC 26.3:
@@ -51,6 +64,7 @@ fetch_mod "https://cdn.modrinth.com/data/fxxUqruK/versions/iIrM8ZKQ/voxy-0.2.20-
 #    generates this file with defaults).
 RD="${VOXY_RD:-3}"
 THREADS="${VOXY_THREADS:-1}"
+trace "writing voxy config (rd=${RD}, threads=${THREADS})"
 mkdir -p "$C/config"
 cat > "$C/config/voxy-config.json" <<EOF
 {
@@ -65,3 +79,4 @@ cat > "$C/config/voxy-config.json" <<EOF
 EOF
 
 echo "fabric layer ready: loader 0.20.1, api 0.165.0, sodium 0.9.2, voxy 0.2.20-beta (rd=${RD}, threads=${THREADS})"
+trace "fabric layer ready"

@@ -65,6 +65,27 @@ python3 "$BENCH_DIR/patch_paper_cfg.py" "$D"
 rm -f /tmp/server.in /tmp/server.log
 mkfifo /tmp/server.in
 cd "$D"
+# v6.8.4 CONTROL ARM: CLOD_CONTROL=1 boots PLAIN Paper (no CRUSSTY launcher,
+# no c-LoD module, no pack push, no gates) — the differential run answers
+# "does the vanilla renderer draw console-burst particles on this runner at
+# all" with the SAME client and shots recipe (frozen-frame forensics: the
+# v6.8.3 screenshots, run 41464836708, show the pack client's frame frozen
+# mid-boot with live lens panels — the suspects are the pack's post-chains
+# vs the runner environment itself).
+if [ "${CLOD_CONTROL:-0}" = "1" ]; then
+  tail -f /tmp/server.in 2>/tmp/tail.err | "$JAVA" -Xmx2G -jar versions/paper-26.3.jar > /tmp/server.log 2>&1 &
+  SRV=$!
+  exec 9>/tmp/server.in
+  echo "control paper pid $SRV"
+  for i in $(seq 1 150); do
+    grep -q "Done (" /tmp/server.log 2>/dev/null && break
+    kill -0 $SRV 2>/dev/null || { echo "SERVER DIED"; tail -40 /tmp/server.log; exit 1; }
+    sleep 2
+  done
+  grep -q "Done (" /tmp/server.log 2>/dev/null || { echo "TIMEOUT waiting for vanilla boot"; tail -40 /tmp/server.log; exit 1; }
+  echo "=== control server is up (stdin: /tmp/server.in, log: /tmp/server.log) ==="
+  exit 0
+fi
 # reader first (tail blocks on open until the writer side opens), then
 # hold the write end open for the lifetime of the server
 tail -f /tmp/server.in 2>/tmp/tail.err | "$JAVA" -Xmx2G -jar launcher.jar > /tmp/server.log 2>&1 &

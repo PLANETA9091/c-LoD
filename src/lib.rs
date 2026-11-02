@@ -75,7 +75,7 @@ pub unsafe extern "C" fn cplugin_init(
         cfg.region_blocks, cfg.cell_size, cfg.http_port, cfg.fov, cfg.particles_per_tick
     ));
     log_info(
-        "c-LoD v6.8.3: EYES IN THE FEED — three RENDERER DEAD verdicts were judged on white-px counters alone; the ci-verdicts branch now carries four downscaled screenshots per run (burst/far/baseline/last) plus the GL stack version (a runner Mesa bump is a prime suspect — the death window v6.6.2 live -> v6.7.2 dead touches no production-pack byte, the 13-entry artifact is pinned byte-identical by test); the voxy feed publishes a failure marker with a per-step trace on EVERY zero-shot outcome (run 41454056043 died 76 s in, before the shots dir existed, and left no branch at all)",
+        "c-LoD v6.8.4: FROZEN-FRAME CONTROL ARM — the v6.8.3 screenshots (run 41464836708) exposed the truth: the pack client's frame freezes mid-boot with LIVE lens panels (red words already in the color lattice), so RENDERER DEAD was a dead frame SWAP, not a dead GL — the new visual-control CI job runs the SAME client against PLAIN Paper (CLOD_CONTROL=1: no module, no pack) and answers with the same console bursts + a 12 s frame-motion probe: pack chain guilty if the pack-free client draws, environment guilty if it freezes too; the voxy setup now traces its steps into the same steps.log (the 2-second fabric-layer death gets named)",
     );
 
     let st = engine::State::new(cfg);

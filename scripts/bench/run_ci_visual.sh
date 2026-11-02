@@ -194,6 +194,24 @@ print(1 if cnt > 30 else 0)
   return 0
 }
 
+# v6.8.4: the white-px counter as a function — the control arm needs the
+# SAME burst counter as the pack arm (a different counter would make the
+# differential verdict a comparison of rulers, not of frames).
+white_count() { # shot_name -> white px in the center window
+  python3 - "$1" <<'PYEOF'
+import sys, os
+from PIL import Image
+im = Image.open(os.environ.get('SHOTS', '/home/runner/mc-test/shots/ci-visual') + '/' + sys.argv[1] + '.png').convert('RGB')
+px = im.load(); n = 0
+for y in range(180, 540):
+    for x in range(320, 960):
+        r, g, b = (c / 255.0 for c in px[x, y])
+        if min(r, g, b) > 0.75 and max(r, g, b) - min(r, g, b) < 0.15:
+            n += 1
+print(n)
+PYEOF
+}
+
 stop_stack() {
   pkill -f "net.minecraft.client.main.Main" 2>/dev/null || true
   pkill Xvfb 2>/dev/null || true
@@ -242,6 +260,9 @@ trap 'rc=$?; stop_stack; dump_summary' EXIT
 # ---- 0. sanity -------------------------------------------------------------
 for f in "$D/launcher.jar" "$HOME/mc-test/shim/libGL.so.1" \
          "$HOME/mc-test/client/cp.txt" "$JAVA"; do
+  # v6.8.4: the control arm boots plain Paper — the CRUSSTY launcher is not
+  # part of that path
+  if [ "${CLOD_CONTROL:-0}" = "1" ] && [ "$f" = "$D/launcher.jar" ]; then continue; fi
   [ -e "$f" ] || { echo "FAIL: missing $f"; exit 2; }
 done
 
@@ -263,9 +284,15 @@ export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=true"
 CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" || {
   echo "FAIL: boot/gates"; tail -40 /tmp/server.log; exit 1; }
 sum "- boot + gates OK ($(date -u +%H:%M:%S))"
-wait_log "sky-grid stream armed" /tmp/server.log 60 || {
-  echo "FAIL: sky-grid never armed"; tail -40 /tmp/server.log; exit 1; }
-sum "- sky-grid armed"
+# v6.8.4: the control server has no c-LoD module — no sky-grid line exists;
+# boot_server.sh already gated the vanilla boot on Paper's own 'Done ('
+if [ "${CLOD_CONTROL:-0}" = "1" ]; then
+  sum "- control boot: plain Paper up (no module, no pack — boot gated on 'Done (')"
+else
+  wait_log "sky-grid stream armed" /tmp/server.log 60 || {
+    echo "FAIL: sky-grid never armed"; tail -40 /tmp/server.log; exit 1; }
+  sum "- sky-grid armed"
+fi
 
 # ---- 2. client #1: join, accept pack ----------------------------------------
 bash "$BENCH_DIR/run_client.sh" || fail "run_client.sh exited nonzero"
@@ -277,6 +304,47 @@ sum "- joined session 1 ($(date -u +%H:%M:%S))"
 # guards — captured before, it was 0 and the guard read "0 -> 1" (the join
 # itself) and failed every run ("join count changed mid-test").
 JOIN1=$(join_count)
+
+# ---- 2b. v6.8.4 CONTROL PATH (CLOD_CONTROL=1): the differential arm ---------
+# The frozen-frame discovery (v6.8.3 screenshots, run 41464836708): the pack
+# client's frame freezes mid-boot with LIVE lens panels — the suspects are
+# the pack's post-chains vs the runner environment itself. This arm runs the
+# SAME client against the PLAIN Paper server (boot_server.sh CLOD_CONTROL=1,
+# no module/pack) and answers ONE question with the SAME console bursts:
+# does the vanilla renderer draw here at all?
+if [ "${CLOD_CONTROL:-0}" = "1" ]; then
+  sum "- mode: CONTROL (vanilla server, no pack — differential arm)"
+  srv "gamerule doDaylightCycle false"
+  srv "time set noon"
+  srv "gamemode spectator Stepan"
+  srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"
+  sleep 3
+  shot 10_before_edit || exit 1
+  sleep 12
+  shot 11_baseline_settle || exit 1
+  DRIFT=$(paint_px "$SHOTS/10_before_edit.png" "$SHOTS/11_baseline_settle.png")
+  echo "- baseline try 1: drift=${DRIFT:-?} px" | tee -a "$SUMMARY"
+  if [ "${DRIFT:-9999}" -le 3 ] 2>/dev/null; then
+    sum "- frame motion: drift=0 px on a PACK-FREE client — the frame freezes WITHOUT the pack too (environment suspect)"
+  else
+    sum "- frame motion: drift=${DRIFT} px — the pack-free client repaints (the renderer loop is alive)"
+  fi
+  note "control: particle render probe (console bursts)"
+  srv "particle minecraft:end_rod $((VX + 20)) 150 $CZ 0.2 0.2 0.2 0 400 force"
+  srv "particle minecraft:end_rod $((CX - 1)) 150 $CZ 0.2 0.2 0.2 0 400 force"
+  sleep 1
+  shot 09_burst_close || exit 1
+  BC=$(white_count 09_burst_close)
+  echo "- burst_close white px: ${BC:-?} (control passes if > 50)" | tee -a "$SUMMARY"
+  if [ "${BC:-0}" -gt 50 ]; then
+    sum "- **CONTROL PASS:** the pack-free vanilla client DRAWS the console bursts (close=${BC}) — the environment renders particles fine; the frozen frame on the pack runs points at the c-LoD pack chain"
+  else
+    sum "- **CONTROL FAIL:** the pack-free vanilla client draws NOTHING (close=${BC:-0}) — the environment kills the render by itself; the pack is exonerated"
+  fi
+  cp "$SUMMARY" "$SHOTS/summary.md" 2>/dev/null || true
+  exit 0
+fi
+
 sleep 5
 accept_pack_prompt leg1 60
 sleep 15

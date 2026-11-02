@@ -615,3 +615,23 @@ v6.7.2 (paint=114, close=2); the v6.6.2->v6.7.0 diff touches no
 production-pack byte (packgen pins the 13-entry artifact by test) — the
 prime suspect moves to the runner image (Mesa/llvmpipe bump), which the
 new GL line will name. Rust code untouched: 87 tests, fmt/clippy green.
+
+v6.8.4 FROZEN-FRAME CONTROL ARM (harness/CI): the v6.8.3 screenshots
+settled the question the counters couldn't — run 41464836708's burst and
+baseline JPEGs are IDENTICAL to the pixel: the pack client's frame froze
+mid-boot with LIVE lens panels (lens frames, dark lattice, a red word
+strip already committed to the color lattice), a slice of sky and 95%
+black. "RENDERER DEAD" was actually a dead frame SWAP after an early
+frame. The differential arm: visual-control CI job — the SAME client
+against PLAIN Paper (boot_server.sh CLOD_CONTROL=1: no CRUSSTY launcher,
+no module, no pack; eula/properties written by the job), the SAME white-
+px burst counter (now the white_count() function shared by both arms),
+plus a 12 s frame-motion probe. CONTROL PASS (pack-free client draws) ->
+the pack chain kills the swap; CONTROL FAIL -> the environment (Xvfb/
+llvmpipe/window) is the killer and the pack is exonerated. The control
+publisher (publish_control_feed.sh) retries once on a rejected push —
+the main visual publisher races it on the same branch (self-tested on a
+scratch remote 9/9: normal, racer-on-top, prune-3). The voxy setup
+traces its internal steps into the same steps.log the failure marker
+carries (the 2-second fabric-layer death now names its stage). 87 tests,
+fmt/clippy green.
