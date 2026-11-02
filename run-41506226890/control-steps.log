@@ -1,0 +1,14 @@
+2026-11-02T19:02:56Z control X11+GL+pip start
+2026-11-02T19:03:38Z control X11+GL+pip ok
+2026-11-02T19:03:38Z control fetch-paper start
+2026-11-02T19:03:39Z control fetch-paper ok
+2026-11-02T19:03:39Z control prepare-dist start
+2026-11-02T19:03:39Z control prepare-dist ok
+2026-11-02T19:03:39Z control shim start
+2026-11-02T19:03:41Z control shim ok
+2026-11-02T19:03:43Z control setup_client start
+2026-11-02T19:03:45Z control setup_client ok
+2026-11-02T19:03:46Z control pulse: leg start (stdout/stderr teed to control-leg.log)
+2026-11-02T19:03:46Z control pulse: sanity ok (boot_server next)
+2026-11-02T19:04:14Z control pulse: boot ok
+2026-11-02T19:04:17Z control pulse: run_client launch issued
