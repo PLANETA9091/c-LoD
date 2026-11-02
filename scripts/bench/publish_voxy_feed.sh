@@ -20,10 +20,51 @@ if [ ! -d "$SRC" ]; then
   exit 0
 fi
 
-# Collect the shot files (png preferred, fall back to jpg/jpeg).
+# v6.8.2 OBSERVABILITY HOLE CLOSED: a FAILED voxy leg used to leave NO
+# branch at all ("nothing to publish"), indistinguishable from "hasn't run
+# yet" — the same lesson ci-verdicts learned in v6.7.2. A zero-shot run now
+# publishes a FAILURE marker carrying the client/server log tails, so the
+# feed always answers "what happened this run".
 SHOTS=$(ls "$SRC"/*.png "$SRC"/*.jpg "$SRC"/*.jpeg 2>/dev/null || true)
 if [ -z "$SHOTS" ]; then
-  echo "no shot files in $SRC — nothing to publish"
+  echo "no shot files in $SRC — publishing a failure marker"
+  git config user.name "voxy-ref-bot"
+  git config user.email "actions@users.noreply.github.com"
+  git fetch origin voxy-ref 2>/dev/null || true
+  rm -rf /tmp/xfeed
+  git worktree prune
+  git worktree add --detach /tmp/xfeed HEAD || exit 0
+  ( cd /tmp/xfeed && git checkout --orphan voxy-ref && git rm -rf --quiet . 2>/dev/null || true )
+  if git show-ref --verify --quiet refs/remotes/origin/voxy-ref; then
+    ( cd /tmp/xfeed && git rm -rf --quiet . 2>/dev/null || true && git checkout -B voxy-ref origin/voxy-ref )
+  fi
+  mkdir -p "/tmp/xfeed/run-${RUN_ID}"
+  cp /tmp/voxy_client.log "/tmp/xfeed/run-${RUN_ID}/client.log" 2>/dev/null || true
+  cp /tmp/voxy_server.log "/tmp/xfeed/run-${RUN_ID}/server.log" 2>/dev/null || true
+  {
+    echo "# voxy reference run ${RUN_ID} (#${RUN_NO}) — FAILURE (no shots) $(date -u +%FT%TZ)"
+    echo
+    echo "The job produced zero screenshots. See run-${RUN_ID}/client.log and"
+    echo "run-${RUN_ID}/server.log (tails below) for the boot/mesh/shot state."
+    echo
+    echo "## client.log tail"
+    echo '```'
+    tail -60 /tmp/voxy_client.log 2>/dev/null || echo "(no client log)"
+    echo '```'
+    echo
+    echo "## server.log tail"
+    echo '```'
+    tail -40 /tmp/voxy_server.log 2>/dev/null || echo "(no server log)"
+    echo '```'
+  } > /tmp/xfeed/latest.md
+  cd /tmp/xfeed
+  git add -A
+  SHA7=unknown
+  if [ -n "${GITHUB_SHA:-}" ]; then SHA7="${GITHUB_SHA:0:7}"; fi
+  git commit -m "voxy reference FAILED (no shots): run ${RUN_ID} (${SHA7})" || echo "no changes"
+  git push origin voxy-ref \
+    && echo "voxy failure marker published" \
+    || echo "WARN: voxy feed push failed (non-fatal)"
   exit 0
 fi
 

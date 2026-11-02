@@ -194,22 +194,9 @@
         },
         {
             "vertex_shader": "minecraft:core/screenquad",
-            "fragment_shader": "clod:post/clod_blit",
-            "inputs": [
-                { "sampler_name": "In", "target": "clod_swap" }
-            ],
-            "output": "minecraft:main",
-            "uniforms": {
-                "BlitConfig": [
-                    { "name": "ColorModulate", "type": "vec4", "value": [1.0, 1.0, 1.0, 1.0] }
-                ]
-            }
-        },
-        {
-            "vertex_shader": "minecraft:core/screenquad",
             "fragment_shader": "clod:post/debug_lens",
             "inputs": [
-                { "sampler_name": "In", "target": "minecraft:main" },
+                { "sampler_name": "In", "target": "clod_swap" },
                 { "sampler_name": "Height", "target": "clod_h_b" },
                 { "sampler_name": "ColBuf", "target": "clod_c_b" }
             ],

@@ -1,5 +1,5 @@
 {
   "id": "lod",
-  "version": "6.8.1",
-  "description": "True server-side LOD: shader-only pack pushed once, all world data streams as sky-grid dust particles (SKY-GRID BIT-STREAM). No Display entities, no textures, no repacks. Live edits ride the stream (event push + delta beats); capture lens observes the client decode; CI verdicts publish to the ci-verdicts branch; the visual harness preflights the client renderer (a dead pipeline aborts the run as INVALID instead of framing the transport); voxy-reference shots publish to the voxy-ref branch (no API quota); the marcher SSAO is the cited port of voxy post/ssao.comp."
+  "version": "6.8.2",
+  "description": "True server-side LOD: shader-only pack pushed once, all world data streams as sky-grid dust particles (SKY-GRID BIT-STREAM). No Display entities, no textures, no repacks. Live edits ride the stream (event push + delta beats); capture lens observes the client decode; CI verdicts publish to the ci-verdicts branch; the visual harness preflights the client renderer (a dead pipeline aborts the run as INVALID instead of framing the transport); voxy-reference shots publish to the voxy-ref branch (no API quota); the marcher SSAO is the cited port of voxy post/ssao.comp; the renderer preflight disambiguates a dead pipeline (lens_zero=1) from pool saturation."
 }

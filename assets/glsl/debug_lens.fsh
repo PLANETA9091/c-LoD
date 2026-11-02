@@ -29,7 +29,10 @@
 // (1280x720; the bottom panel ends at y=656) and reads texCoord bottom-up
 // like every other post pass — the harness crops the full right strip.
 
-uniform sampler2D InSampler;      // minecraft:main (post-blit frame, passthrough)
+uniform sampler2D InSampler;      // clod_swap (v6.8.2: the lens REPLACED the
+                                  // blit pass — reading minecraft:main while
+                                  // writing minecraft:main was a framebuffer
+                                  // feedback loop, GL undefined behavior)
 uniform sampler2D HeightSampler;  // clod_h_b — committed height bytes (1 px = 1 cell)
 uniform sampler2D ColBufSampler;  // clod_c_b — committed color bytes (1 px = 1 cell)
 

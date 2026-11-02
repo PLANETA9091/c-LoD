@@ -75,7 +75,7 @@ pub unsafe extern "C" fn cplugin_init(
         cfg.region_blocks, cfg.cell_size, cfg.http_port, cfg.fov, cfg.particles_per_tick
     ));
     log_info(
-        "c-LoD v6.8.1: VOXY EVIDENCE TO PRODUCTION — voxy-reference shots feed the voxy-ref branch (raw CDN, no API quota) and the marcher ships the cited port of voxy post/ssao.comp (BETTER, 12 steps, radius 1.5, pow 2.5): the look converges on the real mod, constant by constant",
+        "c-LoD v6.8.2: RENDERER FORENSICS — the debug lens replaced the blit pass (reading minecraft:main while writing it was a framebuffer feedback loop, GL UB) and the preflight now separates a dead pipeline (lens_zero=1: no particle EVER rendered) from pool saturation (lens committed, fresh spawns rejected): the 3x RENDERER DEAD runs can finally say WHY",
     );
 
     let st = engine::State::new(cfg);

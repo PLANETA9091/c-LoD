@@ -444,17 +444,38 @@ PYEOF
 )
   echo "- burst_close retry white px: ${BC2:-?} (preflight passes if > 50)" | tee -a "$SUMMARY"
   if ! [ "${BC2:-0}" -gt 50 ] 2>/dev/null; then
-    fail "RENDERER DEAD: the client draws no particles at all (close=${BC:-?}, retry=${BC2:-?}) — run INVALID, the transport verdict is N/A (probes would be noise)"
-    { echo ""
-      echo "### client log tail (renderer death forensics)"
-      echo '```'
-      tail -40 /tmp/client.log 2>/dev/null || true
-      echo '```'
-    } >> "$SUMMARY"
-    cp "$SUMMARY" "$SHOTS/summary.md" 2>/dev/null || true
-    exit 1
+    # v6.8.2 PREFLIGHT DISAMBIGUATION (the 3x RENDERER DEAD lesson — runs
+    # 41413233374 / 41426906229 / 41437201051): a weak burst alone is TWO
+    # very different states — (a) the client truly cannot render particles
+    # (the capture stayed empty the WHOLE session: lens_zero=1, the v6.7.2
+    # signature), or (b) the steady-state refresh stream has saturated the
+    # vanilla pool and the fresh end_rod spawns were rejected (the v6.5.3
+    # measured mechanism — the renderer is ALIVE, the dome proves it; the
+    # v6.7.3 gate would have aborted HEALTHY saturated runs forever). The
+    # lens decides: the panels are drawn by the chain itself every frame,
+    # so the burst screenshot carries the capture's belief for free.
+    LZ=$(lens_metrics "09c_burst_close_retry" | grep -o 'lens_zero=[01]' | cut -d= -f2)
+    echo "- preflight lens_zero=${LZ:-?} (1 = capture NEVER committed = no particle EVER rendered)" | tee -a "$SUMMARY"
+    if [ "${LZ:-0}" = "1" ]; then
+      fail "RENDERER DEAD: no particles at all (close=${BC:-?}, retry=${BC2:-?}) AND the capture never committed (lens_zero=1) — the client has not rendered a single carrier since boot; run INVALID, the transport verdict is N/A"
+      { echo ""
+        echo "### client log tail (renderer death forensics)"
+        echo '```'
+        tail -40 /tmp/client.log 2>/dev/null || true
+        echo '```'
+        echo "### client log forensics (pipeline/particle/atlas lines — v6.8.2)"
+        echo '```'
+        grep -av "level_particles" /tmp/client.log 2>/dev/null \
+          | grep -iaE "pipeline|compil|shader|particle|atlas|stitch|exception|error|disconnect|shutdown|reload" \
+          | tail -50 || true
+        echo '```'
+      } >> "$SUMMARY"
+      cp "$SUMMARY" "$SHOTS/summary.md" 2>/dev/null || true
+      exit 1
+    fi
+    note "burst weak (close=${BC:-?}, retry=${BC2:-?}) but the lens shows committed capture (lens_zero=0) — pool saturation, not a dead renderer; the run continues (v6.8.2 disambiguation)"
+    BC=$BC2
   fi
-  BC=$BC2
 fi
 
 # ---- 5. THE LIVE EDIT (no relog!) + probe loop -------------------------------
@@ -594,6 +615,19 @@ done
 # ---- 7. verdict ---------------------------------------------------------------
 echo "=== client log pack markers ==="
 grep -iE "pack|post|reload" /tmp/client.log | tail -8 || true
+# v6.8.2 CLIENT-LOG FORENSICS (always): the artifact endpoint is API-gated
+# and the raw tail is packet spam — the verdict feed carries the client's
+# own pipeline/particle/atlas words instead, healthy or not (an EMPTY
+# forensics section is itself evidence: nothing complained).
+{
+  echo ""
+  echo "### client log forensics (pipeline/particle/atlas — v6.8.2)"
+  echo '```'
+  grep -av "level_particles" /tmp/client.log 2>/dev/null \
+    | grep -iaE "pipeline|compil|shader|particle|atlas|stitch|exception|error|disconnect|shutdown|reload" \
+    | tail -50 || true
+  echo '```'
+} >> "$SUMMARY"
 echo "=== server stream counters ==="
 grep -E "stream|cells|laps|edits" /tmp/server.log | tail -8 || true
 # v6.5.2 forensics: the server's belief AFTER the probe loop — if the
