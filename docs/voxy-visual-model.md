@@ -65,13 +65,13 @@ Voxy does NOT render a heightfield. It renders real block geometry:
 | color | real textures + biome tint, mipmapped | 6x6x6 lattice (216 colors) per cell |
 | light | per-quad real voxel light → live lightmap | reconstructed lightmap(0,15) only |
 | normals | axis-aligned per quad | flat per-cell gradient |
-| AO | full-frame SSAO (BASIC/BETTER/BEST) | none |
+| AO | full-frame SSAO (BASIC/BETTER/BEST) | **ported v6.8.1** — the BETTER path (12 steps, radius 1.5, pow 2.5) runs over the heightfield hit; every constant cites its ssao.comp line in lod_terrain.fsh |
 | fog/fade | vanilla pair + 10% xz fade | identical (already ported) |
 
-The last row is the ONLY fully closed gap. Everything above it needs either
-client-side voxel data (textures, per-quad light — impossible without a mod)
-or a faithful port of the SSAO/fog/AO recipe INTO the heightfield marcher.
-Any such port must cite this file and the Voxy line numbers — no invented
+The last two rows are closed (fog/fade since v4.2, AO since v6.8.1). The rows
+above them need either client-side voxel data (textures, per-quad light —
+impossible without a mod) or stay inherent to the heightfield (real quads).
+Any further port must cite this file and the Voxy line numbers — no invented
 constants (the rejected "v7.0 VOXY-GRADE" attempt died for exactly that).
 
 ## 4. The reference stand (scripts/bench/*voxy*)
@@ -101,5 +101,9 @@ constants (the rejected "v7.0 VOXY-GRADE" attempt died for exactly that).
   generous memory knobs (VOXY_CLIENT_XMX=2500M, VOXY_RD=8) and the sandbox
   defaults stay tiny (700M/rd3).
 - The reference matrix itself is the CI job's product: evidence lands in the
-  `voxy-reference-shots` artifact; the marcher comparison reads it from
-  there.
+  `voxy-reference-shots` artifact AND — since v6.8.1 — in the `voxy-ref`
+  branch (raw CDN, no API quota; the artifact endpoints were repeatedly
+  rate-limited for the sandbox egress IPs). `latest.md` carries the newest
+  run's shots inline, `index.md` lists the last 5 runs. The publisher is
+  `scripts/bench/publish_voxy_feed.sh` (self-tested against a scratch
+  remote: downscale, prune, current-run protection).

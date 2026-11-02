@@ -563,3 +563,19 @@ verdict line once. Harness self-tested on synthetic panels (all-zero /
 dot-loss / bare scene). Rust code untouched: 87 tests, fmt/clippy green.
 The real transport verdict (leg 1, marker red) is still pending a run
 with a LIVE renderer — the lens question stands.
+
+v6.8.1 EVIDENCE TO PRODUCTION (harness/CI/shader): voxy-reference shots
+publish to the voxy-ref branch via scripts/bench/publish_voxy_feed.sh —
+raw CDN, no API quota (the artifacts endpoint kept 403-ing the sandbox
+egress IPs; the publisher is self-tested against a scratch remote: prune
+ordering + GITHUB_SHA-under-set-u bugs were caught BEFORE CI). The marcher
+ships the cited SSAO port of voxy post/ssao.comp (BETTER path): 12 steps,
+golden-ratio r1 with the constant dither 0.5, radius 1.5, falloff
+1/(1+len/r), pow(clamp(1-ao/steps), 2.5), land hits only (the bit6 gate
+mapping, RenderDataFactory.java:262), applied before fog (the
+NormalRenderPipeline order). Every constant carries its ssao.comp line
+number in the shader source — the no-invented-constants rule from the
+rejected v7.0 attempt. Shader gate: all 5 post shaders + full chain check
+green; numeric port sanity (flat=1.0, valley 0.476 < cliff 0.721, void
+frontier 1.0) in scripts/ssao_port_sanity.py. Rust code untouched: 87
+tests, fmt/clippy green.

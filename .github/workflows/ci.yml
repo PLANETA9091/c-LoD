@@ -531,6 +531,12 @@ jobs:
     if: github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
     continue-on-error: true
     timeout-minutes: 50
+    # v6.8.1 VOXY FEED: the shots are committed to the voxy-ref branch
+    # (contents: write) — raw CDN, NO API quota (the artifact endpoints
+    # were repeatedly rate-limited for the sandbox egress IPs; evidence
+    # that cannot be read is not evidence).
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -586,6 +592,12 @@ jobs:
             /tmp/voxy_client.log
             /tmp/voxy_server.log
           if-no-files-found: warn
+      - name: Publish reference feed (voxy-ref branch)
+        if: always()
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_NO: ${{ github.run_number }}
+        run: bash scripts/bench/publish_voxy_feed.sh /home/runner/mc-test/voxy-shots "$RUN_ID" "$RUN_NO"
 
   strict:
     name: strictness gate (all green)

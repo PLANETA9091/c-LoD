@@ -75,7 +75,7 @@ pub unsafe extern "C" fn cplugin_init(
         cfg.region_blocks, cfg.cell_size, cfg.http_port, cfg.fov, cfg.particles_per_tick
     ));
     log_info(
-        "c-LoD v6.8: VOXY VISUAL REFERENCE — real Voxy 0.2.20-beta (Fabric) rendered on CI against the same pinned-seed world; the marcher look is now judged from evidence, not invention",
+        "c-LoD v6.8.1: VOXY EVIDENCE TO PRODUCTION — voxy-reference shots feed the voxy-ref branch (raw CDN, no API quota) and the marcher ships the cited port of voxy post/ssao.comp (BETTER, 12 steps, radius 1.5, pow 2.5): the look converges on the real mod, constant by constant",
     );
 
     let st = engine::State::new(cfg);

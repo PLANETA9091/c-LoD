@@ -7,3 +7,4 @@ Cargo.lock
 clod.conf
 __pycache__/
 *.pyc
+analysis/

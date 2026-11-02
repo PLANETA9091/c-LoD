@@ -21,6 +21,8 @@
 //
 // Shading reproduces the Voxy color model exactly, as in v4.2:
 //   color = albedo x vanillaFaceShade x lightmap(0, 15)
+//   ssao  = voxy post/ssao.comp BETTER path ported onto the heightfield
+//           (v6.8.1 — every constant cites its ssao.comp line below)
 //   fog   = Voxy NormalRenderPipeline.finish over the VANILLA environmental
 //           pair toward the VANILLA FogColor;
 //   fade  = Voxy FogMode.FADE MODE=1: linear alpha fade over the last 10% of
@@ -297,6 +299,96 @@ vec3 color_at(ivec2 celli, float w, float w2, out bool water) {
     return mix(avg, s2 / c2, w2);
 }
 
+// ---- SSAO: the Voxy post/ssao.comp BETTER path, ported (v6.8.1) -----------
+// Evidence: analysis/voxy/.../shaders/post/ssao.comp (voxy 0.2.20-beta,
+// MCRcortex/voxy branch 263) — the run order in NormalRenderPipeline.java is
+// terrain -> SSAO.computeSSAO -> finish(fog), so the ao multiplier enters
+// the albedo HERE, before the fog mix at the bottom of main. No invented
+// constants — every number below cites its line:
+//
+//   SSAO_STEPS 12                    ssao.comp:95-97  (BETTER; BEST = 24)
+//   phi1 = 1.6180339887              ssao.comp:101
+//   r1(n) = fract(0.5 + n/phi1)      ssao.comp:105-110 (seed 0.5)
+//   offset_i = r_i * (cos, sin) of   ssao.comp:112-119, call at :186
+//     theta = (i+0.5)/STEPS*tau      — CONSTANT dither vec2(0.5): voxy has
+//                                      no TAA jitter here, the result is
+//                                      stable per frame, no noise seed
+//   SSAO_RADIUS 1.5                  ssao.comp:121
+//   per-sample accumulate            ssao.comp:210-223:
+//     v = occluder - position
+//     cos_theta = clamp(dot(v,n)/|v|, 0, 1)
+//     falloff = 1/(1 + |v|/RADIUS)
+//     ao += cos_theta * falloff
+//   final pow(clamp(1-ao/STEPS),2.5) ssao.comp:226
+//   applied as colour.rgb *= ao      ssao.comp:272
+//   gate = metadata bit 6            set when the section holds fully-opaque
+//                                    blocks (RenderDataFactory.java:262);
+//                                    pure-fluid sections never carry it.
+//                                    Per-pixel mapping: land hits only —
+//                                    ocean cells are the pure-fluid case; a
+//                                    mixed 2 m cell decodes as land anyway
+//                                    (color_at flips water only when the
+//                                    neighborhood is MOSTLY water).
+//
+// The one substitution the port REQUIRES (documented, not invented): voxy
+// probes occluders through its depth buffer (ssao.comp:190-209); a
+// heightfield marcher has no second geometry source — the occluder height
+// IS ground_at() at the sample xz. The screen-space clamp
+// (SSAO_MAX_RADIUS_SCREEN 0.1, ssao.comp:120) bounds the projected sample
+// footprint; the world-space disc is already bounded by SSAO_RADIUS, so
+// there is nothing left to clamp. Samples read ground_at with w=0
+// (NEAREST, 2 fetches): the dh-style smoothing exists for the far field,
+// a 1.5-block AO probe gains nothing from it, and the llvmpipe march
+// budget is real (see the level-2 note inside ground_at).
+
+const float SSAO_STEPS_F = 12.0;   // ssao.comp:96
+const float SSAO_PHI1 = 1.6180339887; // ssao.comp:101
+const float SSAO_TAU = 6.2831853;  // ssao.comp:99
+const float SSAO_RADIUS = 1.5;     // ssao.comp:121
+
+float ssao_r1(int n) {
+    return fract(0.5 + float(n) / SSAO_PHI1); // ssao.comp:105-110, seed 0.5
+}
+
+// voxy get_tbn_matrix (ssao.comp:131-137) in world space: tangent frame of
+// the surface normal, the y-up special case verbatim.
+void ssao_tbn(vec3 n, out vec3 t0, out vec3 t1) {
+    vec3 tangent = (n.y == 1.0)
+        ? vec3(1.0, 0.0, 0.0)
+        : normalize(cross(vec3(0.0, 1.0, 0.0), n));
+    t0 = tangent;
+    t1 = normalize(cross(tangent, n));
+}
+
+// BETTER_SSAO computeAO (ssao.comp:150-227) with the depth-buffer probe
+// replaced by the heightfield probe (header note above).
+float march_ssao(vec3 pos, vec3 n) {
+    vec3 t0; vec3 t1;
+    ssao_tbn(n, t0, t1);
+    float ao = 0.0;
+    for (int i = 0; i < 12; ++i) {
+        float a = (float(i) + 0.5) * (1.0 / SSAO_STEPS_F); // ssao.comp:113
+        float r = sqrt(ssao_r1(i));                        // ssao.comp:115
+        float theta = a * SSAO_TAU;                        // ssao.comp:116
+        vec2 off = r * vec2(cos(theta), sin(theta));       // ssao.comp:118
+        vec2 q = pos.xz + (t0.xz * off.x + t1.xz * off.y) * SSAO_RADIUS;
+        bool sw; bool sok;
+        float hq = ground_at(q, 0.0, 0.0, sw, sok);
+        if (!sok) {
+            // no occluder data = voxy's depth==FAR skip (ssao.comp:193)
+            continue;
+        }
+        vec3 v = vec3(q.x - pos.x, hq - pos.y, q.y - pos.z); // ssao.comp:210
+        float slen = dot(v, v);                              // ssao.comp:212
+        float rlen = inversesqrt(max(slen, 1.0e-6));         // ssao.comp:218
+        float angle = dot(v, n) * rlen;                      // ssao.comp:219
+        float cosTheta = clamp(angle, 0.0, 1.0);             // ssao.comp:220
+        float falloff = 1.0 / (1.0 + (1.0 / rlen) * (1.0 / SSAO_RADIUS)); // :221
+        ao += cosTheta * falloff;                            // ssao.comp:223
+    }
+    return pow(clamp(1.0 - ao * (1.0 / SSAO_STEPS_F), 0.0, 1.0), 2.5); // :226
+}
+
 // Horizontal distance from cam to the box boundary along dir.xz.
 float edge_distance_xz(vec3 cam, vec3 dir, vec2 minW, vec2 maxW) {
     float e = 1.0e9;
@@ -525,6 +617,12 @@ void main() {
         face = 1.0; // water quads face straight up (flat sea surface)
     }
 
+    // ---- SSAO: the voxy bit6 gate — land hits only (header note) --------
+    float ao = 1.0;
+    if (!isWater) {
+        ao = march_ssao(hitPos, nrm);
+    }
+
     // Light = EXACT vanilla lightmap texel (0,15) via the live fog color.
     vec4 dayState = texelFetch(RotSampler, ivec2(1, 1), 0);
     vec3 lightRGB;
@@ -534,7 +632,9 @@ void main() {
     } else {
         lightRGB = vanilla_lightmap0_15(6000.0); // pre-first-frame: noon
     }
-    vec3 lit = albedo * face * lightRGB;
+    // ssao.comp:272 — ocolour.rgb *= computeAO(...): the ao multiplier rides
+    // the albedo BEFORE finish/fog (NormalRenderPipeline.java run order).
+    vec3 lit = albedo * face * lightRGB * ao;
 
     // NormalRenderPipeline.finish: linear fog over the environmental pair,
     // saturated at max(vanillaRD, 320) * sqrt(3) blocks (3D distance).
