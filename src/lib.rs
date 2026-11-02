@@ -75,7 +75,7 @@ pub unsafe extern "C" fn cplugin_init(
         cfg.region_blocks, cfg.cell_size, cfg.http_port, cfg.fov, cfg.particles_per_tick
     ));
     log_info(
-        "c-LoD v6.7.2: EVENT PUSH + CAPTURE LENS + MULTI-BEAT — shader-only pack, one bundle per player, live edits without relog or repack",
+        "c-LoD v6.7.3: EVENT PUSH + CAPTURE LENS + MULTI-BEAT + RENDERER PREFLIGHT — shader-only pack, one bundle per player, live edits without relog or repack",
     );
 
     let st = engine::State::new(cfg);

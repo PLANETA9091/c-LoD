@@ -512,3 +512,25 @@ The lens verdict from the next visual run decides the next layer: if
 lens_black persists at a correct stream across three beats, the fix
 moves to the client (strobe inversion for rare codes / replace-electron
 acknowledgment).
+
+v6.7.2 VERDICT FEED (harness/CI): the visual job's final best-effort step
+commits summary.md + probe_counts.txt to the ci-verdicts branch
+(run-<id>.md, latest.md, index.md) — verdicts live in git, readable over
+raw CDN with NO API quota (three earlier verdicts drowned in 403s). The
+step is non-fatal by construction (exit 0, push failure = WARN): the feed
+cannot flip the job's real verdict. Production pack untouched.
+
+v6.7.3 RENDERER PREFLIGHT (harness, run 41396294510 verdict): the burst
+gates were advisory — a client renderer dead from boot (close=2 white px,
+paint=114, lens all-zero over BOTH panels) burned the 12-minute schedule
+and the verdict then blamed the transport. Now: burst counts land in shell
+vars; a weak CLOSE burst gets one 20 s settle + retry, and a second miss
+aborts the leg as RENDERER DEAD / run INVALID with the client log tail in
+the summary (the feed publishes it — `if: always()`). lens_metrics grew
+the ALL-ZERO classifier (lens_zero=1: >= 90% black in EACH panel =
+capture never committed — a dead pipeline, NOT the cell-LOCAL dot-loss
+signature); the probe loops print the "dead pipeline, transport N/A"
+verdict line once. Harness self-tested on synthetic panels (all-zero /
+dot-loss / bare scene). Rust code untouched: 87 tests, fmt/clippy green.
+The real transport verdict (leg 1, marker red) is still pending a run
+with a LIVE renderer — the lens question stands.

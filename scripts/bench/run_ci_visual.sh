@@ -54,6 +54,7 @@ VX=$(( CX - 75 )); VY=150; VYAW=270; VPITCH=5
 mkdir -p "$SHOTS"
 FAILURES=0
 FOUND1=0; FOUND2=0
+LENS_ZERO_NOTED=0   # v6.7.3: say "dead pipeline" ONCE, not 24 times
 # self-carrying diagnostics: the runner's step log is auth-walled for the
 # anonymous forensics this job exists for, but the STEP SUMMARY renders
 # publicly — dump the whole decision timeline there, always.
@@ -114,8 +115,13 @@ shot() { # name
 #   lens_black ~ (0,0,0)     = idx 0 committed (the lost-single-dot signature)
 #   lens_water ~ (70,130,240)= idx 216 water committed
 #   lens_dark  ~ (31,31,31)  = never-marked cells (no word ever committed)
-lens_metrics() { # shot_name -> prints lens_red=N lens_black=N lens_water=N lens_dark=N, saves crop
-  python3 - "$SHOTS/$1.png" "$SHOTS/lens_$1.png" <<'PYEOF' 2>/dev/null || { echo "lens_red=? lens_black=? lens_water=? lens_dark=?"; return 0; }
+lens_metrics() { # shot_name -> prints lens_red=N lens_black=N lens_water=N lens_dark=N lens_zero=B, saves crop
+  # v6.7.3 ALL-ZERO CLASSIFIER (run 41396294510 lesson): lens_black over BOTH
+  # panels (>= 90% each) means the capture chain never committed a single
+  # cell this session — a dead pipeline, NOT the one-lost-dot signature
+  # (that one is cell-LOCAL: marker cells black while neighbours decode).
+  # lens_zero=1 lets the verdict say "probes measure a dead pipeline".
+  python3 - "$SHOTS/$1.png" "$SHOTS/lens_$1.png" <<'PYEOF' 2>/dev/null || { echo "lens_red=? lens_black=? lens_water=? lens_dark=? lens_zero=?"; return 0; }
 import sys
 from PIL import Image
 im = Image.open(sys.argv[1]).convert('RGB')
@@ -130,18 +136,26 @@ crop = im.crop((940, 50, 1280, 720))
 crop.save(sys.argv[2])
 px = im.load()
 red = black = water = dark = 0
+black_c = black_h = 0
 for y in list(COLOR_ROWS) + list(HEIGHT_ROWS):
+    in_color = y in COLOR_ROWS
     for x in range(PX0 + 1, PX0 + PW - 1):
         r, g, b = px[x, y]
         if 85 <= r <= 120 and g <= 25 and b <= 25:
             red += 1
         elif r <= 8 and g <= 8 and b <= 8:
             black += 1
+            if in_color:
+                black_c += 1
+            else:
+                black_h += 1
         elif 55 <= r <= 90 and 110 <= g <= 150 and 220 <= b <= 255:
             water += 1
         elif 24 <= r <= 40 and 24 <= g <= 40 and 24 <= b <= 40:
             dark += 1
-print(f"lens_red={red} lens_black={black} lens_water={water} lens_dark={dark}")
+PANEL = 320 * (PW - 2)  # rows x inner cols per panel
+zero = 1 if (black_c >= 0.9 * PANEL and black_h >= 0.9 * PANEL) else 0
+print(f"lens_red={red} lens_black={black} lens_water={water} lens_dark={dark} lens_zero={zero}")
 PYEOF
 }
 
@@ -372,7 +386,7 @@ srv "particle minecraft:end_rod $BURST_CLOSE_X 150 $CZ 0.2 0.2 0.2 0 400 force"
 srv "particle minecraft:end_rod $((CX - 1)) 150 $CZ 0.2 0.2 0.2 0 400 force"
 sleep 1
 shot 09_burst_close || exit 1
-python3 - <<'PYEOF' | tee -a "$SUMMARY"
+BC=$(python3 - <<'PYEOF'
 from PIL import Image
 im = Image.open(f"{__import__('os').environ.get('SHOTS','/home/runner/mc-test/shots/ci-visual')}/09_burst_close.png").convert('RGB')
 px = im.load(); n = 0
@@ -381,12 +395,14 @@ for y in range(180, 540):
         r, g, b = (c / 255.0 for c in px[x, y])
         if min(r, g, b) > 0.75 and max(r, g, b) - min(r, g, b) < 0.15:
             n += 1
-print(f"- burst_close white px: {n} (renderer alive if > 50)")
+print(n)
 PYEOF
+)
+echo "- burst_close white px: ${BC:-?} (renderer alive if > 50)" | tee -a "$SUMMARY"
 srv "particle minecraft:end_rod $((CX - 2)) 150 $CZ 1 1 1 0 1200 force"
 sleep 1
 shot 09b_burst_far || exit 1
-python3 - <<'PYEOF' | tee -a "$SUMMARY"
+BF=$(python3 - <<'PYEOF'
 from PIL import Image
 im = Image.open(f"{__import__('os').environ.get('SHOTS','/home/runner/mc-test/shots/ci-visual')}/09b_burst_far.png").convert('RGB')
 px = im.load(); n = 0
@@ -395,8 +411,51 @@ for y in range(180, 540):
         r, g, b = (c / 255.0 for c in px[x, y])
         if min(r, g, b) > 0.75 and max(r, g, b) - min(r, g, b) < 0.15:
             n += 1
-print(f"- burst_far white px: {n} (renderer alive in the marker zone if > 20)")
+print(n)
 PYEOF
+)
+echo "- burst_far white px: ${BF:-?} (renderer alive in the marker zone if > 20)" | tee -a "$SUMMARY"
+
+# v6.7.3 RENDERER PREFLIGHT (run 41396294510 lesson): the burst gates were
+# advisory text only — a dead client renderer burned the whole 12-minute
+# edit/probe/relog schedule and the verdict then blamed the TRANSPORT for
+# what was a dead pipeline (close=2, paint=114, lens all-zero). The close
+# burst is the renderer's pulse: no close dots -> every downstream number
+# is noise. Gate on CLOSE only (a weak FAR burst can still be fog/eraser
+# in the marker zone — the probes decide that). One settle+retry to be
+# fair to a slow llvmpipe first frame, then abort with forensics.
+if ! [ "${BC:-0}" -gt 50 ] 2>/dev/null; then
+  note "renderer pulse weak (close=${BC:-?}) — 20 s settle, one retry"
+  sleep 20
+  srv "particle minecraft:end_rod $BURST_CLOSE_X 150 $CZ 0.2 0.2 0.2 0 400 force"
+  sleep 1
+  shot 09c_burst_close_retry || exit 1
+  BC2=$(python3 - <<'PYEOF'
+from PIL import Image
+im = Image.open(f"{__import__('os').environ.get('SHOTS','/home/runner/mc-test/shots/ci-visual')}/09c_burst_close_retry.png").convert('RGB')
+px = im.load(); n = 0
+for y in range(180, 540):
+    for x in range(320, 960):
+        r, g, b = (c / 255.0 for c in px[x, y])
+        if min(r, g, b) > 0.75 and max(r, g, b) - min(r, g, b) < 0.15:
+            n += 1
+print(n)
+PYEOF
+)
+  echo "- burst_close retry white px: ${BC2:-?} (preflight passes if > 50)" | tee -a "$SUMMARY"
+  if ! [ "${BC2:-0}" -gt 50 ] 2>/dev/null; then
+    fail "RENDERER DEAD: the client draws no particles at all (close=${BC:-?}, retry=${BC2:-?}) — run INVALID, the transport verdict is N/A (probes would be noise)"
+    { echo ""
+      echo "### client log tail (renderer death forensics)"
+      echo '```'
+      tail -40 /tmp/client.log 2>/dev/null || true
+      echo '```'
+    } >> "$SUMMARY"
+    cp "$SUMMARY" "$SHOTS/summary.md" 2>/dev/null || true
+    exit 1
+  fi
+  BC=$BC2
+fi
 
 # ---- 5. THE LIVE EDIT (no relog!) + probe loop -------------------------------
 note "placing $MARKER column at $CX,$CZ (y $FILL_Y0..$FILL_Y1)"
@@ -443,6 +502,12 @@ for k in $(seq 0 23); do
   assert_online "edit probe $k" || exit 1
   shot "12_after_edit_probe$k" || exit 1
   LM=$(lens_metrics "12_after_edit_probe$k")
+  case "$LM" in *lens_zero=1*)
+    if [ "$LENS_ZERO_NOTED" = "0" ]; then
+      LENS_ZERO_NOTED=1
+      sum "- LENS ALL-ZERO: both capture buffers read empty — the capture chain never committed this session; these probes measure a dead pipeline, not the transport (dot-loss verdict N/A)"
+    fi ;;
+  esac
   python3 "$BENCH_DIR/visual_diff.py" \
        "$SHOTS/10_before_edit.png" "$SHOTS/12_after_edit_probe$k.png" \
        --probe red --min-probe "$MIN_PROBE" --min-change "$MIN_CHANGE" \
@@ -500,6 +565,12 @@ for k in $(seq 0 11); do
   assert_online "relog probe $k" || exit 1
   shot "13_after_relog_probe$k" || exit 1
   LM=$(lens_metrics "13_after_relog_probe$k")
+  case "$LM" in *lens_zero=1*)
+    if [ "$LENS_ZERO_NOTED" = "0" ]; then
+      LENS_ZERO_NOTED=1
+      sum "- LENS ALL-ZERO: both capture buffers read empty — the capture chain never committed this session; these probes measure a dead pipeline, not the transport (dot-loss verdict N/A)"
+    fi ;;
+  esac
   # leg 2 asserts the MARKER COLOR on screen (probe only): scene drift between
   # sessions is allowed to move non-marker pixels
   python3 "$BENCH_DIR/visual_diff.py" \
