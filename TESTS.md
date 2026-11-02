@@ -579,3 +579,19 @@ rejected v7.0 attempt. Shader gate: all 5 post shaders + full chain check
 green; numeric port sanity (flat=1.0, valley 0.476 < cliff 0.721, void
 frontier 1.0) in scripts/ssao_port_sanity.py. Rust code untouched: 87
 tests, fmt/clippy green.
+
+v6.8.2 RENDERER FORENSICS (harness/CI/shader-chain): the debug lens pass
+used to read minecraft:main while writing minecraft:main — a framebuffer
+feedback loop (GL undefined behavior); the lens REPLACED the blit pass
+(its passthrough IS a pure copy), so the debug chain is 12->11 passes,
+In <- clod_swap, zero read-while-write (structurally checked: no pass
+reads its own output). The renderer preflight now disambiguates: burst
+weak + lens_zero=1 (capture never committed the whole session) = RENDERER
+DEAD, abort with client-log forensics; burst weak + lens_zero=0 = the
+v6.5.3 saturated-pool state, renderer ALIVE, the run continues (the
+v6.7.3 >50 threshold was never validated against a healthy steady-state
+run). Client-log forensics (pipeline/particle/atlas grep, packet spam
+filtered) ride the verdict feed always. The voxy feed publishes a failure
+marker (log tails) on zero-shot runs — a failed leg is no longer
+indistinguishable from "hasn't run yet". Rust code untouched: 87 tests,
+fmt/clippy green.
