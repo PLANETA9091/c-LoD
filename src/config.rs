@@ -123,6 +123,14 @@ pub struct Config {
     /// screen. CI-only observability — the pack SHA changes (one re-push on
     /// the runner), production stays debug_lens=false forever.
     pub debug_lens: bool,
+    /// v6.7.1 MULTI-BEAT: retry beats a genuine edit gets after its release
+    /// (total decode chances = edit_beats + 1). Each retry re-runs the
+    /// hold→release sequence with a fresh reset electron, so a beat whose
+    /// sparse color dot was lost (the transport's single-point fragility,
+    /// RED index 2 = one active slot-dot) gets another complete-decode
+    /// chance while the miss probability falls as (1-p)^K. 0 = the v6.6.1
+    /// single-shot edit; the cap keeps an episode bounded.
+    pub edit_beats: u32,
 }
 
 impl Default for Config {
@@ -164,6 +172,7 @@ impl Default for Config {
             native_edits: true,
             debug_cell: None,
             debug_lens: false,
+            edit_beats: crate::stream::EDIT_BEATS_DEFAULT,
         }
     }
 }
@@ -310,6 +319,10 @@ impl Config {
         // v6.7: debug_lens=true — ship the capture-lens debug chain.
         if let Some(v) = get("debug_lens") {
             cfg.debug_lens = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
+        // v6.7.1: edit_beats — bounded retry beats per genuine edit.
+        if let Some(v) = get("edit_beats").and_then(|v| v.parse::<u32>().ok()) {
+            cfg.edit_beats = v.clamp(0, crate::stream::EDIT_BEATS_MAX);
         }
         cfg
     }
@@ -466,6 +479,35 @@ mod tests {
         assert_eq!(c.rescan_ticks, 5, "clamp to a sane minimum");
         let c = Config::parse("rescan_ticks=99999");
         assert_eq!(c.rescan_ticks, 2400);
+    }
+
+    #[test]
+    fn edit_beats_knob() {
+        // v6.7.1 MULTI-BEAT: the bounded retry-beat count per genuine edit.
+        let c = Config::parse("");
+        assert_eq!(
+            c.edit_beats,
+            crate::stream::EDIT_BEATS_DEFAULT,
+            "default: 2 retries (three total decode chances)"
+        );
+        let c = Config::parse("edit_beats=0");
+        assert_eq!(c.edit_beats, 0, "0 restores the v6.6.1 single-shot edit");
+        let c = Config::parse("edit_beats=1");
+        assert_eq!(c.edit_beats, 1, "1 is the v6.6.2 single rebeat");
+        let c = Config::parse("edit_beats=5");
+        assert_eq!(c.edit_beats, 5);
+        let c = Config::parse("edit_beats=99");
+        assert_eq!(
+            c.edit_beats,
+            crate::stream::EDIT_BEATS_MAX,
+            "clamped to the episode bound"
+        );
+        let c = Config::parse("edit_beats=abc");
+        assert_eq!(
+            c.edit_beats,
+            crate::stream::EDIT_BEATS_DEFAULT,
+            "garbage falls back to the default"
+        );
     }
 
     #[test]

@@ -7,15 +7,15 @@ runs layer 8 there too — a real vanilla 26.3 client under Xvfb + Mesa
 llvmpipe on the runner (no GPU needed, software GL is enough for 640×360).
 Layers 6–7 remain the richer local real-client harness.
 
-## 1. Rust unit tests — `cargo test` (82 tests)
+## 1. Rust unit tests — `cargo test` (87 tests)
 
 | module | count | what they pin |
 |--------|------:|---------------|
-| `src/stream.rs` | 25 | 16-bit word packing (4 particles/word, X-sub = data bits, Z-sub = slot), HI/LO plane layout, delta-zone scheduling, cone admission, lap coverage; v6.2 rescan due/mark semantics + the dirty edit stream carrying exactly ONE reset electron at the (qx=0,qz=0) probe position; v6.4.2 center-anchored disk (config center -> Streamer origin) streams from an off-center vantage; v6.6 ROUND-ROBIN cone — the frustum budget rotates across ALL views (prefix of each tick's batch belongs to the served view's band+frustum, opposite frustums make the assertion unambiguous), and the per-view cone caches are matched by eye/look geometry — player-order flips reuse them and a 20-view churn burst degrades to transparent rebuilds, never to starved players; v6.6.1 EDIT RECENCY — 150 STALE decodable dirty cells cannot outvote a fresh edit in the hold/release decision (`stale_backlog_yields_the_edit_window`), while a fresh 150-cell wave still streams straight through (`fresh_wave_still_streams_through`) |
+| `src/stream.rs` | 27 | 16-bit word packing (4 particles/word, X-sub = data bits, Z-sub = slot), HI/LO plane layout, delta-zone scheduling, cone admission, lap coverage; v6.2 rescan due/mark semantics + the dirty edit stream carrying exactly ONE reset electron at the (qx=0,qz=0) probe position; v6.4.2 center-anchored disk (config center -> Streamer origin) streams from an off-center vantage; v6.6 ROUND-ROBIN cone — the frustum budget rotates across ALL views (prefix of each tick's batch belongs to the served view's band+frustum, opposite frustums make the assertion unambiguous), and the per-view cone caches are matched by eye/look geometry — player-order flips reuse them and a 20-view churn burst degrades to transparent rebuilds, never to starved players; v6.6.1 EDIT RECENCY — 150 STALE decodable dirty cells cannot outvote a fresh edit in the hold/release decision (`stale_backlog_yields_the_edit_window`), while a fresh 150-cell wave still streams straight through (`fresh_wave_still_streams_through`); v6.7.1 MULTI-BEAT — the edit episode produces EXACTLY edit_beats+1 releases with a reset electron each (3-beat timeline pinned for the default, `edit_beats_zero_disables_rebeats` restores the v6.6.1 single shot, `edit_beats_scale_the_episode_exactly` pins the K=3 arithmetic and the stop) |
 | `src/engine.rs` | 9 | `wish_admit` ledger (dup reject, backlog cap, per-tick budget, v5.5 window parameter), frontier math; v6.6 wire-budget window math (`bytes_per_sec`: honest 0 on empty windows, exact averages at both tick cadences) |
 | `src/seedgen.rs` | 12 | SeedQueue dedup/order/close + v5.9 `pop_batch` drain; bit-contract vs `ClodSeedgen.pack()` (height/liquid/ordinals/valid bit, bit budget); v5.9 `chunkBatch` payload parsing (header, statuses, zero-filled failed segments, corruption rejects) |
-| `src/config.rs` | 11 | `CLOD_OPTS` parsing + clamps (gen_budget 1..256, gen_wish 32..4096, particles_per_tick, disk geometry, native_threads/seedgen_batch, native_dust/native_trees/native_edits, rescan_ticks 0/off + 5..2400) |
-| `src/packgen.rs` | 5 | the pack builds byte-deterministically, 13 entries, ZERO textures/PNGs, capture chain present; v6.2: reset pass precedes the data captures, ClodAtlas/AtlasInfo stay renamed to ClodRegion/RegionInfo |
+| `src/config.rs` | 14 | `CLOD_OPTS` parsing + clamps (gen_budget 1..256, gen_wish 32..4096, particles_per_tick, disk geometry, native_threads/seedgen_batch, native_dust/native_trees/native_edits, rescan_ticks 0/off + 5..2400); v6.7 debug_lens bool (production false); v6.7.1 edit_beats 0..8, default 2 (0 = v6.6.1 single shot, 1 = v6.6.2 rebeat, garbage falls back) |
+| `src/packgen.rs` | 6 | the pack builds byte-deterministically, 13 entries, ZERO textures/PNGs, capture chain present; v6.2: reset pass precedes the data captures, ClodAtlas/AtlasInfo stay renamed to ClodRegion/RegionInfo; v6.7: the debug lens ships ONLY under debug_lens=true (production 13 entries unchanged SHA, debug 14 with the lens window tokens, both deterministic, SHAs diverge) |
 | `src/palette.rs` | 5 | surface → RGB mapping incl. water/foliage tints; v6.4 concrete family carries the 16 dye MapColors (the CI visual marker RED_CONCRETE = 142,33,33 is pinned here) |
 | `src/sha1.rs` | 4 | SHA-1 correctness (RFC vectors + pack-sized inputs) |
 | `src/http.rs` | 2 | embedded pack server routes/metadata |
@@ -456,3 +456,45 @@ diag dumps, verdicts) into the artifact as `summary.md` —
 GITHUB_STEP_SUMMARY is not API-downloadable. 82 Rust tests, fmt/clippy
 green. Backlog: instrument the client capture (the ledger's frontier) to
 make the per-dot loss observable and the replace protocol verifiable.
+
+### v6.7.0 — the capture lens (client-side observability)
+
+The v6.6.x visual runs could say WHAT failed (red=17) but not WHY: the
+client's capture state was a black box. The lens makes the decode state
+VISIBLE: a CI-only final pass (debug_lens=true) draws the persistent
+capture targets onto the screen as two panels — the color lattice (idx 2
+= exactly (102,0,0), water blue, idx 0 black, unmarked dark gray) and
+the height bytes (gray, unmarked dark red). A screenshot of the lens IS
+the client's committed belief; the lost-single-dot fragility shows as
+lens_black with a live height panel. Production pack stays
+byte-identical (13 entries, same SHA — test-guarded); the debug pack is
+14 entries with the lens window tokens. Harness: lens_metrics() counts
+four pixel signatures inside the fixed panel rects only; server belief
+(/clod-cells), stream diag (ewin/dirty/q) and client belief (lens_*) ride
+every probe line of both legs. 84 Rust tests at the time, fmt/clippy
+green.
+
+### v6.7.1 — MULTI-BEAT: the bounded retry sequence
+
+The v6.6.2 rebeat was ONE retry: p and 1-(1-p)^2 measured on runs 1-2
+(the same sparse dot lost twice would still kill the color). v6.7.1
+generalizes the retry into a bounded EPISODE: `edit_beats` (CLOD_OPTS,
+0..=8, default 2) retry beats after the genuine release — three total
+complete-decode chances at the default, miss probability (1-p)^K. Every
+beat re-runs hold→release with a fresh reset electron, so a
+phantom-complete partial write (the reset landed, the sparse color dot
+did not) is repaired by the NEXT beat's reset + complete decode. The
+episode counter (`rebeat_beats_left`) is set at the genuine release
+(edit_beats - 1 — its own entries are retry 1 of K) and consumed one per
+continuation release, so the retries can never loop; a new genuine edit
+resets the episode. The stream diag line grew the `rbeat Np/M` token
+(pending entries / beats left) so ops see the retry sequence live.
+Tests +3: the edit-window test pins the full THREE-beat timeline (each
+release carries its reset electron, the counter spends, no fourth beat),
+`edit_beats_zero_disables_rebeats` restores the v6.6.1 single-shot edit
+exactly, `edit_beats_scale_the_episode_exactly` pins the K=3 arithmetic
+(exactly 4 releases, then silence). 87 Rust tests, fmt/clippy green.
+The lens verdict from the next visual run decides the next layer: if
+lens_black persists at a correct stream across three beats, the fix
+moves to the client (strobe inversion for rare codes / replace-electron
+acknowledgment).

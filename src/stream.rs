@@ -276,21 +276,34 @@ pub const EDIT_HOLD_MAX_BATCH: u64 = 100;
 /// (20 s at 10 tps) re-arms the window even with a huge backlog.
 pub const RECENT_EDIT_TICKS: u64 = 200;
 
-/// v6.6.2 REBEAT: one extra beat of the same edit, this many ticks after
-/// the release. Why: the CI visual run 41328418141 exposed the transport's
-/// single-point fragility — a SPARSE color word (RED_CONCRETE = index 2 =
-/// 0x0200) has exactly ONE active slot-dot of four; if that one dot is
-/// lost (pool rejection, strobe, fog), the client decodes color index 0
-/// (black) and the column renders fogged-black/navy while its HEIGHT word
-/// (0xEA00, three active dots — loss-tolerant under OR-merge) paints a
-/// tall column in the WRONG color on every client, fresh ones included.
-/// The rebeat re-dirties the just-streamed edit cells once, cuts the post
-/// silence, and runs the whole hold→release sequence again — the client
-/// gets a second complete-decode chance (with a fresh reset electron)
-/// while the operator is still watching. p and 1-(1-p)^2 measured: run 1
-/// decoded red, run 2 missed the same dot — a second beat roughly squares
-/// the miss away.
+/// v6.6.2 REBEAT, v6.7.1 MULTI-BEAT: each retry beat of the same edit
+/// fires this many ticks after the previous release. Why: the CI visual
+/// run 41328418141 exposed the transport's single-point fragility — a
+/// SPARSE color word (RED_CONCRETE = index 2 = 0x0200) has exactly ONE
+/// active slot-dot of four; if that one dot is lost (pool rejection,
+/// strobe, fog), the client decodes color index 0 (black) and the column
+/// renders fogged-black/navy while its HEIGHT word (0xEA00, three active
+/// dots — loss-tolerant under OR-merge) paints a tall column in the WRONG
+/// color on every client, fresh ones included.
+/// Each beat re-dirties the just-streamed edit cells, cuts the post
+/// silence, and reruns the whole hold→release sequence — every beat is a
+/// complete-decode chance with a fresh reset electron. The beat COUNT is
+/// `edit_beats` (v6.7.1, default 2 retries → three total chances): the
+/// per-dot loss measured ~p=0.5 across runs, so the miss probability
+/// falls from p to (1-p)^K — K=2 ≈ 0.75 decode, K=3 ≈ 0.875. Measured:
+/// run 1 decoded red, run 2 missed the same dot — a coin flip per beat.
 pub const REBEAT_DELAY_TICKS: u64 = 40;
+
+/// v6.7.1 MULTI-BEAT: how many RETRY beats a genuine edit gets after its
+/// release (the total decode chances are edit_beats + 1). 0 restores the
+/// v6.6.1 single-shot edit; 1 is the v6.6.2 rebeat. Each retry re-runs
+/// hold→release with a fresh reset electron, so a beat lost to a
+/// phantom-complete partial write (the reset landed, the sparse color dot
+/// did not) is repaired by the NEXT beat's reset + complete decode. The
+/// cap on the knob (0..=8) keeps the edit episode bounded (~101 ticks per
+/// beat at the default pacing).
+pub const EDIT_BEATS_DEFAULT: u32 = 2;
+pub const EDIT_BEATS_MAX: u32 = 8;
 /// Cap on pending rebeat entries (the marker edits are tens of cells).
 pub const REBEAT_MAX: usize = 512;
 
@@ -337,16 +350,26 @@ pub struct Streamer {
     dirty_since: Vec<u64>,
     /// FIFO over dirty cells (phase 0 order = edit order).
     dirty_queue: std::collections::VecDeque<u32>,
-    /// v6.6.2: (cell, tick when to re-dirty it) — the ONE extra beat of the
-    /// edit protocol. Scheduled by the hold/release path only; the rebeat
-    /// release never re-schedules (one retry, not a loop).
+    /// v6.6.2: (cell, tick when to re-dirty it) — a retry beat of the edit
+    /// protocol. Scheduled by the hold/release path only; whether that
+    /// release schedules further beats is decided by the episode counter
+    /// (`rebeat_beats_left`), so the retries stay a bounded sequence.
     rebeat: std::collections::VecDeque<(u32, u64)>,
     /// v6.6.2: true while the CURRENT hold's release may schedule rebeats
     /// (set at the decision arm, consumed by the release).
     rebeat_armed: bool,
+    /// v6.7.1 MULTI-BEAT: retry beats left in the CURRENT edit episode.
+    /// Set at the genuine release (edit_beats - 1: its own entries are
+    /// retry 1 of edit_beats), consumed one per continuation release. 0 =
+    /// no further beats — the retries stay a bounded sequence, never a
+    /// loop. A new genuine edit resets the episode.
+    rebeat_beats_left: u32,
     /// v6.6.2: the upcoming arm comes from a rebeat re-dirty — its release
     /// must not schedule another rebeat (one retry, not a loop).
     pending_rebeat: bool,
+    /// v6.7.1: retry beats per genuine edit (the `edit_beats` CLOD_OPTS
+    /// knob, default EDIT_BEATS_DEFAULT). 0 disables the rebeat entirely.
+    pub edit_beats: u32,
     /// Cells currently marked dirty (fast skip when 0).
     pub dirty_pending: usize,
     /// Dirty-phase cells streamed since boot (diagnostics).
@@ -395,7 +418,9 @@ impl Streamer {
             dirty_queue: std::collections::VecDeque::new(),
             rebeat: std::collections::VecDeque::new(),
             rebeat_armed: false,
+            rebeat_beats_left: 0,
             pending_rebeat: false,
+            edit_beats: EDIT_BEATS_DEFAULT,
             dirty_pending: 0,
             dirty_streams: 0,
             edit_window: 0,
@@ -455,6 +480,13 @@ impl Streamer {
 
     pub fn valid_cells(&self) -> u64 {
         self.cells.iter().filter(|c| c.valid).count() as u64
+    }
+
+    /// v6.7.1 diag: pending rebeat entries and the retry beats still
+    /// scheduled in the current edit episode (the `rbeat` token of the
+    /// stream diag line — ops see the bounded retry sequence live).
+    pub fn rebeat_diag(&self) -> (usize, u32) {
+        (self.rebeat.len(), self.rebeat_beats_left)
     }
 
     pub fn get(&self, cx: u32, cz: u32) -> Option<Cell> {
@@ -692,10 +724,11 @@ impl Streamer {
     /// the idle paths share it. Pops the dirty queue once, streams every
     /// decodable cell (edit=true — the reset electron rides along), keeps
     /// undecodable cells queued. Reports how many cells streamed and whether
-    /// the phase cap was hit (the wave signature). v6.6.2: when
-    /// `schedule_rebeat` is set (the genuine-edit release only), every
-    /// streamed cell gets ONE retry entry — the rebeat re-dirties it
-    /// REBEAT_DELAY_TICKS later for a second complete-decode chance.
+    /// the phase cap was hit (the wave signature). v6.6.2/v6.7.1: when
+    /// `schedule_rebeat` is set (a genuine-edit release or a continuation
+    /// beat while the episode counter allows), every streamed cell gets a
+    /// retry entry — the rebeat re-dirties it REBEAT_DELAY_TICKS later for
+    /// another complete-decode chance.
     fn stream_dirty(
         &mut self,
         cap: usize,
@@ -797,11 +830,12 @@ impl Streamer {
         let budget = budget.max(8);
         let zone_mode = !views.is_empty();
 
-        // ---- v6.6.2 REBEAT: the edit protocol's one retry -----------------
-        // Cells the first release streamed come due REBEAT_DELAY_TICKS
+        // ---- v6.6.2 REBEAT, v6.7.1 MULTI-BEAT: the edit retries -----------
+        // Cells the previous release streamed come due REBEAT_DELAY_TICKS
         // later: re-dirty them (fresh stamp), cut the post silence, and
         // let the decision below re-run the hold→release sequence. The
-        // rebeat release never schedules further rebeats (one retry).
+        // release schedules further beats only while the episode counter
+        // (`rebeat_beats_left`) has one — bounded by `edit_beats`.
         let mut rebeat_rearmed = false;
         while let Some(&(idx, at)) = self.rebeat.front() {
             if now < at {
@@ -853,7 +887,21 @@ impl Streamer {
                 // hold reaches zero (same tick, below).
                 self.edit_hold -= 1;
                 if self.edit_hold == 0 {
-                    let schedule_rebeat = self.rebeat_armed;
+                    // v6.7.1 MULTI-BEAT: a GENUINE edit's release schedules
+                    // retry beat 1 of `edit_beats`; a CONTINUATION arm (from
+                    // a rebeat re-dirty) schedules the next beat while the
+                    // episode counter still has one. Each retry release
+                    // consumes one — bounded, never a loop.
+                    let schedule_rebeat;
+                    if self.rebeat_armed {
+                        schedule_rebeat = self.edit_beats > 0;
+                        self.rebeat_beats_left = self.edit_beats.saturating_sub(1);
+                    } else if self.rebeat_beats_left > 0 {
+                        schedule_rebeat = true;
+                        self.rebeat_beats_left -= 1;
+                    } else {
+                        schedule_rebeat = false;
+                    }
                     self.stream_dirty(
                         cap,
                         views,
@@ -903,9 +951,11 @@ impl Streamer {
                 }
                 if decodable_waiting > 0 && decodable_waiting <= EDIT_HOLD_MAX_BATCH {
                     // A genuine edit: start the drain, release in
-                    // EDIT_HOLD_TICKS ticks. v6.6.2: the first release may
-                    // schedule the rebeat (one retry); an arm driven by a
-                    // rebeat re-dirty must not (pending_rebeat was set).
+                    // EDIT_HOLD_TICKS ticks. v6.6.2/v6.7.1: a GENUINE arm
+                    // starts a new episode (the release schedules retry beat
+                    // 1 of edit_beats); a CONTINUATION arm (a rebeat
+                    // re-dirty, pending_rebeat set) schedules further beats
+                    // only while rebeat_beats_left allows.
                     self.rebeat_armed = !self.pending_rebeat;
                     self.pending_rebeat = false;
                     self.edit_hold = EDIT_HOLD_TICKS;
@@ -1838,10 +1888,12 @@ mod tests {
             s.cone_cells, cone_after_edit,
             "no cone streams in the post window"
         );
-        // v6.6.2 REBEAT: REBEAT_DELAY_TICKS after the release the streamed
-        // cells re-dirty ONCE, the post silence is cut and the whole
-        // hold→release sequence reruns — a second complete-decode chance
-        // for a fragile sparse color word (RED index 2 = one active dot).
+        // v6.6.2 REBEAT, v6.7.1 MULTI-BEAT: REBEAT_DELAY_TICKS after the
+        // release the streamed cells re-dirty, the post silence is cut and
+        // the whole hold→release sequence reruns — with the default
+        // edit_beats=2 the edit gets TWO retries (three complete-decode
+        // chances) for a fragile sparse color word (RED index 2 = one
+        // active dot). Each retry carries its own reset electron.
         let rb = 401 + EDIT_HOLD_TICKS + REBEAT_DELAY_TICKS;
         let v = view_at(rb);
         let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
@@ -1849,26 +1901,60 @@ mod tests {
             s.edit_hold, EDIT_HOLD_TICKS,
             "the rebeat must re-arm the hold"
         );
-        let mut second_reset = 0u64;
+        let mut resets = Vec::new();
         for t in (rb + 1)..(rb + EDIT_HOLD_TICKS + 2) {
             let v = view_at(t);
             let batch: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
             if batch.iter().any(|sp| sp.y == RESET_Y) {
-                second_reset += 1;
+                resets.push(t);
             }
         }
         assert_eq!(
-            second_reset, 1,
+            resets.len(),
+            1,
             "the second beat must release with its reset electron"
         );
         assert_eq!(s.dirty_pending, 0, "the rebeat released the edit again");
-        // ...and it must NOT loop: tick past the second post window — the
-        // window expires and nothing re-dirties.
-        for t in (rb + EDIT_HOLD_TICKS + 2)..(rb + EDIT_HOLD_TICKS + EDIT_WINDOW_TICKS + 10) {
+        assert_eq!(
+            s.rebeat_diag(),
+            (1, 0),
+            "retry 2 of 2 is scheduled, the episode counter is spent"
+        );
+        // The third beat (retry 2 of edit_beats=2) fires one delay later and
+        // releases with its own reset electron — the LAST one.
+        let rb3 = resets[0] + REBEAT_DELAY_TICKS;
+        let v = view_at(rb3);
+        let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        assert_eq!(
+            s.edit_hold, EDIT_HOLD_TICKS,
+            "the third beat must re-arm the hold"
+        );
+        let mut third_reset = 0u64;
+        for t in (rb3 + 1)..(rb3 + EDIT_HOLD_TICKS + 2) {
+            let v = view_at(t);
+            let batch: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+            if batch.iter().any(|sp| sp.y == RESET_Y) {
+                third_reset += 1;
+            }
+        }
+        assert_eq!(
+            third_reset, 1,
+            "the third beat must release with its reset electron"
+        );
+        assert_eq!(s.dirty_pending, 0, "the third beat released the edit");
+        // ...and it must NOT loop: the episode counter is spent, so tick
+        // past the third post window — the window expires and nothing
+        // re-dirties (a fourth beat would re-arm the hold).
+        for t in (rb3 + EDIT_HOLD_TICKS + 2)..(rb3 + EDIT_HOLD_TICKS + EDIT_WINDOW_TICKS + 10) {
             let v = view_at(t);
             let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
         }
         assert_eq!(s.edit_window, 0, "the window must expire (no rebeat loop)");
+        assert_eq!(
+            s.rebeat_diag(),
+            (0, 0),
+            "no pending entries and no beats left after the last retry"
+        );
         assert!(
             s.cone_cells > cone_after_edit,
             "the steady state resumes after the window ({} -> {})",
@@ -1905,6 +1991,96 @@ mod tests {
             s.edit_window, 0,
             "a dirty wave must not silence the steady state"
         );
+    }
+
+    /// v6.7.1 MULTI-BEAT, knob=0: the v6.6.1 single-shot edit — the release
+    /// streams the batch once and NOTHING re-dirties afterwards (no rebeat
+    /// entries, no re-arms). edit_beats=0 must be the escape hatch that
+    /// restores the pre-rebeat behavior exactly.
+    #[test]
+    fn edit_beats_zero_disables_rebeats() {
+        let (cx, cz, region) = (-930.0, 796.0, 512);
+        let half = f64::from(region) * 0.5;
+        let mut s = Streamer::new(cx - half, cz - half, region, 2);
+        s.edit_beats = 0;
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
+            }
+        }
+        let view_at = |now: u64| ViewHint {
+            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            look: look_dir(-90.0, 5.0),
+            now,
+            age_ticks: u64::MAX,
+        };
+        let _: Vec<Spawn> = s.tick_batch(2048, &[view_at(400)]).to_vec();
+        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 401);
+        let t_rel = 401 + EDIT_HOLD_TICKS;
+        let mut released = false;
+        for t in 401..=t_rel + 1 {
+            let v = view_at(t);
+            let batch: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+            if batch.iter().any(|sp| sp.y == RESET_Y) {
+                released = true;
+            }
+        }
+        assert!(released, "the single release must carry the reset electron");
+        assert_eq!(s.rebeat_diag(), (0, 0), "no retry entries at edit_beats=0");
+        // Tick well past where the v6.6.2 rebeat would have fired: nothing
+        // re-dirties, the steady state just resumes.
+        for t in
+            (t_rel + 2)..(t_rel + REBEAT_DELAY_TICKS + EDIT_HOLD_TICKS + EDIT_WINDOW_TICKS + 10)
+        {
+            let _: Vec<Spawn> = s.tick_batch(2048, &[view_at(t)]).to_vec();
+        }
+        assert_eq!(s.edit_hold, 0, "no retry beat ever re-arms the hold");
+        assert_eq!(s.dirty_pending, 0);
+        assert_eq!(s.edit_window, 0);
+    }
+
+    /// v6.7.1 MULTI-BEAT, knob=3: the episode must produce EXACTLY
+    /// edit_beats + 1 releases (the genuine one plus three retries), each
+    /// with its own reset electron, and then stop — bounded by the knob,
+    /// never a loop. This pins the beat-accounting arithmetic: a genuine
+    /// release schedules retry 1 of K and leaves K-1 beats; every
+    /// continuation release consumes one and schedules while any remain.
+    #[test]
+    fn edit_beats_scale_the_episode_exactly() {
+        let (cx, cz, region) = (-930.0, 796.0, 512);
+        let half = f64::from(region) * 0.5;
+        let mut s = Streamer::new(cx - half, cz - half, region, 2);
+        s.edit_beats = 3;
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
+            }
+        }
+        let view_at = |now: u64| ViewHint {
+            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            look: look_dir(-90.0, 5.0),
+            now,
+            age_ticks: u64::MAX,
+        };
+        let _: Vec<Spawn> = s.tick_batch(2048, &[view_at(400)]).to_vec();
+        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 401);
+        // March the engine until the episode must be over: 4 beats ×
+        // (REBEAT_DELAY + hold + post margin) covers the whole timeline.
+        let horizon = 401 + 4 * (REBEAT_DELAY_TICKS + EDIT_HOLD_TICKS + 2) + EDIT_WINDOW_TICKS;
+        let mut releases = 0u64;
+        for t in 401..=horizon {
+            let v = view_at(t);
+            let batch: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+            if batch.iter().any(|sp| sp.y == RESET_Y) {
+                releases += 1;
+            }
+        }
+        assert_eq!(
+            releases, 4,
+            "edit_beats=3 must give exactly 1 genuine release + 3 retries"
+        );
+        assert_eq!(s.rebeat_diag(), (0, 0), "the episode is spent");
+        assert_eq!(s.dirty_pending, 0, "every beat released cleanly");
     }
 
     /// v6.6.1 EDIT RECENCY: the boot-era backlog (minutes-old dirty cells

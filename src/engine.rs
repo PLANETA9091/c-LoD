@@ -950,6 +950,9 @@ fn arm_stream(state: &Arc<State>, ox: f64, oz: f64) {
     let (side, cells) = {
         let mut s = state.stream.lock().unwrap();
         *s = Streamer::new(ox, oz, state.cfg.region_blocks, state.cfg.cell_size);
+        // v6.7.1 MULTI-BEAT: the retry-beat count rides the config like the
+        // rest of the edit protocol knobs (default EDIT_BEATS_DEFAULT).
+        s.edit_beats = state.cfg.edit_beats;
         (s.side, s.cells())
     };
     let lap_ticks = cells / ((state.cfg.particles_per_tick as u64) / 8).max(1);
@@ -968,8 +971,21 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     if !tick.is_multiple_of(100) {
         return;
     }
-    let (valid, laps, total_cells, cone_c, zone_c, dirty_c, dirty_q, rescan_c, rescan_e) = {
+    let (
+        valid,
+        laps,
+        total_cells,
+        cone_c,
+        zone_c,
+        dirty_c,
+        dirty_q,
+        rescan_c,
+        rescan_e,
+        rb_q,
+        rb_left,
+    ) = {
         let s = state.stream.lock().unwrap();
+        let (rb_q, rb_left) = s.rebeat_diag();
         (
             s.valid_cells(),
             s.laps,
@@ -980,6 +996,8 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
             s.dirty_pending,
             s.rescan_cells,
             s.rescan_edits,
+            rb_q,
+            rb_left,
         )
     };
     // v5.5 frontier diagnostics: wish = in-flight FORCED tickets,
@@ -1070,7 +1088,7 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     }
     let p0 = players.first();
     crate::log_info(&format!(
-        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}) ewin {} rescan {rescan_c}c/{rescan_e}e, edits {e_char}{e_pushes}p/{e_cells}c/{e_edits}e drop {e_drops}, spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} ~{kbps} kB/s {cache_stat}",
+        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}) ewin {} rbeat {rb_q}p/{rb_left} rescan {rescan_c}c/{rescan_e}e, edits {e_char}{e_pushes}p/{e_cells}c/{e_edits}e drop {e_drops}, spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} ~{kbps} kB/s {cache_stat}",
         state.stream.lock().unwrap().edit_window,
         jni::STREAM_SPAWNED.load(Ordering::Relaxed),
         jni::STREAM_FAILED.load(Ordering::Relaxed),
