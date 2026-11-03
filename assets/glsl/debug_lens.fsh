@@ -106,12 +106,17 @@ vec3 color_lattice(float idxF) {
 
 // ---- v6.9.2 stage eyes v2 --------------------------------------------------
 
-// Cells whose strobe FIRED this frame (clod_h_b.g — 32x32 grid).
+// Cells whose strobe FIRED this frame on the LO PLANE (clod_c_b.g — the
+// color/marker words). v6.9.2 read clod_h_b (the HI plane) which is
+// GEOMETRICALLY OFF-SCREEN from the bench vantage (the HI dots at 75+ blocks
+// sit 43 deg below the horizon vs the 35-deg half-FOV) — the v6.9.2
+// strobe_hits=0 was blind by construction. The LO plane is the one that
+// carries the marker.
 int strobe_hits() {
     int hits = 0;
     for (int j = 0; j < 32; ++j) {
         for (int i = 0; i < 32; ++i) {
-            if (texelFetch(HeightSampler, ivec2(j * 8 + 4, i * 8 + 4), 0).g > 0.5) {
+            if (texelFetch(ColBufSampler, ivec2(j * 8 + 4, i * 8 + 4), 0).g > 0.5) {
                 ++hits;
             }
         }
@@ -119,13 +124,15 @@ int strobe_hits() {
     return hits;
 }
 
-// Eraser mask marks on a DENSE 64x36 grid.
+// Eraser mask marks on a DENSE 128x72 grid (9216 samples — v6.9.2's 64x36
+// expected ~3 hits on the measured column and read 0 at P(0)~3%; the dense
+// grid expects ~15 on the same dots).
 int carrier_hits() {
     ivec2 ms = textureSize(MaskSampler, 0);
     int hits = 0;
-    for (int j = 0; j < 64; ++j) {
-        for (int i = 0; i < 36; ++i) {
-            ivec2 p = ivec2((j * 2 + 1) * ms.x / 128, (i * 2 + 1) * ms.y / 72);
+    for (int j = 0; j < 128; ++j) {
+        for (int i = 0; i < 72; ++i) {
+            ivec2 p = ivec2((j * 2 + 1) * ms.x / 256, (i * 2 + 1) * ms.y / 144);
             if (texelFetch(MaskSampler, p, 0).r > 0.5) {
                 ++hits;
             }
@@ -193,16 +200,18 @@ bool stage_eyes(vec2 px, float x0, float ya, float panel) {
         return true;
     }
 
-    // HITS strip [54,78): the strobe-fired cell count this frame.
+    // HITS strip [54,78): the LO-plane strobe-fired cell count this frame
+    // (x8 scale, cap 240).
     if (col >= 54 && col < 78) {
-        float v = float(min(strobe_hits(), 240)) / 255.0;
+        float v = float(min(strobe_hits() * 8, 240)) / 255.0;
         fragColor = vec4(v, v, 0.0, 1.0);
         return true;
     }
 
-    // MASK strip [80,104): the eraser-mask mark count this frame.
+    // MASK strip [80,104): the eraser-mask mark count this frame (x8 scale,
+    // cap 240).
     if (col >= 80 && col < 104) {
-        float v = float(min(carrier_hits(), 240)) / 255.0;
+        float v = float(min(carrier_hits() * 8, 240)) / 255.0;
         fragColor = vec4(v, v, 0.0, 1.0);
         return true;
     }

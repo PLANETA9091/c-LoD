@@ -176,6 +176,10 @@ dark_c = dark_h = 0
 px = im.load()
 for y in list(color_rows) + list(height_rows):
     in_color = y in color_rows
+    # v6.9.4: skip the stage-eyes strip band (its black/green pixels are
+    # service marks, not cell signatures)
+    if in_color and yA0 + 1 <= y <= yA0 + 11:
+        continue
     for x in range(x0 + 1, x0 + PW - 1):
         r, g, b = px[x, y]
         if 85 <= r <= 120 and g <= 25 and b <= 25:
@@ -244,8 +248,8 @@ elb = bucket_val(rot_reg, 1, 'el')
 # never-decoded rot prints a full yellow row 0
 rr = rot_reg[7, :, 0]; rg = rot_reg[7, :, 1]
 rot_state = "never" if (rr > 240).mean() > 0.8 and (rg > 240).mean() > 0.8 else "decoded"
-hits = int(hits_reg[:, :, 0].max() + 0.5)
-mask = int(mask_reg[:, :, 0].max() + 0.5)
+hits = int(round(hits_reg[:, :, 0].max() / 8.0))
+mask = int(round(mask_reg[:, :, 0].max() / 8.0))
 print(f"lens_red={red} lens_black={black} lens_water={water} lens_dark={dark} lens_zero={zero} rot={rot_state} cam_x_b={cxb} cam_z_b={czb} az_b={azb} el_b={elb} strobe_hits={hits} mask_hits={mask}")
 PYEOF
 }

@@ -754,3 +754,23 @@ client left mid-test because of the compile-death disconnect) and set -u
 killed the script on "line 111: tag: unbound variable", hiding the real
 reason. Confirmed working in #232's log: the dynamic prompt click hit
 (406,445) dead center and the pack was accepted. 87 tests.
+
+v6.9.4 THE EYES LOOK AT THE RIGHT PLANE (CI #233): the v2 bucket printers
+delivered the cleanest verdict yet — cam_x_b=8 cam_z_b=11 az_b=0 el_b=3:
+the post-chain Globals camera IS the player camera (x bucket exactly the
+vantage), the decoded azimuth is exactly east, elevation exactly -5 deg —
+the camera channel is FULLY exonerated, together with the hue test (the
+relative arm fires 399/400 on the artifact dots). But strobe_hits=0 was
+blind BY CONSTRUCTION: the strip read clod_h_b.g — the HI plane — whose
+dots sit 43 deg below the horizon at 75+ blocks vs the 35-deg half-FOV:
+geometrically invisible from the bench vantage. The marker words ride the
+LO plane (clod_c_b.g). Fixes: the HITS strip reads the LO plane; the MASK
+strip samples a dense 128x72 grid (v6.9.2's 64x36 expected ~3 hits on the
+measured column and read 0 at P(0)~3%); both counts scale x8 for JPEG-safe
+decoding; the panel counters skip the strip band (lens_black=762 on #233
+was the strips' own black background, not committed idx-0 cells). The #233
+verdict also confirmed: particles composite INSIDE the main frame pass
+(LevelRenderer.addMainPass lambda -> executeOit) BEFORE applyPostEffects —
+the dots ARE in main at chain time; the blind spot is now only the capture
+merge/strobe itself. Synthetic decode verified (cam 8/9, az 0, el 3,
+hits=30, mask=5 on the x8 scale). 87 tests, glsl 15/15, fmt/clippy green.
