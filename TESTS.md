@@ -736,3 +736,21 @@ self-repairing fill copies dot colors from dot neighbors (isolated-dot
 assumption) — cosmetic. Harness decode verified on synthetic panels
 (cam_x_b=8 cam_z_b=9 az_b=0 el_b=3 strobe_hits=100 mask_hits=40). 87 tests,
 fmt/clippy green, glsl 15/15.
+
+v6.9.3 UNIFORM-BLOCK GATE (CI #232): the #232 run died BEFORE the verdict —
+the client's own words in client.log:
+  ShaderCompileException: Unable to find shader defined uniform (ClodGrid)
+  -> Failed to compile post processing pipeline clod:lod_terrain/10
+  -> (recovery) -> "Stepan lost connection: Disconnected"
+The v6.9.2 lens shader gained the ClodGrid/ClodStream blocks while the debug
+chain's lens pass still supplied only ClodLens — the sampler-map gate cannot
+see uniform blocks. Fixes: the lens pass supplies ClodGrid+ClodStream; a new
+STATIC gate (uniform blocks map) requires every shader-defined std140 block
+(minus the client-bound vanilla set) to appear in the pass uniforms and
+vice versa — negative-tested (removing ClodGrid from the JSON FAILs the
+gate). Also fixed the ancient latent assert_online bug: it read $tag (never
+set) instead of $1 — run #232 was the FIRST time the assert fired (the
+client left mid-test because of the compile-death disconnect) and set -u
+killed the script on "line 111: tag: unbound variable", hiding the real
+reason. Confirmed working in #232's log: the dynamic prompt click hit
+(406,445) dead center and the pack was accepted. 87 tests.

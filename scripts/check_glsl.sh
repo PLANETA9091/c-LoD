@@ -242,5 +242,44 @@ PYEOF
 sampler_gate_rc=$?
 [ "$sampler_gate_rc" -ne 0 ] && status=1
 
+# v6.9.2: renderpearl requires every shader-defined uniform BLOCK to be
+# provided by the pass's "uniforms" map — run #232's client log named it:
+#   ShaderCompileException: Unable to find shader defined uniform (ClodGrid)
+#   -> Failed to compile post processing pipeline clod:lod_terrain/10
+#   -> the whole chain died at the pack reload and the client disconnected.
+# The v6.9.2 lens shader gained ClodGrid/ClodStream blocks while the debug
+# chain's lens pass kept only ClodLens — the sampler gate above cannot see
+# uniform blocks. Gate statically: every "layout(std140) uniform NAME {" in
+# the shader (minus the vanilla includes: Globals/Fog/DynamicTransforms/
+# Projection/ProjectionMatrixBuffer, which the client binds itself) must
+# appear in the pass's "uniforms" map, and every uniforms entry must be a
+# real block in the shader.
+python3 - <<'PYEOF'
+import json, re, sys
+from pathlib import Path
+ok = True
+VANILLA = {"Globals", "Fog", "DynamicTransforms", "Projection",
+           "ProjectionMatrixBuffer", "SamplerInfo", "FogInstanced"}
+for chain in sorted(Path("assets/post_effect").glob("*.json")):
+    txt = re.sub(r"__[A-Z0-9_]+__", "0", chain.read_text())
+    txt = re.sub(r"^\s*//.*$", "", txt, flags=re.M)
+    j = json.loads(txt)
+    for i, p in enumerate(j.get("passes", [])):
+        fs = p["fragment_shader"].split("/")[-1]
+        src = Path(f"assets/glsl/{fs}.fsh").read_text()
+        declared = set(re.findall(r"layout\(std140\)\s+uniform\s+(\w+)\s*\{", src))
+        declared -= VANILLA
+        have = set((p.get("uniforms") or {}).keys())
+        missing, extra = declared - have, have - declared
+        if missing or extra:
+            ok = False
+            print(f"FAIL {chain.name} pass {i} ({fs}):"
+                  f" blocks not in uniforms={sorted(missing)} uniforms without block={sorted(extra)}")
+print("OK   uniform blocks map (renderpearl rule)" if ok else "FAIL uniform blocks map")
+sys.exit(0 if ok else 1)
+PYEOF
+ubos_gate_rc=$?
+[ "$ubos_gate_rc" -ne 0 ] && status=1
+
 [ "$status" -eq 0 ] && echo "all shaders valid"
 exit "$status"

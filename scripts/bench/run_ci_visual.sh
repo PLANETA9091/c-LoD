@@ -106,7 +106,11 @@ online() {
   [ "$(join_count)" -gt "$(left_count)" ] 2>/dev/null
   }
 
-assert_online() { # tag — fail fast once the client is out of the game
+assert_online() { # $1 = tag — fail fast once the client is out of the game
+  # v6.9.3 FIX: the function read $tag (never set — run #232 died on
+  # "line 111: tag: unbound variable" the FIRST time the assert actually
+  # fired, hiding the real reason the client left) under set -u.
+  local tag="$1"
   if ! online; then
     fail "$tag: client left the game mid-test (joins=$(join_count) lefts=$(left_count)) — the shot is the main-menu panorama, not the LOD proof"
     return 1

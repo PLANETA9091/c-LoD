@@ -207,6 +207,12 @@
             "uniforms": {
                 "ClodLens": [
                     { "name": "LensInfo", "type": "vec4", "value": [__LENS_X__, __LENS_Z__, __LENS_WIN__, 5.0] }
+                ],
+                "ClodGrid": [
+                    { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __PLANE_HI_Y__, __PLANE_LO_Y__] }
+                ],
+                "ClodStream": [
+                    { "name": "StreamInfo", "type": "vec4", "value": [__CELL__, __SUB__, __DEPTH_NEAR__, 0.0] }
                 ]
             }
         }
