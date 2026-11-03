@@ -198,27 +198,51 @@ PANEL = 320 * (PW - 2)
 # rule only fired because the wrong rect measured the letterbox (pure
 # black); committed idx-0 cells are the black signature.
 zero = 1 if (dark_c >= 0.98 * PANEL and dark_h >= 0.98 * PANEL) else 0
-# ---- stage eyes: strips sit at GL y [ya+panel-10, ya+panel-2) = the rows
-# just BELOW the color panel's top frame edge in screenshot space.
-sy0, sy1 = yA0 + 2, yA0 + 10
+# ---- stage eyes v2 (v6.9.2): four 24x8 bucket-printer strips sit at GL y
+# [ya+panel-10, ya+panel-2) = the rows just BELOW the color panel's top
+# frame edge in screenshot space. GL row r = screenshot row (sy0 + 7 - r).
+# Strips: CAM[2,26) rows: cam.x / cam.z cell-space buckets (24 each over the
+# 256-cell atlas); ROT[28,52) rows: az bucket (24 over 2pi), el bucket (8
+# over pi, drawn as 3-px-wide groups); HITS[54,78) brightness = strobe-fired
+# cell count; MASK[80,104) brightness = eraser-mask mark count.
+sy0 = yA0 + 2
+LIT = (0, 220, 0)
 def strip(xa, xb):
-    reg = a[sy0:sy1, x0 + xa:x0 + xb]
-    return reg
-rot_reg = strip(2, 26)
-scan_reg = strip(28, 52)
-carr_reg = strip(54, 78)
-rr, rg, rb = rot_reg[:, :, 0], rot_reg[:, :, 1], rot_reg[:, :, 2]
-if (rr > 240).mean() > 0.5 and (rg > 240).mean() > 0.5:
-    rot = "never"
-elif (rr > 150).mean() > 0.3 and (rb > 150).mean() > 0.3 and (rg < 60).mean() > 0.3:
-    rot = "blind"
-elif (rg > 180).mean() > 0.5 and (rr < 60).mean() > 0.5:
-    rot = "ok"
-else:
-    rot = f"mixed({int((rg>180).mean()*100)}g/{int((rr>150).mean()*100)}r)"
-scan_hits = int(scan_reg[:, :, 2].max() / 17.0 + 0.5)
-carr = int(carr_reg[:, :, 0].max() + 0.5)
-print(f"lens_red={red} lens_black={black} lens_water={water} lens_dark={dark} lens_zero={zero} rot={rot} scan={scan_hits} carriers={carr}")
+    return a[sy0:sy0 + 8, x0 + xa:x0 + xb]
+def lit_col(reg, gl_row):
+    # returns the lit bucket column (strip-local) or None
+    ys = 7 - gl_row
+    row = reg[ys]
+    for i in range(reg.shape[1]):
+        r, g, b = row[i]
+        if abs(r - LIT[0]) < 25 and abs(g - LIT[1]) < 25 and abs(b - LIT[2]) < 25:
+            return i
+    return None
+cam_reg = strip(2, 26)
+rot_reg = strip(28, 52)
+hits_reg = strip(54, 78)
+mask_reg = strip(80, 104)
+def bucket_val(reg, gl_row, mode):
+    # mode 'direct': 24 buckets over 24 columns -> bucket = lit column
+    # mode 'el':     8 buckets drawn as 3-px groups -> bucket = column // 3
+    li = lit_col(reg, gl_row)
+    if li is None:
+        return "?"
+    if mode == 'el':
+        return li // 3
+    return li
+# atlas geometry from the harness constants (imported via env): the buckets
+# are decoded to WORLD coords here by the shell wrapper (it knows origin).
+cxb = bucket_val(cam_reg, 0, 'direct')
+czb = bucket_val(cam_reg, 1, 'direct')
+azb = bucket_val(rot_reg, 0, 'direct')
+elb = bucket_val(rot_reg, 1, 'el')
+# never-decoded rot prints a full yellow row 0
+rr = rot_reg[7, :, 0]; rg = rot_reg[7, :, 1]
+rot_state = "never" if (rr > 240).mean() > 0.8 and (rg > 240).mean() > 0.8 else "decoded"
+hits = int(hits_reg[:, :, 0].max() + 0.5)
+mask = int(mask_reg[:, :, 0].max() + 0.5)
+print(f"lens_red={red} lens_black={black} lens_water={water} lens_dark={dark} lens_zero={zero} rot={rot_state} cam_x_b={cxb} cam_z_b={czb} az_b={azb} el_b={elb} strobe_hits={hits} mask_hits={mask}")
 PYEOF
 }
 
@@ -638,18 +662,29 @@ PYEOF
     # lens decides: the panels are drawn by the chain itself every frame,
     # so the burst screenshot carries the capture's belief for free.
     LZ=$(lens_metrics "09c_burst_close_retry" | grep -o 'lens_zero=[01]' | cut -d= -f2)
-    # v6.9.0 stage eyes ride the summary on the DEAD path: the strips name the
-    # blind stage (rot never/blind/ok, scan payload rows, carrier mask hits).
-    EYES=$(lens_metrics "09c_burst_close_retry" | grep -o 'rot=[a-z()0-9/]* scan=[0-9]* carriers=[0-9]*')
+    # v6.9.2 stage eyes ride the summary on the DEAD path: the bucket printers
+    # name the blind stage. Bucket -> world: origin = center - disk/2, cell 2
+    # (the harness constants), 24 buckets over 256 cells.
+    EYES=$(lens_metrics "09c_burst_close_retry" | grep -o 'rot=[a-z]* cam_x_b=[0-9?]* cam_z_b=[0-9?]* az_b=[0-9?]* el_b=[0-9?]* strobe_hits=[0-9]* mask_hits=[0-9]*')
     echo "- preflight lens_zero=${LZ:-?} (1 = capture NEVER committed = no particle EVER rendered)" | tee -a "$SUMMARY"
-    echo "- preflight stage eyes: ${EYES:-?} (rot=never → camera payload never decoded; scan=0 → no payload rows in frame; carriers=0 → carrier mask empty; all live → capture gates)" | tee -a "$SUMMARY"
+    echo "- preflight stage eyes: ${EYES:-?}" | tee -a "$SUMMARY"
     if [ "${LZ:-0}" = "1" ]; then
+      # expected: cam bucket ~8 (vantage 90.5 cells from origin), az ~0 (east),
+      # el ~3 ((-5deg+90)/180*8 = 3.8)
+      REASON="all eyes live but zero commits — the capture merge path itself"
       case "$EYES" in
-        *scan=0*) REASON="no payload rows in frame (the carrier/payload particles never made it into main — vantage/frustum/spawn side)" ;;
-        *rot=never*) REASON="camera payload never decoded (rot conf dead — the camera channel is the blind stage)" ;;
-        *rot=blind*) REASON="camera confidence decayed (stale pose — the payload stopped arriving mid-session)" ;;
-        *carriers=0*) REASON="carrier mask empty while the camera is live (the capture gates — depth strobe/projection — reject everything)" ;;
-        *) REASON="all eyes live but zero commits — the capture merge path itself" ;;
+        *rot=never*) REASON="camera payload never decoded (rot dead — no sky rows survive)" ;;
+        *cam_x_b=?)  REASON="CAM strip unreadable (the lens strips did not render — chain partial?)" ;;
+        *cam_x_b=0*|*cam_x_b=1*|*cam_x_b=2*|*cam_x_b=3*|*cam_x_b=4*|*cam_x_b=5*|*cam_x_b=6*|*cam_x_b=23*)
+          REASON="GLOBALS CAMERA X BUCKET WRONG (expected ~8 = the vantage): the post-chain Globals camera is not the player camera — the capture projects from the wrong eye" ;;
+        *az_b=1[0-9]*|*az_b=2[0-3]*|*az_b=6*|*az_b=7*|*az_b=8*|*az_b=9*)
+          REASON="ROT AZIMUTH BUCKET WRONG (expected ~0 = east): the decoded az disagrees with the true camera direction" ;;
+        *strobe_hits=0*)
+          case "$EYES" in
+            *az_b=0*|*az_b=23*) REASON="camera buckets correct but the strobe NEVER fires — the projection sample positions miss the dots (fov/aspect/precision beyond bucket resolution)" ;;
+            *) REASON="az bucket suspicious AND no strobe hits" ;;
+          esac ;;
+        *mask_hits=0*) REASON="strobe fires but the eraser mask is empty — the dust_mask pass reads stale/dead inputs" ;;
       esac
       fail "RENDERER DEAD: no particles at all (close=${BC:-?}, retry=${BC2:-?}) AND the capture never committed (lens_zero=1) — stage eyes say: ${REASON}; run INVALID, the transport verdict is N/A"
       { echo ""

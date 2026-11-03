@@ -719,3 +719,20 @@ immediately ("PACK NEVER ACCEPTED") instead of measuring a menu for 12
 minutes; numpy joins the CI pip deps (the v6.9.0 lens_metrics locator needs
 it — on #229 every lens metric printed "?" from the numpy ImportError, the
 stage eyes never reached the feed). 87 tests, fmt/clippy green.
+
+v6.9.2 STAGE EYES v2 (CI #231): the verdict finally had eyes — rot=ok,
+scan=15, lens_zero=1, while the burst PNG shows the carrier column PLAINLY
+VISIBLE (4268 green px) and the relative strobe arm fires on 399/400 of the
+actual dot pixels measured off the artifact. The hue test and the camera
+decode are innocent; the residual suspects are the projection inputs. The
+four lens strips became BUCKET PRINTERS: CAM (the Globals CameraBlockPos
+the capture sees, cell-space buckets over the atlas), ROT (az/el buckets),
+HITS (clod_h_b.g strobe-fired cells, 32x32 grid), MASK (clod_mask marks,
+dense 64x36 grid — v6.9.0's 32x18 missed 2-3px discs). The failure marker
+decodes the buckets against the known vantage (cam ~8, az ~0, el ~3) and
+names: Globals-camera-wrong / az-wrong / strobe-never-fires / merge-dead.
+#231 also taught: the dense carrier column survives the eraser because the
+self-repairing fill copies dot colors from dot neighbors (isolated-dot
+assumption) — cosmetic. Harness decode verified on synthetic panels
+(cam_x_b=8 cam_z_b=9 az_b=0 el_b=3 strobe_hits=100 mask_hits=40). 87 tests,
+fmt/clippy green, glsl 15/15.
