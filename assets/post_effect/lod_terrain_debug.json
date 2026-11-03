@@ -198,7 +198,10 @@
             "inputs": [
                 { "sampler_name": "In", "target": "clod_swap" },
                 { "sampler_name": "Height", "target": "clod_h_b" },
-                { "sampler_name": "ColBuf", "target": "clod_c_b" }
+                { "sampler_name": "ColBuf", "target": "clod_c_b" },
+                { "sampler_name": "Scan", "target": "clod_scan" },
+                { "sampler_name": "Rot", "target": "clod_rot_a" },
+                { "sampler_name": "Mask", "target": "clod_mask" }
             ],
             "output": "minecraft:main",
             "uniforms": {

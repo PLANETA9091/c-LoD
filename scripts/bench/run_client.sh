@@ -90,7 +90,7 @@ nohup "$JAVA" -Xmx1200M \
   --accessToken 0 \
   --userType legacy \
   --versionType release \
-  --width 640 --height 360 \
+  --width 1280 --height 720 \
   --quickPlayMultiplayer "127.0.0.1:25565" \
   > /tmp/client.log 2>&1 &
 CLI=$!

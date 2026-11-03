@@ -682,3 +682,26 @@ white-list=false the login proceeds (SetCompression response). Every CI
 dist now writes white-list=false + enforce-secure-profile=false; the
 control boot fingerprints join-critical props into the leg log; control
 failure markers carry the server's disconnect lines. 87 tests.
+
+v6.9.0 RENDERER-DEAD MYTH BUSTED BY PIXEL FORENSICS (CI): the #228 artifact
+(client.log 144 MB + burst PNGs) shows a HEALTHY client — no GL errors, no
+"Failed to apply post effect" warns, tick loop alive to the last line. The
+window forensics: MC runs 640x360 at (320,176) inside the 1280x720 Xvfb
+(--width 640 since the v4.1 bench), so the v6.8.x debug-lens panels rendered
+at screen x 632..952 and the harness lens_metrics (PX0=952, rows 392..712)
+measured the LETTERBOX — lens_zero since v6.7.3 was a letterbox artifact
+(the panels are genuinely empty, so the verdict was right for the wrong
+reason). The burst white-count died because the color panel covers the dust
+column zone (x 634..668, measured on the control arm) since v6.8.2 — the
+lens era IS the renderer-dead era. Also verified in 26.3 bytecode:
+GameRenderer.update prepends minecraft:end_of_frame to every requested list
+(a missing optional hook, harmless warn); preparePostEffects only closes
+persistent targets when chains LEAVE the list (in-game the list persists —
+the cross-frame accumulation design is valid; the every-frame close happens
+only in the !shouldRenderLevel branch, i.e. menus). Fixes: run_client.sh
+--width 1280 --height 720 (documented geometry, burst zone uncovered, one
+ruler for both arms); debug_lens.fsh stage-eye strips (rot conf / scan
+payload rows / carrier mask hits) under the color panel's top frame; the
+debug chain feeds Scan/Rot/Mask to the lens; lens_metrics locates panels by
+their green frames (window-size-proof). Production pack bytes untouched
+(the lens ships only in the debug chain). 87 tests.

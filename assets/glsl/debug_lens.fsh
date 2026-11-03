@@ -26,8 +26,24 @@
 // The pass is appended AFTER clod_blit by packgen when `debug_lens=true`
 // (separate chain template: the production pack never ships this pass and
 // keeps its content-fixed SHA). Panel layout assumes the bench resolution
-// (1280x720; the bottom panel ends at y=656) and reads texCoord bottom-up
-// like every other post pass — the harness crops the full right strip.
+// (1280x720 — run_client.sh launches --width 1280 --height 720 since v6.9.0;
+// the 640x360 era measured the letterbox instead of the panels) and reads
+// texCoord bottom-up like every other post pass — the harness crops the full
+// right strip.
+//
+// v6.9.0 STAGE EYES: three 24x8 px strips sit just under the top frame edge
+// of the color panel (GL y [ya+panel-10, ya+panel-2), x from x0+2, each 24
+// wide + 2 gap). The harness decodes them relative to the located green
+// frame and the verdict names the blind stage:
+//   ROT strip    (x0+2)  : green  (0,220,0)  = camera conf >= 0.25 (live)
+//                          magenta (200,0,200) = decoded once, conf decayed
+//                          yellow (255,255,0)  = camera payload never decoded
+//   SCAN strip   (x0+28) : blue (0,0,v), v = min(hits,15)*17 — payload rows
+//                          found by col_scan in main this frame (both groups)
+//   CARRIER strip(x0+54) : (v,v,0), v = min(grid_hits,240) — carrier pixels
+//                          present in main on a 32x18 sample grid of clod_mask
+// Colors are chosen to never collide with the cell signatures below
+// (red 102/0/0, black, water 70/130/240, dark 31/31/31, frame green 0/153/0).
 
 uniform sampler2D InSampler;      // clod_swap (v6.8.2: the lens REPLACED the
                                   // blit pass — reading minecraft:main while
@@ -35,6 +51,11 @@ uniform sampler2D InSampler;      // clod_swap (v6.8.2: the lens REPLACED the
                                   // feedback loop, GL undefined behavior)
 uniform sampler2D HeightSampler;  // clod_h_b — committed height bytes (1 px = 1 cell)
 uniform sampler2D ColBufSampler;  // clod_c_b — committed color bytes (1 px = 1 cell)
+uniform sampler2D ScanSampler;    // clod_scan — col_scan row reports (v6.9.0)
+uniform sampler2D RotSampler;     // clod_rot_a — the persistent 2x2 camera/fog
+                                  // state (v6.9.0)
+uniform sampler2D MaskSampler;    // clod_mask — this frame's carrier mask
+                                  // (v6.9.0)
 
 // x,y = window min cell (cells), z = window side in cells, w = px per cell.
 layout(std140) uniform ClodLens {
@@ -55,6 +76,62 @@ vec3 color_lattice(float idxF) {
     return vec3(l) * (51.0 / 255.0);
 }
 
+// ---- v6.9.0 stage eyes -----------------------------------------------------
+// Payload rows found in main this frame (clod_scan, both group rows).
+int scan_hits() {
+    int hits = 0;
+    for (int j = 0; j < 640; ++j) {
+        if (texelFetch(ScanSampler, ivec2(j, 0), 0).r > 0.5) { ++hits; }
+        if (texelFetch(ScanSampler, ivec2(j, 1), 0).r > 0.5) { ++hits; }
+    }
+    return hits;
+}
+
+// Carrier pixels present in main this frame (coarse 32x18 grid of clod_mask).
+int carrier_hits() {
+    ivec2 ms = textureSize(MaskSampler, 0);
+    int hits = 0;
+    for (int j = 0; j < 32; ++j) {
+        for (int i = 0; i < 18; ++i) {
+            ivec2 p = ivec2((j * 2 + 1) * ms.x / 64, (i * 2 + 1) * ms.y / 36);
+            if (texelFetch(MaskSampler, p, 0).r > 0.5) { ++hits; }
+        }
+    }
+    return hits;
+}
+
+// Draws the three strips; true when the fragment was consumed.
+bool stage_eyes(vec2 px, float x0, float ya, float panel) {
+    float yTop = ya + panel - 10.0;
+    if (px.y < yTop || px.y >= yTop + 8.0) {
+        return false;
+    }
+    float v;
+    if (px.x >= x0 + 2.0 && px.x < x0 + 26.0) {
+        // ROT strip: the persistent camera pixel (0,0).
+        vec4 rot = texelFetch(RotSampler, ivec2(0, 0), 0);
+        if (rot.a <= 0.001) {
+            fragColor = vec4(1.0, 1.0, 0.0, 1.0);          // never decoded
+        } else if (rot.b >= 0.25) {
+            fragColor = vec4(0.0, 220.0 / 255.0, 0.0, 1.0); // live camera
+        } else {
+            fragColor = vec4(200.0 / 255.0, 0.0, 200.0 / 255.0, 1.0); // decayed
+        }
+        return true;
+    }
+    if (px.x >= x0 + 28.0 && px.x < x0 + 52.0) {
+        v = float(min(scan_hits(), 15)) * 17.0 / 255.0;
+        fragColor = vec4(0.0, 0.0, v, 1.0);
+        return true;
+    }
+    if (px.x >= x0 + 54.0 && px.x < x0 + 78.0) {
+        v = float(min(carrier_hits(), 240)) / 255.0;
+        fragColor = vec4(v, v, 0.0, 1.0);
+        return true;
+    }
+    return false;
+}
+
 void main() {
     vec2 px = texCoord * ScreenSize;
     float win = LensInfo.z;
@@ -66,6 +143,9 @@ void main() {
     // Panel A: the client's committed COLOR map.
     float ya = 8.0;
     if (px.x >= x0 && px.x < x0 + panel && px.y >= ya && px.y < ya + panel) {
+        if (stage_eyes(px, x0, ya, panel)) {
+            return;
+        }
         vec2 cell = minCell + floor((px - vec2(x0, ya)) / ppc);
         vec4 c = texelFetch(ColBufSampler, ivec2(cell), 0);
         vec3 col = vec3(0.12);

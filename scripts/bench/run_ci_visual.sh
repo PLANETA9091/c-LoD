@@ -127,31 +127,52 @@ shot() { # name
 #   lens_black ~ (0,0,0)     = idx 0 committed (the lost-single-dot signature)
 #   lens_water ~ (70,130,240)= idx 216 water committed
 #   lens_dark  ~ (31,31,31)  = never-marked cells (no word ever committed)
-lens_metrics() { # shot_name -> prints lens_red=N lens_black=N lens_water=N lens_dark=N lens_zero=B, saves crop
+lens_metrics() { # shot_name -> prints lens_* + stage eyes, saves crop
   # v6.7.3 ALL-ZERO CLASSIFIER (run 41396294510 lesson): lens_black over BOTH
   # panels (>= 90% each) means the capture chain never committed a single
   # cell this session — a dead pipeline, NOT the one-lost-dot signature
   # (that one is cell-LOCAL: marker cells black while neighbours decode).
   # lens_zero=1 lets the verdict say "probes measure a dead pipeline".
-  python3 - "$SHOTS/$1.png" "$SHOTS/lens_$1.png" <<'PYEOF' 2>/dev/null || { echo "lens_red=? lens_black=? lens_water=? lens_dark=? lens_zero=?"; return 0; }
+  # v6.9.0: the panels are LOCATED via their green frames (0,153,0) instead
+  # of hardcoded rows — the 640x360-window era measured the letterbox
+  # (PX0=952 rows 392..712 were outside the 640x360 window at x=320,y=176),
+  # so every lens_zero since v6.7.3 was a letterbox artifact. The stage-eye
+  # strips (debug_lens.fsh v6.9.0) are decoded relative to the color panel's
+  # top frame edge: rot (green/magenta/yellow), scan (blue value = row hits),
+  # carriers (yellow value = mask grid hits).
+  python3 - "$SHOTS/$1.png" "$SHOTS/lens_$1.png" <<'PYEOF' 2>/dev/null || { echo "lens_red=? lens_black=? lens_water=? lens_dark=? lens_zero=? rot=? scan=? carriers=?"; return 0; }
 import sys
+import numpy as np
 from PIL import Image
 im = Image.open(sys.argv[1]).convert('RGB')
-# Panel geometry (debug_lens.fsh, 1280x720): 320x320 px each on the right
-# edge, GL y is bottom-up -> screenshot rows are flipped. Count ONLY inside
-# the two panel rects — scene pixels in the surrounding strip must never
-# pollute the signatures (a night sky is exactly lens_black-black).
-PX0, PW = 952, 320
-COLOR_ROWS = range(392, 712)   # GL y 8..328  (panel A: color)
-HEIGHT_ROWS = range(64, 384)   # GL y 336..656 (panel B: height)
+a = np.array(im).astype(int)
 crop = im.crop((940, 50, 1280, 720))
 crop.save(sys.argv[2])
-px = im.load()
+H, W = a.shape[:2]
+# locate green frames: (0,153,0) +- tolerance
+gmask = (abs(a[:, :, 0]) < 30) & (a[:, :, 1] > 130) & (a[:, :, 1] < 175) & (abs(a[:, :, 2]) < 30)
+ys, xs = np.where(gmask)
+if len(xs) < 100:
+    print("lens_red=0 lens_black=0 lens_water=0 lens_dark=0 lens_zero=0 rot=none scan=0 carriers=0")
+    raise SystemExit
+# cluster rows into two frames (upper = height panel B, lower = color panel A)
+mid = (ys.min() + ys.max()) // 2
+def bbox(m):
+    yy, xx = ys[m], xs[m]
+    return int(xx.min()), int(yy.min()), int(xx.max()), int(yy.max())
+up = bbox(ys <= mid)
+lo = bbox(ys > mid)
+x0, yA0, x1, yA1 = lo  # color panel outer rect (frame included)
+PW = x1 - x0 + 1
+color_rows = range(yA0 + 2, yA1 - 1)
+height_rows = range(up[1] + 2, up[3] - 1)
 red = black = water = dark = 0
 black_c = black_h = 0
-for y in list(COLOR_ROWS) + list(HEIGHT_ROWS):
-    in_color = y in COLOR_ROWS
-    for x in range(PX0 + 1, PX0 + PW - 1):
+dark_c = dark_h = 0
+px = im.load()
+for y in list(color_rows) + list(height_rows):
+    in_color = y in color_rows
+    for x in range(x0 + 1, x0 + PW - 1):
         r, g, b = px[x, y]
         if 85 <= r <= 120 and g <= 25 and b <= 25:
             red += 1
@@ -163,11 +184,41 @@ for y in list(COLOR_ROWS) + list(HEIGHT_ROWS):
                 black_h += 1
         elif 55 <= r <= 90 and 110 <= g <= 150 and 220 <= b <= 255:
             water += 1
-        elif 24 <= r <= 40 and 24 <= g <= 40 and 24 <= b <= 40:
+        elif in_color and 24 <= r <= 40 and 24 <= g <= 40 and 24 <= b <= 40:
+            # color panel never-marked: (0.12,0.12,0.12) gray
             dark += 1
-PANEL = 320 * (PW - 2)  # rows x inner cols per panel
-zero = 1 if (black_c >= 0.9 * PANEL and black_h >= 0.9 * PANEL) else 0
-print(f"lens_red={red} lens_black={black} lens_water={water} lens_dark={dark} lens_zero={zero}")
+            dark_c += 1
+        elif (not in_color) and 50 <= r <= 80 and g <= 15 and b <= 15:
+            # height panel never-marked: (0.25,0.02,0.02) dark red
+            dark += 1
+            dark_h += 1
+PANEL = 320 * (PW - 2)
+# v6.9.0: "never committed" = the NEVER-MARKED colors on both panels —
+# color panel gray-31, height panel dark-red (64,5,5); the old pure-black
+# rule only fired because the wrong rect measured the letterbox (pure
+# black); committed idx-0 cells are the black signature.
+zero = 1 if (dark_c >= 0.98 * PANEL and dark_h >= 0.98 * PANEL) else 0
+# ---- stage eyes: strips sit at GL y [ya+panel-10, ya+panel-2) = the rows
+# just BELOW the color panel's top frame edge in screenshot space.
+sy0, sy1 = yA0 + 2, yA0 + 10
+def strip(xa, xb):
+    reg = a[sy0:sy1, x0 + xa:x0 + xb]
+    return reg
+rot_reg = strip(2, 26)
+scan_reg = strip(28, 52)
+carr_reg = strip(54, 78)
+rr, rg, rb = rot_reg[:, :, 0], rot_reg[:, :, 1], rot_reg[:, :, 2]
+if (rr > 240).mean() > 0.5 and (rg > 240).mean() > 0.5:
+    rot = "never"
+elif (rr > 150).mean() > 0.3 and (rb > 150).mean() > 0.3 and (rg < 60).mean() > 0.3:
+    rot = "blind"
+elif (rg > 180).mean() > 0.5 and (rr < 60).mean() > 0.5:
+    rot = "ok"
+else:
+    rot = f"mixed({int((rg>180).mean()*100)}g/{int((rr>150).mean()*100)}r)"
+scan_hits = int(scan_reg[:, :, 2].max() / 17.0 + 0.5)
+carr = int(carr_reg[:, :, 0].max() + 0.5)
+print(f"lens_red={red} lens_black={black} lens_water={water} lens_dark={dark} lens_zero={zero} rot={rot} scan={scan_hits} carriers={carr}")
 PYEOF
 }
 
@@ -548,9 +599,20 @@ PYEOF
     # lens decides: the panels are drawn by the chain itself every frame,
     # so the burst screenshot carries the capture's belief for free.
     LZ=$(lens_metrics "09c_burst_close_retry" | grep -o 'lens_zero=[01]' | cut -d= -f2)
+    # v6.9.0 stage eyes ride the summary on the DEAD path: the strips name the
+    # blind stage (rot never/blind/ok, scan payload rows, carrier mask hits).
+    EYES=$(lens_metrics "09c_burst_close_retry" | grep -o 'rot=[a-z()0-9/]* scan=[0-9]* carriers=[0-9]*')
     echo "- preflight lens_zero=${LZ:-?} (1 = capture NEVER committed = no particle EVER rendered)" | tee -a "$SUMMARY"
+    echo "- preflight stage eyes: ${EYES:-?} (rot=never → camera payload never decoded; scan=0 → no payload rows in frame; carriers=0 → carrier mask empty; all live → capture gates)" | tee -a "$SUMMARY"
     if [ "${LZ:-0}" = "1" ]; then
-      fail "RENDERER DEAD: no particles at all (close=${BC:-?}, retry=${BC2:-?}) AND the capture never committed (lens_zero=1) — the client has not rendered a single carrier since boot; run INVALID, the transport verdict is N/A"
+      case "$EYES" in
+        *scan=0*) REASON="no payload rows in frame (the carrier/payload particles never made it into main — vantage/frustum/spawn side)" ;;
+        *rot=never*) REASON="camera payload never decoded (rot conf dead — the camera channel is the blind stage)" ;;
+        *rot=blind*) REASON="camera confidence decayed (stale pose — the payload stopped arriving mid-session)" ;;
+        *carriers=0*) REASON="carrier mask empty while the camera is live (the capture gates — depth strobe/projection — reject everything)" ;;
+        *) REASON="all eyes live but zero commits — the capture merge path itself" ;;
+      esac
+      fail "RENDERER DEAD: no particles at all (close=${BC:-?}, retry=${BC2:-?}) AND the capture never committed (lens_zero=1) — stage eyes say: ${REASON}; run INVALID, the transport verdict is N/A"
       { echo ""
         echo "### client log tail (renderer death forensics)"
         echo '```'
