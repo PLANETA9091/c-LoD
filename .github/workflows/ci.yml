@@ -383,7 +383,7 @@ jobs:
           # verdict — a runner Mesa/llvmpipe bump is a prime suspect for a
           # client that renders nothing.
           sudo apt-get install -y -qq xvfb ffmpeg libgl1 libglx-mesa0 libgl1-mesa-dri mesa-utils
-          python3 -m pip install --quiet --user pillow python-xlib
+          python3 -m pip install --quiet --user pillow numpy python-xlib
       - name: Build module (release)
         run: cargo build --release
       - name: Build CRUSSTY runtime + launcher
@@ -572,7 +572,7 @@ jobs:
           echo "$(date -u +%FT%TZ) control X11+GL+pip start" >> ~/mc-test/control-steps.log
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb ffmpeg libgl1 libglx-mesa0 libgl1-mesa-dri mesa-utils
-          python3 -m pip install --quiet --user pillow python-xlib
+          python3 -m pip install --quiet --user pillow numpy python-xlib
           echo "$(date -u +%FT%TZ) control X11+GL+pip ok" >> ~/mc-test/control-steps.log
       - name: Fetch Paper 26.3
         run: |

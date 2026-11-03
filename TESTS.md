@@ -705,3 +705,17 @@ payload rows / carrier mask hits) under the color panel's top frame; the
 debug chain feeds Scan/Rot/Mask to the lens; lens_metrics locates panels by
 their green frames (window-size-proof). Production pack bytes untouched
 (the lens ships only in the debug chain). 87 tests.
+
+v6.9.1 WINDOW-FIX FALLOUT NAMED AND GUARDED (CI #229): the 1280x720 window
+moved the pack prompt's Proceed button to y 420..475; the fixed click
+(561,385) landed ABOVE it, the client sat on the prompt the whole session,
+and the burst preflight measured the prompt's own white text as "5405 white
+px renderer alive" — a menu passed the renderer gate. Fixes: the prompt
+click is DYNAMIC (locate the Proceed label's white pixels in the button
+band y 410..480, x 120..700, click its center; the yellow warning only
+gates when to click — verified on the #229 prompt PNG: click lands at
+(406,445), dead center); a PROMPT GUARD after the close burst fails the run
+immediately ("PACK NEVER ACCEPTED") instead of measuring a menu for 12
+minutes; numpy joins the CI pip deps (the v6.9.0 lens_metrics locator needs
+it — on #229 every lens metric printed "?" from the numpy ImportError, the
+stage eyes never reached the feed). 87 tests, fmt/clippy green.

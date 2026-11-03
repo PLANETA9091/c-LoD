@@ -236,19 +236,42 @@ paint_px() { # a.png b.png -> changed pixel count, ALWAYS a single line
 }
 
 accept_pack_prompt() { # tag loops — wait for the yellow prompt, click Proceed
+  # v6.9.0 WINDOW FIX FALLOUT: with the client window at 1280x720 the prompt
+  # renders FULL-SIZE — the yellow warning sits at y~288..335 and the Proceed
+  # button (the LEFT one) at x~185..630, y~420..475. The old fixed click
+  # (561,385) landed ABOVE the button → the pack was never accepted and the
+  # client sat on the prompt all session (run #229: the "5405 white px
+  # renderer alive" was the prompt's own white text!). The click is now
+  # DYNAMIC: locate the Proceed button by its white label inside the button
+  # band (y 390..560, x 100..700) and click the label's center; the yellow
+  # detector only gates WHEN to click.
   local tag="$1" loops="$2"
   for _ in $(seq 1 "$loops"); do
     ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 \
       -i :99 -frames:v 1 /tmp/prompt_probe.png 2>/dev/null
-    if python3 -c "
+    XY=$(python3 -c "
 from PIL import Image
 im = Image.open('/tmp/prompt_probe.png').convert('RGB')
-cnt = sum(1 for y in range(330, 365) for x in range(380, 900)
-          if (lambda p: p[0] > 220 and p[1] > 220 and p[2] < 120)(im.getpixel((x, y))))
-print(1 if cnt > 30 else 0)
-" | grep -q "^1$"; then
-      python3 "$BENCH_DIR/click.py" 561 385
-      note "$tag: pack prompt clicked"
+px = im.load()
+warn = sum(1 for y in range(280, 370) for x in range(200, 1100)
+           if (lambda p: p[0] > 220 and p[1] > 220 and p[2] < 120)(px[x, y]))
+if warn <= 30:
+    print('')  # no prompt yet
+else:
+    xs, ys = [], []
+    for y in range(410, 480):
+        for x in range(120, 700):
+            p = px[x, y]
+            if p[0] > 235 and p[1] > 235 and p[2] > 235:
+                xs.append(x); ys.append(y)
+    if xs:
+        print(f'{(min(xs)+max(xs))//2} {(min(ys)+max(ys))//2}')
+    else:
+        print('561 447')  # documented Proceed center at 1280x720
+")
+    if [ -n "$XY" ]; then
+      python3 "$BENCH_DIR/click.py" $XY
+      note "$tag: pack prompt clicked at ($XY)"
       return 0
     fi
     sleep 2
@@ -543,6 +566,22 @@ print(n)
 PYEOF
 )
 echo "- burst_close white px: ${BC:-?} (renderer alive if > 50)" | tee -a "$SUMMARY"
+# v6.9.0 PROMPT GUARD (run #229 lesson): the prompt screen's own white text
+# (5405 px) passes the "renderer alive" gate while the client never accepted
+# the pack — the run then burns 12 minutes measuring a menu. If the pack
+# prompt is still on screen HERE, fail immediately with the real cause.
+if python3 -c "
+from PIL import Image
+import os
+im = Image.open(f\"{os.environ.get('SHOTS','/home/runner/mc-test/shots/ci-visual')}/09_burst_close.png\").convert('RGB')
+px = im.load()
+warn = sum(1 for y in range(280, 370) for x in range(200, 1100)
+           if (lambda p: p[0] > 220 and p[1] > 220 and p[2] < 120)(px[x, y]))
+print(1 if warn > 30 else 0)" | grep -q "^1$"; then
+  fail "PACK NEVER ACCEPTED: the resource-pack prompt is still on screen at the burst probe — the click missed the Proceed button (or the prompt re-appeared); every downstream number is a menu measurement; run INVALID"
+  cp "$SUMMARY" "$SHOTS/summary.md" 2>/dev/null || true
+  exit 1
+fi
 srv "particle minecraft:end_rod $((CX - 2)) 150 $CZ 1 1 1 0 1200 force"
 sleep 1
 shot 09b_burst_far || exit 1
