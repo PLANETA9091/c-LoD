@@ -665,3 +665,20 @@ sanity/boot/client/probes; the setup_client step got its start/ok trace.
 Both failure markers carry the leg logs (publisher self-tested on a
 scratch remote: voxy marker + leg.log in run dir; control marker +
 leg.log). 87 tests, fmt/clippy green.
+
+v6.8.7 WHITE-LIST DEFAULT, BYTE-EXACT (CI): run #227's traces named both
+deaths. (1) voxy leg: the leg.log showed the real <=1 s killer — NOT the
+curl pipeline, but a self-copy `cp -f "$D/paper-26.3.jar" ./paper-26.3.jar`
+(the download path IS the cwd; GNU cp rc=1 under set -e) — guarded with
+an `-ef` test. (2) control arm: boot ok, client booted, handshake+hello
+-> instant login_disconnect (43 bytes) -> join never happened. The new
+protocol probe (scripts/bench/ctl_login_probe.py) reproduced it locally
+against the EXACT control dist (Paper 26.3 build 238 + the same 5-line
+server.properties + Java 25): the server's own words are
+"You are not whitelisted on this server!" — Paper 26.3's FIRST BOOT
+appends white-list=true to a minimal server.properties (the historical
+default was false). Fix validated by the same probe: with an explicit
+white-list=false the login proceeds (SetCompression response). Every CI
+dist now writes white-list=false + enforce-secure-profile=false; the
+control boot fingerprints join-critical props into the leg log; control
+failure markers carry the server's disconnect lines. 87 tests.

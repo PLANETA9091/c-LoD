@@ -37,12 +37,12 @@ if [ -z "$PAPER_JAR" ]; then
   URL=$(echo "$API_JSON" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['downloads']['server:default']['url'])") || {
     echo "FATAL: papermc API response not parseable / missing server:default (first 300 bytes):"
     echo "$API_JSON" | head -c 300; echo; exit 1; }
-  echo "api ok, downloading $(echo "$API_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("name","paper build ?"))' 2>/dev/null || echo 'paper build ?')"
+  echo "api ok, downloading $(echo "$API_JSON" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d["downloads"]["server:default"].get("name","paper build ?"))' 2>/dev/null || echo 'paper build ?')"
   curl -sS --fail --retry 3 --retry-delay 2 --max-time 300 -o "$D/paper-26.3.jar" "$URL" || {
     echo "FATAL: Paper jar download failed: $URL"; exit 1; }
   PAPER_JAR="$D/paper-26.3.jar"
 fi
-cp -f "$PAPER_JAR" ./paper-26.3.jar
+cp -f "$PAPER_JAR" ./paper-26.3.jar 2>/dev/null || [ "./paper-26.3.jar" -ef "$PAPER_JAR" ] || { echo "FATAL: cannot stage paper jar ($PAPER_JAR -> ./paper-26.3.jar)"; exit 1; }
 echo "eula=true" > eula.txt
 # pinned seed + deterministic world; view distance 8 matches the client
 cat > server.properties <<EOF

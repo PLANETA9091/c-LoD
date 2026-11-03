@@ -220,6 +220,8 @@ jobs:
           printf 'eula=true\n' > dist/eula.txt
           {
             echo 'online-mode=false'
+            echo 'white-list=false'
+            echo 'enforce-secure-profile=false'
             echo 'view-distance=6'
             echo 'simulation-distance=6'
             echo 'server-port=25565'
@@ -436,6 +438,8 @@ jobs:
           printf 'eula=true\n' > dist/eula.txt
           {
             echo 'online-mode=false'
+            echo 'white-list=false'
+            echo 'enforce-secure-profile=false'
             echo 'view-distance=4'
             echo 'simulation-distance=4'
             echo 'server-port=25565'
@@ -585,6 +589,8 @@ jobs:
           printf 'eula=true\n' > dist/eula.txt
           {
             echo 'online-mode=false'
+            echo 'white-list=false'
+            echo 'enforce-secure-profile=false'
             echo 'view-distance=6'
             echo 'simulation-distance=6'
             echo 'server-port=25565'

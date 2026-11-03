@@ -83,6 +83,12 @@ if [ "${CLOD_CONTROL:-0}" = "1" ]; then
     sleep 2
   done
   grep -q "Done (" /tmp/server.log 2>/dev/null || { echo "TIMEOUT waiting for vanilla boot"; tail -40 /tmp/server.log; exit 1; }
+  # v6.8.7 JOIN-KILLER FINGERPRINT: Paper 26.3's FIRST-BOOT defaults append
+  # white-list=true to a minimal server.properties — the #227 control client
+  # was kicked at login ("You are not whitelisted on this server!", 43 bytes,
+  # reproduced byte-exact by scripts/bench/ctl_login_probe.py). Print the
+  # join-critical lines into the leg log on every control boot.
+  grep -hE "^(white-list|enforce-whitelist|online-mode|enforce-secure-profile)=" server.properties 2>/dev/null || true
   echo "=== control server is up (stdin: /tmp/server.in, log: /tmp/server.log) ==="
   exit 0
 fi

@@ -42,6 +42,10 @@ if [ ! -f "$SRC/summary.md" ]; then
     # v6.8.6: the pulse leg's own stdout/stderr (run_ci_visual.sh tees it
     # when CLOD_CONTROL=1) — names a death the per-step trace does not.
     cp "$HOME/mc-test/control-leg.log" "/tmp/cfeed/run-${RUN_ID}/control-leg.log" 2>/dev/null || true
+    # v6.8.7: the SERVER's own words name login refusals — the #227 root
+    # cause (white-list=true first-boot default) was in this log.
+    cp /tmp/server.log "/tmp/cfeed/run-${RUN_ID}/server.log" 2>/dev/null || true
+    cp /tmp/client.log "/tmp/cfeed/run-${RUN_ID}/client.log" 2>/dev/null || true
     {
       echo "# control run ${RUN_ID} (#${RUN_NO}) — FAILURE (no summary) $(date -u +%FT%TZ)"
       echo
@@ -56,6 +60,12 @@ if [ ! -f "$SRC/summary.md" ]; then
       echo "## control-leg.log tail (the pulse leg's own stdout/stderr)"
       echo '```'
       tail -30 "$HOME/mc-test/control-leg.log" 2>/dev/null || echo "(no leg log — the death predates the v6.8.6 tee)"
+      echo '```'
+      echo
+      echo "## server.log tail (join refusals name themselves here)"
+      echo '```'
+      grep -aE "Disconnecting|lost connection|whitelist|white-list|Failed to verify|Invalid session" /tmp/server.log 2>/dev/null | tail -6
+      tail -10 /tmp/server.log 2>/dev/null || echo "(no server log)"
       echo '```'
     } > "/tmp/cfeed/run-${RUN_ID}-control.md"
     cd /tmp/cfeed

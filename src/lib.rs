@@ -75,7 +75,7 @@ pub unsafe extern "C" fn cplugin_init(
         cfg.region_blocks, cfg.cell_size, cfg.http_port, cfg.fov, cfg.particles_per_tick
     ));
     log_info(
-        "c-LoD v6.8.6: EVERY SILENT DEATH NAMED — run 41472301678 killed the voxy leg in <=1 s (trace: start then nothing) and the control pulse in 8.5 untraced minutes: the voxy leg now tees its whole stdout/stderr into voxy-leg.log and traces every stage (server up / client joined / shot n/9) into voxy-steps.log, the Paper download in run_server_voxy.sh is --fail --retry 3 with the API's own words on any refusal; the control pulse tees into control-leg.log and traces sanity/boot/client/probes; both failure markers carry the leg logs — the feed can no longer be blinded by a death it cannot read",
+        "c-LoD v6.8.7: THE #227 CONTROL KILL ROOT-CAUSED, BYTE-EXACT — the protocol probe (ctl_login_probe.py, run against a local Paper 26.3 boot of the EXACT control dist) caught the server's own words: 'You are not whitelisted on this server!' (43 bytes) — Paper 26.3's first boot appends white-list=true to a minimal server.properties, so the offline control client was kicked at login before a single frame; every CI dist now writes white-list=false + enforce-secure-profile=false explicitly and the control boot fingerprints the join-critical props into the leg log; the voxy leg's real <=1 s killer was a self-copy cp (download resolves INTO the server dir, cp file onto itself, rc=1 under set -e) — guarded with -ef; control failure markers now carry the server's own disconnect lines",
     );
 
     let st = engine::State::new(cfg);
