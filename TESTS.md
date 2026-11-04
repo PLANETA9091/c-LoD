@@ -893,3 +893,17 @@ the queue below skips them as clean. 93 tests (new:
 fresh_edits_stream_before_the_backlog_tail — a fresh edit streams
 through a 64-dot cap while a 300-cell stale backlog waits), fmt/clippy
 green.
+
+v6.9.11 THE 15-MIN WINDOW + THE HONEST THRESHOLD (CI #241): the
+recent-edit priority DELIVERED the fill — LEG 1's red=93 px is the
+marker's own column (the carrier dots no longer pad it in non-red light
+phases; noon repeats keep the light flat) — but two numbers were still
+calibrated for the carrier era. (1) MIN_PROBE 150 -> 60: the honest
+marker silhouette measures ~93 px; the old threshold passed only when
+the red-phase carrier column padded it by 1500 px. (2)
+REARM_EDIT_WINDOW_TICKS 600 -> 9000: LEG 1 failing means its full
+24-probe loop runs (~11 min), so the fill->relog gap hit ~8.5 min and
+the marker's cells aged out of the stamped set (rearm 0c — every relog
+probe all-zero). The re-arm cycle's own re-deliveries refresh the
+stamps once the span is live; 15 min only has to cover LEG 1. 92 tests,
+fmt/clippy green.

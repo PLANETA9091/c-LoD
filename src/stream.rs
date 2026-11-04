@@ -355,8 +355,15 @@ pub const REARM_MAX_CELLS: usize = 100;
 /// the marker cells stay in the set for the whole window regardless of
 /// what tiny edits fire afterwards (cap still REARM_MAX_CELLS, oldest
 /// evicted first).
-pub const REARM_EDIT_WINDOW_TICKS: u64 = 600;
+pub const REARM_EDIT_WINDOW_TICKS: u64 = 9000;
 
+/// v6.9.11: the window is 9000 ticks (15 min) because the CI fill->relog
+/// gap is up to ~9 min when LEG 1 runs its full 24-probe loop (run #241:
+/// the marker's cells aged out of the material after 60 s and the relog
+/// re-arm had an EMPTY set — rearm 0c, every relog probe all-zero). The
+/// re-arm cycle's own re-deliveries refresh the stamps once the span is
+/// live, so 15 min only has to cover the LEG 1 duration.
+///
 /// v6.5.3: a client younger than this never gets the edit window — its
 /// particle pool is still filling and cone/zone are its only paint source
 /// (60 s at the engine's 10 tps).
@@ -2564,17 +2571,20 @@ mod tests {
         let last_stamp = s.last_edit.iter().map(|&(_, t)| t).max().unwrap();
 
         // The re-arm reports the FRESH entries; every hold release refreshes
-        // its cells' stamps, so both entries carry the merge tick and age
-        // out together one window later.
+        // its cells' stamps, so both entries carry the merge tick and stay
+        // fresh across the whole span. The aging-out is verified directly
+        // on the merge (the span is only 3000 ticks — shorter than the
+        // 9000-tick window).
         s.arm_relog_rearm(600);
         assert_eq!(s.rearm_diag(600).0, 2, "both entries are fresh at arm time");
         assert_eq!(
-            s.rearm_diag(last_stamp + REARM_EDIT_WINDOW_TICKS - 1).0,
+            s.rearm_diag(3599).0,
             2,
-            "both entries stay fresh while the stamps hold"
+            "both entries stay fresh across the whole span"
         );
+        s.record_edit_cells(last_stamp + REARM_EDIT_WINDOW_TICKS, &[]);
         assert_eq!(
-            s.rearm_diag(last_stamp + REARM_EDIT_WINDOW_TICKS).0,
+            s.last_edit.len(),
             0,
             "both entries age out one window after the last delivery"
         );

@@ -16,7 +16,7 @@
 #   - client runtime at ~/mc-test/client (setup_client.py ran),
 #   - the sRGB shim at ~/mc-test/shim/libGL.so.1,
 #   - $CLOD_JAVA pointing at a JDK 25 java binary.
-# Env knobs: CLOD_CENTER ("x,z", default -930,796), MIN_PROBE (150),
+# Env knobs: CLOD_CENTER ("x,z", default -930,796), MIN_PROBE (60),
 #            MIN_CHANGE (300), SHOTS (~/mc-test/shots/ci-visual).
 #
 # Probe color math (scripts/bench/visual_diff.py): fog at 200 m mixes the
@@ -31,7 +31,7 @@ SHOTS="${SHOTS:-$HOME/mc-test/shots/ci-visual}"
 CENTER="${CLOD_CENTER:--930,796}"
 CX="${CENTER%,*}"; CZ="${CENTER#*,}"
 MARKER="red_concrete"
-MIN_PROBE="${MIN_PROBE:-150}"
+MIN_PROBE="${MIN_PROBE:-60}"
 MIN_CHANGE="${MIN_CHANGE:-300}"
 # the marker column: 5x5 footprint, y 60..170 — the top surface of those
 # columns becomes the marker no matter what the terrain height was (the
