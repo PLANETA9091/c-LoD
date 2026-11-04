@@ -768,6 +768,24 @@ fn manage_players(state: &Arc<State>, env: Env) {
         //    on the in-world screen, not on the loading terrain screen.
         if st.joined_tick == 0 {
             st.joined_tick = state.tick_no.load(Ordering::Relaxed).max(1);
+            // v6.9.5 RELOG RE-ARM: a NEW session (the CI leg 2 relog, an
+            // operator's client, a second player). The per-player entry is
+            // dropped on leave (the retain below), so every rejoin lands
+            // here. The streamer keeps the last genuine edit's cells cycling
+            // through the rebeat queue (drain + release with reset
+            // electrons) for REARM_SPAN_TICKS — the fresh client's particle
+            // pool saturates within seconds and plain cone/zone re-streams
+            // never win slots again (run #235: red=0 on every relog probe
+            // while LEG 1 painted the same cells), and the span outlives the
+            // pack prompt + tp + sky-row rot bootstrap. A join before any
+            // edit is a no-op (nothing to re-arm).
+            let now = state.tick_no.load(Ordering::Relaxed).max(1);
+            state.stream.lock().unwrap().arm_relog_rearm(now);
+            crate::log_info(&format!(
+                "relog re-armed for {} (the last edit's cells cycle drain+release for {} ticks)",
+                p.uuid,
+                crate::stream::REARM_SPAN_TICKS
+            ));
         }
         let joined_longs_enough =
             state.tick_no.load(Ordering::Relaxed) >= st.joined_tick + PACK_PUSH_DELAY_TICKS;
@@ -983,9 +1001,12 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
         rescan_e,
         rb_q,
         rb_left,
+        ra_c,
+        ra_t,
     ) = {
         let s = state.stream.lock().unwrap();
         let (rb_q, rb_left) = s.rebeat_diag();
+        let (ra_c, ra_t) = s.rearm_diag(tick);
         (
             s.valid_cells(),
             s.laps,
@@ -998,6 +1019,8 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
             s.rescan_edits,
             rb_q,
             rb_left,
+            ra_c,
+            ra_t,
         )
     };
     // v5.5 frontier diagnostics: wish = in-flight FORCED tickets,
@@ -1088,7 +1111,7 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     }
     let p0 = players.first();
     crate::log_info(&format!(
-        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}) ewin {} rbeat {rb_q}p/{rb_left} rescan {rescan_c}c/{rescan_e}e, edits {e_char}{e_pushes}p/{e_cells}c/{e_edits}e drop {e_drops}, spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} ~{kbps} kB/s {cache_stat}",
+        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}) ewin {} rbeat {rb_q}p/{rb_left} rearm {ra_c}c/{ra_t}t rescan {rescan_c}c/{rescan_e}e, edits {e_char}{e_pushes}p/{e_cells}c/{e_edits}e drop {e_drops}, spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} ~{kbps} kB/s {cache_stat}",
         state.stream.lock().unwrap().edit_window,
         jni::STREAM_SPAWNED.load(Ordering::Relaxed),
         jni::STREAM_FAILED.load(Ordering::Relaxed),

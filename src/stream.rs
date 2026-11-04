@@ -307,6 +307,33 @@ pub const EDIT_BEATS_MAX: u32 = 8;
 /// Cap on pending rebeat entries (the marker edits are tens of cells).
 pub const REBEAT_MAX: usize = 512;
 
+/// v6.9.5 RELOG RE-ARM: how long after a NEW session joins the streamer
+/// keeps the last genuine edit's cells cycling through the rebeat queue.
+/// Why: run #235 settled the relog failure — LEG 1 painted the marker
+/// (red=1604) while EVERY relog probe read red=0, with the camera channel
+/// correct (az/el/cam buckets frame-exact) and dots demonstrably flowing
+/// (strobe/mask hits in the sweep windows). The difference is the delivery
+/// protocol, not the data: LEG 1's marker went through the edit window
+/// (hold: the wire silences, the client's saturated particle pool drains,
+/// release: the dots land into the EMPTIED pool), while the relog client
+/// only ever saw plain cone/zone re-streams — its pool refills to
+/// saturation within seconds of the join and after that every new spawn
+/// loses the slot race, so the marker words never strobe again. The one
+/// rebeat window that happened to be pending at the join fired while the
+/// fresh client's camera channel was still blind (probe 0: cam "?") — a
+/// coin toss, hence "stream state is not persistent/deterministic". The
+/// re-arm makes it deterministic: each cycle is drain + release with reset
+/// electrons, retried until the client's rot channel is ready (the pack
+/// prompt, the tp to the vantage and the sky-row bootstrap all fit inside
+/// the span) or the span expires (90 s at the 10 tps engine cadence).
+pub const REARM_SPAN_TICKS: u64 = 900;
+
+/// v6.9.5: cap on the recorded last-edit cells (the genuine-edit gate
+/// never arms above EDIT_HOLD_MAX_BATCH recent decodable cells; stale
+/// queue stragglers streamed by the same release are cut here so the
+/// re-arm stays a bounded marker-sized batch).
+pub const REARM_MAX_CELLS: usize = 100;
+
 /// v6.5.3: a client younger than this never gets the edit window — its
 /// particle pool is still filling and cone/zone are its only paint source
 /// (60 s at the engine's 10 tps).
@@ -367,6 +394,14 @@ pub struct Streamer {
     /// v6.6.2: the upcoming arm comes from a rebeat re-dirty — its release
     /// must not schedule another rebeat (one retry, not a loop).
     pending_rebeat: bool,
+    /// v6.9.5 RELOG RE-ARM: the cells of the last genuine edit release —
+    /// the set a relogging client must re-receive through a drain+release
+    /// window (its pool saturates; plain re-streams never land). Bounded by
+    /// REARM_MAX_CELLS.
+    last_edit: Vec<u32>,
+    /// v6.9.5: engine tick until which the re-arm keeps cycling the last
+    /// edit's cells (0 = the re-arm is off).
+    rearm_until: u64,
     /// v6.7.1: retry beats per genuine edit (the `edit_beats` CLOD_OPTS
     /// knob, default EDIT_BEATS_DEFAULT). 0 disables the rebeat entirely.
     pub edit_beats: u32,
@@ -392,6 +427,16 @@ pub struct Streamer {
     /// caught (encoded words changed).
     pub rescan_cells: u64,
     pub rescan_edits: u64,
+}
+
+/// v6.9.5: what a dirty-phase release should do beyond streaming.
+struct ReleaseOpts<'a> {
+    /// Push a rebeat entry per streamed cell (a genuine-edit release or a
+    /// continuation beat while the episode counter allows).
+    schedule_rebeat: bool,
+    /// v6.9.5 RELOG RE-ARM: receive the cells actually streamed — the
+    /// caller stores the last genuine edit's set as the re-arm material.
+    record: Option<&'a mut Vec<u32>>,
 }
 
 impl Streamer {
@@ -420,6 +465,8 @@ impl Streamer {
             rebeat_armed: false,
             rebeat_beats_left: 0,
             pending_rebeat: false,
+            last_edit: Vec::new(),
+            rearm_until: 0,
             edit_beats: EDIT_BEATS_DEFAULT,
             dirty_pending: 0,
             dirty_streams: 0,
@@ -487,6 +534,32 @@ impl Streamer {
     /// stream diag line — ops see the bounded retry sequence live).
     pub fn rebeat_diag(&self) -> (usize, u32) {
         (self.rebeat.len(), self.rebeat_beats_left)
+    }
+
+    /// v6.9.5 diag: (re-arm cells, ticks left) — 0/0 while the span is off.
+    /// The `rearm` token of the stream diag line.
+    pub fn rearm_diag(&self, now: u64) -> (usize, u64) {
+        if now < self.rearm_until {
+            (self.last_edit.len(), self.rearm_until - now)
+        } else {
+            (0, 0)
+        }
+    }
+
+    /// v6.9.5 RELOG RE-ARM: a NEW session joined (any fresh per-player entry
+    /// — the CI leg 2 relog, an operator's client, a second player). If the
+    /// last genuine edit's cells are known, keep them cycling through the
+    /// rebeat queue for REARM_SPAN_TICKS: each cycle is a drain+release
+    /// with reset electrons — the only delivery that lands in a relogging
+    /// client's saturating pool, and it must outlive the client's camera
+    /// bootstrap (pack prompt, tp, sky-row rot decode) to be decoded. A
+    /// join before any genuine edit is a no-op: the boot paint flows
+    /// through the fresh-client path exactly as before.
+    pub fn arm_relog_rearm(&mut self, now: u64) {
+        if self.last_edit.is_empty() {
+            return;
+        }
+        self.rearm_until = now + REARM_SPAN_TICKS;
     }
 
     pub fn get(&self, cx: u32, cz: u32) -> Option<Cell> {
@@ -728,7 +801,9 @@ impl Streamer {
     /// `schedule_rebeat` is set (a genuine-edit release or a continuation
     /// beat while the episode counter allows), every streamed cell gets a
     /// retry entry — the rebeat re-dirties it REBEAT_DELAY_TICKS later for
-    /// another complete-decode chance.
+    /// another complete-decode chance. v6.9.5: `release.record` receives the
+    /// cells actually streamed (the caller keeps the last genuine edit's
+    /// set for the relog re-arm).
     fn stream_dirty(
         &mut self,
         cap: usize,
@@ -736,7 +811,7 @@ impl Streamer {
         now: u64,
         edit_streamed: &mut u64,
         dirty_cap_hit: &mut bool,
-        schedule_rebeat: bool,
+        mut release: ReleaseOpts<'_>,
     ) {
         let sub = self.cell_size as f64 / SUB_PER_CELL;
         let q_len = self.dirty_queue.len();
@@ -756,8 +831,13 @@ impl Streamer {
                 self.push_cell_spawns(idx_u32, sub, now, true);
                 self.dirty_streams += 1;
                 *edit_streamed += 1;
-                if schedule_rebeat && self.rebeat.len() < REBEAT_MAX {
+                if release.schedule_rebeat && self.rebeat.len() < REBEAT_MAX {
                     self.rebeat.push_back((idx_u32, now + REBEAT_DELAY_TICKS));
+                }
+                if let Some(rec) = release.record.as_deref_mut() {
+                    if rec.len() < REARM_MAX_CELLS {
+                        rec.push(idx_u32);
+                    }
                 }
             } else {
                 // Nobody can decode it now — keep it queued for later.
@@ -856,6 +936,27 @@ impl Streamer {
             self.edit_window = 0;
         }
 
+        // ---- v6.9.5 RELOG RE-ARM --------------------------------------------
+        // While the span is live, keep the last edit's cells queued for a
+        // re-dirty REBEAT_DELAY_TICKS out: the pop re-dirties them (cutting
+        // any post silence), the decision arms the hold, and the release
+        // lands them into the drained pool with reset electrons. Plain
+        // cone/zone re-streams cannot do this for a relogged client — its
+        // pool saturates within seconds and never frees a slot for the
+        // marker words again (run #235). The dedup keeps one pending entry
+        // per cell; the entries the pop consumed re-queue on the next tick.
+        if now < self.rearm_until && !self.last_edit.is_empty() {
+            for &idx in self.last_edit.iter() {
+                if self.rebeat.len() >= REBEAT_MAX {
+                    break;
+                }
+                let i = idx as usize;
+                if !self.dirty[i] && !self.rebeat.iter().any(|&(e, _)| e == idx) {
+                    self.rebeat.push_back((idx, now + REBEAT_DELAY_TICKS));
+                }
+            }
+        }
+
         // ---- phase 0: dirty delta (v5.4) + the v6.5.3 edit window ----------
         // Runs #202-#206 measured the real killer: the steady-state refresh
         // stream saturates the vanilla client's particle pool, so an edit's
@@ -902,31 +1003,56 @@ impl Streamer {
                     } else {
                         schedule_rebeat = false;
                     }
+                    // v6.9.5: a genuine episode's delivered cells become the
+                    // relog re-arm's material (a continuation beat streams
+                    // the same set — skip the re-record).
+                    let mut recorded = Vec::new();
+                    let record = self.rebeat_armed.then_some(&mut recorded);
                     self.stream_dirty(
                         cap,
                         views,
                         now,
                         &mut edit_streamed,
                         &mut dirty_cap_hit,
-                        schedule_rebeat,
+                        ReleaseOpts {
+                            schedule_rebeat,
+                            record,
+                        },
                     );
-                    if edit_streamed > 0 && !dirty_cap_hit && !fresh_audience {
-                        self.edit_window = EDIT_WINDOW_TICKS; // beat 3
+                    if self.rebeat_armed && !recorded.is_empty() {
+                        self.last_edit = recorded;
+                    }
+                    if edit_streamed > 0
+                        && !dirty_cap_hit
+                        && (!fresh_audience || now < self.rearm_until)
+                    {
+                        // beat 3. v6.9.5: during the re-arm span the fresh
+                        // release gets the post-silence too — the released
+                        // dots' lifetime is the decode window, and the next
+                        // re-dirty (REBEAT_DELAY out) cuts the rest anyway.
+                        self.edit_window = EDIT_WINDOW_TICKS;
                     }
                 }
             } else if self.edit_window > 0 {
                 // Beat 3: post-release silence — the released dots' lifetime
                 // must pass with no competition. New edits wait here.
-            } else if fresh_audience {
+            } else if fresh_audience && now >= self.rearm_until {
                 // A fresh client's pool is empty and cone/zone are its only
                 // paint — stream dirty cells straight through, never hold.
+                // v6.9.5: UNLESS the relog re-arm is live — then the
+                // re-armed cells fall through to the idle decision below
+                // and go through the hold (the drain is the whole point:
+                // a relogged client's pool saturates in seconds).
                 self.stream_dirty(
                     cap,
                     views,
                     now,
                     &mut edit_streamed,
                     &mut dirty_cap_hit,
-                    false,
+                    ReleaseOpts {
+                        schedule_rebeat: false,
+                        record: None,
+                    },
                 );
             } else {
                 // Idle: decide between a genuine edit (HOLD first) and
@@ -967,7 +1093,10 @@ impl Streamer {
                         now,
                         &mut edit_streamed,
                         &mut dirty_cap_hit,
-                        false,
+                        ReleaseOpts {
+                            schedule_rebeat: false,
+                            record: None,
+                        },
                     );
                 }
             }
@@ -1990,6 +2119,260 @@ mod tests {
         assert_eq!(
             s.edit_window, 0,
             "a dirty wave must not silence the steady state"
+        );
+    }
+
+    /// v6.9.5 RELOG RE-ARM: after the marker edit delivered once (the
+    /// genuine episode), a NEW session (arm_relog_rearm) with a FRESH view
+    /// must get the same cells re-delivered through the hold/release
+    /// protocol — repeatedly, not once. Run #235's failure was exactly
+    /// here: the fresh client's pool saturates and plain re-streams never
+    /// land, while the ONE pending rebeat window fired into a still-blind
+    /// camera. The re-arm cycles drain+release until the span expires, so
+    /// the fresh client sees MULTIPLE reset-electron releases even though
+    /// the v6.5.3 fresh-client exemption would normally skip the hold.
+    #[test]
+    fn relog_rearm_cycles_the_last_edit_through_the_drain() {
+        let (cx, cz, region) = (-930.0, 796.0, 512);
+        let half = f64::from(region) * 0.5;
+        let mut s = Streamer::new(cx - half, cz - half, region, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
+            }
+        }
+        let settled = |now: u64| ViewHint {
+            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            look: look_dir(-90.0, 5.0),
+            now,
+            age_ticks: u64::MAX,
+        };
+        let fresh_at = |now: u64, joined: u64| ViewHint {
+            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            look: look_dir(-90.0, 5.0),
+            now,
+            age_ticks: now.saturating_sub(joined),
+        };
+        // The genuine edit: hold -> release -> the cells are recorded.
+        let _: Vec<Spawn> = s.tick_batch(2048, &[settled(400)]).to_vec();
+        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 401);
+        let _: Vec<Spawn> = s.tick_batch(2048, &[settled(401)]).to_vec();
+        for t in 402..(401 + EDIT_HOLD_TICKS) {
+            let _: Vec<Spawn> = s.tick_batch(2048, &[settled(t)]).to_vec();
+        }
+        let v = settled(401 + EDIT_HOLD_TICKS);
+        let batch: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        assert!(
+            batch.iter().any(|sp| sp.y == RESET_Y),
+            "the genuine release must carry the reset electron"
+        );
+        assert_eq!(
+            s.rearm_diag(461),
+            (0, 0),
+            "no re-arm before a session change"
+        );
+
+        // THE RELOG: a fresh client joins (the engine's per-player entry is
+        // brand-new) and the streamer is armed.
+        let joined = 460;
+        s.arm_relog_rearm(470);
+        assert_eq!(
+            s.rearm_diag(470).0,
+            1,
+            "the last edit's single cell is the re-arm material"
+        );
+        // The pending rebeat entry (scheduled by the genuine release) fires
+        // REBEAT_DELAY_TICKS out; the FRESH audience must take the HOLD path
+        // now (the re-arm span suspends the v6.5.3 straight-through).
+        let redirty = 470 + 40;
+        let v = fresh_at(redirty, joined);
+        let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        assert_eq!(
+            s.edit_hold, EDIT_HOLD_TICKS,
+            "the re-armed cells must go through the drain even for a fresh audience"
+        );
+        // Hold ticks: the drain (the wire stays silent).
+        for t in (redirty + 1)..(redirty + EDIT_HOLD_TICKS) {
+            let v = fresh_at(t, joined);
+            let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        }
+        // Release: the reset electron rides again — the fresh client gets a
+        // complete-decode chance into its (drained) pool.
+        let v = fresh_at(redirty + EDIT_HOLD_TICKS, joined);
+        let batch: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        assert!(
+            batch.iter().any(|sp| sp.y == RESET_Y),
+            "the relog release must carry the reset electron"
+        );
+        // ...and the cycle must REPEAT (that is the determinism fix): keep
+        // ticking the span and count further reset-electron releases.
+        let mut releases = 1u32;
+        for t in (redirty + EDIT_HOLD_TICKS + 1)..(joined + 400) {
+            let v = fresh_at(t, joined);
+            let batch: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+            if batch.iter().any(|sp| sp.y == RESET_Y) {
+                releases += 1;
+                assert_eq!(
+                    s.dirty_pending, 0,
+                    "each relog release must drain the edit queue (t={t})"
+                );
+            }
+        }
+        assert!(
+            releases >= 3,
+            "the re-arm must cycle the drain+release repeatedly (got {releases})"
+        );
+        assert!(
+            s.rearm_diag(joined + 400).1 > 0,
+            "the span must still be live mid-window"
+        );
+    }
+
+    /// v6.9.5: the re-arm is inert without edit material (a join before any
+    /// genuine edit changes nothing — the boot paint flows as before) and
+    /// stops cycling once the span expires.
+    #[test]
+    fn rearm_needs_edit_material_and_expires_with_the_span() {
+        let (cx, cz, region) = (-930.0, 796.0, 512);
+        let half = f64::from(region) * 0.5;
+        let mut s = Streamer::new(cx - half, cz - half, region, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
+            }
+        }
+        let fresh_at = |now: u64, joined: u64| ViewHint {
+            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            look: look_dir(-90.0, 5.0),
+            now,
+            age_ticks: now.saturating_sub(joined),
+        };
+        // A join with NOTHING edited yet: the arm is a no-op and no hold
+        // ever arms (the fresh straight-through path serves the boot paint).
+        s.arm_relog_rearm(100);
+        assert_eq!(
+            s.rearm_diag(100),
+            (0, 0),
+            "no edit material -> the re-arm stays off"
+        );
+        for t in 100..140 {
+            let v = fresh_at(t, 100);
+            let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+            assert_eq!(s.edit_hold, 0, "no material -> no drain (t={t})");
+        }
+
+        // NOW a genuine edit, a release, and a relog: the span cycles —
+        // until it expires. Past the span no new entries are queued and the
+        // steady state resumes with no holds and no reset electrons.
+        let settled = ViewHint {
+            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            look: look_dir(-90.0, 5.0),
+            now: 200,
+            age_ticks: u64::MAX,
+        };
+        let _: Vec<Spawn> = s.tick_batch(2048, &[settled]).to_vec();
+        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 201);
+        let _: Vec<Spawn> = s.tick_batch(2048, &[settled]).to_vec();
+        for t in 202..(201 + EDIT_HOLD_TICKS) {
+            let v = ViewHint {
+                eye: [cx - 75.0, 150.0 + 1.62, cz],
+                look: look_dir(-90.0, 5.0),
+                now: t,
+                age_ticks: u64::MAX,
+            };
+            let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        }
+        let v = ViewHint {
+            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            look: look_dir(-90.0, 5.0),
+            now: 201 + EDIT_HOLD_TICKS,
+            age_ticks: u64::MAX,
+        };
+        let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        let joined = 400;
+        s.arm_relog_rearm(joined);
+        let span_end = joined + REARM_SPAN_TICKS;
+        // The span is live: holds DO arm for the fresh audience.
+        let mut held = false;
+        let mut late_resets = 0u32;
+        for t in joined..(span_end + REBEAT_DELAY_TICKS + EDIT_HOLD_TICKS + 60) {
+            let v = fresh_at(t, joined);
+            let batch: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+            if t < span_end && s.edit_hold > 0 {
+                held = true;
+            }
+            if t >= span_end + REBEAT_DELAY_TICKS + EDIT_HOLD_TICKS
+                && batch.iter().any(|sp| sp.y == RESET_Y)
+            {
+                late_resets += 1;
+            }
+        }
+        assert!(held, "the span must arm holds while live");
+        assert_eq!(
+            late_resets, 0,
+            "past the span + one drain cycle, the re-arm must be silent"
+        );
+        assert_eq!(
+            s.last_edit.len(),
+            1,
+            "the material stays recorded after the span"
+        );
+        assert_eq!(
+            s.rearm_diag(span_end + REBEAT_DELAY_TICKS + EDIT_HOLD_TICKS + 59),
+            (0, 0),
+            "the diag reports the span off once it expires"
+        );
+    }
+
+    /// v6.9.5: the re-arm's material is the GENUINE edit's cells only — a
+    /// wave streamed straight through must not overwrite it (the boot
+    /// backlog is wave material by definition; the relog re-arm exists for
+    /// marker-sized edits).
+    #[test]
+    fn wave_stream_does_not_overwrite_rearm_material() {
+        let (cx, cz, region) = (-930.0, 796.0, 512);
+        let half = f64::from(region) * 0.5;
+        let mut s = Streamer::new(cx - half, cz - half, region, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
+            }
+        }
+        let settled = |now: u64| ViewHint {
+            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            look: look_dir(-90.0, 5.0),
+            now,
+            age_ticks: u64::MAX,
+        };
+        // A small genuine edit: hold -> release -> recorded.
+        let _: Vec<Spawn> = s.tick_batch(2048, &[settled(400)]).to_vec();
+        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 401);
+        let _: Vec<Spawn> = s.tick_batch(2048, &[settled(401)]).to_vec();
+        for t in 402..(401 + EDIT_HOLD_TICKS) {
+            let _: Vec<Spawn> = s.tick_batch(2048, &[settled(t)]).to_vec();
+        }
+        let _: Vec<Spawn> = s
+            .tick_batch(2048, &[settled(401 + EDIT_HOLD_TICKS)])
+            .to_vec();
+        assert_eq!(
+            s.last_edit.len(),
+            1,
+            "the genuine edit's single cell is recorded"
+        );
+
+        // A WAVE (400 fresh decodable dirty cells) streams straight through
+        // and must NOT become the re-arm material.
+        for cz in 120..140u32 {
+            for cx in 120..140u32 {
+                s.set_cell(cx, cz, cell(80, false, [100, 100, 100]), 5001);
+            }
+        }
+        assert!(s.dirty_pending > 256, "test must build a wave");
+        let _: Vec<Spawn> = s.tick_batch(2048, &[settled(5001)]).to_vec();
+        assert_eq!(
+            s.last_edit.len(),
+            1,
+            "the wave must not overwrite the re-arm material"
         );
     }
 

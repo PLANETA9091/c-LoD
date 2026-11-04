@@ -774,3 +774,27 @@ verdict also confirmed: particles composite INSIDE the main frame pass
 the dots ARE in main at chain time; the blind spot is now only the capture
 merge/strobe itself. Synthetic decode verified (cam 8/9, az 0, el 3,
 hits=30, mask=5 on the x8 scale). 87 tests, glsl 15/15, fmt/clippy green.
+
+v6.9.5 RELOG RE-ARM (CI #235 verdict: LEG 1 PASS red=1604, every relog
+probe red=0 with the camera frame-exact and dots demonstrably flowing in
+the sweep windows): the relog failure was the DELIVERY PROTOCOL, not the
+data. LEG 1's marker went through the edit window (hold: the wire
+silences and the client's saturated particle pool drains; release: the
+dots land into the EMPTIED pool), while the relogged client only ever saw
+plain cone/zone re-streams — its pool refills to saturation within
+seconds of the join and every later spawn loses the slot race, so the
+marker words never strobe again. The one rebeat window pending at the
+join fired into a still-blind camera (probe 0: cam "?" / strobe=22 — a
+coin toss, hence "stream state is not persistent/deterministic"). Fix:
+arm_relog_rearm on every NEW session (the per-player entry is dropped on
+leave, so every rejoin lands there) — the streamer keeps the last
+genuine edit's cells cycling through the rebeat queue (drain + release
+with reset electrons) for REARM_SPAN_TICKS=900 (90 s: the pack prompt +
+tp + sky-row rot bootstrap all fit inside); the v6.5.3 fresh-client
+straight-through exemption is suspended while the span is live (the
+drain IS the point), the fresh release gets the post-silence, and the
+release records its delivered cells (REARM_MAX_CELLS=100, waves never
+overwrite). The diag line carries `rearm Nc/Tt`. 90 tests (3 new: the
+re-arm cycles the drain repeatedly for a fresh audience; inert without
+edit material and silent past the span; waves do not overwrite the
+material), glsl 17 OK, fmt/clippy -D warnings green, YAML 12 jobs.
