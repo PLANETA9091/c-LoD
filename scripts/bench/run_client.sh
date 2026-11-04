@@ -44,6 +44,12 @@ grep -q "^simulationDistance:" "$OPT" && sed -i 's/^simulationDistance:.*/simula
 # v5.1.1 A/B hygiene: vanilla clouds drift between shots and poison the
 # pixel diff with thousands of false-change pixels. Kill them.
 grep -q "^renderClouds:" "$OPT" && sed -i 's/^renderClouds:.*/renderClouds:false/' "$OPT" || echo "renderClouds:false" >> "$OPT"
+# v6.9.12: pin the particles video setting — LEG 2's client rendered NO
+# particles at all (#243's forensics: 189-point bursts arrive every 10 s,
+# a shot taken 2 s into a burst shows ZERO non-sky pixels) while LEG 1
+# rendered the same geometry; the persisted options.txt from LEG 1's
+# exit is the prime suspect.
+grep -q "^particles:" "$OPT" && sed -i 's/^particles:.*/particles:0/' "$OPT" || echo "particles:0" >> "$OPT"
 
 export LP_NUM_THREADS=$(nproc)
 

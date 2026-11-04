@@ -1083,7 +1083,12 @@ impl Streamer {
                 if !self.dirty[i] {
                     if self.rebeat.len() < REBEAT_MAX && !self.rebeat.iter().any(|&(e, _)| e == idx)
                     {
-                        self.rebeat.push_back((idx, now + REBEAT_DELAY_TICKS));
+                        // v6.9.12: REBEAT_DELAY_TICKS(40) -> 5 — the re-arm
+                        // cycle period drops from ~10 s to ~6.5 s, so the
+                        // 3-5 s dots overlap between releases (run #243's
+                        // burst-per-10-s left the screen empty between
+                        // flashes). The dedup keeps one entry per cell.
+                        self.rebeat.push_back((idx, now + 5));
                     }
                 } else if now.saturating_sub(self.dirty_since[i]) >= RECENT_EDIT_TICKS {
                     self.dirty_since[i] = now;

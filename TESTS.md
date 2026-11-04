@@ -907,3 +907,21 @@ the marker's cells aged out of the stamped set (rearm 0c — every relog
 probe all-zero). The re-arm cycle's own re-deliveries refresh the
 stamps once the span is live; 15 min only has to cover LEG 1. 92 tests,
 fmt/clippy green.
+
+v6.9.12 THE LEG-2 RENDERER PROBE + THE SHORT CYCLE (CI #243 forensics):
+the stamped set held (rearm 21c), LEG 1 PASS red=2961 with the honest
+threshold — and the relog probes were all-zero while the ARTIFACT's
+client.log proves the delivery NOW WORKS: exactly 189 level_particles
+packets every 10 s (21 cells x 9 dots = the re-arm release burst), from
+join to leave, INCLUDING every probe window — and a shot taken 2 s into
+a burst shows ZERO non-sky pixels. The leg-2 client renders NO
+particles at all while LEG 1 rendered the same geometry; the pack IS
+applied (the 19:57:43 reload line carries server/6b1f2f7e). Three
+answers: (1) the harness fires the LEG-1-style console end_rod burst at
+the vantage before the relog probes and measures it with the same white
+ruler — "leg-2 renderer probe white px" lands in the verdict: 0 means
+the leg-2 client draws NOTHING (a client state, not the transport);
+(2) options.txt gains a particles:0 pin (the LEG-1-exit persisted
+options are the prime suspect); (3) the re-arm cycle period drops 10 s
+-> 6.5 s (the re-push re-dirty delay 40 -> 5) so the 3-5 s dots overlap
+between releases. 93 tests, fmt/clippy green.

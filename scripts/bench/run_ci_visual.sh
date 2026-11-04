@@ -823,6 +823,18 @@ srv "time set noon"  # v6.4.8: was 'time set 6000' — night in the 26.3 scale
 srv "gamemode spectator Stepan"
 srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"
 sleep 30   # fresh session: the dust must re-deliver the persisted disk
+# v6.9.12 LEG-2 RENDERER PROBE: run #243's forensics caught the leg-2
+# client rendering NO particles at all (189-point re-arm bursts arrive
+# every 10 s; a shot taken 2 s into a burst shows ZERO non-sky pixels)
+# while LEG 1 rendered the same geometry. Fire the same console end_rod
+# burst LEG 1 uses and measure it with the same ruler: if the white
+# count is dead, the leg-2 verdict is a CLIENT state, not the transport.
+srv "particle minecraft:end_rod $((VX + 20)) 150 $CZ 0.2 0.2 0.2 0 400 force"
+sleep 1
+shot 14_leg2_burst || exit 1
+L2B=$(white_count 14_leg2_burst)
+sum "- leg-2 renderer probe white px: ${L2B:-?} (client renders particles if > 20; 0 = the leg-2 client draws NOTHING — a client state, not the transport)"
+echo "- leg-2 renderer probe white px: ${L2B:-?}" >> "$PROBE_LOG"
 for k in $(seq 0 11); do
   assert_online "relog probe $k" || exit 1
   srv "time set noon"  # v6.9.8: keep the light flat across the window
