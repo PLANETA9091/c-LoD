@@ -798,3 +798,20 @@ overwrite). The diag line carries `rearm Nc/Tt`. 90 tests (3 new: the
 re-arm cycles the drain repeatedly for a fresh audience; inert without
 edit material and silent past the span; waves do not overwrite the
 material), glsl 17 OK, fmt/clippy -D warnings green, YAML 12 jobs.
+
+v6.9.6 THE RE-STAMP (CI #236 verdict: LEG 1 PASS red=734, the re-arm
+bursts demonstrably flowed — strobe/mask hits in EVERY relog window, the
+camera frame-exact at 9/12 probes — and still red=0 everywhere): the
+relog client joins at SPAWN, hundreds of blocks from the marker, so the
+re-armed cells went dirty while UNDECODABLE and sat in the queue through
+the whole pack-prompt+tp window (~35 s); their dirty_since aged past
+RECENT_EDIT_TICKS=200 and the genuine-edit decision stopped counting
+them — the hold NEVER armed, the words streamed wave-style (no drain)
+into the saturated pool, and every delivery lost the slot race. The
+v6.9.5 test missed it: its fresh view sat at the vantage from tick one.
+Fix: while the re-arm span is live, re-stamp the still-queued re-arm
+cells as RECENT each tick — the edit window stays ARMABLE until the
+client's view can finally decode them; the first post-tp decision arms
+the drain and the release lands. 91 tests (new:
+rearm_stays_armable_through_a_stale_queued_episode — spawn view, stale
+queue, tp revives the drain), fmt/clippy -D warnings green.

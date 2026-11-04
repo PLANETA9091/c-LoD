@@ -936,7 +936,7 @@ impl Streamer {
             self.edit_window = 0;
         }
 
-        // ---- v6.9.5 RELOG RE-ARM --------------------------------------------
+        // ---- v6.9.5/v6.9.6 RELOG RE-ARM -------------------------------------
         // While the span is live, keep the last edit's cells queued for a
         // re-dirty REBEAT_DELAY_TICKS out: the pop re-dirties them (cutting
         // any post silence), the decision arms the hold, and the release
@@ -945,14 +945,30 @@ impl Streamer {
         // pool saturates within seconds and never frees a slot for the
         // marker words again (run #235). The dedup keeps one pending entry
         // per cell; the entries the pop consumed re-queue on the next tick.
+        //
+        // v6.9.6 (run #236's lesson): a cell that went dirty while the
+        // client was still at SPAWN (undecodable — the marker is hundreds
+        // of blocks away) sits in the queue through the whole prompt+tp
+        // window, and its dirty_since ages past RECENT_EDIT_TICKS — the
+        // genuine-edit decision then stops counting it, the hold NEVER
+        // arms, and the cells stream wave-style (no drain) into the
+        // saturated pool forever: red=0 on every probe although the re-arm
+        // bursts visibly flowed (strobe/mask hits in every #236 window).
+        // While the span is live, re-stamp the still-queued cells as
+        // RECENT — the edit window stays ARMABLE until the client's view
+        // can finally decode them (the harness tp's to the vantage ~35 s
+        // into the session; the first post-tp decision then arms the drain
+        // and the release lands).
         if now < self.rearm_until && !self.last_edit.is_empty() {
             for &idx in self.last_edit.iter() {
-                if self.rebeat.len() >= REBEAT_MAX {
-                    break;
-                }
                 let i = idx as usize;
-                if !self.dirty[i] && !self.rebeat.iter().any(|&(e, _)| e == idx) {
-                    self.rebeat.push_back((idx, now + REBEAT_DELAY_TICKS));
+                if !self.dirty[i] {
+                    if self.rebeat.len() < REBEAT_MAX && !self.rebeat.iter().any(|&(e, _)| e == idx)
+                    {
+                        self.rebeat.push_back((idx, now + REBEAT_DELAY_TICKS));
+                    }
+                } else if now.saturating_sub(self.dirty_since[i]) >= RECENT_EDIT_TICKS {
+                    self.dirty_since[i] = now;
                 }
             }
         }
@@ -2373,6 +2389,98 @@ mod tests {
             s.last_edit.len(),
             1,
             "the wave must not overwrite the re-arm material"
+        );
+    }
+
+    /// v6.9.6 (#236's lesson): the relog client joins at SPAWN — hundreds of
+    /// blocks from the marker — so the re-armed cells go dirty while
+    /// UNDECODABLE and sit in the queue through the whole prompt+tp window;
+    /// their dirty_since ages past RECENT_EDIT_TICKS and the genuine-edit
+    /// decision stops counting them: the hold never arms, the words stream
+    /// wave-style into the saturated pool, red=0 on every probe. The fix
+    /// re-stamps the still-queued cells as RECENT while the span is live,
+    /// so the FIRST post-tp decision arms the drain and the release lands.
+    #[test]
+    fn rearm_stays_armable_through_a_stale_queued_episode() {
+        let (cx, cz, region) = (-930.0, 796.0, 512);
+        let half = f64::from(region) * 0.5;
+        let mut s = Streamer::new(cx - half, cz - half, region, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
+            }
+        }
+        let settled = |now: u64| ViewHint {
+            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            look: look_dir(-90.0, 5.0),
+            now,
+            age_ticks: u64::MAX,
+        };
+        // The genuine edit delivers once and records its cell.
+        let _: Vec<Spawn> = s.tick_batch(2048, &[settled(400)]).to_vec();
+        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 401);
+        let _: Vec<Spawn> = s.tick_batch(2048, &[settled(401)]).to_vec();
+        for t in 402..(401 + EDIT_HOLD_TICKS) {
+            let _: Vec<Spawn> = s.tick_batch(2048, &[settled(t)]).to_vec();
+        }
+        let _: Vec<Spawn> = s
+            .tick_batch(2048, &[settled(401 + EDIT_HOLD_TICKS)])
+            .to_vec();
+        assert_eq!(s.last_edit.len(), 1, "the edit cell is recorded");
+
+        // The relog client joins at SPAWN (the far corner of the disk — the
+        // marker cells are NOT decodable from there).
+        let joined = 460;
+        let spawn_view = |now: u64| ViewHint {
+            eye: [0.5, 70.0, 0.5],
+            look: look_dir(0.0, 0.0),
+            now,
+            age_ticks: now.saturating_sub(joined),
+        };
+        s.arm_relog_rearm(470);
+        // The re-arm entry pops ~40 ticks out; the cell goes dirty and the
+        // spawn view cannot decode it — it must sit queued, no hold, and
+        // (without the re-stamp) age out of the RECENT window.
+        let mut queued_seen = false;
+        let mut held_while_blind = false;
+        for t in 470..900 {
+            let v = spawn_view(t);
+            let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+            if s.dirty_pending > 0 {
+                queued_seen = true;
+            }
+            if s.edit_hold > 0 {
+                held_while_blind = true;
+            }
+        }
+        assert!(queued_seen, "the cell must sit queued while undecodable");
+        assert!(
+            !held_while_blind,
+            "no drain may arm for a view that cannot decode the cells"
+        );
+
+        // THE TP: the view arrives at the vantage. The re-stamp must have
+        // kept the cell RECENT, so the very first decisions arm the drain.
+        let mut armed = false;
+        let mut released = false;
+        for t in 900..1100 {
+            let v = settled(t);
+            let batch: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+            if s.edit_hold == EDIT_HOLD_TICKS {
+                armed = true;
+            }
+            if batch.iter().any(|sp| sp.y == RESET_Y) {
+                released = true;
+                break;
+            }
+        }
+        assert!(
+            armed,
+            "the post-tp decision must arm the drain (the re-stamp)"
+        );
+        assert!(
+            released,
+            "the post-tp release must carry the reset electron into the drained pool"
         );
     }
 
