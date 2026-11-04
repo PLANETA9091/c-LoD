@@ -609,9 +609,10 @@ impl Streamer {
     /// re-arm pass — a background cosmetic edit can never erase the
     /// marker's cells while they are inside the window.
     fn record_edit_cells(&mut self, now: u64, cells: &[u32]) {
-        if cells.is_empty() {
-            return;
-        }
+        // The prune runs FIRST — even on an empty merge the aging must
+        // advance (the tick passed in is the merge's clock).
+        self.last_edit
+            .retain(|&(_, t)| now.saturating_sub(t) < REARM_EDIT_WINDOW_TICKS);
         for &idx in cells {
             if let Some(e) = self.last_edit.iter_mut().find(|e| e.0 == idx) {
                 e.1 = now;
@@ -619,8 +620,6 @@ impl Streamer {
                 self.last_edit.push((idx, now));
             }
         }
-        self.last_edit
-            .retain(|&(_, t)| now.saturating_sub(t) < REARM_EDIT_WINDOW_TICKS);
         if self.last_edit.len() > REARM_MAX_CELLS {
             self.last_edit.sort_by_key(|&(_, t)| t);
             let excess = self.last_edit.len() - REARM_MAX_CELLS;
