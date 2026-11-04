@@ -1,5 +1,3 @@
 # c-LoD visual verdicts
 
-- run 41910426284 (#245) b6d829e 2026-11-04T21:09:06Z: 1 FAIL lines in summary
-- run 41913791144 (#246) CONTROL 903cf98: CONTROL PASS, drift=drift=213552
-- run 41913921369 (#247) CONTROL 6984b59: CONTROL PASS, drift=drift=212180
+- run 41913921369 (#247) 6984b59 2026-11-04T21:27:10Z: 1 FAIL lines in summary
