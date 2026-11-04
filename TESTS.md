@@ -925,3 +925,12 @@ the leg-2 client draws NOTHING (a client state, not the transport);
 options are the prime suspect); (3) the re-arm cycle period drops 10 s
 -> 6.5 s (the re-push re-dirty delay 40 -> 5) so the 3-5 s dots overlap
 between releases. 93 tests, fmt/clippy green.
+
+v6.9.13 THE DISTANCE-CUT PROBE (CI #244): the leg-2 renderer probe came
+back ALIVE (543 white px on the console end_rod burst 20 blocks from
+the vantage) while the re-arm's dots at 75-105 m stayed invisible —
+the distance is now the prime suspect (a vanilla particle render cut
+at the loaded client-chunk radius; server view-distance 4 = 64 blocks).
+The probe splits in two: NEAR (20 m, inside any cut) and FAR (80 m, at
+the marker zone). NEAR alive + FAR dead names the cut; both alive
+convicts the re-arm dots themselves. 93 tests, fmt/clippy green.
