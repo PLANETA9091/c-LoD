@@ -873,27 +873,43 @@ impl Streamer {
         mut release: ReleaseOpts<'_>,
     ) {
         let sub = self.cell_size as f64 / SUB_PER_CELL;
-        // v6.9.9 RE-ARM PRIORITY: while the span is live, the re-arm's cells
-        // stream FIRST — before the shared dirty queue. Run #239: the cycle
-        // armed and released every ~100 ticks (ewin ~260, holds cycling)
-        // while the 22 marker cells sat at the TAIL of the 12k-entry
-        // backlog queue — each release filled the batch cap on the
-        // decode-band backlog cells (their duplicates re-queue forever) and
-        // broke before ever reaching the tail: spawned=0, mask/strobe=0 on
-        // every probe, dirty monotonically +22/100t. The re-arm set is
-        // bounded (REARM_MAX_CELLS) and its cells are decodable by
-        // construction (they stream in LEG 1), so they fit the cap with
-        // room to spare; the queue below then skips them as clean.
-        if now < self.rearm_until {
-            self.last_edit
-                .retain(|&(_, t)| now.saturating_sub(t) < REARM_EDIT_WINDOW_TICKS);
-            let rearm_cells: Vec<u32> = self.last_edit.iter().map(|&(i, _)| i).collect();
-            for idx in rearm_cells {
+        // v6.9.10 RECENT-EDIT PRIORITY: the fresh (RECENT_EDIT_TICKS-young)
+        // decodable dirty cells stream FIRST — before the shared dirty
+        // queue — capped at EDIT_HOLD_MAX_BATCH. Runs #239/#240: a genuine
+        // edit's cells land at the TAIL of the 12k-entry backlog queue, and
+        // each release's pop fills the 1024-dot batch cap on decode-band
+        // backlog cells whose duplicates re-queue forever — the tail is
+        // unreachable by construction. #239's span-gated re-arm priority
+        // fixed the relog leg but left LEG 1 on the "lucky walk" (#240's
+        // fill never reached the client at all: red=0 on all 24 probes).
+        // The recent-edit gate is the SAME predicate the genuine-edit
+        // decision uses, so every fresh edit — the marker fill, the
+        // background cosmetic edits, the re-arm's re-dirties — now rides
+        // the release front; the queue below then skips them as clean.
+        if self.dirty_pending > 0 {
+            let mut pri: Vec<u32> = Vec::new();
+            let mut seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
+            for &idx_u32 in self.dirty_queue.iter() {
+                if pri.len() >= EDIT_HOLD_MAX_BATCH as usize {
+                    break;
+                }
+                if !seen.insert(idx_u32) {
+                    continue;
+                }
+                let i = idx_u32 as usize;
+                if self.dirty[i]
+                    && now.saturating_sub(self.dirty_since[i]) < RECENT_EDIT_TICKS
+                    && self.decodable_by_any(i, views)
+                {
+                    pri.push(idx_u32);
+                }
+            }
+            for idx in pri {
                 if self.batch.len() >= cap {
                     break;
                 }
                 let i = idx as usize;
-                if self.dirty[i] && self.decodable_by_any(i, views) {
+                if self.dirty[i] {
                     self.push_cell_spawns(idx, sub, now, true);
                     self.dirty_streams += 1;
                     *edit_streamed += 1;
@@ -2561,6 +2577,66 @@ mod tests {
             s.rearm_diag(last_stamp + REARM_EDIT_WINDOW_TICKS).0,
             0,
             "both entries age out one window after the last delivery"
+        );
+    }
+
+    /// v6.9.10: a fresh edit's cells stream FIRST, ahead of a backlog that
+    /// would otherwise fill the batch cap (#240's LEG 1: the fill cells sat
+    /// at the tail of the 12k backlog queue; the pop filled the cap on
+    /// decode-band backlog duplicates and the marker never reached the
+    /// client). With the priority pass the fresh cell rides the release
+    /// front even when the cap is tiny and the backlog is huge.
+    #[test]
+    fn fresh_edits_stream_before_the_backlog_tail() {
+        let (cx, cz, region) = (-930.0, 796.0, 512);
+        let half = f64::from(region) * 0.5;
+        let mut s = Streamer::new(cx - half, cz - half, region, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
+            }
+        }
+        let settled = |now: u64| ViewHint {
+            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            look: look_dir(-90.0, 5.0),
+            now,
+            age_ticks: u64::MAX,
+        };
+        // A deep backlog of OLD decodable dirty cells (east band, aged past
+        // RECENT_EDIT_TICKS) — far more dots than any release cap.
+        for cz in 110..118u32 {
+            for cx in 105..145u32 {
+                s.set_cell(cx, cz, cell(90, false, [142, 33, 33]), 100);
+            }
+        }
+        assert!(s.dirty_pending > 250, "test must build a deep backlog");
+        // THE FRESH EDIT lands ~800 ticks later (the backlog is stale by
+        // then): the genuine-edit decision arms on it alone.
+        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 900);
+        let _: Vec<Spawn> = s.tick_batch(64, &[settled(900)]).to_vec();
+        for t in 901..960 {
+            let _: Vec<Spawn> = s.tick_batch(64, &[settled(t)]).to_vec();
+        }
+        // THE RELEASE (cap 64 dots — the backlog alone would fill it): the
+        // fresh cell must ride the priority front.
+        let batch: Vec<Spawn> = s.tick_batch(64, &[settled(960)]).to_vec();
+        let fresh_idx = 128usize * 256 + 128;
+        assert!(
+            !s.dirty[fresh_idx],
+            "the fresh edit must stream despite the cap-filling backlog"
+        );
+        assert!(
+            s.dirty_pending > 250,
+            "the stale backlog must still be queued (the cap cut it)"
+        );
+        let in_fresh_zone = batch
+            .iter()
+            .any(|sp| (-930.5..=-927.5).contains(&sp.x) && (795.5..=798.5).contains(&sp.z));
+        assert!(in_fresh_zone, "the fresh cell's dots must be in the batch");
+        // ...and the fresh cell's reset electron rode along.
+        assert!(
+            batch.iter().any(|sp| sp.y == RESET_Y),
+            "the fresh cell streams as an edit (reset electron)"
         );
     }
 

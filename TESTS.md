@@ -879,3 +879,17 @@ FIRST — before the shared queue pop loop (bounded ≤ REARM_MAX_CELLS,
 decodable-gated, edit=true with reset electrons; the queue then skips
 them as clean). LEG 1's delivery is byte-identical (the span is off
 there). 92 tests, fmt/clippy -D warnings green.
+
+v6.9.10 RECENT-EDIT PRIORITY (CI #240): the span-gated re-arm priority
+fixed the relog leg but left LEG 1 on the lucky walk — #240's fill never
+reached the client at all (red=0 on all 24 probes; the pop filled the
+1024-dot cap on decode-band backlog duplicates before reaching the tail
+where the fill cells sat). Fix: the priority pass is now UNCONDITIONAL
+over fresh edits — RECENT_EDIT_TICKS-young, decodable, dirty cells ride
+every release front (deduped, capped at EDIT_HOLD_MAX_BATCH) — the SAME
+predicate the genuine-edit decision uses. The marker fill, the
+background cosmetic edits and the re-arm's re-dirties all ride the front;
+the queue below skips them as clean. 93 tests (new:
+fresh_edits_stream_before_the_backlog_tail — a fresh edit streams
+through a 64-dot cap while a 300-cell stale backlog waits), fmt/clippy
+green.
