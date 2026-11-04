@@ -873,6 +873,41 @@ impl Streamer {
         mut release: ReleaseOpts<'_>,
     ) {
         let sub = self.cell_size as f64 / SUB_PER_CELL;
+        // v6.9.9 RE-ARM PRIORITY: while the span is live, the re-arm's cells
+        // stream FIRST — before the shared dirty queue. Run #239: the cycle
+        // armed and released every ~100 ticks (ewin ~260, holds cycling)
+        // while the 22 marker cells sat at the TAIL of the 12k-entry
+        // backlog queue — each release filled the batch cap on the
+        // decode-band backlog cells (their duplicates re-queue forever) and
+        // broke before ever reaching the tail: spawned=0, mask/strobe=0 on
+        // every probe, dirty monotonically +22/100t. The re-arm set is
+        // bounded (REARM_MAX_CELLS) and its cells are decodable by
+        // construction (they stream in LEG 1), so they fit the cap with
+        // room to spare; the queue below then skips them as clean.
+        if now < self.rearm_until {
+            self.last_edit
+                .retain(|&(_, t)| now.saturating_sub(t) < REARM_EDIT_WINDOW_TICKS);
+            let rearm_cells: Vec<u32> = self.last_edit.iter().map(|&(i, _)| i).collect();
+            for idx in rearm_cells {
+                if self.batch.len() >= cap {
+                    break;
+                }
+                let i = idx as usize;
+                if self.dirty[i] && self.decodable_by_any(i, views) {
+                    self.push_cell_spawns(idx, sub, now, true);
+                    self.dirty_streams += 1;
+                    *edit_streamed += 1;
+                    if release.schedule_rebeat && self.rebeat.len() < REBEAT_MAX {
+                        self.rebeat.push_back((idx, now + REBEAT_DELAY_TICKS));
+                    }
+                    if let Some(rec) = release.record.as_deref_mut() {
+                        if rec.len() < REARM_MAX_CELLS {
+                            rec.push((idx, now));
+                        }
+                    }
+                }
+            }
+        }
         let q_len = self.dirty_queue.len();
         for _ in 0..q_len {
             if self.batch.len() >= cap {

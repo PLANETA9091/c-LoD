@@ -862,3 +862,20 @@ NOT terrain: it varies per run with the light (#234-237 red-phase 1580-
 diff lands inside it. LEG 1's red>=150 has always measured this column;
 the marker's own silhouette is identical to it. 92 tests (new:
 background_edit_merges_and_ages_out_of_rearm_material), fmt/clippy green.
+
+v6.9.9 RE-ARM PRIORITY OVER THE BACKLOG QUEUE (CI #239, server-log
+forensics): the stamped set held (rearm 21-22c live across leg 2), the
+cycle ran (ewin ~254-255 constant, holds arming every ~100 ticks) — and
+the delivery was STILL empty: spawned=0, mask/strobe=0 on all 12 probes,
+dirty monotonically +22/100t with no resets. The 22 marker cells sat at
+the TAIL of the 12319-entry backlog dirty queue: each release's pop
+walks the queue head-first, the decode-band backlog cells stream into
+the batch (1024-dot cap = ~113 cells), the cap breaks, and the tail —
+the re-arm's own cells, re-queued to the back by their re-dirties — is
+never reached. LEG 1's fill reached the client only through the same
+lucky walk (its own cells re-dirtied at the head by the event push).
+Fix: while the span is live, stream_dirty streams the re-arm's cells
+FIRST — before the shared queue pop loop (bounded ≤ REARM_MAX_CELLS,
+decodable-gated, edit=true with reset electrons; the queue then skips
+them as clean). LEG 1's delivery is byte-identical (the span is off
+there). 92 tests, fmt/clippy -D warnings green.
