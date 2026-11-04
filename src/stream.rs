@@ -344,6 +344,19 @@ pub const REARM_SPAN_TICKS: u64 = 3000;
 /// re-arm stays a bounded marker-sized batch).
 pub const REARM_MAX_CELLS: usize = 100;
 
+/// v6.9.8: how long a recorded edit's cells stay in the re-arm material.
+/// Run #237 showed the re-arm cycling 15 marker cells; run #238 showed it
+/// cycling ONE — a small single-cell background edit (the rescan wave and
+/// the event channel keep firing cosmetically long after the marker)
+/// OVERWROTE the recorded set, and the relog re-arm then re-delivered a
+/// cell nobody cares about while the marker words never landed. The
+/// material is now a STAMPED SET: every genuine release upserts its cells
+/// with the recording tick, entries older than this window drop out, and
+/// the marker cells stay in the set for the whole window regardless of
+/// what tiny edits fire afterwards (cap still REARM_MAX_CELLS, oldest
+/// evicted first).
+pub const REARM_EDIT_WINDOW_TICKS: u64 = 600;
+
 /// v6.5.3: a client younger than this never gets the edit window — its
 /// particle pool is still filling and cone/zone are its only paint source
 /// (60 s at the engine's 10 tps).
@@ -404,11 +417,14 @@ pub struct Streamer {
     /// v6.6.2: the upcoming arm comes from a rebeat re-dirty — its release
     /// must not schedule another rebeat (one retry, not a loop).
     pending_rebeat: bool,
-    /// v6.9.5 RELOG RE-ARM: the cells of the last genuine edit release —
+    /// v6.9.5 RELOG RE-ARM: the cells of the recent genuine edit releases —
     /// the set a relogging client must re-receive through a drain+release
-    /// window (its pool saturates; plain re-streams never land). Bounded by
-    /// REARM_MAX_CELLS.
-    last_edit: Vec<u32>,
+    /// window (its pool saturates; plain re-streams never land). v6.9.8:
+    /// STAMPED entries (cell, recording tick) merged across releases — a
+    /// small background edit must not overwrite the marker's cells —
+    /// bounded by REARM_MAX_CELLS, entries older than
+    /// REARM_EDIT_WINDOW_TICKS drop out.
+    last_edit: Vec<(u32, u64)>,
     /// v6.9.5: engine tick until which the re-arm keeps cycling the last
     /// edit's cells (0 = the re-arm is off).
     rearm_until: u64,
@@ -444,9 +460,10 @@ struct ReleaseOpts<'a> {
     /// Push a rebeat entry per streamed cell (a genuine-edit release or a
     /// continuation beat while the episode counter allows).
     schedule_rebeat: bool,
-    /// v6.9.5 RELOG RE-ARM: receive the cells actually streamed — the
-    /// caller stores the last genuine edit's set as the re-arm material.
-    record: Option<&'a mut Vec<u32>>,
+    /// v6.9.5 RELOG RE-ARM: receive the cells actually streamed (stamped
+    /// with the tick, v6.9.8) — the caller merges them into the re-arm
+    /// material.
+    record: Option<&'a mut Vec<(u32, u64)>>,
 }
 
 impl Streamer {
@@ -547,10 +564,16 @@ impl Streamer {
     }
 
     /// v6.9.5 diag: (re-arm cells, ticks left) — 0/0 while the span is off.
-    /// The `rearm` token of the stream diag line.
+    /// The `rearm` token of the stream diag line. v6.9.8: the count is the
+    /// entries still inside the freshness window.
     pub fn rearm_diag(&self, now: u64) -> (usize, u64) {
         if now < self.rearm_until {
-            (self.last_edit.len(), self.rearm_until - now)
+            let fresh = self
+                .last_edit
+                .iter()
+                .filter(|&&(_, t)| now.saturating_sub(t) < REARM_EDIT_WINDOW_TICKS)
+                .count();
+            (fresh, self.rearm_until - now)
         } else {
             (0, 0)
         }
@@ -570,6 +593,32 @@ impl Streamer {
             return;
         }
         self.rearm_until = now + REARM_SPAN_TICKS;
+    }
+
+    /// v6.9.8: merge a genuine release's cells into the stamped re-arm
+    /// material. Upsert: an existing entry's stamp refreshes, a new cell is
+    /// appended; the cap evicts the OLDEST entries first. Entries older
+    /// than REARM_EDIT_WINDOW_TICKS are pruned on every merge and on every
+    /// re-arm pass — a background cosmetic edit can never erase the
+    /// marker's cells while they are inside the window.
+    fn record_edit_cells(&mut self, now: u64, cells: &[u32]) {
+        if cells.is_empty() {
+            return;
+        }
+        for &idx in cells {
+            if let Some(e) = self.last_edit.iter_mut().find(|e| e.0 == idx) {
+                e.1 = now;
+            } else {
+                self.last_edit.push((idx, now));
+            }
+        }
+        self.last_edit
+            .retain(|&(_, t)| now.saturating_sub(t) < REARM_EDIT_WINDOW_TICKS);
+        if self.last_edit.len() > REARM_MAX_CELLS {
+            self.last_edit.sort_by_key(|&(_, t)| t);
+            let excess = self.last_edit.len() - REARM_MAX_CELLS;
+            self.last_edit.drain(0..excess);
+        }
     }
 
     pub fn get(&self, cx: u32, cz: u32) -> Option<Cell> {
@@ -846,7 +895,7 @@ impl Streamer {
                 }
                 if let Some(rec) = release.record.as_deref_mut() {
                     if rec.len() < REARM_MAX_CELLS {
-                        rec.push(idx_u32);
+                        rec.push((idx_u32, now));
                     }
                 }
             } else {
@@ -969,8 +1018,10 @@ impl Streamer {
         // can finally decode them (the harness tp's to the vantage ~35 s
         // into the session; the first post-tp decision then arms the drain
         // and the release lands).
-        if now < self.rearm_until && !self.last_edit.is_empty() {
-            for &idx in self.last_edit.iter() {
+        if now < self.rearm_until {
+            self.last_edit
+                .retain(|&(_, t)| now.saturating_sub(t) < REARM_EDIT_WINDOW_TICKS);
+            for &(idx, _) in self.last_edit.iter() {
                 let i = idx as usize;
                 if !self.dirty[i] {
                     if self.rebeat.len() < REBEAT_MAX && !self.rebeat.iter().any(|&(e, _)| e == idx)
@@ -1030,10 +1081,13 @@ impl Streamer {
                         schedule_rebeat = false;
                     }
                     // v6.9.5: a genuine episode's delivered cells become the
-                    // relog re-arm's material (a continuation beat streams
-                    // the same set — skip the re-record).
-                    let mut recorded = Vec::new();
-                    let record = self.rebeat_armed.then_some(&mut recorded);
+                    // relog re-arm's material. v6.9.8: EVERY hold release
+                    // records (stamped upserts) — continuation beats refresh
+                    // their cells' stamps so the material lives as long as
+                    // the cycle runs, and a background single-cell edit that
+                    // joins the episode ADDS itself instead of overwriting
+                    // the marker's cells (#238's `rearm 1c`).
+                    let mut recorded: Vec<(u32, u64)> = Vec::new();
                     self.stream_dirty(
                         cap,
                         views,
@@ -1042,11 +1096,12 @@ impl Streamer {
                         &mut dirty_cap_hit,
                         ReleaseOpts {
                             schedule_rebeat,
-                            record,
+                            record: Some(&mut recorded),
                         },
                     );
-                    if self.rebeat_armed && !recorded.is_empty() {
-                        self.last_edit = recorded;
+                    if !recorded.is_empty() {
+                        let cells: Vec<u32> = recorded.iter().map(|&(i, _)| i).collect();
+                        self.record_edit_cells(now, &cells);
                     }
                     if edit_streamed > 0
                         && !dirty_cap_hit
@@ -2399,6 +2454,78 @@ mod tests {
             s.last_edit.len(),
             1,
             "the wave must not overwrite the re-arm material"
+        );
+    }
+
+    /// v6.9.8 (#238's `rearm 1c` lesson): the re-arm material is a STAMPED
+    /// SET merged across releases — a small single-cell background edit
+    /// (the rescan/event channel keeps firing cosmetically after the
+    /// marker) ADDS itself instead of overwriting the marker's cells, and
+    /// entries age out of the set after REARM_EDIT_WINDOW_TICKS.
+    #[test]
+    fn background_edit_merges_and_ages_out_of_rearm_material() {
+        let (cx, cz, region) = (-930.0, 796.0, 512);
+        let half = f64::from(region) * 0.5;
+        let mut s = Streamer::new(cx - half, cz - half, region, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
+            }
+        }
+        let settled = |now: u64| ViewHint {
+            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            look: look_dir(-90.0, 5.0),
+            now,
+            age_ticks: u64::MAX,
+        };
+        // The marker edit (the disk-center cell) delivers and records.
+        let _: Vec<Spawn> = s.tick_batch(2048, &[settled(400)]).to_vec();
+        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 401);
+        let _: Vec<Spawn> = s.tick_batch(2048, &[settled(401)]).to_vec();
+        for t in 402..(401 + EDIT_HOLD_TICKS) {
+            let _: Vec<Spawn> = s.tick_batch(2048, &[settled(t)]).to_vec();
+        }
+        let _: Vec<Spawn> = s
+            .tick_batch(2048, &[settled(401 + EDIT_HOLD_TICKS)])
+            .to_vec();
+        assert_eq!(s.last_edit.len(), 1, "the marker cell is recorded");
+
+        // A small background edit east of the vantage (decodable, in cone —
+        // cell (129,128), whose LO probe is still inside the band) delivers
+        // ~60 ticks later and must MERGE. The marker's own rebeat entry
+        // re-dirties the marker cell mid-window (the post-silence cuts),
+        // so both cells ride ONE release a few ticks past the naive
+        // hold+1 schedule — the loop ticks until the merge registers.
+        s.set_cell(129, 128, cell(90, false, [142, 33, 33]), 500);
+        let mut merged = false;
+        for t in 501..700 {
+            let _: Vec<Spawn> = s.tick_batch(2048, &[settled(t)]).to_vec();
+            if s.last_edit.len() == 2 {
+                merged = true;
+                break;
+            }
+        }
+        assert!(
+            merged,
+            "the background edit must merge, not overwrite ({:?})",
+            s.last_edit
+        );
+        let last_stamp = s.last_edit.iter().map(|&(_, t)| t).max().unwrap();
+
+        // The re-arm reports the FRESH entries; every hold release refreshes
+        // its cells' stamps, so both entries carry the merge tick and age
+        // out together one window later.
+        s.arm_relog_rearm(600);
+        assert_eq!(s.rearm_diag(600).0, 2, "both entries are fresh at arm time");
+        assert_eq!(
+            s.rearm_diag(last_stamp + REARM_EDIT_WINDOW_TICKS - 1).0,
+            2,
+            "both entries stay fresh while the stamps hold"
+        );
+        assert_eq!(
+            s.rearm_diag(last_stamp + REARM_EDIT_WINDOW_TICKS).0,
+            0,
+            "both entries age out one window after the last delivery"
         );
     }
 

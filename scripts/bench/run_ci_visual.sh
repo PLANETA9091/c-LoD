@@ -758,6 +758,10 @@ srv "time set noon"  # v6.4.8: the probe loop must run in daylight
 PROBE_LOG="$SHOTS/probe_counts.txt"; : > "$PROBE_LOG"
 for k in $(seq 0 23); do
   assert_online "edit probe $k" || exit 1
+  # v6.9.8: re-arm noon EVERY probe — the day/night boundary can cross
+  # mid-loop (~5 min at 26.3's day length) and the marker's rendered hue
+  # swings with the lightmap (run #238 measured dusk purple).
+  srv "time set noon"
   shot "12_after_edit_probe$k" || exit 1
   LM=$(lens_metrics "12_after_edit_probe$k")
   case "$LM" in *lens_zero=1*)
@@ -821,6 +825,7 @@ srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"
 sleep 30   # fresh session: the dust must re-deliver the persisted disk
 for k in $(seq 0 11); do
   assert_online "relog probe $k" || exit 1
+  srv "time set noon"  # v6.9.8: keep the light flat across the window
   shot "13_after_relog_probe$k" || exit 1
   LM=$(lens_metrics "13_after_relog_probe$k")
   case "$LM" in *lens_zero=1*)

@@ -33,8 +33,13 @@ def load(p):
 
 
 def is_red(c):
+    # v6.9.8: the threshold drops 110 -> 90. Run #238's artifact: the
+    # marker column renders as PURPLE at dusk/night (the fog-resolved
+    # night lightmap #7a7aff tints red_concrete to ~(104,48,95) — the
+    # red surface measured r=104 and MISSED the old threshold, so LEG 1
+    # read red=27 and "failed" while the marker was plainly on screen).
     r, g, b = c
-    return r >= 110 and (r - g) >= 30
+    return r >= 90 and (r - g) >= 30
 
 
 def is_white(c):

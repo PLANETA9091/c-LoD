@@ -837,3 +837,28 @@ world picture is PURE SKY — the fresh client renders none of the band
 content until a drained release commits it. Fix: REARM_SPAN_TICKS 900 ->
 3000 (300 s = the join->tp sequence ~135 s + ten drain cycles + the
 whole probe window with margin). 91 tests, fmt/clippy -D warnings green.
+
+v6.9.8 THE STAMPED SET + THE HUE THRESHOLD (CI #238 read by its artifact):
+three independent findings. (1) The span fix WORKED — leg 2's diag carried
+`rearm 1c/694t` live across the whole probe window (the 3000-tick span
+outlives the harness) — but it cycled ONE cell, not 15: a single-cell
+background edit (the rescan/event channel fires cosmetically for minutes)
+OVERWROTE the recorded set between the fill and the relog, and the relog
+re-arm re-delivered a cell nobody cares about. Fix: the re-arm material is
+a STAMPED SET (cell, tick) merged across releases — every hold release
+upserts (continuation beats refresh their stamps so the material lives as
+long as the cycle runs), entries older than REARM_EDIT_WINDOW_TICKS=600
+drop out, the cap evicts oldest-first — a background edit can never erase
+the marker's cells inside the window. (2) LEG 1 read red=27 while the
+marker was PLAINLY on screen: the rendered marker column is PURPLE at
+dusk (the fog-resolved night lightmap #7a7aff tints red_concrete to
+(104,48,95) — r=104 missed the old is_red threshold 110 by six units;
+the day hue (127,86,82) passes). Fix: is_red r>=110 -> r>=90; the
+harness re-arms noon EVERY probe (the day/night boundary can cross
+mid-loop). (3) The "red strip" at the marker's azimuth is the CARRIER
+COLUMN — the visible, partially-erased dust dots over the marker cells —
+NOT terrain: it varies per run with the light (#234-237 red-phase 1580-
+1604 px, #238 night-phase 27 px), it pre-exists the fill, and the fill's
+diff lands inside it. LEG 1's red>=150 has always measured this column;
+the marker's own silhouette is identical to it. 92 tests (new:
+background_edit_merges_and_ages_out_of_rearm_material), fmt/clippy green.
