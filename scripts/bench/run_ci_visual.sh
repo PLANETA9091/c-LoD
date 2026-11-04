@@ -846,6 +846,32 @@ shot 14_leg2_burst_far || exit 1
 L2F=$(white_count 14_leg2_burst_far)
 sum "- leg-2 renderer probe FAR (80 m, marker zone) white px: ${L2F:-?} (> 20 = no distance cut; ~0 with NEAR alive = particles beyond the client chunk radius do not render)"
 echo "- leg-2 renderer probe FAR white px: ${L2F:-?}" >> "$PROBE_LOG"
+# v6.9.14 THE CARRIER-TYPE PROBE: the transport's carrier is
+# happy_villager (green); its render FLAPS across runs (the marker column
+# measured 1631 / 27 / 0 / 93 / 2961 red px on identical geometry — runs
+# #234-#245) while end_rod rendered in every single probe (543/530/407).
+# A GREEN DUST burst at the same spot answers whether a stable green
+# carrier exists: dust{color:[0,1,0]} renders a green cloud the capture's
+# green-hue strobe can decode — if it proves stable across runs, the
+# carrier migrates to it and the flap dies with happy_villager.
+srv "particle minecraft:dust{color:[0.0,1.0,0.0],scale:1.0} $((CX - 1)) 150 $CZ 0 0 0 0 600 force"
+sleep 1
+shot 14_leg2_burst_greendust || exit 1
+GD=$(python3 - <<'PYEOF'
+from PIL import Image
+import os
+im = Image.open(f"{os.environ.get('SHOTS','/home/runner/mc-test/shots/ci-visual')}/14_leg2_burst_greendust.png").convert('RGB')
+px = im.load(); n = 0
+for y in range(180, 540):
+    for x in range(320, 960):
+        r, g, b = (c / 255.0 for c in px[x, y])
+        if g - b > 0.12 and g > r + 0.10 and g > 0.45:
+            n += 1
+print(n)
+PYEOF
+)
+sum "- leg-2 carrier probe green dust (80 m) green px: ${GD:-?} (> 100 = a stable green carrier exists)"
+echo "- leg-2 green dust px: ${GD:-?}" >> "$PROBE_LOG"
 for k in $(seq 0 11); do
   assert_online "relog probe $k" || exit 1
   srv "time set noon"  # v6.9.8: keep the light flat across the window

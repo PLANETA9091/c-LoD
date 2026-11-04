@@ -934,3 +934,16 @@ at the loaded client-chunk radius; server view-distance 4 = 64 blocks).
 The probe splits in two: NEAR (20 m, inside any cut) and FAR (80 m, at
 the marker zone). NEAR alive + FAR dead names the cut; both alive
 convicts the re-arm dots themselves. 93 tests, fmt/clippy green.
+
+v6.9.14 THE CARRIER-TYPE PROBE (CI #245): the dual renderer probe killed
+the distance-cut hypothesis — the console end_rod burst at 80 m (the
+marker zone) rendered 407 white px while NEAR measured 530: no
+particle-render distance cut exists. The one remaining difference
+between the visible console bursts and the invisible re-arm dots is the
+PARTICLE TYPE: the carrier is happy_villager, and its render FLAPS
+across runs on identical geometry (the marker column measured 1631/27/0/
+93/2961 red px in #234-#245, in LEG 1 as much as LEG 2) while end_rod
+rendered in every single probe. A GREEN DUST burst (dust{color:[0,1,0]})
+at the marker zone answers whether a stable green carrier exists for the
+capture's green-hue strobe; if it proves stable, the carrier migrates
+and the flap dies with happy_villager. 93 tests, bash -n green.
