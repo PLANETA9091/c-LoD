@@ -815,3 +815,25 @@ client's view can finally decode them; the first post-tp decision arms
 the drain and the release lands. 91 tests (new:
 rearm_stays_armable_through_a_stale_queued_episode — spawn view, stale
 queue, tp revives the drain), fmt/clippy -D warnings green.
+
+v6.9.7 THE SPAN MUST OUTLIVE THE HARNESS (CI #237: the artifact's own
+timeline settled it): the re-arm FIRED at the relog (17:14:10, the diag
+carried `rearm 15c/828t` — the 15 fill cells recorded, the v6.9.5/6
+machinery works end to end) but the 900-tick span expired at ~17:15:40
+while the client was still at spawn — the harness TP'd it to the vantage
+at 17:16:24, 134 s after the join (the pack prompt + two 15 s asserts +
+the 30 s settle), and every drain cycle ran against a view that could
+not decode the cells (dirty 1322 frozen through the whole leg, the cells
+queued forever, wave-style deliveries into the saturated pool). The
+screenshot forensics also settled two long-standing unknowns: (1) the
+"red strip" at x654-662 exists in EVERY session-1 shot INCLUDING the
+pre-fill baseline (11_baseline_settle/09b/10_before_edit all ~1580-1604
+px, the fill's diff lands INSIDE it, +1 px at probe 0) — with
+level-seed=clodbench2026 the terrain is deterministic and the strip is
+the world's own ~170-tall reddish feature at the marker's azimuth; every
+LEG 1 PASS to date measured IT, not the marker (the marker repaints the
+strip's colors in place — the silhouette is identical). (2) the relog
+world picture is PURE SKY — the fresh client renders none of the band
+content until a drained release commits it. Fix: REARM_SPAN_TICKS 900 ->
+3000 (300 s = the join->tp sequence ~135 s + ten drain cycles + the
+whole probe window with margin). 91 tests, fmt/clippy -D warnings green.

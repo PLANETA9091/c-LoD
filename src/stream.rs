@@ -323,10 +323,20 @@ pub const REBEAT_MAX: usize = 512;
 /// fresh client's camera channel was still blind (probe 0: cam "?") — a
 /// coin toss, hence "stream state is not persistent/deterministic". The
 /// re-arm makes it deterministic: each cycle is drain + release with reset
-/// electrons, retried until the client's rot channel is ready (the pack
-/// prompt, the tp to the vantage and the sky-row bootstrap all fit inside
-/// the span) or the span expires (90 s at the 10 tps engine cadence).
-pub const REARM_SPAN_TICKS: u64 = 900;
+/// electrons, retried until the client's rot channel is ready or the span
+/// expires.
+///
+/// v6.9.7 THE SPAN MUST OUTLIVE THE HARNESS (run #237's artifact timeline):
+/// the re-arm fired at the join (17:14:10, `rearm 15c/828t` in the diag —
+/// the 15 fill cells recorded ✓) but expired after 900 ticks (90 s) while
+/// the client was still at spawn — the harness only TP'd it to the vantage
+/// at 17:16:24, 134 s AFTER the join (the pack prompt accept + the two
+/// 15 s asserts + the 30 s settle), and every drain cycle ran against a
+/// view that could not decode the cells (they sat queued, dirty 1322
+/// frozen). The span now covers 300 s — the join→tp sequence (~135 s)
+/// plus ten full drain cycles and the whole probe window (~95 s) with
+/// margin; a session change arms ~30 drain+release chances.
+pub const REARM_SPAN_TICKS: u64 = 3000;
 
 /// v6.9.5: cap on the recorded last-edit cells (the genuine-edit gate
 /// never arms above EDIT_HOLD_MAX_BATCH recent decodable cells; stale
