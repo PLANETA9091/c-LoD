@@ -1,27 +1,46 @@
-# c-LoD independent audit: runs #248 (42063218460, d4ff522 v6.10.0) + #250 (42076419845, 6b0b599 v6.10.1)
+# c-LoD forensic addendum: run #250 — the spawn-gate suspicion rests on stale doc constants; the real discriminator is already measured (dust vs end_rod at identical coords on leg-2)
 
-**Independent re-verification of the #248 verdict and the #250 forensics, with own pixel rulers and raw log greps (not trusting probe_counts or the summary). The verdicts CONFIRM; one forensic claim is CORRECTED; one new hard fact emerges.**
+## 1. The prime suspect's arithmetic used stale constants
 
-## Confirmed by own rulers (PNG-decode at pixel level)
+Task 34 and the #250 forensics locate the prime suspect via "the sky planes at Y=260/272 sit 108–120+ m from the eye — at or beyond ZONE_FAR". Y=260/272 exists ONLY in the stale module doc (stream.rs lines 8-9, predating the plane move). The live constants are `LAYER_Y: [f64; 2] = [80.0, 120.0]` (stream.rs:71 — hword rides Y=120, cword Y=80; edit-reset plane Y=100 midway, stream.rs:79).
 
-- **Leg 1 paints** (probe0 after fill): is_red = 1183 (#248) / 1117 (#250) — exact match with the recorded verdicts.
-- **Leg 2 paints nothing**: is_red = 0 on the baseline and every checked relog probe of both runs.
-- **The leg-2 frame set is byte-frozen**: among the 12 relog probes + baseline + greendust shot there is exactly ONE unique frame per run (sha256-identical); diff vs baseline = 0 px over the whole frame.
-- **The leg-2 renderer is alive**: the burst shots DO move pixels — NEAR changed 495 (#248) / 479 (#250), FAR 383 / 324 — matching the harness counters. Particles render into the frame; only the LOD scene layer contributes nothing.
-- **Dust probe still empty** even with the delta 1 1 1 spread fix: 0 changed px in both runs while the same coordinates give 375 px with end_rod. The dust instrument needs its own investigation (atlas/quad path); it is moot until the scene lives.
+Recomputed from the bench eye (Y=151.62, pitch 5, half-cone = ASSUMED_FOV 110/2 + margin 8 = 63°, stream.rs:112-126):
 
-## NEW hard fact: cross-run byte identity
+| plane | Δy from eye | in-band horiz (d≤112) | elevation at marker horiz 75 m | cone at pitch 5 (−5°±63°) |
+|---|---|---|---|---|
+| hword Y=120 | −31.62 m | ≤ 107.4 m | −22.9° | IN CONE |
+| cword Y=80 | −71.62 m | ≤ 86.1 m | −43.7° | IN CONE |
+| reset Y=100 | −51.62 m | ≤ 99.4 m | −34.5° | IN CONE |
 
-The frozen leg-2 frame of #248 (v6.10.0) and #250 (v6.10.1) is **the same image byte-for-byte** (sha256 2fe0cf5a…): engine changed, chains re-armed twice (remove+add, all true) and rebuilt once more by the harness tier flip between the shots — and not one pixel moved. The leg-2 world render is a deterministic constant; the frame is live (bursts perturb it) but the scene layer is absent, independent of chain/arm state.
+The ENTIRE bit-stream is in-band and in-cone from the bench vantage — for both legs, identically. The stated spawn-gate suspicion ("sky planes at/beyond ZONE_FAR decide which dots flow") dissolves: there is no geometry reason for the gate to behave differently on leg-2 at the same vantage. The gate counters are still worth surfacing (per-session server state remains a live question) — but not because of plane geometry.
 
-## CORRECTION to the #250 forensics
+## 2. The gate diag exists since v5.3.1 and is statistically blind
 
-"No client warnings at all this run — the #248 join-time race did not even happen" is **wrong**. client.log line 277-279: `[17:49:20] WARN Requested post effect does not exist: minecraft:end_of_frame / clod:lod_terrain / clod:atmosphere`. The join-time race DID happen in #250 as well. What changed in #250 is that the v6.10.1 re-arm healed it: 17:49:35 and 17:49:45 `chain re-arm terrain/atmosphere (remove -> true add -> true) post-reload` — with zero warnings after 17:49:35 (the re-added chains resolved against the now-loaded pack), plus the harness flip at 17:52:05→08 (Full→Veil→Full, terrain remove→true / add→true).
+`gate: sky {} near {} far {} cone {}` (engine.rs, since f396967 v5.3.1) prints only on spawn-phase ticks that ALSO hit `tick % 100 == 0` — but the spawn phase early-returns on empty batches (engine.rs:1281 `if batch.is_empty() { return; }` BEFORE the per-player gate loop), and in #250's full 15-minute server.log (uploaded unfiltered, ci.yml:643) the line fired ZERO times, while the `stream:` diag prints every 100 ticks unconditionally (stream_diag is called BEFORE the early return, engine.rs:1280). To surface the counters: (a) print the gate line on EVERY spawn-phase fire (drop the %100 guard — spawn fires are rare, rearm-beat cadence), or (b) aggregate per-diag-window counters into the `stream:` line.
 
-## Sharpened conclusion
+## 3. The real discriminator is already in the #250 data
 
-The death is definitively NOT the enabled-set state: in #250 the join-time adds failed (WARN×3 at 17:49:20, same race as #248), the re-arm restored the set (all true, resolved cleanly), the flip rebuilt the chain again — 8+ clean arm operations over 2.5 minutes across two engine versions — and the scene stayed dead at a byte-constant frame. The chains are enabled, silent, and unproductive: the death sits in what the chains consume or how they execute on a fresh-session client. The capture/decode path (prime suspect: the v5.3.1 spawn gate — sky_visible pitch<47, decode band [28,112] vs sky planes at 108–120 m) stands, and the two decisive instruments remain: surface the per-player gate counters in the diag, and the leg-2 sky-plane pitch probe (pitch ≈ -60 shot, count lattice rows changed-vs-baseline, leg-1 control).
+At IDENTICAL coords and spread (`$((CX - 1)) 150 $CZ 1 1 1 ... force`):
 
-## #248 race timeline (verified to the second from client.log)
+- `minecraft:end_rod` (count 1200) → **318–324 changed px** (renders);
+- `minecraft:dust{color:[0,1,0],scale:1.0}` (count 600) → **0 changed px** — twice (#248: delta 0 0 0 stacked at one subpixel point, inconclusive; #250: delta 1 1 1, fair, same coords as FAR).
 
-16:31:40 join → 16:31:41 WARN×3 (chains requested against vanilla resources) → 16:31:45 `Reloading ResourceManager: vanilla, vanilla, server/00000000/…` → 16:31:48 reload completes (atlases rebuilt) and the post-reload rebuild re-requests ONLY `minecraft:end_of_frame` (still WARNed at that instant); `clod:lod_terrain`/`clod:atmosphere` are never re-requested — they left the enabled set.
+The bit-stream is 100% dust (`word_spawns → Spawn { y: plane_y }`, stream.rs:838-839, both layers). If dust does not RENDER on the relog client, the capture strobe reads sky at every sub-cell position, the decode keeps previous values (empty on a fresh session), and the chains paint nothing — exactly the byte-frozen scene-dead frame of every leg-2 since pre-pin #241.
+
+Supporting existing data: the leg-2 baseline + 12 relog probes are byte-frozen (sha256-identical across #248/#250, audit marker above) even though the relog re-arm streams the last edit's 21 cells — dust dots at Y=80/120, in-band, in-cone, within the 128-block client particle cull — around the probe window. If ANY dust rendered on leg-2, the frozen frames would move. They do not.
+
+**Unifying root-cause candidate: dust particles do not render on fresh-session (relog) clients; end_rod does.** The capture→decode→paint chain has no input by construction; the engine/harness chain work (v6.10.0/v6.10.1) was real but upstream of the break.
+
+## 4. The missing cell: a leg-1 dust probe (never measured)
+
+The harness fires dust only on leg-2 (run_ci_visual.sh:962). Fire the same burst on LEG-1 right after the FAR console burst and count changed vs the leg-1 baseline. Expected > 0 (leg-1's own paint argues dust+decode+chain all work there); this kills the alternative "ruler problem" reading of the leg-2 zero and confirms the per-session dust break. One run, ~4 lines.
+
+Follow-up matrix on leg-2 (cheap, same run): dust at NEAR coords (20 m — distance dependence), white dust `color:[1,1,1]` (color/ruler artifact exclusion), happy_villager (second non-dust type — the type matrix). Mechanism candidates for a dust-specific break after the pack RELOAD: the particles.png-atlas rebuild at reload (client.log 17:49:27 "Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas") hitting the dust quad path (color-uniform sprite blit) but not end_rod's; a 26.3 reversed-Z interaction specific to the dust render type (the stream doc's own caveat "26.3 reversed-Z hides particles against the sky" cannot be a blanket rule — end_rod against sky renders at the same coords).
+
+## 5. Instrument note on the sky-plane pitch probe
+
+With the real planes at Y=80/120, the pitch −60 shot is NOT needed for delivery-proof at the bench vantage — the stream is in-cone at pitch 5 for both legs. The pitch probe keeps only model-validation value. The decisive instrument is the leg-1 dust probe (#4).
+
+## Bottom line
+
+The gate/geometry suspect of Task 34 is retired (stale constants). The evidence now converges on one measurable sentence: **on a relog client, end_rod renders and dust does not — and the whole LOD bit-stream is dust.** One leg-1 dust probe (plus the optional leg-2 type matrix) splits the last alternatives and names the root cause.
