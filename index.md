@@ -1,4 +1,3 @@
 # c-LoD visual verdicts
 
-- run 41913791144 (#246) 903cf98 2026-11-04T21:27:58Z: 1 FAIL lines in summary
-- run 42063218460 (#248) CONTROL d4ff522: CONTROL PASS, drift=drift=210748
+- run 42063218460 (#248) d4ff522 2026-11-05T16:36:18Z: 1 FAIL lines in summary
