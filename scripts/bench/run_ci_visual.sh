@@ -877,6 +877,29 @@ srv "time set noon"  # v6.4.8: was 'time set 6000' — night in the 26.3 scale
 srv "gamemode spectator Stepan"
 srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"
 sleep 30   # fresh session: the dust must re-deliver the persisted disk
+# v6.10.1 THE ARM-RACE CONTROL: run #248's forensics named the leg-2
+# scene-dead ROOT CAUSE — the join-time posteffect add loses the pack
+# push/reload race on a relog-into-vantage (the client resolves the clod
+# chains 4-5 s BEFORE the pack lands, drops the failed adds, and 26.3
+# never re-requests them on the post-reload rebuild). One deterministic
+# tier flip re-arms the chains on the now pack-bearing client — the same
+# remove+add the leg-1 vantage tp has been riding all along — so leg 2
+# measures the TRANSPORT (its purpose), not the arm race. The engine's
+# bounded re-arm (push+100t/+200t, v6.10.1) normally covers this already;
+# this flip is the independent control: after it the scene MUST be alive.
+# (tp target: CZ+460 leaves the 512-block disk for both the min-corner and
+# the center-corner reading of the 256x256-cell origin — Veil radius.)
+shot 13_leg2_scene_probe || true
+SC0=$(scene_count 13_leg2_scene_probe)
+if [ "${SC0:-0}" = "0" ]; then
+  sum "- leg-2 scene dead at first probe (0 px): the arm race hit the relog — tier flip to re-arm the chains (out -> Veil, back -> Full)"
+  echo "- leg-2 arm-race control: scene 0 at first probe, flipping tier" >> "$PROBE_LOG"
+  srv "tp Stepan $VX $VY $((CZ + 460)) $VYAW $VPITCH"  # outside the disk -> Veil (terrain chain removed)
+  sleep 3
+  srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"            # back inside -> Full (chain re-added on the pack-bearing client)
+  sleep 25   # chain rebuild + one full sky-grid lap (~12.8 s) of decode
+  sum "- leg-2 tier flip done: chains re-armed post-reload; baseline follows"
+fi
 # v6.10.0: the leg-2 BASELINE shot — everything the leg-2 rulers count is
 # CHANGED pixels against this frame, so the lens-panel column and the sky
 # gradient cannot masquerade as burst/marker content (the v6.9.14 green
@@ -930,7 +953,13 @@ echo "- leg-2 renderer probe FAR white px: ${L2F:-?} changed: ${L2FC:-?}" >> "$P
 # frame of #246/#247, pixel-identical to no-burst frames) while the dust
 # burst changed exactly 0 pixels in both runs. The ruler now counts
 # green-excess among pixels CHANGED vs the leg-2 baseline, x < 940.
-srv "particle minecraft:dust{color:[0.0,1.0,0.0],scale:1.0} $((CX - 1)) 150 $CZ 0 0 0 0 600 force"
+# v6.10.1: the burst geometry was the SECOND reason it read 0 — delta
+# 0 0 0 speed 0 stacks all 600 particles at ONE world point; at 80 m a
+# single stacked billboard is subpixel, under the >8-delta threshold
+# (the end_rod FAR burst that renders 375 px spreads over delta 1 1 1;
+# #248 server.log proves the dust command parses and executes). Spread
+# like FAR so the carrier question is answerable at all.
+srv "particle minecraft:dust{color:[0.0,1.0,0.0],scale:1.0} $((CX - 1)) 150 $CZ 1 1 1 0 600 force"
 sleep 1
 shot 14_leg2_burst_greendust || exit 1
 GDL=$(changed_class 14_leg2_baseline 14_leg2_burst_greendust)

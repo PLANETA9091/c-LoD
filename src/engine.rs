@@ -104,6 +104,14 @@ pub struct PlayerState {
     /// must land AFTER the client finished the join screens, or the pack
     /// prompt screen gets swallowed by the loading terrain screen).
     pub joined_tick: u64,
+    /// Engine tick of the ONE pack push (the post-reload chain re-arm
+    /// anchor: the client cannot resolve the clod chains until the pack
+    /// reload completes, and 26.3 never re-requests them after the rebuild
+    /// — run #248 forensics).
+    pub pushed_tick: u64,
+    /// Chain remove+add re-arms since the pack push (the post-reload arm
+    /// race fix; bounded, llvmpipe-safe).
+    pub chain_rearms: u32,
     /// v6.0: consecutive wire (bundle) delivery failures. At
     /// WIRE_FAIL_LIMIT the player sticks to the legacy per-particle path
     /// (a flaky channel must not cost a JNI storm every tick).
@@ -111,6 +119,32 @@ pub struct PlayerState {
 }
 /// Engine ticks between the join and the single pack push.
 const PACK_PUSH_DELAY_TICKS: u64 = 40;
+/// Engine ticks between the pack push and the first post-reload chain
+/// re-arm: the client's reload (download + rebuild) has plausibly
+/// completed by then (run #248: push 16:31:45 -> reload done 16:31:48).
+const CHAIN_REARM_FIRST_DELAY_TICKS: u64 = 100;
+/// Engine ticks between the two re-arms (the first one may land inside a
+/// slow reload and get dropped again; the second catches it).
+const CHAIN_REARM_SPACING_TICKS: u64 = 100;
+/// Max remove+add re-arms per pack push. Two fires, one per reload window
+/// — bounded like the effect-list healer, no per-tick storms (a retry
+/// storm makes the client rebuild its post chain every tick and starves
+/// the render thread).
+const CHAIN_REARM_MAX: u32 = 2;
+
+/// The re-arm fire predicate: pure so the timing contract is unit-tested.
+/// Fires once at push+CHAIN_REARM_FIRST_DELAY_TICKS and once
+/// CHAIN_REARM_SPACING_TICKS later; never before the push, never past
+/// CHAIN_REARM_MAX fires.
+fn chain_rearm_due(pushed_tick: u64, chain_rearms: u32, now: u64) -> bool {
+    if pushed_tick == 0 || chain_rearms >= CHAIN_REARM_MAX {
+        return false;
+    }
+    let due = pushed_tick
+        + CHAIN_REARM_FIRST_DELAY_TICKS
+        + CHAIN_REARM_SPACING_TICKS * u64::from(chain_rearms);
+    now >= due
+}
 
 impl State {
     pub fn new(cfg: Config) -> Arc<Self> {
@@ -807,6 +841,12 @@ fn manage_players(state: &Arc<State>, env: Env) {
                         if ok {
                             st.pushed_sha = pack.sha1_hex.clone();
                             st.resends = 0;
+                            // v6.10.1: anchor the post-reload chain re-arm
+                            // to the push (the reload completes seconds
+                            // later; the join-time effect add cannot
+                            // survive that race — run #248 forensics).
+                            st.pushed_tick = state.tick_no.load(Ordering::Relaxed).max(1);
+                            st.chain_rearms = 0;
                             crate::log_info(&format!(
                                 "pack pushed to {} ({}): {} bytes, sha1 {} — the ONE push this session",
                                 p.uuid,
@@ -862,11 +902,12 @@ fn manage_players(state: &Arc<State>, env: Env) {
             st.last_tier = tier_no;
         }
         let have_pack = pack.is_some();
+        // v6.10.1: hoisted above the handle block — the post-reload re-arm
+        // (section 3) evaluates the same predicates for its own handle.
+        let want_terrain = have_pack && tier == Tier::Full && keys.terrain != 0;
+        let want_atmo =
+            have_pack && (tier == Tier::Full || tier == Tier::Veil) && keys.atmosphere != 0;
         if let Some(handle) = jni::player_by_uuid(env, &p.uuid) {
-            let want_terrain = have_pack && tier == Tier::Full && keys.terrain != 0;
-            let want_atmo =
-                have_pack && (tier == Tier::Full || tier == Tier::Veil) && keys.atmosphere != 0;
-
             if want_terrain && !st.terrain_on {
                 let tkey = unsafe { as_obj(keys.terrain) };
                 let ok = jni::add_effect(env, handle, tkey);
@@ -919,6 +960,55 @@ fn manage_players(state: &Arc<State>, env: Env) {
                 let ok = jni::remove_effect(env, handle, unsafe { as_obj(keys.atmosphere) });
                 st.atmosphere_on = false;
                 crate::log_info(&format!("effect atmosphere remove -> {} ({})", ok, p.uuid));
+            }
+        }
+
+        // 3. v6.10.1 THE POST-RELOAD CHAIN RE-ARM: the join-time effect add
+        //    loses the pack race BY CONSTRUCTION — the chains arm at t=0
+        //    (join), the pack goes out at t=40 and the client's reload lands
+        //    seconds later. Until the reload the client cannot resolve
+        //    clod:lod_terrain / clod:atmosphere, DROPS the failed adds from
+        //    its enabled set (26.3 never re-requests them on the post-reload
+        //    rebuild — run #248: only minecraft:end_of_frame re-fired), and
+        //    the PostEffects.update() list re-sends do not re-resolve them
+        //    either. Leg 2 has been measuring a worldless client ever since
+        //    (scene=0 on every relog probe), and leg 1 only painted because
+        //    its terrain add rode the vantage tp, 27 s after join. Re-arm
+        //    the armed-but-unresolved chains with ONE remove+add (the
+        //    tier-flip resync primitive, proven to load a chain on a
+        //    pack-bearing client) at push+100t and push+200t — past the
+        //    reload, 20-tick spacing by engine tick granularity, two fires
+        //    max (llvmpipe-safe; no per-tick retry storms). In leg 1 the
+        //    fires land while the tier is still Veil, so terrain is
+        //    untouched (its add rides the tp) and the atmosphere chain —
+        //    which silently lost the same race — gets healed for free.
+        let now = state.tick_no.load(Ordering::Relaxed);
+        if chain_rearm_due(st.pushed_tick, st.chain_rearms, now) {
+            if let Some(handle) = jni::player_by_uuid(env, &p.uuid) {
+                let mut fired = false;
+                if want_terrain && st.terrain_on {
+                    let tkey = unsafe { as_obj(keys.terrain) };
+                    let rm = jni::remove_effect(env, handle, tkey);
+                    let ok = jni::add_effect(env, handle, tkey);
+                    fired = true;
+                    crate::log_info(&format!(
+                        "chain re-arm terrain (remove -> {} add -> {}) post-reload ({})",
+                        rm, ok, p.uuid
+                    ));
+                }
+                if want_atmo && st.atmosphere_on {
+                    let akey = unsafe { as_obj(keys.atmosphere) };
+                    let rm = jni::remove_effect(env, handle, akey);
+                    let ok = jni::add_effect(env, handle, akey);
+                    fired = true;
+                    crate::log_info(&format!(
+                        "chain re-arm atmosphere (remove -> {} add -> {}) post-reload ({})",
+                        rm, ok, p.uuid
+                    ));
+                }
+                if fired {
+                    st.chain_rearms += 1;
+                }
             }
         }
 
@@ -1480,6 +1570,25 @@ mod tests {
     fn pack_url_uses_base() {
         let st = State::new(Config::parse("pack_base_url=http://x.example;http_port=1"));
         assert_eq!(pack_url(&st), "http://x.example/clod-pack.zip");
+    }
+
+    /// v6.10.1: the post-reload chain re-arm timing contract — two fires,
+    /// at push+100t and push+200t, never before the push, never past the
+    /// cap, and never at all without a push anchor.
+    #[test]
+    fn chain_rearm_fires_twice_after_the_push() {
+        // No push yet: never fire.
+        assert!(!chain_rearm_due(0, 0, 100_000));
+        // Before the first threshold: silent.
+        assert!(!chain_rearm_due(1_000, 0, 1_099));
+        // Exactly at push+100: fire one.
+        assert!(chain_rearm_due(1_000, 0, 1_100));
+        // Between the fires: silent again.
+        assert!(!chain_rearm_due(1_000, 1, 1_150));
+        // At push+200: fire two (the reload-catch fallback).
+        assert!(chain_rearm_due(1_000, 1, 1_200));
+        // Past the cap: welded shut.
+        assert!(!chain_rearm_due(1_000, 2, 99_999));
     }
 
     /// v6.6: the wire-budget window math — bytes over a tick window at the
