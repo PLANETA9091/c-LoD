@@ -330,6 +330,60 @@ print(n)
 PYEOF
 }
 
+# v6.10.0: the changed-pixel classifier — counts pixels that DIFFER from a
+# baseline shot (sum of channel deltas > 8) inside the scene region
+# (x < 940; the lens-panel column x >= 952 burned the v6.9.14 green ruler:
+# its static (0,153,0) frame scored "366 green px" in EVERY frame of
+# #246/#247 while the dust burst changed exactly 0 pixels in both runs).
+# Classes mirror the existing rulers in int space: white = end_rod burst,
+# green = dust carrier, red = marker paint. total > 0 with all classes ~0
+# means something rendered but the fog washed it — a ruler problem, not a
+# carrier problem.
+changed_class() { # baseline_shot target_shot -> "white=N green=N red=N total=N"
+  python3 - "$1" "$2" <<'PYEOF'
+import sys, os
+import numpy as np
+from PIL import Image
+root = os.environ.get('SHOTS', '/home/runner/mc-test/shots/ci-visual')
+a = np.asarray(Image.open(f"{root}/{sys.argv[1]}.png").convert('RGB'), dtype=np.int16)
+b = np.asarray(Image.open(f"{root}/{sys.argv[2]}.png").convert('RGB'), dtype=np.int16)
+d = np.abs(a.astype(int) - b.astype(int)).sum(axis=2) > 8
+d[:, 940:] = False
+r, g, bl = b[..., 0], b[..., 1], b[..., 2]
+white = d & (r > 191) & (g > 191) & (bl > 191) & \
+        (np.maximum(np.maximum(r, g), bl) - np.minimum(np.minimum(r, g), bl) < 38)
+green = d & ((g - bl) > 30) & (g > r + 25) & (g > 115)
+red   = d & (r >= 90) & ((r - g) >= 30)
+print(f"white={int(white.sum())} green={int(green.sum())} red={int(red.sum())} total={int(d.sum())}")
+PYEOF
+}
+
+# v6.10.0 THE SCENE RULER: non-sky pixels in the scene region (x < 940).
+# Runs #241/#246/#247's pixel forensics caught the relog leg painting NO
+# scene at all — every 13_after_relog frame is pure sky + the 204800-px
+# lens-panel column (x >= 952), zero scene pixels — while LEG 1's frames
+# from the same vantage carry the LOD-painted terrain strip (is_red
+# ~1200-2100 px, pre-pin #241 included). The relog probes have been
+# scoring red=0 on a client that sees NOTHING, not on one that fails to
+# decode: the fresh-session capture chain never commits (the renderer-dead
+# class of #227/#228, alive in leg 2), and the pack suppresses vanilla
+# terrain, so no LOD paint == no world at all. Both legs run spectator
+# (no HUD), so any scene px is world.
+scene_count() { # shot_name -> non-sky px at x < 940
+  python3 - "$1" <<'PYEOF'
+import sys, os
+import numpy as np
+from PIL import Image
+root = os.environ.get('SHOTS', '/home/runner/mc-test/shots/ci-visual')
+a = np.asarray(Image.open(f"{root}/{sys.argv[1]}.png").convert('RGB'), dtype=np.int16)
+r, g, b = a[..., 0], a[..., 1], a[..., 2]
+sky = ((b > r) & (b >= g)) | ((r > 220) & (g > 220) & (b > 220))
+ns = ~sky
+ns[:, 940:] = False
+print(int(ns.sum()))
+PYEOF
+}
+
 stop_stack() {
   pkill -f "net.minecraft.client.main.Main" 2>/dev/null || true
   pkill Xvfb 2>/dev/null || true
@@ -823,6 +877,14 @@ srv "time set noon"  # v6.4.8: was 'time set 6000' — night in the 26.3 scale
 srv "gamemode spectator Stepan"
 srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"
 sleep 30   # fresh session: the dust must re-deliver the persisted disk
+# v6.10.0: the leg-2 BASELINE shot — everything the leg-2 rulers count is
+# CHANGED pixels against this frame, so the lens-panel column and the sky
+# gradient cannot masquerade as burst/marker content (the v6.9.14 green
+# ruler burned on exactly that).
+shot 14_leg2_baseline || exit 1
+L2_SCENE0=$(scene_count 14_leg2_baseline)
+sum "- leg-2 baseline scene px (x<940): ${L2_SCENE0:-?} (0 = the relog client paints no world at all)"
+echo "- leg-2 baseline scene px: ${L2_SCENE0:-?}" >> "$PROBE_LOG"
 # v6.9.12/v6.9.13 LEG-2 RENDERER PROBES: run #243's forensics caught the
 # leg-2 client rendering NO particles at all (189-point re-arm bursts
 # arrive every 10 s; a shot taken 2 s into a burst shows ZERO non-sky
@@ -834,18 +896,27 @@ sleep 30   # fresh session: the dust must re-deliver the persisted disk
 # ruler: NEAR (20 blocks, inside any cut) and FAR (80 blocks, at the
 # marker zone — where the carriers land). NEAR alive + FAR dead names
 # the distance cut; both alive convicts the re-arm dots themselves.
+# v6.10.0: #247 broke the TYPE hypothesis — end_rod FAR flapped
+# 407 -> 354 -> 0 across #245/#246/#247 while NEAR stayed alive, so the
+# flap is not happy_villager-specific. And every burst since #243 ran
+# under the particles:0 pin (MINIMAL): non-forced particles never spawn
+# and forced bursts survive ~19% of attempts — the pin was the censor.
+# Both legs now run particles:2 (ALL); raw white counts stay for series
+# continuity, changed-vs-baseline counts ride next to them.
 srv "particle minecraft:end_rod $((VX + 20)) 150 $CZ 0.2 0.2 0.2 0 400 force"
 sleep 1
 shot 14_leg2_burst_near || exit 1
 L2B=$(white_count 14_leg2_burst_near)
-sum "- leg-2 renderer probe NEAR (20 m) white px: ${L2B:-?} (> 20 = the client renders particles)"
-echo "- leg-2 renderer probe NEAR white px: ${L2B:-?}" >> "$PROBE_LOG"
+L2BC=$(changed_class 14_leg2_baseline 14_leg2_burst_near | grep -o 'white=[0-9]*' | cut -d= -f2)
+sum "- leg-2 renderer probe NEAR (20 m) white px: ${L2B:-?} raw / ${L2BC:-?} changed-vs-baseline (> 20 = the client renders particles)"
+echo "- leg-2 renderer probe NEAR white px: ${L2B:-?} changed: ${L2BC:-?}" >> "$PROBE_LOG"
 srv "particle minecraft:end_rod $((CX - 1)) 150 $CZ 1 1 1 0 1200 force"
 sleep 1
 shot 14_leg2_burst_far || exit 1
 L2F=$(white_count 14_leg2_burst_far)
-sum "- leg-2 renderer probe FAR (80 m, marker zone) white px: ${L2F:-?} (> 20 = no distance cut; ~0 with NEAR alive = particles beyond the client chunk radius do not render)"
-echo "- leg-2 renderer probe FAR white px: ${L2F:-?}" >> "$PROBE_LOG"
+L2FC=$(changed_class 14_leg2_baseline 14_leg2_burst_far | grep -o 'white=[0-9]*' | cut -d= -f2)
+sum "- leg-2 renderer probe FAR (80 m, marker zone) white px: ${L2F:-?} raw / ${L2FC:-?} changed-vs-baseline (> 20 = no distance cut; ~0 with NEAR alive = particles beyond the client chunk radius do not render)"
+echo "- leg-2 renderer probe FAR white px: ${L2F:-?} changed: ${L2FC:-?}" >> "$PROBE_LOG"
 # v6.9.14 THE CARRIER-TYPE PROBE: the transport's carrier is
 # happy_villager (green); its render FLAPS across runs (the marker column
 # measured 1631 / 27 / 0 / 93 / 2961 red px on identical geometry — runs
@@ -854,28 +925,29 @@ echo "- leg-2 renderer probe FAR white px: ${L2F:-?}" >> "$PROBE_LOG"
 # carrier exists: dust{color:[0,1,0]} renders a green cloud the capture's
 # green-hue strobe can decode — if it proves stable across runs, the
 # carrier migrates to it and the flap dies with happy_villager.
+# v6.10.0: #246's in-band green ruler was a FALSE POSITIVE — it counted
+# the static (0,153,0) lens-panel frame at x=952..959 (366 px in EVERY
+# frame of #246/#247, pixel-identical to no-burst frames) while the dust
+# burst changed exactly 0 pixels in both runs. The ruler now counts
+# green-excess among pixels CHANGED vs the leg-2 baseline, x < 940.
 srv "particle minecraft:dust{color:[0.0,1.0,0.0],scale:1.0} $((CX - 1)) 150 $CZ 0 0 0 0 600 force"
 sleep 1
 shot 14_leg2_burst_greendust || exit 1
-GD=$(python3 - <<'PYEOF'
-from PIL import Image
-import os
-im = Image.open(f"{os.environ.get('SHOTS','/home/runner/mc-test/shots/ci-visual')}/14_leg2_burst_greendust.png").convert('RGB')
-px = im.load(); n = 0
-for y in range(180, 540):
-    for x in range(320, 960):
-        r, g, b = (c / 255.0 for c in px[x, y])
-        if g - b > 0.12 and g > r + 0.10 and g > 0.45:
-            n += 1
-print(n)
-PYEOF
-)
-sum "- leg-2 carrier probe green dust (80 m) green px: ${GD:-?} (> 100 = a stable green carrier exists)"
-echo "- leg-2 green dust px: ${GD:-?}" >> "$PROBE_LOG"
+GDL=$(changed_class 14_leg2_baseline 14_leg2_burst_greendust)
+GD=$(echo "$GDL" | grep -o 'green=[0-9]*' | cut -d= -f2)
+GDT=$(echo "$GDL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+sum "- leg-2 carrier probe green dust (80 m): changed-green px ${GD:-?} / total changed ${GDT:-?} vs baseline (> 100 green = a stable green carrier exists; total > 0 with green ~0 = the dust renders but fog washes it — a ruler problem, not a carrier problem)"
+echo "- leg-2 green dust changed-green px: ${GD:-?} total changed: ${GDT:-?}" >> "$PROBE_LOG"
+L2_SCENE_ALIVE=0
 for k in $(seq 0 11); do
   assert_online "relog probe $k" || exit 1
   srv "time set noon"  # v6.9.8: keep the light flat across the window
   shot "13_after_relog_probe$k" || exit 1
+  SC=$(scene_count "13_after_relog_probe$k")
+  if [ "${SC:-0}" -gt 0 ] 2>/dev/null; then L2_SCENE_ALIVE=1; fi
+  if [ "$k" = "0" ] && [ "${SC:-0}" = "0" ]; then
+    sum "- LEG-2 SCENE DEAD: the relog client paints ZERO scene pixels (x<940) — pure sky + lens panels; the fresh-session capture chain never commits (renderer-dead class, #227/#228); these probes measure a worldless client, not the transport"
+  fi
   LM=$(lens_metrics "13_after_relog_probe$k")
   case "$LM" in *lens_zero=1*)
     if [ "$LENS_ZERO_NOTED" = "0" ]; then
@@ -890,8 +962,8 @@ for k in $(seq 0 11); do
        --probe red --min-probe "$MIN_PROBE" --min-change 0 \
        --out "$SHOTS/diff_after_relog.png" > /tmp/probe_out.txt 2>&1
   PC=$(grep -o 'probe\[red\] px = [0-9]*' /tmp/probe_out.txt | grep -o '[0-9]*$')
-  echo "relog_probe$k red=${PC:-?} $LM" >> "$PROBE_LOG"
-  sum "- relog probe $k: red=${PC:-?} $LM (need >= $MIN_PROBE)"
+  echo "relog_probe$k red=${PC:-?} scene=${SC:-?} $LM" >> "$PROBE_LOG"
+  sum "- relog probe $k: red=${PC:-?} scene=${SC:-?} $LM (need red >= $MIN_PROBE; scene > 0 = the client paints a world at all)"
   if grep -q "VISUAL OK" /tmp/probe_out.txt; then
     FOUND2=1
     note "marker STILL visible after relog (probe $k)"
@@ -899,9 +971,14 @@ for k in $(seq 0 11); do
   fi
   sleep 5
 done
-[ "$FOUND2" = "1" ] && echo "LEG 2 PASS: the streamed marker survives the session change" \
-  && sum "- **LEG 2 PASS** (marker persisted over relog)" \
-  || fail "marker lost after relog — stream state is not persistent/deterministic"
+if [ "$FOUND2" = "1" ]; then
+  echo "LEG 2 PASS: the streamed marker survives the session change"
+  sum "- **LEG 2 PASS** (marker persisted over relog)"
+elif [ "${L2_SCENE_ALIVE:-0}" = "0" ]; then
+  fail "leg-2 painted no scene in any probe — the fresh-session capture chain never commits (renderer-dead class of #227/#228); the relog verdict is N/A until the chain arms on a fresh client"
+else
+  fail "marker lost after relog — stream state is not persistent/deterministic"
+fi
 
 # ---- 7. verdict ---------------------------------------------------------------
 echo "=== client log pack markers ==="

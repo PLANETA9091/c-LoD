@@ -44,12 +44,16 @@ grep -q "^simulationDistance:" "$OPT" && sed -i 's/^simulationDistance:.*/simula
 # v5.1.1 A/B hygiene: vanilla clouds drift between shots and poison the
 # pixel diff with thousands of false-change pixels. Kill them.
 grep -q "^renderClouds:" "$OPT" && sed -i 's/^renderClouds:.*/renderClouds:false/' "$OPT" || echo "renderClouds:false" >> "$OPT"
-# v6.9.12: pin the particles video setting — LEG 2's client rendered NO
-# particles at all (#243's forensics: 189-point bursts arrive every 10 s,
-# a shot taken 2 s into a burst shows ZERO non-sky pixels) while LEG 1
-# rendered the same geometry; the persisted options.txt from LEG 1's
-# exit is the prime suspect.
-grep -q "^particles:" "$OPT" && sed -i 's/^particles:.*/particles:0/' "$OPT" || echo "particles:0" >> "$OPT"
+# v6.10.0: pin the particles video setting to ALL (2). The v6.9.12 pin
+# wrote particles:0 (MINIMAL) — a diagnostic that became a censor: under
+# MINIMAL vanilla never spawns non-forced particles (the #243 "189 bursts
+# arrive, zero rendered" was this pin's own effect) and forced bursts
+# survive only ~19% of spawn attempts (ClientLevel.calculateParticleLevel
+# rolls nextInt(10) twice: 1/10 to leave MINIMAL, then 1/10 again).
+# #241's pixel forensics proves the leg-2 scene was dead BEFORE the pin,
+# but every particle probe since #243 ran censored on top of it. ALL
+# keeps both legs deterministic without culling anything.
+grep -q "^particles:" "$OPT" && sed -i 's/^particles:.*/particles:2/' "$OPT" || echo "particles:2" >> "$OPT"
 
 export LP_NUM_THREADS=$(nproc)
 
