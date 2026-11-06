@@ -1,0 +1,145 @@
+diff --git b/scripts/bench/run_ci_visual.sh b/scripts/bench/run_ci_visual.sh
+index 0000000..0000000 100644
+--- b/scripts/bench/run_ci_visual.sh
++++ b/scripts/bench/run_ci_visual.sh
+@@ -79,6 +79,24 @@
+ 
+ srv() { echo "$1" > /tmp/server.in; }
+ 
++# v6.11 THE STREAM-SHAPE BURST: fire the stream's EXACT packet shape —
++# /particle with count=0 emits ONE ClientboundLevelParticlesPacket with
++# count=0, delta 0/0/0, speed 0, force — byte-identical to what the engine
++# builds PER DOT (jni.rs build_particle_packet: "count=0 -> exactly one
++# particle at the point, zero drift"; the whole bit-stream rides these
++# single-particle packets). Every burst cell in this script instead sends
++# ONE packet with count=1200 (server/client-side expansion) — the packet
++# SHAPE axis was unmeasured. A 12x10 grid of single-packet dots, 1 block
++# apart around the given spot, makes the per-dot path measurable: 120
++# dots x multi-px each >> the >20 threshold, no expansion involved.
++stream_burst() { # type_id x y z [n]
++  local t="$1" x="$2" y="$3" z="$4" n="${5:-120}" i ox oz
++  for i in $(seq 0 $((n - 1))); do
++    ox=$(( i % 12 )); oz=$(( i / 12 ))
++    srv "particle $t $((x + ox)) $y $((z + oz)) 0 0 0 0 0 force"
++  done
++}
++
+ wait_log() { # pattern file timeout_loops
+   for _ in $(seq 1 "$3"); do
+     grep -q "$1" "$2" 2>/dev/null && return 0
+@@ -565,6 +583,35 @@
+   CVG=$(echo "$CVL" | grep -o 'green=[0-9]*' | cut -d= -f2)
+   CVT=$(echo "$CVL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+   sum "- control CARRIER (happy_villager, pack-free — no capture shaders) NEAR: changed-green ${CVG:-?} / total ${CVT:-?} vs the control dust shot (> 20 = the carrier renders raw; ~0 = the carrier type is broken on this build — P0)"
++  # v6.11 THE STREAM-SHAPE CELLS, control arm (dossier 2026-11-07): the
++  # pack-free client has NO capture shaders and NO eraser — the raw
++  # renderability of the engine's PER-DOT packet path. end_rod first (the
++  # known-alive type), then the carrier on the same shape:
++  #   end_rod stream-shape > 20 (control burst alive)  -> the count=0
++  #       single-dot path renders on this build — with the burst cells the
++  #       whole packet-shape axis is exonerated;
++  #   end_rod stream-shape ~ 0 (control burst alive)   -> THE count=0
++  #       single-dot path is broken on this build (P0 — the stream dies by
++  #       SHAPE on every client; the engine must batch dots into count>0
++  #       packets — no carrier migration can help);
++  #   carrier stream-shape ~ 0 with end_rod stream alive -> the count=0
++  #       CARRIER path specifically fails (type/pool at the packet level).
++  sleep 4
++  stream_burst minecraft:end_rod $((VX + 20)) 150 $CZ
++  sleep 1
++  shot 09d_control_endrod_stream || exit 1
++  CES=$(changed_class 09c_control_villager 09d_control_endrod_stream)
++  CEW=$(echo "$CES" | grep -o 'white=[0-9]*' | cut -d= -f2)
++  CET=$(echo "$CES" | grep -o 'total=[0-9]*' | cut -d= -f2)
++  sum "- control STREAM-SHAPE end_rod (count=0 x120 NEAR — the engine's exact per-dot packet, no expansion): changed-white ${CEW:-?} / total ${CET:-?} vs the control villager shot (> 20 with the burst alive = the per-dot packet path renders, shape exonerated; ~0 with the burst alive = the count=0 path is broken on this build — P0: batch the dots)"
++  sleep 4
++  stream_burst minecraft:happy_villager $((VX + 20)) 150 $CZ
++  sleep 1
++  shot 09e_control_villager_stream || exit 1
++  CVS=$(changed_class 09d_control_endrod_stream 09e_control_villager_stream)
++  CVSG=$(echo "$CVS" | grep -o 'green=[0-9]*' | cut -d= -f2)
++  CVST=$(echo "$CVS" | grep -o 'total=[0-9]*' | cut -d= -f2)
++  sum "- control STREAM-SHAPE carrier (happy_villager count=0 x120, pack-free): changed-green ${CVSG:-?} / total ${CVST:-?} vs the end_rod stream shot (> 20 = the per-dot CARRIER path renders raw; ~0 with end_rod stream alive = the per-dot carrier path specifically fails — type/pool at the packet level)"
+   cp "$SUMMARY" "$SHOTS/summary.md" 2>/dev/null || true
+   exit 0
+ fi
+@@ -875,6 +922,35 @@
+ L1VG=$(echo "$L1VL" | grep -o 'green=[0-9]*' | cut -d= -f2)
+ L1VT=$(echo "$L1VL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+ sum "- leg-1 CARRIER (happy_villager) 20 m NEAR: changed-green ${L1VG:-?} / total ${L1VT:-?} vs white-dust shot (> 20 = the carrier renders on the healthy client — the leg-2 villager twin's reference; ~0 with end_rod alive = the carrier type itself is dead on BOTH legs — the flap at its extreme, carrier must change)"
++# v6.11 leg-1 STREAM-SHAPE cells (dossier 2026-11-07) — the healthy-client
++# reference twins for the leg-2 per-dot path. end_rod first: white is
++# IMMUNE to the eraser's color net, so this is the clean shape read on a
++# packed client. Then the carrier on the same shape: NOTE the color net
++# (dust_mask.fsh v5.3.2b) erases carrier hue EVERYWHERE — its 2px
++# out-of-band tier fires on ANY carrier-hue pixel, band only sets the disc
++# radius (3px in-band / 2px out) — so villager cells on packed legs are
++# eraser-overlaid and the leg-1 vs leg-2 TWIN COMPARISON is the signal:
++#   leg-1 end_rod stream ~ 0 (leg-1 bursts alive) -> the count=0 path is
++#       dead on BOTH legs — a 26.3-client single-particle bug class, P0:
++#       the engine must batch dots regardless of the leg-2 anomaly;
++#   leg-1 end_rod stream > 20 -> healthy reference established; leg-2's
++#       twin cell now reads cleanly against it.
++sleep 2
++stream_burst minecraft:end_rod $((VX + 20)) 150 $CZ
++sleep 1
++shot 09h_leg1_endrod_stream || exit 1
++L1ESL=$(changed_class 09g_leg1_villager_near 09h_leg1_endrod_stream)
++L1ESW=$(echo "$L1ESL" | grep -o 'white=[0-9]*' | cut -d= -f2)
++L1EST=$(echo "$L1ESL" | grep -o 'total=[0-9]*' | cut -d= -f2)
++sum "- leg-1 STREAM-SHAPE end_rod (count=0 x120 NEAR — the engine's exact per-dot packet): changed-white ${L1ESW:-?} / total ${L1EST:-?} vs the villager NEAR shot (> 20 = the per-dot path renders on the healthy client — the leg-2 twin's reference; ~0 with the bursts alive = the count=0 path is dead on BOTH legs — P0: batch the dots)"
++sleep 2
++stream_burst minecraft:happy_villager $((VX + 20)) 150 $CZ
++sleep 1
++shot 09i_leg1_villager_stream || exit 1
++L1VSL=$(changed_class 09h_leg1_endrod_stream 09i_leg1_villager_stream)
++L1VSG=$(echo "$L1VSL" | grep -o 'green=[0-9]*' | cut -d= -f2)
++L1VST=$(echo "$L1VSL" | grep -o 'total=[0-9]*' | cut -d= -f2)
++sum "- leg-1 STREAM-SHAPE carrier (happy_villager count=0 x120 NEAR): changed-green ${L1VSG:-?} / total ${L1VST:-?} vs the end_rod stream shot (the healthy twin for the leg-2 per-dot carrier read: ~ 0 green = the 2px color net erases the per-dot carrier hue on a HEALTHY packed client — the expected design read; > 20 = the net misses the per-dot geometry — dot-size/pool class on the healthy leg)"
+ 
+ # ---- 5. THE LIVE EDIT (no relog!) + probe loop -------------------------------
+ note "placing $MARKER column at $CX,$CZ (y $FILL_Y0..$FILL_Y1)"
+@@ -1239,6 +1315,43 @@
+ L2VPT=$(echo "$L2VPL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+ sum "- leg-2 ERASER TEST: CARRIER (happy_villager) at Y=120 in-band (75 m, the hword plane): changed-green ${L2VPG:-?} / total ${L2VPT:-?} vs the dust@Y80 shot (~ 0 = the eraser is ALIVE on leg 2 — stream dots die pre-display; > 20 = the eraser is BLIND on leg 2 — the capture tail is down)"
+ echo "- leg-2 carrier@Y120 in-band changed-green: ${L2VPG:-?} total: ${L2VPT:-?}" >> "$PROBE_LOG"
++# v6.11 THE STREAM-SHAPE CELLS on the relog leg (dossier 2026-11-07) — the
++# decisive PACKET-SHAPE split. The stream's wire payload is ONE count=0
++# packet PER DOT (jni.rs build_particle_packet: overrideLimiter=true,
++# alwaysShow=true, delta 0/0/0, speed 0, count=0 — sent in a
++# ClientboundBundlePacket per tick); every burst cell above is ONE packet
++# with count=1200. end_rod first — white is immune to the color net, so
++# this is the CLEAN per-dot path read on the relog client:
++#   > 20 (NEAR end_rod burst 479/495 alive) -> the count=0 single-dot
++#       path RENDERS on the relog client — packet shape exonerated; the
++#       stream's death must ride the type (the villager flap), the
++#       in-band eraser (the cell above), the BUNDLE wrapper (engine-only,
++#       no /particle equivalent) or the trickle cadence — the published
++#       cells split all but the bundle, which becomes the named suspect;
++#   ~ 0 (burst alive) -> THE count=0 single-dot path is DEAD on the relog
++#       client: the stream's per-dot packets die BY SHAPE — the engine
++#       must batch (count>0 packets or per-dot bundles of bursts); this
++#       is the P0 fix row and it does not exist in any client shader.
++sleep 2
++stream_burst minecraft:end_rod $((VX + 20)) 150 $CZ
++sleep 1
++shot 14_leg2_burst_endrod_stream || exit 1
++L2ESL=$(changed_class 14_leg2_burst_villager_plane 14_leg2_burst_endrod_stream)
++L2ESW=$(echo "$L2ESL" | grep -o 'white=[0-9]*' | cut -d= -f2)
++L2EST=$(echo "$L2ESL" | grep -o 'total=[0-9]*' | cut -d= -f2)
++sum "- leg-2 STREAM-SHAPE end_rod (count=0 x120 NEAR — the engine's exact per-dot packet, eraser-immune): changed-white ${L2ESW:-?} / total ${L2EST:-?} vs the villager@Y120 shot (> 20 with the NEAR burst alive = the per-dot path renders — shape exonerated, suspects narrow to type/bundle/cadence; ~0 with the burst alive = the count=0 path is DEAD on the relog client — the stream dies by packet shape, the engine must batch dots)"
++echo "- leg-2 end_rod stream-shape changed-white: ${L2ESW:-?} total: ${L2EST:-?}" >> "$PROBE_LOG"
++# carrier stream-shape — the per-dot CARRIER path (the color net overlays
++# this cell; the leg-1 twin 09i is the reference):
++sleep 2
++stream_burst minecraft:happy_villager $((VX + 20)) 150 $CZ
++sleep 1
++shot 14_leg2_burst_villager_stream || exit 1
++L2VSL=$(changed_class 14_leg2_burst_endrod_stream 14_leg2_burst_villager_stream)
++L2VSG=$(echo "$L2VSL" | grep -o 'green=[0-9]*' | cut -d= -f2)
++L2VST=$(echo "$L2VSL" | grep -o 'total=[0-9]*' | cut -d= -f2)
++sum "- leg-2 STREAM-SHAPE carrier (happy_villager count=0 x120 NEAR): changed-green ${L2VSG:-?} / total ${L2VST:-?} vs the end_rod stream shot (read against the leg-1 twin: leg-2 ~ leg-1 = the per-dot carrier path behaves like the healthy leg — carrier exonerated at NEAR; leg-2 green > 20 with leg-1 ~ 0 = the eraser is blind on leg 2 at per-dot geometry; leg-2 ~ 0 with end_rod stream alive = the per-dot CARRIER path specifically dies — type/pool class)"
++echo "- leg-2 villager stream-shape changed-green: ${L2VSG:-?} total: ${L2VST:-?}" >> "$PROBE_LOG"
+ L2_SCENE_ALIVE=0
+ for k in $(seq 0 11); do
+   assert_online "relog probe $k" || exit 1
