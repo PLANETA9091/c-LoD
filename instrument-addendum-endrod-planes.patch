@@ -1,0 +1,33 @@
+diff --git a/scripts/bench/run_ci_visual.sh b/scripts/bench/run_ci_visual.sh
+index 0000000..0000000 100644
+--- a/scripts/bench/run_ci_visual.sh
++++ b/scripts/bench/run_ci_visual.sh
+@@ -1042,6 +1042,28 @@ L2HVG=$(echo "$L2HVL" | grep -o 'green=[0-9]*' | cut -d= -f2)
+ L2HVT=$(echo "$L2HVL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+ sum "- leg-2 type matrix happy_villager NEAR (20 m): changed-green ${L2HVG:-?} / total ${L2HVT:-?} vs white-dust shot (the old carrier on the relog client; total is the signal — the eraser can eat green)"
+ echo "- leg-2 happy_villager NEAR changed-green: ${L2HVG:-?} total: ${L2HVT:-?}" >> "$PROBE_LOG"
++# v6.10.2b THE PLANE CONTROL (log-mining addendum, 2026-11-06): the wire
++# counters in #248/#250 proved the stream dots ARRIVE at the leg-2 client
++# continuously (+189-378 particles per 100-tick window, fail 0, gate-passed)
++# and none of them render — but end_rod has only ever been fired at Y=150
++# (eye level). This burst fires end_rod at the stream's OWN plane (Y=120,
++# the hword plane, marker zone, delta 1 1 1 — the exact geometry of the dots
++# the client refuses to render):
++#   renders (> 20) -> the planes are fine; the break is dust-TYPE-only —
++#                      the carrier must change type, not altitude;
++#   ~0             -> the break rides the plane/depth position TOO (the
++#                      reversed-Z class from the stream doc's own caveat:
++#                      below-horizon particles lose to the sky) — the
++#                      carrier must change type AND possibly in Y.
++sleep 2
++srv "particle minecraft:end_rod $((CX - 1)) 120 $CZ 1 1 1 0 1200 force"
++sleep 1
++shot 14_leg2_burst_endrod_plane || exit 1
++EPL=$(changed_class 14_leg2_burst_villager 14_leg2_burst_endrod_plane)
++EPC=$(echo "$EPL" | grep -o 'white=[0-9]*' | cut -d= -f2)
++EPT=$(echo "$EPL" | grep -o 'total=[0-9]*' | cut -d= -f2)
++sum "- leg-2 plane control end_rod at Y=120 (80 m, the hword plane): changed-white ${EPC:-?} / total ${EPT:-?} vs villager shot (> 20 = the planes render — the break is dust-type-only; ~0 with end_rod@150 alive (495/479) = the break rides the plane/depth too)"
++echo "- leg-2 end_rod@Y120 changed-white: ${EPC:-?} total: ${EPT:-?}" >> "$PROBE_LOG"
+ L2_SCENE_ALIVE=0
+ for k in $(seq 0 11); do
+   assert_online "relog probe $k" || exit 1
