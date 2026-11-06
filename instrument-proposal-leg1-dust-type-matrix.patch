@@ -1,0 +1,93 @@
+diff --git a/scripts/bench/run_ci_visual.sh b/scripts/bench/run_ci_visual.sh
+index ede727c..b865d30 100644
+--- a/scripts/bench/run_ci_visual.sh
++++ b/scripts/bench/run_ci_visual.sh
+@@ -769,6 +769,50 @@ PYEOF
+   fi
+ fi
+ 
++# ---- 4c. THE LEG-1 DUST PROBE (v6.10.2; the feed's decisive instrument) ------
++# The bit-stream is 100% dust (word_spawns -> Spawn at the LAYER_Y planes) and
++# at IDENTICAL coords/delta/force on leg-2 dust reads 0 changed px twice
++# (#248 stacked delta 0 0 0 inconclusive, #250 fair delta 1 1 1) while end_rod
++# at the same coords renders 318-324 (#250 FAR, twice). But the harness fires
++# dust ONLY on leg-2 — the missing cell is the SAME burst on leg 1, where this
++# client demonstrably renders (end_rod 543/530/407 raw, marker red 1183/1117,
++# chains painted).
++# The leg-1 answer splits the two remaining root-cause candidates in ONE run:
++#   leg-1 green dust > 0   -> dust renders on a live client; the leg-2 zero is
++#                             session-specific -> the fresh-session capture/
++#                             decode path (the dust-vs-end_rod asymmetry rides
++#                             the relog, e.g. the reload-time particles.png
++#                             atlas rebuild vs the dust quad blit);
++#   leg-1 green = 0 + white = 0 (total ~0) -> dust does not render on this
++#                             client/build AT ALL (26.3/llvmpipe) -> the
++#                             carrier type itself is the root cause; the
++#                             stream must leave dust (P0 engine finding).
++# A dedicated pre-burst baseline (09d) keeps the changed count free of the
++# <=1500 px paint-wave drift the 10/11 pair tolerates; the white-dust burst
++# at the proven NEAR spot (end_rod 543 raw there) splits color-specific from
++# type-specific when green reads 0 (the eraser's fog-invariant arm fires on
++# green excess even on leg 1 — total/white are the signal there). Successive
++# baselines (09d->09e->09f) isolate each burst: a dying neighbour burst can
++# only inflate `total` (its pixels revert to sky = unclassified delta), never
++# the counted class.
++note "leg-1 dust probe (carrier-type discriminator)"
++shot 09d_leg1_predust || exit 1
++srv "particle minecraft:dust{color:[0.0,1.0,0.0],scale:1.0} $((CX - 1)) 150 $CZ 1 1 1 0 600 force"
++sleep 1
++shot 09e_leg1_greendust_far || exit 1
++L1GL=$(changed_class 09d_leg1_predust 09e_leg1_greendust_far)
++L1GD=$(echo "$L1GL" | grep -o 'green=[0-9]*' | cut -d= -f2)
++L1GT=$(echo "$L1GL" | grep -o 'total=[0-9]*' | cut -d= -f2)
++sum "- leg-1 green dust (80 m, leg-2 geometry) changed-green ${L1GD:-?} / total ${L1GT:-?} vs predust (> 100 green = dust renders on a live client — the leg-2 zero is session-specific; green 0 with total ~0 = dust never renders here, the carrier type IS the root cause)"
++sleep 2
++srv "particle minecraft:dust{color:[1.0,1.0,1.0],scale:1.0} $((VX + 20)) 150 $CZ 0.2 0.2 0.2 0 400 force"
++sleep 1
++shot 09f_leg1_whitedust_near || exit 1
++L1WL=$(changed_class 09e_leg1_greendust_far 09f_leg1_whitedust_near)
++L1WC=$(echo "$L1WL" | grep -o 'white=[0-9]*' | cut -d= -f2)
++L1WT=$(echo "$L1WL" | grep -o 'total=[0-9]*' | cut -d= -f2)
++sum "- leg-1 white dust (20 m NEAR, proven-render spot) changed-white ${L1WC:-?} / total ${L1WT:-?} vs green-dust shot (> 20 = the dust TYPE renders; green 0 + white > 0 = color-specific break, green 0 + white 0 = dust-type break)"
++
+ # ---- 5. THE LIVE EDIT (no relog!) + probe loop -------------------------------
+ note "placing $MARKER column at $CX,$CZ (y $FILL_Y0..$FILL_Y1)"
+ # v6.4.2 FIX (CI visual run 2026-10-31): the marker zone sits 100 blocks from
+@@ -967,6 +1011,37 @@ GD=$(echo "$GDL" | grep -o 'green=[0-9]*' | cut -d= -f2)
+ GDT=$(echo "$GDL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+ sum "- leg-2 carrier probe green dust (80 m): changed-green px ${GD:-?} / total changed ${GDT:-?} vs baseline (> 100 green = a stable green carrier exists; total > 0 with green ~0 = the dust renders but fog washes it — a ruler problem, not a carrier problem)"
+ echo "- leg-2 green dust changed-green px: ${GD:-?} total changed: ${GDT:-?}" >> "$PROBE_LOG"
++# v6.10.2 THE LEG-2 TYPE MATRIX (the feed's follow-up cell, fired in-run):
++# every leg-2 dust datapoint so far was FAR (80 m) — two questions remain
++# that the end_rod-vs-dust pair cannot separate on leg 2:
++#   white dust at the NEAR coords (20 m) — end_rod proves the spot renders
++#   (495/479 changed) and fog is negligible there, so a zero here convicts
++#   the dust TYPE (or its color path), not distance/fog;
++#   happy_villager at the NEAR coords — the second non-dust type (the old
++#   carrier): a render here with dust 0 narrows the break to dust; a zero
++#   here TOO says the relog client renders end_rod and nothing else.
++# Successive baselines (greendust -> whitedust -> villager) isolate each
++# burst: a dying neighbour can only inflate `total`, never the counted
++# class; the eraser (if the tier-flip re-armed the chains) can eat green —
++# total is the signal for the villager reading.
++sleep 2
++srv "particle minecraft:dust{color:[1.0,1.0,1.0],scale:1.0} $((VX + 20)) 150 $CZ 0.2 0.2 0.2 0 400 force"
++sleep 1
++shot 14_leg2_burst_whitedust || exit 1
++L2WDL=$(changed_class 14_leg2_burst_greendust 14_leg2_burst_whitedust)
++L2WDC=$(echo "$L2WDL" | grep -o 'white=[0-9]*' | cut -d= -f2)
++L2WDT=$(echo "$L2WDL" | grep -o 'total=[0-9]*' | cut -d= -f2)
++sum "- leg-2 type matrix white dust NEAR (20 m): changed-white ${L2WDC:-?} / total ${L2WDT:-?} vs green-dust shot (> 20 = dust renders on the relog client NEAR — the FAR zero is distance/fog; 0 with the end_rod NEAR burst alive (495/479) = the dust TYPE is unrendered on leg 2)"
++echo "- leg-2 white dust NEAR changed-white: ${L2WDC:-?} total: ${L2WDT:-?}" >> "$PROBE_LOG"
++sleep 2
++srv "particle minecraft:happy_villager $((VX + 20)) 150 $CZ 0.2 0.2 0.2 0 400 force"
++sleep 1
++shot 14_leg2_burst_villager || exit 1
++L2HVL=$(changed_class 14_leg2_burst_whitedust 14_leg2_burst_villager)
++L2HVG=$(echo "$L2HVL" | grep -o 'green=[0-9]*' | cut -d= -f2)
++L2HVT=$(echo "$L2HVL" | grep -o 'total=[0-9]*' | cut -d= -f2)
++sum "- leg-2 type matrix happy_villager NEAR (20 m): changed-green ${L2HVG:-?} / total ${L2HVT:-?} vs white-dust shot (the old carrier on the relog client; total is the signal — the eraser can eat green)"
++echo "- leg-2 happy_villager NEAR changed-green: ${L2HVG:-?} total: ${L2HVT:-?}" >> "$PROBE_LOG"
+ L2_SCENE_ALIVE=0
+ for k in $(seq 0 11); do
+   assert_online "relog probe $k" || exit 1

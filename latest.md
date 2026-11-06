@@ -1,46 +1,59 @@
-# c-LoD forensic addendum: run #250 — the spawn-gate suspicion rests on stale doc constants; the real discriminator is already measured (dust vs end_rod at identical coords on leg-2)
+# Instrument proposal: the leg-1 dust probe + the leg-2 type matrix (a ready harness patch)
 
-## 1. The prime suspect's arithmetic used stale constants
+Date: 2026-11-06. Applies to `fix/leg2-arm-race` @ 35eb53b (the latest harness state), file `scripts/bench/run_ci_visual.sh`: **+74 lines, `bash -n` green, `git apply --check` clean, zero rust touched, ~15 s of added run time.** Patch file: `instrument-proposal-leg1-dust-type-matrix.patch` (same commit). No new runs and no new commits since #251 / 35eb53b / d4ff522 (monitored 2026-11-06) — this is the missing-instrument post, not a run verdict.
 
-Task 34 and the #250 forensics locate the prime suspect via "the sky planes at Y=260/272 sit 108–120+ m from the eye — at or beyond ZONE_FAR". Y=260/272 exists ONLY in the stale module doc (stream.rs lines 8-9, predating the plane move). The live constants are `LAYER_Y: [f64; 2] = [80.0, 120.0]` (stream.rs:71 — hword rides Y=120, cword Y=80; edit-reset plane Y=100 midway, stream.rs:79).
+## 1. Why this is the next instrument
 
-Recomputed from the bench eye (Y=151.62, pitch 5, half-cone = ASSUMED_FOV 110/2 + margin 8 = 63°, stream.rs:112-126):
+Task 34 lists two next instruments: the gate counters in diag and the sky-plane pitch probe. The addendum above retired the pitch probe (stale doc constants — the live `LAYER_Y=[80,120]` planes are in-band and in-cone from the bench vantage on BOTH legs) and showed the gate diag is statistically blind (zero firings in #250's full unfiltered server.log: the spawn phase early-returns on empty batches BEFORE the counters, and the `%100` window almost never coincides). The one instrument that splits the remaining root-cause candidates is the **leg-1 dust probe**: the harness fires dust ONLY on leg-2 (`run_ci_visual.sh:962`), so the candidate root cause "dust does not render" has never been measured on a client that demonstrably works.
 
-| plane | Δy from eye | in-band horiz (d≤112) | elevation at marker horiz 75 m | cone at pitch 5 (−5°±63°) |
-|---|---|---|---|---|
-| hword Y=120 | −31.62 m | ≤ 107.4 m | −22.9° | IN CONE |
-| cword Y=80 | −71.62 m | ≤ 86.1 m | −43.7° | IN CONE |
-| reset Y=100 | −51.62 m | ≤ 99.4 m | −34.5° | IN CONE |
+## 2. What the patch adds (4 bursts, 4 shots, 4 changed-class readings)
 
-The ENTIRE bit-stream is in-band and in-cone from the bench vantage — for both legs, identically. The stated spawn-gate suspicion ("sky planes at/beyond ZONE_FAR decide which dots flow") dissolves: there is no geometry reason for the gate to behave differently on leg-2 at the same vantage. The gate counters are still worth surfacing (per-session server state remains a live question) — but not because of plane geometry.
+**leg 1** (new section 4c — after the v6.7.3 renderer preflight, before the live edit; the preflight still gates the run BEFORE any dust flies):
 
-## 2. The gate diag exists since v5.3.1 and is statistically blind
+- `09d_leg1_predust` — a dedicated pre-burst baseline (the 10/11 pair tolerates ≤1500 px paint-wave drift; a dedicated baseline keeps the dust reading clean);
+- **green dust** at the EXACT leg-2 FAR geometry (`CX-1 150 CZ`, delta `1 1 1`, count 600) → `changed_class` vs 09d — the decisive cell, never measured;
+- **white dust** at the proven NEAR spot (`VX+20`, delta `0.2 0.2 0.2`, count 400 — end_rod rendered 543 raw there) → `changed_class` vs the green-dust shot — splits color-specific from type-specific when green reads 0.
 
-`gate: sky {} near {} far {} cone {}` (engine.rs, since f396967 v5.3.1) prints only on spawn-phase ticks that ALSO hit `tick % 100 == 0` — but the spawn phase early-returns on empty batches (engine.rs:1281 `if batch.is_empty() { return; }` BEFORE the per-player gate loop), and in #250's full 15-minute server.log (uploaded unfiltered, ci.yml:643) the line fired ZERO times, while the `stream:` diag prints every 100 ticks unconditionally (stream_diag is called BEFORE the early return, engine.rs:1280). To surface the counters: (a) print the gate line on EVERY spawn-phase fire (drop the %100 guard — spawn fires are rare, rearm-beat cadence), or (b) aggregate per-diag-window counters into the `stream:` line.
+**leg 2** (after the green-dust probe, before the relog probe loop):
 
-## 3. The real discriminator is already in the #250 data
+- **white dust NEAR** (20 m) → changed vs the green-dust shot — the FIRST NEAR dust datapoint on the relog leg (every dust reading so far was FAR at 80 m, where fog lives);
+- **happy_villager NEAR** (20 m) → changed vs the white-dust shot — the second non-dust type on the relog client.
 
-At IDENTICAL coords and spread (`$((CX - 1)) 150 $CZ 1 1 1 ... force`):
+Isolation rule: **successive baselines** (09d→09e→09f; greendust→whitedust→villager). A dying neighbour burst can only inflate `total` (its pixels revert to sky = an unclassified delta) — never the counted class. Eraser caveats: on leg 1 the fog-invariant eraser arm eats green excess, so the leg-1 cell carries the white-dust control; on leg 2 the tier-flip control may re-arm the chains (eraser included) — the villager reading relies on `total`.
 
-- `minecraft:end_rod` (count 1200) → **318–324 changed px** (renders);
-- `minecraft:dust{color:[0,1,0],scale:1.0}` (count 600) → **0 changed px** — twice (#248: delta 0 0 0 stacked at one subpixel point, inconclusive; #250: delta 1 1 1, fair, same coords as FAR).
+## 3. The decision tree (one run names the root cause)
 
-The bit-stream is 100% dust (`word_spawns → Spawn { y: plane_y }`, stream.rs:838-839, both layers). If dust does not RENDER on the relog client, the capture strobe reads sky at every sub-cell position, the decode keeps previous values (empty on a fresh session), and the chains paint nothing — exactly the byte-frozen scene-dead frame of every leg-2 since pre-pin #241.
+| # | leg-1 green | leg-1 white | reading |
+|---|---|---|---|
+| 1 | > 100 | any | dust renders on a live client → the leg-2 zero is **session-specific**: the fresh-session capture/decode path. Named mechanism candidate: the reload-time `particles.png` atlas rebuild (client.log 17:49:27, #250) vs the dust color-uniform quad blit — end_rod (textured) survives the rebuild, dust does not. Engine follow-up: rebuild/re-resolve the dust quad path on the pack `SUCCESSFULLY_LOADED` callback (the JNI hook already flagged in v6.10.1), or migrate the carrier. |
+| 2 | ~0 | > 20 | the dust TYPE renders, the GREEN path does not → a **color-specific break on the live client**; the green carrier cannot work regardless of the relog — the stream must leave green dust (re-encode the color channel, e.g. white dust + sign, or end_rod). |
+| 3 | ~0 | ~0 | the dust TYPE does not render on this client/build AT ALL (26.3/llvmpipe) → **P0 engine finding**: the bit-stream carrier is unrenderable (`word_spawns → Spawn`, both planes, stream.rs:838-839 — the whole stream is dust); migrate the encoding. |
 
-Supporting existing data: the leg-2 baseline + 12 relog probes are byte-frozen (sha256-identical across #248/#250, audit marker above) even though the relog re-arm streams the last edit's 21 cells — dust dots at Y=80/120, in-band, in-cone, within the 128-block client particle cull — around the probe window. If ANY dust rendered on leg-2, the frozen frames would move. They do not.
+With leg-1 green > 0, the leg-2 matrix refines the session-specific branch:
 
-**Unifying root-cause candidate: dust particles do not render on fresh-session (relog) clients; end_rod does.** The capture→decode→paint chain has no input by construction; the engine/harness chain work (v6.10.0/v6.10.1) was real but upstream of the break.
+| # | leg-2 white NEAR | leg-2 villager | reading |
+|---|---|---|---|
+| 4 | > 20 | — | dust renders on the relog client NEAR → the FAR-only zero becomes a **dust-specific distance/fog/cull interaction** (end_rod FAR DID render 383/324 at the same coords — plain distance does not kill particles); the carrier geometry, not the session, is the question. |
+| 5 | ~0 | — | the dust type is unrendered on the relog client (end_rod NEAR alive: 495/479) → **confirms the unifying candidate**; combined with rows 1-3 it names WHICH side of the relog the break lives on (row 1 + row 5 = the atlas-rebuild mechanism; row 3 = global). |
+| 6 | — | > 20 | the break is dust-specific: two non-dust types render where dust does not. |
+| 7 | — | ~0 | the relog client renders **end_rod and nothing else** — an even sharper type cut; the carrier has exactly one known-good type on leg 2. |
 
-## 4. The missing cell: a leg-1 dust probe (never measured)
+## 4. Costs and invariants
 
-The harness fires dust only on leg-2 (run_ci_visual.sh:962). Fire the same burst on LEG-1 right after the FAR console burst and count changed vs the leg-1 baseline. Expected > 0 (leg-1's own paint argues dust+decode+chain all work there); this kills the alternative "ruler problem" reading of the leg-2 zero and confirms the per-session dust break. One run, ~4 lines.
+- The probes are **additive**: no fail/pass path, no verdict logic, no existing gate threshold is touched; raw counts stay untouched for series continuity (all new readings are changed-vs-baseline, the v6.10.0 ruler family).
+- The v6.7.3 renderer preflight still gates the run BEFORE any dust flies (the leg-1 block sits after the preflight `fi`); a RENDERER DEAD abort never reaches the new probes.
+- Budget: 4 bursts + 4 shots + ~6 s of sleeps ≈ **15 s of run time**; no rust, no workflow changes.
 
-Follow-up matrix on leg-2 (cheap, same run): dust at NEAR coords (20 m — distance dependence), white dust `color:[1,1,1]` (color/ruler artifact exclusion), happy_villager (second non-dust type — the type matrix). Mechanism candidates for a dust-specific break after the pack RELOAD: the particles.png-atlas rebuild at reload (client.log 17:49:27 "Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas") hitting the dust quad path (color-uniform sprite blit) but not end_rod's; a 26.3 reversed-Z interaction specific to the dust render type (the stream doc's own caveat "26.3 reversed-Z hides particles against the sky" cannot be a blanket rule — end_rod against sky renders at the same coords).
+## 5. Apply
 
-## 5. Instrument note on the sky-plane pitch probe
+```
+# on fix/leg2-arm-race (35eb53b or a descendant that does not touch the 4b/leg-2 probe sections):
+git apply instrument-proposal-leg1-dust-type-matrix.patch
+bash -n scripts/bench/run_ci_visual.sh
+```
 
-With the real planes at Y=80/120, the pitch −60 shot is NOT needed for delivery-proof at the bench vantage — the stream is in-cone at pitch 5 for both legs. The pitch probe keeps only model-validation value. The decisive instrument is the leg-1 dust probe (#4).
+master @ d4ff522 does not carry the v6.10.1 arm-race control yet — apply on the leg2 branch (the active investigation), or re-apply after 6b0b599 merges.
 
 ## Bottom line
 
-The gate/geometry suspect of Task 34 is retired (stale constants). The evidence now converges on one measurable sentence: **on a relog client, end_rod renders and dust does not — and the whole LOD bit-stream is dust.** One leg-1 dust probe (plus the optional leg-2 type matrix) splits the last alternatives and names the root cause.
+Everything measured so far says one sentence: **on a relog client end_rod renders and dust does not — and the whole LOD bit-stream is dust.** This patch adds the four readings that sentence still owes: does dust render on a live client at all (leg 1), and if yes — which side of the relog kills it (leg 2 NEAR matrix).
