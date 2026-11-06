@@ -1,37 +1,14 @@
-# Instrument addendum v6.10.2e: the PLANE × TYPE CROSS — dust at the stream's OWN planes (Y=120 hword, Y=80 cword)
+# CORRECTION: the bit-stream carrier is happy_villager — every "dust" cell in the published matrix measures a type the engine already documented as degenerate (v6.10.2f)
 
-Date: 2026-11-07. Companion to v6.10.2b–d. The matrix still has one unmeasured interaction cell: the type matrix fires dust at **Y=150 only**, and the plane control (v6.10.2b) fires **end_rod at Y=120 only**. Nobody has ever fired **dust at the stream's own planes** — while the engine's actual dots ARE dust at `LAYER_Y=[80.0, 120.0]` (stream.rs:71: hword rides Y=120, cword Y=80; edit-reset Y=100 midway), the planes are in-band and in-cone from the bench vantage on both legs (the stale-constants note), and the whole stream is dead on leg-2. If the verdict on the rest of the matrix comes back "dust renders", it will have been measured at a Y the engine never uses.
+Date: 2026-11-07. Found by reading the LIVE engine source on `master` (d4ff522 — the code that built #248/#250), prompted by the v6.10.2e plane work. This rewrites the interpretation layer of the whole published instrument chain. Nothing needs reverting: the patches stay additive; the decision trees get re-read as below, and v6.10.2f adds the missing CARRIER cells.
 
-## The patch (+36 lines, `instrument-addendum-plane-type-cross.patch`)
+## The one-paragraph version
 
-Applies AFTER the full 4-patch chain: base (bfbed5c) → endrod-planes (8b16c22) → cached-pack control (0184784) → control type matrix (1a0c871) → **this**. Apply-chain verified on 35eb53b, `bash -n` green on the full stack, zero rust.
+The bit-stream's carrier is **happy_villager** — NOT minecraft:dust. The engine source says it outright (master `src/jni.rs`, `build_particle_packet`): *"happy_villager replaces the v5.0 dust carrier: dust quads render with degenerate UVs on every 26.3 software backend (verified live on GL llvmpipe AND Vulkan lavapipe — dust stays 1-2 px while explosions and town-sparkles render full-size)"* — and `src/stream.rs`: *"the villager-sparkle carrier has one hue, so the capture pass tells words apart by plane height."* Every **dust** cell in the published instrument chain therefore measures a **documented-dead type** — expected ~0 on EVERY leg, NOT a leg-2 discriminator; the "P0: migrate the carrier" rows misfire (the migration already happened at v5.1). The decode band (`CULL_RADIUS=28` … `ZONE_FAR=112`) decides measurability: the NEAR probe spot (20 m) is OUT-of-band (measurable), the disk at 75 m is IN-band where `dust_mask.fsh`'s color net repaints every carrier-hue pixel — the stealth eraser. **v6.10.2f** adds the three missing CARRIER cells: leg-1 villager NEAR (healthy-client reference), control villager NEAR (pack-free = raw renderability, no capture shaders at all), leg-2 villager@Y=120 IN-BAND (the eraser test: ~0 = eraser alive → stream dots die pre-display; > 20 = the capture tail is blind on leg 2). `roadmap.md` (G0-G4) is now the standing goals file. The one-command path to the decisive run: `git apply instrument-chain-full-v6.10.2f.patch` (+272 lines vs 35eb53b, byte-identical to the 6-patch chain).
 
-Insertion: right after the end_rod@Y120 verdict line, before the relog probe loop —
+## Decision rows (read with the already-published leg-2 villager NEAR cell from bfbed5c)
 
-- `sleep 2` + white dust at **the EXACT end_rod@Y120 geometry** (`$((CX - 1)) 120 $CZ`, delta `1 1 1`, count `1200`, `force`) — a TYPE-ONLY swap against the plane control,
-- `shot 14_leg2_burst_whitedust_plane`, `changed_class 14_leg2_burst_endrod_plane → whitedust_plane` (successive baseline; a dying end_rod only inflates `total`, never white; white is eraser-immune),
-- `sleep 2` + the same burst at **Y=80 — the cword plane** (the second engine plane, deepest below-horizon geometry),
-- `shot 14_leg2_burst_whitedust_cword`, baseline = the dust@Y120 shot (dust dies in ~1.5 s, the +3 s cadence leaves it fully dead),
-- both verdict lines name the outcome in the summary.
-
-## Decision rows (the type × plane interaction, read on the same run)
-
-| end_rod@120 (8b16c22) | dust@120 | dust@80 | Verdict | Next |
-|---|---|---|---|---|
-| > 20 | > 20 | > 20 | **PLANES FINE FOR DUST** — the client renders dust at the exact engine geometry; the dead stream points at the ENGINE side (spawn/packet/dot content), not the client renderer | engine-side diag: what is different about the stream's own Spawn packets |
-| > 20 | > 20 | ~ 0 | **Y=80 SPECIFICALLY LOSES** (deepest below-horizon) | engine: drop or move the cword plane |
-| > 20 | ~ 0 | ~ 0 | **TYPE × PLANE INTERACTION** if dust@150 NEAR renders (dust is plane-sensitive) — else the dust type itself is dead on leg-2 | engine: move `LAYER_Y` or a per-plane carrier |
-| ~ 0 | ~ 0 | ~ 0 | **THE WHOLE PLANE DEPTH LOSES on leg-2** (the reversed-Z class, the stream doc's own caveat) | the carrier must change altitude AND type |
-
-Combined with the rest of the chain this completes the full type × plane × pack × session matrix in ONE run: (leg-1 dust@150) × (leg-2 dust/end_rod/villager @150, end_rod@120, dust@120, dust@80) × (control dust/end_rod, pack-free).
-
-## The zero-friction path: the consolidated chain
-
-The stack is now 5 patches deep — **`instrument-chain-full-v6.10.2e.patch` replaces the whole stack with ONE apply** (+213 lines vs vanilla `35eb53b`, real git index lines, verified byte-identical to the 5-step chain, `bash -n` green):
-
-```
-git apply instrument-chain-full-v6.10.2e.patch   # onto fix/leg2-arm-race @ 35eb53b
-bash -n scripts/bench/run_ci_visual.sh           # sanity, should be silent
-```
-
-Cost of the full stack: +213 script lines, zero rust, ~+25 s runtime, purely additive (existing verdicts unchanged; the v6.7.3 preflight still gates every probe).
+- leg-2 NEAR villager > 20 **and** in-band villager ≈ 0 → eraser alive on leg 2; the stream dots die pre-display → dot-geometry/pool class; next: engine-side dot-path diag.
+- leg-2 NEAR villager > 20 **and** in-band villager > 20 → eraser blind on leg 2; any rendered dot would show — the total absence localizes death to the particle render path itself.
+- leg-2 NEAR villager ≈ 0 with end_rod alive → the carrier TYPE is dead on the relog client (the flap at its extreme — TESTS.md v6.9.14 documents 0-px marker states on BOTH legs) → carrier must change; the dust candidacy is measured by the v6.10.2e cells.
+- control villager ≈ 0 → the carrier is broken on this build/environment itself (P0) regardless of legs.

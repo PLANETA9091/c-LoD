@@ -1,0 +1,84 @@
+diff --git a/scripts/bench/run_ci_visual.sh b/scripts/bench/run_ci_visual.sh
+index 0000000..0000000 100644
+--- a/scripts/bench/run_ci_visual.sh
++++ b/scripts/bench/run_ci_visual.sh
+@@ -548,6 +548,23 @@
+   else
+     sum "- **CONTROL DUST DEAD** (changed-green=${CDG:-0}): dust does not render on this build/environment at all — P0: migrate the carrier type"
+   fi
++  # v6.10.2f THE CONTROL CARRIER CELL (correction note 2026-11-07): the control
++  # client is PACK-FREE — no capture/eraser shaders exist at all, so the
++  # carrier type renders RAW here. The stream's carrier is happy_villager
++  # (jni.rs: it REPLACED the v5.0 dust carrier — dust is documented degenerate
++  # on the 26.3 software backends), so the control's decisive type is THIS,
++  # not dust: control villager > 20 = the carrier renders without the pack;
++  # ~0 = the carrier type is broken on this build/environment itself (P0 —
++  # migrate the carrier; the flap note TESTS.md v6.9.14 already documents a
++  # run-crossing flap for it).
++  sleep 4
++  srv "particle minecraft:happy_villager $((VX + 20)) 150 $CZ 0.2 0.2 0.2 0 400 force"
++  sleep 1
++  shot 09c_control_villager || exit 1
++  CVL=$(changed_class 09b_control_greendust 09c_control_villager)
++  CVG=$(echo "$CVL" | grep -o 'green=[0-9]*' | cut -d= -f2)
++  CVT=$(echo "$CVL" | grep -o 'total=[0-9]*' | cut -d= -f2)
++  sum "- control CARRIER (happy_villager, pack-free — no capture shaders) NEAR: changed-green ${CVG:-?} / total ${CVT:-?} vs the control dust shot (> 20 = the carrier renders raw; ~0 = the carrier type is broken on this build — P0)"
+   cp "$SUMMARY" "$SHOTS/summary.md" 2>/dev/null || true
+   exit 0
+ fi
+@@ -840,6 +857,24 @@
+ L1WC=$(echo "$L1WL" | grep -o 'white=[0-9]*' | cut -d= -f2)
+ L1WT=$(echo "$L1WL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+ sum "- leg-1 white dust (20 m NEAR, proven-render spot) changed-white ${L1WC:-?} / total ${L1WT:-?} vs green-dust shot (> 20 = the dust TYPE renders; green 0 + white > 0 = color-specific break, green 0 + white 0 = dust-type break)"
++# v6.10.2f THE CARRIER REFERENCE (correction note 2026-11-07): the bit-stream's
++# carrier is happy_villager — NOT minecraft:dust (stream.rs: the villager-sparkle
++# carrier has one hue; jni.rs: happy_villager REPLACED the v5.0 dust carrier —
++# dust quads render with degenerate UVs on every 26.3 software backend, verified
++# live on GL llvmpipe AND Vulkan lavapipe). Every dust cell in this run measures
++# a DOCUMENTED-DEAD type; this cell measures the ACTUAL carrier on the client
++# that demonstrably works — the reference twin for the leg-2 villager cell.
++# 20 m NEAR is OUTSIDE the decode band [CULL_RADIUS=28 .. ZONE_FAR=112], so the
++# eraser's color net cannot eat it (dust_mask.fsh repaints carrier-hue pixels
++# in-band only) — the count is a true renderability datapoint.
++sleep 2
++srv "particle minecraft:happy_villager $((VX + 20)) 150 $CZ 0.2 0.2 0.2 0 400 force"
++sleep 1
++shot 09g_leg1_villager_near || exit 1
++L1VL=$(changed_class 09f_leg1_whitedust_near 09g_leg1_villager_near)
++L1VG=$(echo "$L1VL" | grep -o 'green=[0-9]*' | cut -d= -f2)
++L1VT=$(echo "$L1VL" | grep -o 'total=[0-9]*' | cut -d= -f2)
++sum "- leg-1 CARRIER (happy_villager) 20 m NEAR: changed-green ${L1VG:-?} / total ${L1VT:-?} vs white-dust shot (> 20 = the carrier renders on the healthy client — the leg-2 villager twin's reference; ~0 with end_rod alive = the carrier type itself is dead on BOTH legs — the flap at its extreme, carrier must change)"
+ 
+ # ---- 5. THE LIVE EDIT (no relog!) + probe loop -------------------------------
+ note "placing $MARKER column at $CX,$CZ (y $FILL_Y0..$FILL_Y1)"
+@@ -1180,6 +1215,30 @@
+ L2WCT=$(echo "$L2WCL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+ sum "- leg-2 cword plane: white dust at Y=80 (80 m, the cword plane, same burst geometry): changed-white ${L2WCC:-?} / total ${L2WCT:-?} vs the dust@Y120 shot (> 20 = the cword plane renders dust too — planes fully exonerated for dust; ~0 with dust@120 > 20 = the Y=80 plane specifically loses (deepest below-horizon) — drop or move it; both ~0 = the whole plane depth loses on leg-2, reversed-Z class)"
+ echo "- leg-2 white dust@Y80 changed-white: ${L2WCC:-?} total: ${L2WCT:-?}" >> "$PROBE_LOG"
++# v6.10.2f THE ERASER TEST (correction note 2026-11-07): the stream's carrier
++# is happy_villager (NOT dust), the dots ride the planes Y=120 (hword) and
++# Y=80 (cword), and BOTH the spot (75 m) and the planes sit INSIDE the decode
++# band [CULL_RADIUS=28 .. ZONE_FAR=112] where dust_mask.fsh's color net
++# REPAINTS every carrier-hue pixel from its surroundings — the stealth
++# eraser. On a HEALTHY capture chain this burst renders AND gets erased:
++# changed-green ~ 0 BY DESIGN. So this cell does NOT measure renderability —
++# it measures the ERASER TAIL of the capture pipeline on the relog client:
++#   ~0 (with the NEAR villager cell alive on leg 2)  -> the eraser is ALIVE
++#       on leg 2: the stream dots die BEFORE display (render-path/pool),
++#       never reach capture (mask_hits=0 consistent) — dot-geometry/pool;
++#   > 20 -> the eraser is BLIND on leg 2: the capture tail is down, and any
++#       dot that rendered would be VISIBLE — their total absence localizes
++#       the death to the particle render path itself (with end_rod@120
++#       alive, the plane/depth class is exonerated for the carrier too).
++sleep 2
++srv "particle minecraft:happy_villager $((CX - 1)) 120 $CZ 1 1 1 0 1200 force"
++sleep 1
++shot 14_leg2_burst_villager_plane || exit 1
++L2VPL=$(changed_class 14_leg2_burst_whitedust_cword 14_leg2_burst_villager_plane)
++L2VPG=$(echo "$L2VPL" | grep -o 'green=[0-9]*' | cut -d= -f2)
++L2VPT=$(echo "$L2VPL" | grep -o 'total=[0-9]*' | cut -d= -f2)
++sum "- leg-2 ERASER TEST: CARRIER (happy_villager) at Y=120 in-band (75 m, the hword plane): changed-green ${L2VPG:-?} / total ${L2VPT:-?} vs the dust@Y80 shot (~ 0 = the eraser is ALIVE on leg 2 — stream dots die pre-display; > 20 = the eraser is BLIND on leg 2 — the capture tail is down)"
++echo "- leg-2 carrier@Y120 in-band changed-green: ${L2VPG:-?} total: ${L2VPT:-?}" >> "$PROBE_LOG"
+ L2_SCENE_ALIVE=0
+ for k in $(seq 0 11); do
+   assert_online "relog probe $k" || exit 1
