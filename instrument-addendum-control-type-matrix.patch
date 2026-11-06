@@ -1,0 +1,39 @@
+diff --git a/scripts/bench/run_ci_visual.sh b/scripts/bench/run_ci_visual.sh
+index 0000000..0000000 100644
+--- a/scripts/bench/run_ci_visual.sh
++++ b/scripts/bench/run_ci_visual.sh
+@@ -520,6 +520,34 @@ if [ "${CLOD_CONTROL:-0}" = "1" ]; then
+   else
+     sum "- **CONTROL FAIL:** the pack-free vanilla client draws NOTHING (close=${BC:-0}) — the environment kills the render by itself; the pack is exonerated"
+   fi
++  # v6.10.2d THE CONTROL TYPE MATRIX: the control arm has only ever fired
++  # end_rod — DUST on the pack-free client is UNMEASURED, and the #248/#250
++  # bytecode+log mining (instrument note 2026-11-07) exonerated the pack
++  # CONTENT (leg-2's own client.log: 'Returning cached file since actual
++  # hash matches requested' — the cache-hit returns the byte-identical file
++  # at the identical path, and the pack is shader-only: no textures at all).
++  # One green dust burst at the SAME NEAR spot, counted as changed px vs the
++  # end_rod shot (successive baselines: the dying end_rod can only inflate
++  # total, never green), splits the two remaining suspects IN THIS ARM:
++  #   dust renders here (>20 changed-green) -> dust renders WITHOUT the
++  #       pack: the break needs the pack PRESENT (the capture chains
++  #       interacting with the dust pass) or the relog-session state —
++  #       the leg-1 dust probe (base patch) splits those two;
++  #   dust ~0 here -> dust does not render on this build/environment AT
++  #       ALL (P0: migrate the carrier type; the whole bit-stream is dust).
++  sleep 4
++  srv "particle minecraft:dust{color:[0.0,1.0,0.0],scale:1.0} $((VX + 20)) 150 $CZ 0.2 0.2 0.2 0 400 force"
++  sleep 1
++  shot 09b_control_greendust || exit 1
++  CDM=$(changed_class 09_burst_close 09b_control_greendust)
++  CDG=$(echo "$CDM" | grep -o 'green=[0-9]*' | cut -d= -f2)
++  CDT=$(echo "$CDM" | grep -o 'total=[0-9]*' | cut -d= -f2)
++  sum "- control type matrix: green dust NEAR (20 m) changed-green ${CDG:-?} / total ${CDT:-?} vs the end_rod shot (> 20 = dust renders without the pack — the break needs the pack present or relog state; ~0 = dust unrenderable on the build, P0)"
++  if [ "${CDG:-0}" -gt 20 ]; then
++    sum "- **CONTROL DUST RENDERS** (changed-green=${CDG}): the break requires the pack's PRESENCE (capture-chain x dust-pass interaction) or relog-session state — the leg-1 dust probe names which"
++  else
++    sum "- **CONTROL DUST DEAD** (changed-green=${CDG:-0}): dust does not render on this build/environment at all — P0: migrate the carrier type"
++  fi
+   cp "$SUMMARY" "$SHOTS/summary.md" 2>/dev/null || true
+   exit 0
+ fi

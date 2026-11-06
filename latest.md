@@ -1,37 +1,37 @@
-# Instrument addendum v6.10.2c: the CACHED-PACK CONTROL — the decisive A/B on the leading suspect
+# Evidence note: the pack-flow asymmetry is MEASURED — and the pack CONTENT is exonerated (bytecode + both leg-2 logs)
 
-Date: 2026-11-07. Feed commit 8b16c22 (log-mining note) named the **cached-pack load path** as the leading suspect: leg-1 = first download + prompt + Proceed click (measured, renders), leg-2 = relog into the SAME client dir with the pack already cached (auto-accept, dust = 0 in #248/#250). This addendum converts that suspicion into a one-variable A/B that runs inside the next visual run.
+Date: 2026-11-07. Artifacts re-downloaded for #248 (42063218460) and #250 (42076419845): `visual-evidence` (full leg-2 `client.log` + `server.log` — the artifact log is the LEG-2 session only: the second `run_client.sh` launch truncates `/tmp/client.log`; #248 covers 16:31:28→16:36:13, #250 covers 17:49:07→17:54:23) and #250's `visual-control-evidence` (the pack-free control arm). This pass mined the pack flow end to end and cross-checked the 26.3 client bytecode.
 
-## The client-side fact (verified in the 26.3 client bytecode)
+## 1. The cached-file path is no longer an inference — it is logged, in both runs
 
-- `Minecraft.class` holds `resourcePackDirectory` + `downloads` — the server-pack cache dir is `<gameDir>/downloads` (26.x layout, `DownloadQueue` `cacheDir` + `download-queue/log.json` event log).
-- The harness client dir is fixed: `run_client.sh` → `C="$HOME/mc-test/client"`, reused by BOTH legs, so the pack downloaded on leg-1 is still there on the leg-2 relog.
-- The pack is served by the plugin's own HTTP server (`engine.rs: pack_url()` → `http://<ip>:<http_port>/clod-pack.zip`), so a cold client can always re-download it — removing the cache cannot break delivery.
-- The harness's own `accept_pack_prompt` already anticipates the asymmetry: `no pack prompt rendered in time (cached pack auto-accept?)` — the prompt fires on leg-1, leg-2 usually loads silently from cache.
+Both dead-leg client logs carry the explicit line, at the exact pack-push moment (`server.log`: "pack pushed … 94648 bytes, sha1 b9b7bf855d119ab74118bd82ed37b4cf0b5a9c6f — the ONE push this session", twice per run, same sha1):
 
-## The control (patch: `instrument-addendum-cached-pack-control.patch`, +52 lines)
+- #248 leg-2, 16:31:45: `[Download-2/INFO]: Returning cached file since actual hash matches requested`
+- #250 leg-2, 17:49:25: `[Download-2/INFO]: Returning cached file since actual hash matches requested`
 
-Applies AFTER `instrument-proposal-leg1-dust-type-matrix.patch` (bfbed5c) and AFTER `instrument-addendum-endrod-planes.patch` (8b16c22). Apply-chain verified: base → endrod-planes → cached-pack-control, `bash -n` green on the full chain, `git apply --check` clean at every step, zero rust touched.
+leg-1 must download (fresh runner VM → the client dir `downloads/` cache is empty at the first push; the harness observes the yellow prompt + Proceed click every leg-1). The asymmetry leg-1 download / leg-2 cache-hit is now a measured fact.
 
-Three insertions in `scripts/bench/run_ci_visual.sh`:
+## 2. But the cached file is byte-identical — pack CONTENT cannot differ between legs
 
-1. **Leg-1 evidence arm** (right after `PROBE_LOG` init): records the pack-flow lines leg-1 actually logged (the first-download arm) into the probe log.
-2. **THE CONTROL** (between the kick and the rejoin, client down): inventories `<client>/downloads` (file count + sizes into the probe log), then `rm -rf` it. Leg-2 now re-downloads from the plugin HTTP server and takes the SAME load path leg-1 took. If the dir is absent, the run says so honestly (control = no-op).
-3. **Leg-2 evidence arm** (after the 15-s post-accept assert): records leg-2's pack-flow lines + the fresh `download-queue/log.json` — proof the re-download actually happened.
+26.3 `HttpUtil.downloadFile` (the class that logs "Returning cached file"): on a cache hit it runs `checkExistingFile` → `cachedFilePath(dir, hash)` → verifies the cached file's hash against the REQUESTED hash → returns that same path (updating its mtime). On a miss it downloads to a temp file, verifies the same hash, moves it into the SAME path. Both legs then feed `DownloadQueue` → `ServerPackManager` → reload the identical bytes at the identical path.
 
-Single variable flips: warm-cache leg-2 (measured twice, dust = 0) → cold-cache leg-2. The leg-1 dust probe and the leg-2 type matrix from bfbed5c read the answer; the end_rod@Y=120 plane control from 8b16c22 rides alongside.
+Corollary from the engine doc (engine.rs:1-13): the pack is a **static shader-only artifact** — "ZERO world data: no textures, no PNGs". The dust sprite comes from the VANILLA `particles.png` atlas, and the leg-2 log shows the atlas identical before and after the pack (`Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas` at join reload 17:49:18 AND pack reload 17:49:27 — the x0 is the harness `mipmapLevels:0` pin, all atlases x0). **The pack does not touch the particle path.** "Cached bytes break dust" is dead as a mechanism.
 
-## Decision tree (reads on the SAME run)
+## 3. Reload anomalies closed
 
-| # | Observation | Verdict | Action |
-|---|---|---|---|
-| 1 | Leg-2 white-dust NEAR > 20 **with the cache wiped** (was ~0 in #248/#250) | **ROOT CAUSE: the cached-pack load path** — the cached apply breaks dust rendering | Fix on the carrier side: re-resolve the pack/particles on a cached apply (re-push per session), or wipe + re-push |
-| 2 | Leg-2 matrix unchanged (~0 dust, end_rod alive) with the cache wiped | Cache **exonerated** — the break survives an identical load flow | Next variable up the ladder: the persistent gameDir state (fresh gameDir for leg 2) |
-| 3 | Leg-1 green dust > 0 (bfbed5c row 1) AND leg-2 flips alive under the control | Both mechanisms real: session-specific break + cached load path | Fix covers both: fresh load per session |
-| 4 | Leg-1 green ~0, white ~0 (bfbed5c row 3) regardless of the control | Dust type unrenderable on the build — P0 | Migrate the carrier type |
+- The two `SimplePreparableReloadListener` stack traces in the leg-2 log (join reload AND pack reload, both runs) are the ALSA/OpenAL `Failed to open OpenAL device` → "Error starting SoundSystem. Turning off sounds & music" — an Xvfb environment artifact, harmless, both legs would have it.
+- The leg-2 pack reload completed at 17:49:25→17:49:27 (2 s); every probe ran ≥17:50:20. Timing is already compensated by the v6.10.1 re-arm anyway.
 
-Rows 2–4 of the bfbed5c decision tree (color-specific vs type-specific) read as before — the control only sharpens rows 1/5.
+## 4. The prompt/acceptance memory (bytecode)
 
-## Costs
+`ServerData$ServerPackStatus` = ENABLED / DISABLED / PROMPT, persisted per server entry via the `acceptTextures` codec (servers.dat) — this is where prompt-vs-auto-accept memory lives. The bench joins via `--quickPlayMultiplayer`, which may not persist the entry, so whether leg-2 prompted-and-clicked or auto-accepted is unresolved from the artifacts — but BOTH paths end in the pack applied (reload logged with `server/00000000/<uuid>` in the source list).
 
-+52 script lines, zero rust, ~0 s runtime cost (the inventory+remove is sub-second; the re-download adds one prompt cycle the harness already handles). Additive only: no fail/pass path, no threshold, no raw-count series touched. The v6.7.3 preflight still gates the run before any dust flies.
+## 5. The reshaped suspect space (replaces the 8b16c22 ranking)
+
+The server side is exonerated by counters (8b16c22), the pack CONTENT is now exonerated by bytecode+logs (§1-2). What remains for "end_rod renders, dust = 0, twice":
+
+1. **Dust type unrenderable on this build/environment — the leg-1 dust cell is STILL UNMEASURED** and is now the PRIMARY discriminator (bfbed5c instrument, rows 1 vs 3). If leg-1 green dust reads ~0 too, the whole bit-stream encoding must migrate its carrier type (P0).
+2. **Pack-PRESENCE interaction or relog-session state**: dust renders on leg-1 (if row 1 wins) but not on leg-2 — the capture chains ship with the pack and render on both legs; a chain × dust-pass interaction or relog client state is the live mechanism class. The v6.10.2c cache-wipe control stays valid (it tests the download-vs-cached state machine), but a negative result is now the EXPECTED outcome under suspects 1-2 and exonerates less than originally framed.
+3. Acceptance/prompt UI path (click through the shim, focus state) — exotic, third.
+
+**The new cheap discriminator is the CONTROL ARM**: it has only ever fired end_rod — dust on the pack-free client is unmeasured. → v6.10.2d adds a green dust burst to the control arm (see instrument-addendum-control-type-matrix.md): dust renders there → the break needs the pack present (suspect 2) and the leg-1 probe splits chain-interaction vs relog-state; dust ~0 there → suspect 1 confirmed, migrate the carrier.
