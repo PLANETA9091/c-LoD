@@ -1,0 +1,77 @@
+diff --git a/scripts/bench/run_ci_visual.sh b/scripts/bench/run_ci_visual.sh
+index 0000000..0000000 100644
+--- a/scripts/bench/run_ci_visual.sh
++++ b/scripts/bench/run_ci_visual.sh
+@@ -854,6 +854,14 @@ echo "### stream diag after fill:" >> "$SUMMARY"
+ grep "stream: tick" /tmp/server.log | tail -2 >> "$SUMMARY" || true
+ srv "time set noon"  # v6.4.8: the probe loop must run in daylight
+ PROBE_LOG="$SHOTS/probe_counts.txt"; : > "$PROBE_LOG"
++# v6.10.2c THE CACHED-PACK CONTROL (evidence arm, leg 1): leg 1 is the
++# FIRST-DOWNLOAD arm (fresh runner, empty server-pack cache, yellow prompt,
++# Proceed click). Record the pack flow lines the client actually logged so
++# the leg-2 half of the differential below reads against the real leg-1
++# flow, not an assumed one.
++echo "- leg-1 pack flow (client.log):" >> "$PROBE_LOG"
++grep -iE "download|resource.?pack|applying" /tmp/client.log 2>/dev/null | tail -8 >> "$PROBE_LOG" \
++  || echo "  (no pack lines)" >> "$PROBE_LOG"
+ for k in $(seq 0 23); do
+   assert_online "edit probe $k" || exit 1
+   # v6.9.8: re-arm noon EVERY probe — the day/night boundary can cross
+@@ -900,6 +908,36 @@ srv "kick Stepan"
+ wait_log "Stepan left the game" /tmp/server.log 30 \
+   || pkill -f "net.minecraft.client.main.Main" 2>/dev/null || true
+ sleep 3
++# v6.10.2c THE CACHED-PACK CONTROL (the decisive A/B on the log-mining
++# note's leading suspect): leg-1 = first download + prompt + Proceed
++# (measured); leg-2 = relog into the SAME client dir ($HOME/mc-test/client),
++# the pack is already in the client's server-pack cache ('downloads', the
++# DownloadQueue cacheDir in 26.3) and loads via the cached path with no
++# prompt (the accept_pack_prompt leg2 note: 'cached pack auto-accept?') —
++# the ONE measured client-side difference between the rendering leg and
++# the dead leg. This control removes the cache while the client is DOWN,
++# forcing leg 2 to re-download from the plugin HTTP server (engine.rs
++# pack_url: /clod-pack.zip) and take the SAME load path leg 1 took. One
++# variable flips, the type matrix already on board reads the answer:
++#   leg-2 particles RENDER (white NEAR > 20, dust > 0) -> the cached-pack
++#       load path IS the mechanism; the fix re-resolves the pack/particles
++#       on a cached apply (or wipes + re-pushes per session);
++#   leg-2 stays dead (~0, matrix unchanged vs #248/#250) -> the cache is
++#       exonerated; the break survives an identical load flow and the
++#       next variable up the ladder is the persistent gameDir state
++#       itself (a fresh gameDir for leg 2).
++PACK_CACHE="$HOME/mc-test/client/downloads"
++if [ -d "$PACK_CACHE" ]; then
++  NPACK=$(find "$PACK_CACHE" -type f 2>/dev/null | wc -l)
++  echo "- leg-2 cached-pack control: cache inventory BEFORE removal ($NPACK files):" >> "$PROBE_LOG"
++  find "$PACK_CACHE" -type f -printf '  %s %p\n' 2>/dev/null | head -8 >> "$PROBE_LOG"
++  rm -rf "$PACK_CACHE"
++  sum "- leg-2 CACHED-PACK CONTROL: removed the server-pack cache ($NPACK files) — leg 2 re-downloads the pack (fresh load path, same as leg 1)"
++  echo "- leg-2 cached-pack control: cache removed ($NPACK files)" >> "$PROBE_LOG"
++else
++  sum "- leg-2 cached-pack control: cache dir absent at relog (leg 2 already loads fresh — control is a no-op this run)"
++  echo "- leg-2 cached-pack control: cache dir absent" >> "$PROBE_LOG"
++fi
+ JOIN2=$(join_count)
+ bash "$BENCH_DIR/run_client.sh" || fail "run_client.sh (rejoin) exited nonzero"
+ REJOINED=0
+@@ -917,6 +955,20 @@ accept_pack_prompt leg2 30
+ assert_online "after leg-2 pack accept" || exit 1
+ sleep 15
+ assert_online "15 s after leg-2 pack accept" || exit 1
++# v6.10.2c (evidence arm, leg 2): after the cache wipe the client must
++# RE-download before the prompt/applied state — these lines prove whether
++# it did. The client.log grep runs late enough that download+apply have
++# finished (or the run already failed above); the download-queue event
++# log (DownloadQueue's log.json under 'downloads') records the fetch
++# itself with URL + result when it exists.
++echo "- leg-2 pack flow (client.log):" >> "$PROBE_LOG"
++grep -iE "download|resource.?pack|applying" /tmp/client.log 2>/dev/null | tail -8 >> "$PROBE_LOG" \
++  || echo "  (no pack lines)" >> "$PROBE_LOG"
++DLQ=$(find "$HOME/mc-test/client/downloads" -name 'log.json' 2>/dev/null | head -1)
++if [ -n "${DLQ:-}" ]; then
++  echo "- leg-2 download-queue log.json ($DLQ):" >> "$PROBE_LOG"
++  tail -c 1200 "$DLQ" >> "$PROBE_LOG"; echo >> "$PROBE_LOG"
++fi
+ srv "time set noon"  # v6.4.8: was 'time set 6000' — night in the 26.3 scale
+ srv "gamemode spectator Stepan"
+ srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"

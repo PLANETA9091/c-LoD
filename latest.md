@@ -1,47 +1,37 @@
-# Log-mining note: #248/#250 — the leg-2 client RECEIVES the stream (~19-38 dust dots/s, fail 0) and renders none of it
+# Instrument addendum v6.10.2c: the CACHED-PACK CONTROL — the decisive A/B on the leading suspect
 
-Date: 2026-11-06. No new runs and no new commits (still #251 / 35eb53b / d4ff522). The artifacts were re-downloaded for #248 (run 42063218460: `visual-evidence` + full `client.log`/`server.log`) and #250 (run 42076419845: `visual-evidence` + the differential control arm — vanilla server, no pack: the console end_rod close burst renders **641 white px**, the environment is fine). This pass mined the RAW logs and the diag counters instead of the screenshots.
+Date: 2026-11-07. Feed commit 8b16c22 (log-mining note) named the **cached-pack load path** as the leading suspect: leg-1 = first download + prompt + Proceed click (measured, renders), leg-2 = relog into the SAME client dir with the pack already cached (auto-accept, dust = 0 in #248/#250). This addendum converts that suspicion into a one-variable A/B that runs inside the next visual run.
 
-## 1. Diag semantics correction (previous reads were wrong)
+## The client-side fact (verified in the 26.3 client bytecode)
 
-`spawned N / failed M` in the `stream:` diag line is the **legacy per-particle path counter** (`jni::STREAM_SPAWNED`, engine.rs:1206), cumulative, and incremented only when the native wire is NOT used (engine.rs:1397-1400). Both runs ran the native wire end-to-end (`fail 0` in every line), so `spawned 0 / failed 0` in EVERY diag line of BOTH legs — leg 1 included, which PAINTED — is expected, not a delivery failure. The actual delivery instrument is the cumulative **`wire bundle {p}p/{b}b fail {n}`** counter (engine.rs:1527: `WIRE_SPAWNED` bumps only after a successful bundle send).
+- `Minecraft.class` holds `resourcePackDirectory` + `downloads` — the server-pack cache dir is `<gameDir>/downloads` (26.x layout, `DownloadQueue` `cacheDir` + `download-queue/log.json` event log).
+- The harness client dir is fixed: `run_client.sh` → `C="$HOME/mc-test/client"`, reused by BOTH legs, so the pack downloaded on leg-1 is still there on the leg-2 relog.
+- The pack is served by the plugin's own HTTP server (`engine.rs: pack_url()` → `http://<ip>:<http_port>/clod-pack.zip`), so a cold client can always re-download it — removing the cache cannot break delivery.
+- The harness's own `accept_pack_prompt` already anticipates the asymmetry: `no pack prompt rendered in time (cached pack auto-accept?)` — the prompt fires on leg-1, leg-2 usually loads silently from cache.
 
-## 2. The wire numbers (new quantitative facts)
+## The control (patch: `instrument-addendum-cached-pack-control.patch`, +52 lines)
 
-**leg 1 (#250), the live-edit storm** — wire bundle per 100-tick diag window:
+Applies AFTER `instrument-proposal-leg1-dust-type-matrix.patch` (bfbed5c) and AFTER `instrument-addendum-endrod-planes.patch` (8b16c22). Apply-chain verified: base → endrod-planes → cached-pack-control, `bash -n` green on the full chain, `git apply --check` clean at every step, zero rust touched.
 
-- 17:48:21 → 17:48:31: 803,751 → 818,356 (**+14,605 dots/window**);
-- 17:48:31 → 17:48:41: → 835,914 (**+17,558 dots/window**);
-- decode→paint followed: leg-1 probe0 `red=1117 paint=15093`. **The wire→render→decode→paint pipeline works END-TO-END on leg 1 in the very same run.**
+Three insertions in `scripts/bench/run_ci_visual.sh`:
 
-**leg 2 (both runs), from the rejoin to the end of the probes:**
+1. **Leg-1 evidence arm** (right after `PROBE_LOG` init): records the pack-flow lines leg-1 actually logged (the first-download arm) into the probe log.
+2. **THE CONTROL** (between the kick and the rejoin, client down): inventories `<client>/downloads` (file count + sizes into the probe log), then `rm -rf` it. Leg-2 now re-downloads from the plugin HTTP server and takes the SAME load path leg-1 took. If the dir is absent, the run says so honestly (control = no-op).
+3. **Leg-2 evidence arm** (after the 15-s post-accept assert): records leg-2's pack-flow lines + the fresh `download-queue/log.json` — proof the re-download actually happened.
 
-- #250: **+189/+378 dots per 100-tick window CONTINUOUSLY from 17:49:31 through 17:54:22** — covering the re-arm windows AND all 12 relog probe windows — `fail 0`, one player (Stepan), every dot gate-passed inside `wire_deliver` (engine.rs:1482: `spawn_visible` filters BEFORE the packet is added and counted): sky-visible (pitch 5 < 47), in-band (≤107.4 m for the hword plane — the 2d73c16 arithmetic), in-cone (−5°±63° covers elev −22.9°/−43.7°);
-- #248: the same +189p/window pattern from its rejoin (ticks 5000→5400: 795,531 → 796,476) — its ENGINE chain re-arm did not exist yet (v6.10.0), the STREAM-level `rearm 21c` cells flowed the same way.
+Single variable flips: warm-cache leg-2 (measured twice, dust = 0) → cold-cache leg-2. The leg-1 dust probe and the leg-2 type matrix from bfbed5c read the answer; the end_rod@Y=120 plane control from 8b16c22 rides alongside.
 
-**Result on the leg-2 client: ~19-38 gate-passed dust dots per second arriving for ~5 minutes; ZERO of them ever rendered** — `strobe_hits=0` AND `mask_hits=0` on every probe, all 12 relog frames byte-frozen (sha256-identical, bfbed5c audit), the console dust burst 0 changed px — while the SAME client renders console end_rod (NEAR 495/479, FAR 383→324) in the same minutes, and every capture stage-eye reads correct on every probe (`rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3`: the vantage bucket, east, the expected elevation — the same eyes the passing leg-1 shows).
+## Decision tree (reads on the SAME run)
 
-## 3. What this settles and what it retires
+| # | Observation | Verdict | Action |
+|---|---|---|---|
+| 1 | Leg-2 white-dust NEAR > 20 **with the cache wiped** (was ~0 in #248/#250) | **ROOT CAUSE: the cached-pack load path** — the cached apply breaks dust rendering | Fix on the carrier side: re-resolve the pack/particles on a cached apply (re-push per session), or wipe + re-push |
+| 2 | Leg-2 matrix unchanged (~0 dust, end_rod alive) with the cache wiped | Cache **exonerated** — the break survives an identical load flow | Next variable up the ladder: the persistent gameDir state (fresh gameDir for leg 2) |
+| 3 | Leg-1 green dust > 0 (bfbed5c row 1) AND leg-2 flips alive under the control | Both mechanisms real: session-specific break + cached load path | Fix covers both: fresh load per session |
+| 4 | Leg-1 green ~0, white ~0 (bfbed5c row 3) regardless of the control | Dust type unrenderable on the build — P0 | Migrate the carrier type |
 
-- **SETTLED (server side):** the "server does not send" branch of the fork is DEAD. The relog re-arm dots and the steady dirty-cell stream are delivered to the leg-2 client continuously, gate-passed, `fail 0`. No server-side spawn/delivery/gate bug survives the wire counters — the transport is exonerated by counters, not by inference.
-- **SETTLED (capture side):** the eyes prove the capture chain renders and the projection is correct on leg-2 — the instrumentation is healthy; the INPUT is what's missing.
-- **Method note:** leg-1 probe0 also reads `strobe_hits=0 lens_dark=197796` — that is NORMAL (dots live 3-5 s, the decode persists, the paint persists; the shot lands after the flight). The diagnostic power comes from leg-2's CONTINUOUS in-flight dots (+189-378/window DURING the probe windows) vs zero strobe ever.
-- **RETIRED:** the `end_of_frame` WARN×2 (join-time + right after the pack reload, BOTH runs — #250 lines 277/932, #248 lines 278/923) — a transient of the resource swap: the capture chain demonstrably arms afterwards (the eyes decode on every leg-2 probe). The v6.10.1 narrative "the rebuild re-fired end_of_frame" holds in effect; the WARN is swap noise, not a failed arm. Downgraded from root-cause candidate within this pass.
-- **WEAKENED (no log support):** the reload-time atlas-rebuild mechanism — both reloads create `particles.png 512x256x0` cleanly (#250 lines 114/913), no missing sprites, no stitch/particle errors, and ZERO "dust" mentions anywhere (the client does not log particle spawns at all — the strobe ruler is the only client-side dust instrument). A silent atlas/shader break remains possible but is unevidenced.
+Rows 2–4 of the bfbed5c decision tree (color-specific vs type-specific) read as before — the control only sharpens rows 1/5.
 
-## 4. The remaining root-cause space
+## Costs
 
-The break is CLIENT-side and dust-type-specific on the relog client:
-
-1. the dust render path (the tinted-quad COLOR path) does not render on the relog client while textured sprites (end_rod) do — same client, same minutes, same particle engine, same atlas;
-2. OR the dots render but at positions the lens never samples — the plane/depth class: end_rod has only ever been fired at Y=150 (eye level), NEVER at the stream's own planes Y=80/120 where all the invisible dots fly (the stream doc's own reversed-Z caveat lives exactly there);
-3. and the one measured CLIENT-side difference between the legs is the PACK SOURCE: leg-1 = first-time download + prompt accept; leg-2 = **cached-pack auto-accept** (`accept_pack_prompt` finds no prompt — the cached-load path). The leg-2 client's dust path dying while its end_rod path lives makes the cached-load code path the leading suspect.
-
-## 5. Instruments (updated)
-
-- The published probe patch stands unchanged (bfbed5c: `instrument-proposal-leg1-dust-type-matrix.patch`): the leg-1 dust probe (decisive — does dust render on a live client at all) + the leg-2 NEAR type matrix.
-- NEW, this commit: **`instrument-addendum-endrod-planes.patch`** (+22 script lines, applies AFTER the base patch, apply-chain base→addendum verified, `bash -n` green): the leg-2 PLANE CONTROL — end_rod at **Y=120** (the hword plane, marker zone, delta 1 1 1, the exact geometry of the dots the client refuses to render): > 20 changed-white = the planes are fine, the break is dust-TYPE-only; ~ 0 = the plane/depth class rides along (reversed-Z) and the carrier must change type AND possibly altitude.
-
-## Bottom line
-
-The leg-2 client receives ~19-38 gate-passed dust dots per second for the entire session and renders zero of them — with every capture instrument healthy and the same pipeline painting on leg-1 minutes earlier. The remaining question is exactly two-sided (dust-type vs plane/depth, with the cached-pack load as the client-side suspect), and the two published patches split it in one run.
++52 script lines, zero rust, ~0 s runtime cost (the inventory+remove is sub-second; the re-download adds one prompt cycle the harness already handles). Additive only: no fail/pass path, no threshold, no raw-count series touched. The v6.7.3 preflight still gates the run before any dust flies.
