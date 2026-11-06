@@ -1,0 +1,47 @@
+diff --git a/scripts/bench/run_ci_visual.sh b/scripts/bench/run_ci_visual.sh
+index 0000000..0000000 100644
+--- a/scripts/bench/run_ci_visual.sh
++++ b/scripts/bench/run_ci_visual.sh
+@@ -1144,6 +1144,42 @@
+ EPT=$(echo "$EPL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+ sum "- leg-2 plane control end_rod at Y=120 (80 m, the hword plane): changed-white ${EPC:-?} / total ${EPT:-?} vs villager shot (> 20 = the planes render — the break is dust-type-only; ~0 with end_rod@150 alive (495/479) = the break rides the plane/depth too)"
+ echo "- leg-2 end_rod@Y120 changed-white: ${EPC:-?} total: ${EPT:-?}" >> "$PROBE_LOG"
++# v6.10.2e THE PLANE x TYPE CROSS (feed addendum, 2026-11-07): the type matrix
++# fires dust at Y=150 ONLY, and the plane control fires END_ROD at Y=120 ONLY —
++# the interaction cell (dust AT the stream planes) is unmeasured, while the
++# engine's actual dots are dust at LAYER_Y=[80,120] (stream.rs:71: hword rides
++# Y=120, cword Y=80) and the whole stream is dead on leg-2. Two bursts mirror
++# the end_rod@Y120 burst EXACTLY (same 80 m spot, same delta 1 1 1, count
++# 1200, force) with only the type swapped, plus the second engine plane:
++#   dust@120 renders (with end_rod@120 > 20) -> the client renders dust at the
++#       exact engine geometry: the dead stream points at the ENGINE side
++#       (spawn/packet/dot content), not the client renderer;
++#   dust@120 ~0 with end_rod@120 > 20 and dust@150 NEAR rendering -> dust is
++#       PLANE-sensitive (the type x plane interaction) -> move LAYER_Y or the
++#       per-plane carrier;
++#   dust@120 AND dust@80 ~0 (end_rod@150 alive) -> the whole plane depth loses
++#       on leg-2 (the reversed-Z class) -> the carrier must change altitude
++#       AND type. White is immune to the eraser; successive baselines keep a
++#       dying neighbour in `total` only (dust dies in ~1.5 s, the +3 s cadence
++#       leaves it fully dead before the next baseline).
++sleep 2
++srv "particle minecraft:dust{color:[1.0,1.0,1.0],scale:1.0} $((CX - 1)) 120 $CZ 1 1 1 0 1200 force"
++sleep 1
++shot 14_leg2_burst_whitedust_plane || exit 1
++L2WPL=$(changed_class 14_leg2_burst_endrod_plane 14_leg2_burst_whitedust_plane)
++L2WPC=$(echo "$L2WPL" | grep -o 'white=[0-9]*' | cut -d= -f2)
++L2WPT=$(echo "$L2WPL" | grep -o 'total=[0-9]*' | cut -d= -f2)
++sum "- leg-2 plane x type cross: white dust at Y=120 (80 m, the hword plane — the end_rod@Y120 burst with ONLY the type swapped): changed-white ${L2WPC:-?} / total ${L2WPT:-?} vs the end_rod@Y120 shot (> 20 with end_rod@120 alive = dust renders at the exact engine geometry — the dead stream points at the engine spawn/packet path, not the client renderer; ~0 = the type x plane interaction, move LAYER_Y or the per-plane carrier)"
++echo "- leg-2 white dust@Y120 changed-white: ${L2WPC:-?} total: ${L2WPT:-?}" >> "$PROBE_LOG"
++sleep 2
++srv "particle minecraft:dust{color:[1.0,1.0,1.0],scale:1.0} $((CX - 1)) 80 $CZ 1 1 1 0 1200 force"
++sleep 1
++shot 14_leg2_burst_whitedust_cword || exit 1
++L2WCL=$(changed_class 14_leg2_burst_whitedust_plane 14_leg2_burst_whitedust_cword)
++L2WCC=$(echo "$L2WCL" | grep -o 'white=[0-9]*' | cut -d= -f2)
++L2WCT=$(echo "$L2WCL" | grep -o 'total=[0-9]*' | cut -d= -f2)
++sum "- leg-2 cword plane: white dust at Y=80 (80 m, the cword plane, same burst geometry): changed-white ${L2WCC:-?} / total ${L2WCT:-?} vs the dust@Y120 shot (> 20 = the cword plane renders dust too — planes fully exonerated for dust; ~0 with dust@120 > 20 = the Y=80 plane specifically loses (deepest below-horizon) — drop or move it; both ~0 = the whole plane depth loses on leg-2, reversed-Z class)"
++echo "- leg-2 white dust@Y80 changed-white: ${L2WCC:-?} total: ${L2WCT:-?}" >> "$PROBE_LOG"
+ L2_SCENE_ALIVE=0
+ for k in $(seq 0 11); do
+   assert_online "relog probe $k" || exit 1

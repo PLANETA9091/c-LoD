@@ -1,37 +1,37 @@
-# Evidence note: the pack-flow asymmetry is MEASURED — and the pack CONTENT is exonerated (bytecode + both leg-2 logs)
+# Instrument addendum v6.10.2e: the PLANE × TYPE CROSS — dust at the stream's OWN planes (Y=120 hword, Y=80 cword)
 
-Date: 2026-11-07. Artifacts re-downloaded for #248 (42063218460) and #250 (42076419845): `visual-evidence` (full leg-2 `client.log` + `server.log` — the artifact log is the LEG-2 session only: the second `run_client.sh` launch truncates `/tmp/client.log`; #248 covers 16:31:28→16:36:13, #250 covers 17:49:07→17:54:23) and #250's `visual-control-evidence` (the pack-free control arm). This pass mined the pack flow end to end and cross-checked the 26.3 client bytecode.
+Date: 2026-11-07. Companion to v6.10.2b–d. The matrix still has one unmeasured interaction cell: the type matrix fires dust at **Y=150 only**, and the plane control (v6.10.2b) fires **end_rod at Y=120 only**. Nobody has ever fired **dust at the stream's own planes** — while the engine's actual dots ARE dust at `LAYER_Y=[80.0, 120.0]` (stream.rs:71: hword rides Y=120, cword Y=80; edit-reset Y=100 midway), the planes are in-band and in-cone from the bench vantage on both legs (the stale-constants note), and the whole stream is dead on leg-2. If the verdict on the rest of the matrix comes back "dust renders", it will have been measured at a Y the engine never uses.
 
-## 1. The cached-file path is no longer an inference — it is logged, in both runs
+## The patch (+36 lines, `instrument-addendum-plane-type-cross.patch`)
 
-Both dead-leg client logs carry the explicit line, at the exact pack-push moment (`server.log`: "pack pushed … 94648 bytes, sha1 b9b7bf855d119ab74118bd82ed37b4cf0b5a9c6f — the ONE push this session", twice per run, same sha1):
+Applies AFTER the full 4-patch chain: base (bfbed5c) → endrod-planes (8b16c22) → cached-pack control (0184784) → control type matrix (1a0c871) → **this**. Apply-chain verified on 35eb53b, `bash -n` green on the full stack, zero rust.
 
-- #248 leg-2, 16:31:45: `[Download-2/INFO]: Returning cached file since actual hash matches requested`
-- #250 leg-2, 17:49:25: `[Download-2/INFO]: Returning cached file since actual hash matches requested`
+Insertion: right after the end_rod@Y120 verdict line, before the relog probe loop —
 
-leg-1 must download (fresh runner VM → the client dir `downloads/` cache is empty at the first push; the harness observes the yellow prompt + Proceed click every leg-1). The asymmetry leg-1 download / leg-2 cache-hit is now a measured fact.
+- `sleep 2` + white dust at **the EXACT end_rod@Y120 geometry** (`$((CX - 1)) 120 $CZ`, delta `1 1 1`, count `1200`, `force`) — a TYPE-ONLY swap against the plane control,
+- `shot 14_leg2_burst_whitedust_plane`, `changed_class 14_leg2_burst_endrod_plane → whitedust_plane` (successive baseline; a dying end_rod only inflates `total`, never white; white is eraser-immune),
+- `sleep 2` + the same burst at **Y=80 — the cword plane** (the second engine plane, deepest below-horizon geometry),
+- `shot 14_leg2_burst_whitedust_cword`, baseline = the dust@Y120 shot (dust dies in ~1.5 s, the +3 s cadence leaves it fully dead),
+- both verdict lines name the outcome in the summary.
 
-## 2. But the cached file is byte-identical — pack CONTENT cannot differ between legs
+## Decision rows (the type × plane interaction, read on the same run)
 
-26.3 `HttpUtil.downloadFile` (the class that logs "Returning cached file"): on a cache hit it runs `checkExistingFile` → `cachedFilePath(dir, hash)` → verifies the cached file's hash against the REQUESTED hash → returns that same path (updating its mtime). On a miss it downloads to a temp file, verifies the same hash, moves it into the SAME path. Both legs then feed `DownloadQueue` → `ServerPackManager` → reload the identical bytes at the identical path.
+| end_rod@120 (8b16c22) | dust@120 | dust@80 | Verdict | Next |
+|---|---|---|---|---|
+| > 20 | > 20 | > 20 | **PLANES FINE FOR DUST** — the client renders dust at the exact engine geometry; the dead stream points at the ENGINE side (spawn/packet/dot content), not the client renderer | engine-side diag: what is different about the stream's own Spawn packets |
+| > 20 | > 20 | ~ 0 | **Y=80 SPECIFICALLY LOSES** (deepest below-horizon) | engine: drop or move the cword plane |
+| > 20 | ~ 0 | ~ 0 | **TYPE × PLANE INTERACTION** if dust@150 NEAR renders (dust is plane-sensitive) — else the dust type itself is dead on leg-2 | engine: move `LAYER_Y` or a per-plane carrier |
+| ~ 0 | ~ 0 | ~ 0 | **THE WHOLE PLANE DEPTH LOSES on leg-2** (the reversed-Z class, the stream doc's own caveat) | the carrier must change altitude AND type |
 
-Corollary from the engine doc (engine.rs:1-13): the pack is a **static shader-only artifact** — "ZERO world data: no textures, no PNGs". The dust sprite comes from the VANILLA `particles.png` atlas, and the leg-2 log shows the atlas identical before and after the pack (`Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas` at join reload 17:49:18 AND pack reload 17:49:27 — the x0 is the harness `mipmapLevels:0` pin, all atlases x0). **The pack does not touch the particle path.** "Cached bytes break dust" is dead as a mechanism.
+Combined with the rest of the chain this completes the full type × plane × pack × session matrix in ONE run: (leg-1 dust@150) × (leg-2 dust/end_rod/villager @150, end_rod@120, dust@120, dust@80) × (control dust/end_rod, pack-free).
 
-## 3. Reload anomalies closed
+## The zero-friction path: the consolidated chain
 
-- The two `SimplePreparableReloadListener` stack traces in the leg-2 log (join reload AND pack reload, both runs) are the ALSA/OpenAL `Failed to open OpenAL device` → "Error starting SoundSystem. Turning off sounds & music" — an Xvfb environment artifact, harmless, both legs would have it.
-- The leg-2 pack reload completed at 17:49:25→17:49:27 (2 s); every probe ran ≥17:50:20. Timing is already compensated by the v6.10.1 re-arm anyway.
+The stack is now 5 patches deep — **`instrument-chain-full-v6.10.2e.patch` replaces the whole stack with ONE apply** (+213 lines vs vanilla `35eb53b`, real git index lines, verified byte-identical to the 5-step chain, `bash -n` green):
 
-## 4. The prompt/acceptance memory (bytecode)
+```
+git apply instrument-chain-full-v6.10.2e.patch   # onto fix/leg2-arm-race @ 35eb53b
+bash -n scripts/bench/run_ci_visual.sh           # sanity, should be silent
+```
 
-`ServerData$ServerPackStatus` = ENABLED / DISABLED / PROMPT, persisted per server entry via the `acceptTextures` codec (servers.dat) — this is where prompt-vs-auto-accept memory lives. The bench joins via `--quickPlayMultiplayer`, which may not persist the entry, so whether leg-2 prompted-and-clicked or auto-accepted is unresolved from the artifacts — but BOTH paths end in the pack applied (reload logged with `server/00000000/<uuid>` in the source list).
-
-## 5. The reshaped suspect space (replaces the 8b16c22 ranking)
-
-The server side is exonerated by counters (8b16c22), the pack CONTENT is now exonerated by bytecode+logs (§1-2). What remains for "end_rod renders, dust = 0, twice":
-
-1. **Dust type unrenderable on this build/environment — the leg-1 dust cell is STILL UNMEASURED** and is now the PRIMARY discriminator (bfbed5c instrument, rows 1 vs 3). If leg-1 green dust reads ~0 too, the whole bit-stream encoding must migrate its carrier type (P0).
-2. **Pack-PRESENCE interaction or relog-session state**: dust renders on leg-1 (if row 1 wins) but not on leg-2 — the capture chains ship with the pack and render on both legs; a chain × dust-pass interaction or relog client state is the live mechanism class. The v6.10.2c cache-wipe control stays valid (it tests the download-vs-cached state machine), but a negative result is now the EXPECTED outcome under suspects 1-2 and exonerates less than originally framed.
-3. Acceptance/prompt UI path (click through the shim, focus state) — exotic, third.
-
-**The new cheap discriminator is the CONTROL ARM**: it has only ever fired end_rod — dust on the pack-free client is unmeasured. → v6.10.2d adds a green dust burst to the control arm (see instrument-addendum-control-type-matrix.md): dust renders there → the break needs the pack present (suspect 2) and the leg-1 probe splits chain-interaction vs relog-state; dust ~0 there → suspect 1 confirmed, migrate the carrier.
+Cost of the full stack: +213 script lines, zero rust, ~+25 s runtime, purely additive (existing verdicts unchanged; the v6.7.3 preflight still gates every probe).
