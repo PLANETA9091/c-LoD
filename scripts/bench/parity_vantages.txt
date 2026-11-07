@@ -1,0 +1,20 @@
+# c-LoD vs Voxy PARITY MATRIX (v6.16) — the one shared shot list both CI legs
+# consume. The voxy-reference leg shoots every row (no prefix); the c-LoD
+# visual leg shoots every row into shots/parity/ (parity_<name>.png). The
+# parity-gate CI job pairs them BY NAME and fails the run below 100%
+# pixel-exact match. Columns: name yaw pitch x y z (CX/CZ = the disk center,
+# substituted by each leg from its own config — same seed, same noon lock).
+#
+# Rows 01-09 are the v6.8 voxy-reference matrix (proven, feeds every gallery
+# since #226); row 10 is the c-LoD marker-ray vantage (the engine's proven
+# decode vantage: 75 m east of center, eye 151.6, the paint-proof geometry).
+01_aerial_west 90 15 CX 140 CZ
+02_aerial_south 0 15 CX 140 CZ
+03_aerial_north 180 15 CX 140 CZ
+04_aerial_east 270 15 CX 140 CZ
+05_oblique 135 30 CX 170 CZ
+06_ground_west 90 0 CX 100 CZ
+07_far_north 180 5 CX 160 -220
+08_back_inside 90 0 CX 120 CZ
+09_after_mesh 90 15 CX 140 CZ
+10_marker_ray 270 5 CX-75 151.6 CZ

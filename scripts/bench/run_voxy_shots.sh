@@ -75,18 +75,26 @@ shot() { # name yaw pitch x y z
   ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -frames:v 1 "$SHOTS/$1.png" \
     || t "ffmpeg FAILED on $1 (rc=$?) — continuing, the rest of the matrix still shoots"
   SHOT_N=$((SHOT_N + 1))
-  t "shot $1 ok ($SHOT_N/9)"
+  t "shot $1 ok ($SHOT_N/$PARITY_N)"
   echo "shot $1 (yaw=$2 pitch=$3 at $4,$5,$6)"
 }
 
-shot 01_aerial_west   90 15   "$CX" 140 "$CZ"
-shot 02_aerial_south   0 15   "$CX" 140 "$CZ"
-shot 03_aerial_north 180 15   "$CX" 140 "$CZ"
-shot 04_aerial_east  270 15   "$CX" 140 "$CZ"
-shot 05_oblique      135 30   "$CX" 170 "$CZ"
-shot 06_ground_west   90  0   "$CX" 100 "$CZ"
-shot 07_far_north    180  5   "$CX" 160 "-220"
-shot 08_back_inside   90  0   "$CX" 120 "$CZ"
+# v6.16 PARITY MATRIX: the shot list is the SHARED parity_vantages.txt — the
+# c-LoD visual leg shoots the SAME rows into shots/parity/ (parity_<name>.png)
+# and the parity-gate CI job pairs them BY NAME and fails below 100% pixel
+# match. The matrix lives in one file so the two legs can never drift apart.
+PARITY="$BENCH/parity_vantages.txt"
+PARITY_N=$(grep -cv -e '^$' -e '^#' "$PARITY")
+voxy_tour() { # every row except 09_after_mesh (it re-shoots after the lap wait)
+  while read -r PNAME PYAW PPITCH PX PY PZ; do
+    case "$PNAME" in ''|\#*) continue;; esac
+    [ "$PNAME" = "09_after_mesh" ] && continue
+    PX="${PX//CX/$CX}"; PZ="${PZ//CZ/$CZ}"
+    shot "$PNAME" "$PYAW" "$PPITCH" "$PX" "$PY" "$PZ"
+  done < "$PARITY"
+}
+
+voxy_tour
 
 # 5. one more wait + re-shot: voxy keeps meshing outward — detail must grow
 t "lap wait ${LAP_WAIT}s"

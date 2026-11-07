@@ -753,6 +753,57 @@ jobs:
           RUN_NO: ${{ github.run_number }}
         run: bash scripts/bench/publish_voxy_feed.sh /home/runner/mc-test/voxy-shots "$RUN_ID" "$RUN_NO"
 
+  parity-gate:
+    # v6.16 THE PARITY GATE — the user's spec, verbatim: the voxy-reference
+    # leg and the c-LoD visual leg shoot the SAME parity_vantages.txt matrix
+    # at the SAME seed/coords/noon lock; this job pairs the frames BY NAME,
+    # diffs them pixel-perfect, and the job is RED while any pair is below
+    # 100% pixel-exact. Everything (diff heatmaps, voxy|ours|diff triptychs,
+    # parity.md/parity.json) rides the parity-gallery artifact; the verdict
+    # feed commits the report to the ci-verdicts branch. The gate is the
+    # convergence driver: it stays red exactly as long as our render differs
+    # from the Voxy ground truth, and each iteration must move exact % up.
+    name: parity gate (c-LoD vs Voxy — pixel-perfect, 100% or red)
+    needs: [visual, voxy-reference]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: python deps (pillow + numpy)
+        run: python3 -m pip install --quiet --user pillow numpy
+      - name: Download the voxy reference shots
+        uses: actions/download-artifact@v4
+        with:
+          name: voxy-reference-shots
+          path: voxy
+      - name: Download our visual evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: visual-evidence
+          path: ours
+      - name: Pixel-perfect parity diff (100% = green, anything less = red)
+        run: |
+          VOXY=$(dirname "$(find voxy -name '01_aerial_west.png' | head -1)" 2>/dev/null || true)
+          OURS=$(dirname "$(find ours -name '*01_aerial_west.png' | head -1)" 2>/dev/null || true)
+          echo "voxy dir: ${VOXY:-NONE} / ours dir: ${OURS:-NONE}"
+          if [ -z "${VOXY:-}" ]; then
+            echo "FAIL: the voxy reference artifact carries no shots"
+            exit 1
+          fi
+          python3 scripts/bench/parity_diff.py --voxy "$VOXY" \
+            --ours "${OURS:-__none__}" --out parity-out
+      - name: Publish parity feed (ci-verdicts branch)
+        if: always()
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_NO: ${{ github.run_number }}
+        run: bash scripts/bench/publish_parity_feed.sh parity-out "$RUN_ID" "$RUN_NO"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parity-gallery
+          path: parity-out/
+
   strict:
     name: strictness gate (all green)
     needs: [fmt, clippy, test, glsl, build, packaging, e2e-live, visual]

@@ -1053,6 +1053,36 @@ echo "### stream diag after probes:" >> "$SUMMARY"
 grep "stream: tick" /tmp/server.log | tail -3 >> "$SUMMARY" || true
 grep -E "edits \+[0-9]+p/[0-9]+c/[0-9]+e" /tmp/server.log | tail -2 || true
 
+# ---- 5b. PARITY TOUR (v6.16): the c-LoD half of the Voxy parity gate --------
+# The user's gate: the voxy-reference leg shoots a fixed matrix (the SHARED
+# scripts/bench/parity_vantages.txt — one file, both legs, no drift); THIS
+# leg shoots the SAME rows from THIS client into $SHOTS/parity/ as
+# parity_<name>.png. The parity-gate CI job pairs them BY NAME and fails
+# the run below 100% pixel-exact match. Non-fatal by design: a missing or
+# failed tour shot shows up as a FAIL pair in the gate report, it never
+# aborts the transport proof. Runs on the session-1 client (before the
+# leg-2 kick) with a 10 s settle per vantage — the rot/camera channels
+# re-arm on the tp, the heightfield is persistent, the march paints from
+# what has already decoded.
+if [ "${CLOD_CONTROL:-0}" != "1" ]; then
+  PDIR="$SHOTS/parity"; mkdir -p "$PDIR"
+  PARITY="$BENCH_DIR/parity_vantages.txt"
+  PTOT=$(grep -cv -e '^$' -e '^#' "$PARITY" 2>/dev/null || echo 0)
+  sum "- parity tour: $PTOT vantages (the voxy-reference matrix, session-1 client)"
+  ct "parity tour start"
+  PN=0
+  while read -r PNAME PYAW PPITCH PX PY PZ; do
+    case "$PNAME" in ''|\#*) continue;; esac
+    PX="${PX//CX/$CX}"; PZ="${PZ//CZ/$CZ}"
+    srv "tp Stepan $PX $PY $PZ $PYAW $PPITCH"
+    sleep 10
+    PN=$((PN + 1))
+    shot "parity/$PNAME" || true
+    ct "parity shot $PNAME ($PN/$PTOT)"
+  done < "$PARITY"
+  sum "- parity tour done: $PN shots in parity/ (the gate pairs and diffs them)"
+fi
+
 # ---- 6. leg 2: kick + rejoin, the marker must persist ------------------------
 srv "kick Stepan"
 wait_log "Stepan left the game" /tmp/server.log 30 \
