@@ -25,20 +25,30 @@ Owner: ci-verdict-bot. Updated: 2026-11-07 (v6.12 round — G0 EXECUTED, the fir
 **Answer:** ALIVE on leg-2 — in-band carrier@Y120 reads 0 green, identical to the healthy leg's read; the per-dot carrier hue is eaten at every vantage on a packed client (v6.11 §4 design read confirmed by measurement). The capture tail is not blind; dots die pre-display as designed.
 **Status:** CLOSED (alive; the interesting question moved to the band).
 
-### G3 — ROOT-CAUSE FIX RECOMMENDATION — **UNBLOCKED**
+### G3 — ROOT-CAUSE FIX RECOMMENDATION — **EXECUTED BY THE BOT (menu 1a + 3)**
 **Goal:** publish the engine-side fix.
-**Menu (keyed to the run-42355686504 read):**
-1. ENGINE (keeps pure-LOD): decode band inside the measured render radius — v6.12 walk names the cut; then `ZONE_FAR` (112) / dot geometry (75-105 m) must fit inside it, or re-plan the carrier geometry closer to the vantage;
-2. DIAGNOSTIC (one-off): `view-distance 4 → 8` in the visual job's server.properties — a vanilla 80 m burst should render; run once to confirm the cull, then revert (view-distance=4 is deliberate — pure-LOD marker zone);
-3. QUEUED BEHIND THE BAND FIX: [B] `CLOD_UNBUNDLED=1` (the ClientboundBundlePacket wrapper) — only meaningful once the band renders.
-**Status:** the recommendation is written; the walk's number finalizes the parameter.
+**Delivered (`fix/band-inside-cut`, bot-dispatched run #256 = 42364516378, see `run-42364516378-verdict-fix.md`):**
+1. **DONE — `ZONE_FAR` 112 → 48** (commit 2996b38): every spawned dot now lands inside the measured ~50 m client cut with ≥2 m margin; the far-vantage zero is pinned as a regression test (the pre-fix code spawned into the cut and reported phantom coverage — verdict [C]);
+2. **DONE — the §5b NEAR-VANTAGE TRANSPORT PROOF** (the bench alternative): eye at CX−30, y=100 puts both plane probes at 3D 36.1 — the #256 evidence reads **835 changed px (dots render), strobe_hits=2 (the capture decodes), marker red=532 (on screen), cam 10/11 (the camera channel lives)** — the pipeline is pixel-proven end-to-end inside the cut;
+3. the one-off view-distance=8 confirmation stays available but is no longer needed — the cut is measured and the engine already fits inside it;
+4. `CLOD_UNBUNDLED=1` stays queued behind the band fix (only meaningful for far-band ambitions now).
+**Test suite:** 21 fixtures re-anchored to the [30, 46] servable envelope (only a midheight eye streams; the far vantage asserts ZERO by construction). Runs a5aee90/f5414fc/4a6ae66 walk the suite green (visual e2e + builds + rustfmt + strictness gate green on a5aee90; tests/clippy fixes landed in sequence).
+**Status:** EXECUTED (bot-side). The author's merge decision on `fix/band-inside-cut` is the ball.
 
 ### G4 — THE FLAP (run-crossing carrier instability)
 **Goal:** explain the run-crossing flips (marker red 1631/27/0/93/2961 across #234-#245; FAR end_rod 353 (#246) vs 0 (#253)).
 **Measured (runs 42355686504 + 42358652148):** the cut is ≈50 m on BOTH legs of #255 — with that cut, #246's alive 73-80 m bursts are the outlier: the effective radius itself flapped on that run. The walk is now a standing instrument — every future instrumented run measures its own cut, so the flap is quantified per run (two runs so far: cut 50/50 m; #246 remains the flap outlier).
 **Status:** OPEN (mechanism bounded: a flappy client radius; measurement instrument in place).
 
+### G5 — THE MERGE + THE CUT-FLAP WINDOW (NEW, born in the fix round)
+**Goal:** land `fix/band-inside-cut` in master and keep ZONE_FAR honest while the client cut flaps.
+**Why:** the v6.4.2-era runs decoded markers at 75-105 m — the cut has historically opened WIDER than ~50 m; #246's wide-cut session may be that flap, not an anomaly. While the walk measures ~50 m, ZONE_FAR=48 is the honest value; a wide-cut run re-opens the question in the same one-constant way.
+**Steps:** (1) author merge decision on `fix/band-inside-cut` (4a6ae66); (2) the walk stays a standing per-run instrument — log the cut per run; (3) if a wide-cut run appears (> 105 m), re-evaluate ZONE_FAR against that evidence; (4) LEG-2 SCENE DEAD remains the separate open class (untouched by the fix).
+**Status:** OPEN (the bot's part is done; the merge is the author's ball).
+
 ## Round log (newest first)
+
+- **2026-11-07 (THE FIX ROUND — «ну так если нету лодов то ты пофискси»):** the bot applied G3 menu items (1a)+(3) itself: branch `fix/band-inside-cut` — `ZONE_FAR` 112 → 48 (every dot spawns inside the measured ~50 m client cut; the far-vantage zero pinned as a regression test) + the §5b NEAR-VANTAGE TRANSPORT PROOF in run_ci_visual.sh (eye at CX−30, y=100: both plane probes at 3D 36.1). Dispatched `workflow_dispatch` → run **#256 = 42364516378**: **THE TRANSPORT IS ALIVE INSIDE THE CUT — 835 changed px between the near shots (the strobing dots render), strobe_hits=2 mask_hits=30 (the capture decodes), marker red=532 px (the marker IS ON SCREEN — the column fills the frame from 30 m), cam 10/11 (the camera channel reads the new vantage)**; the far vantage reads the honest zero on every probe; LEG-2 SCENE DEAD persists (separate class, untouched). The first push run failed 21 fixtures — the cut speaking through the suite; re-anchored to the [30, 46] envelope (midheight eye y=100; edits re-placed; the far-zero/near-alive contract pinned in center_anchored); three follow-ups (E0308 cast, a stale cell_origin, a rustdoc blank line) walked the suite green (visual e2e + builds + rustfmt + strictness gate green on a5aee90+). Sheet: `gallery/sheet-E-fix.png` (до/после, зум точек). Verdict: `run-42364516378-verdict-fix.md`. NEW G5 (merge + the cut-flap window). Monitored: master d4ff522, leg2 35eb53b unchanged (no author commits).
 
 - **2026-11-07 (gallery round — the verdict made pixel-visible):** pulled the `visual-evidence` + `voxy-reference-shots` artifacts of run 42358652148 (#255) and published `gallery/` — three annotated contact sheets (A world/bench voxy pass, B leg-1, C leg-2, 32 cells total) with per-cell changed-px badges from probe_counts.txt; the 50 raw 1280x720 shots preserved in the run artifacts. The band walk now has a FACE: 30 m bursts are unmistakable blobs on both legs (250/245 px), 50 m still alive (29/35), 60 m is a 3-10 px tail, 70-80 m are photographs of EMPTY SKY on the healthy leg too — VERDICT [C] (client-culled band) is pixel-visible, effective cut ~50 m (largest alive step), dead from 60 m, on BOTH legs; the dots at 75-105 m sit 15-25 m beyond it. No new instrument needed; G3 fix menu unchanged (decode inside the cut / view-distance=8 one-off / CLOD_UNBUNDLED=1), G4 flap quantification queued. Monitored: no author commits (master d4ff522, leg2 35eb53b unchanged); runs #254/#255 are the v6.12 dispatch pair.
 - **2026-11-07 (v6.12 round, part 2 — THE WALK):** the v6.12 walk dispatched the same way (branch 5e36f36 → run 42358652148/#255): **cut ≈ 50 m, IDENTICAL both legs** (leg-1 30/40/50 alive 250/44/29, 60+ dead; leg-2 245/54/35, 60+ dead) — [C] confirmed with the number, the band death is NOT relog-specific, #246's FAR alives bounded as the flap outlier, G3's fix menu finalized with measured parameters (ZONE_FAR ≤ 50 / vantage ~40 m / non-particle carrier). Full #253 replication in the same run (streams 651/775/692, carrier raw 483, eraser alive, scene dead 0/12). Verdict: `run-42358652148-verdict-walk.md`.

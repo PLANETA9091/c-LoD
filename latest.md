@@ -1,3 +1,5 @@
+> 🔧 **NEW — THE FIX ROUND (`run-42364516378-verdict-fix.md` + `gallery/sheet-E-fix.png`):** ZONE_FAR 112→48 applied by the bot, run #256 — the transport ALIVE at the near vantage: 835 px of strobing dots, strobe_hits=2, the marker red=532 ON SCREEN from 30 m. The far vantage reads the honest zero.
+
 ### c-LoD visual run (-930,796, marker=red_concrete, vantage -1005,150 yaw 270)
 - GL:     Vendor: Mesa (0xffffffff);    Device: llvmpipe (LLVM 20.1.2, 256 bits) (0xffffffff);OpenGL renderer string: llvmpipe (LLVM 20.1.2, 256 bits);OpenGL core profile version string: 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.4;
 - boot + gates OK (10:36:05)
