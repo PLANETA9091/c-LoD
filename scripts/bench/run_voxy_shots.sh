@@ -89,7 +89,10 @@ voxy_tour() { # every row except 09_after_mesh (it re-shoots after the lap wait)
   while read -r PNAME PYAW PPITCH PX PY PZ; do
     case "$PNAME" in ''|\#*) continue;; esac
     [ "$PNAME" = "09_after_mesh" ] && continue
-    PX="${PX//CX/$CX}"; PZ="${PZ//CZ/$CZ}"
+    # v6.16.1: arithmetic evaluation — "CX-75" must BECOME -1005 (the tp
+    # parser rejects the literal "-930-75" string the plain substitution
+    # produced). Decimal y values never enter $(()) — they pass through.
+    PX=$(( ${PX//CX/$CX} )); PZ=$(( ${PZ//CZ/$CZ} ))
     shot "$PNAME" "$PYAW" "$PPITCH" "$PX" "$PY" "$PZ"
   done < "$PARITY"
 }

@@ -1073,7 +1073,11 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   PN=0
   while read -r PNAME PYAW PPITCH PX PY PZ; do
     case "$PNAME" in ''|\#*) continue;; esac
-    PX="${PX//CX/$CX}"; PZ="${PZ//CZ/$CZ}"
+    # v6.16.1: the row tokens go through ARITHMETIC evaluation — "CX-75"
+    # must become -1005, not the literal string "-930-75" (a tp arg the
+    # command parser rejects: the shot would silently capture the previous
+    # vantage). Decimal y values never enter $(()) — they pass through.
+    PX=$(( ${PX//CX/$CX} )); PZ=$(( ${PZ//CZ/$CZ} ))
     srv "tp Stepan $PX $PY $PZ $PYAW $PPITCH"
     sleep 10
     PN=$((PN + 1))
