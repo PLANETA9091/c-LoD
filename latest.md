@@ -1,24 +1,13 @@
-# voxy reference run 42076419845 (#250) — FAILURE (no shots) 2026-11-05T18:27:41Z
+# voxy reference shots — run 42355686504 (#253) 2026-11-07T08:37:49Z
 
-The job produced zero screenshots (shots dir exists: NO, sha 6b0b599).
-See run-42076419845/ for client.log, server.log, steps.log and leg.log (tails below).
+9 shots in run-42355686504/ (1280 px JPEG).
 
-## steps.log tail (per-step trace written by the job steps)
-```
-2026-11-05T17:37:28Z X11+GL+pip start
-```
-
-## client.log tail
-```
-(no client log)
-```
-
-## server.log tail
-```
-(no server log)
-```
-
-## voxy-leg.log tail (the leg's own stdout/stderr)
-```
-(no leg log — the death predates the v6.8.6 tee)
-```
+- ![01_aerial_west.jpg](run-42355686504/01_aerial_west.jpg)
+- ![02_aerial_south.jpg](run-42355686504/02_aerial_south.jpg)
+- ![03_aerial_north.jpg](run-42355686504/03_aerial_north.jpg)
+- ![04_aerial_east.jpg](run-42355686504/04_aerial_east.jpg)
+- ![05_oblique.jpg](run-42355686504/05_oblique.jpg)
+- ![06_ground_west.jpg](run-42355686504/06_ground_west.jpg)
+- ![07_far_north.jpg](run-42355686504/07_far_north.jpg)
+- ![08_back_inside.jpg](run-42355686504/08_back_inside.jpg)
+- ![09_after_mesh.jpg](run-42355686504/09_after_mesh.jpg)
