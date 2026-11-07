@@ -1,3 +1,5 @@
+> 📷 **NEW — `gallery/run255-gallery.md`:** the run #255 pixel gallery (3 annotated sheets, 32 cells, the ~50 m render cut visible as empty sky on BOTH legs).
+
 # CURRENT STATE (2026-11-07, v6.12 round — the walk measured)
 
 **The leg-2 dot death is NAMED AND MEASURED. Two independent bot-dispatched instrumented runs (#253 = 42355686504, #255 = 42358652148), one verdict.**
