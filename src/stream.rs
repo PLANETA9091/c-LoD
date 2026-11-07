@@ -92,14 +92,29 @@ pub const RESET_Y: f64 = 100.0;
 pub const CULL_RADIUS: f64 = 28.0;
 
 /// v5.3.1 STEALTH far gate: particles never spawn FARTHER than this (blocks,
-/// 3D, eye-centered) from a player either. Beyond ~96 blocks the fog-washed
-/// hue stops decoding (the capture's un-fog can only stretch so far), so a
-/// far dot is PERMANENTLY visible garbage: rendered (force mode survives the
-/// client's render-distance clip) but never decoded, hence never erased by
-/// the dust-mask pass — exactly the sky specks seen from high vantages.
-/// The persistent capture buffers make the disk cumulative: as players move,
-/// the zone sweeps the grid and every cell still decodes within seconds.
-pub const ZONE_FAR: f64 = 112.0;
+/// 3D, eye-centered) from a player either. Two independent ceilings exist and
+/// the LOWER one now rules:
+///   - the fog ceiling (~96 blocks: beyond it the fog-washed hue stops
+///     decoding — the capture's un-fog can only stretch so far), and
+///   - the CLIENT PARTICLE CUT (run 42358652148, verdict [C]): the v6.12
+///     band-edge walk fired graded end_rod bursts at 30/40/50/60/70/80 m on
+///     BOTH legs and measured the effective render radius at ~50 m — alive
+///     at 30/40/50 (250/44/29 px leg-1, 245/54/35 leg-2), dead from 60 m
+///     (3-10 px fog tail, 0 beyond). The cut tracks the server view-distance
+///     chunk radius (4 x 16 = 64 m) with a fog margin, NOT the client's
+///     options.txt renderDistance:8 — the vanilla client syncs its render
+///     distance to the login packet's viewDistance at join. Every dot spawned
+///     beyond ~50 m was client-culled BEFORE any engine path mattered: the
+///     75-105 m marker band (3D 81/104 m from the y=151.6 vantage) never
+///     rendered on any run — invisible waste at best, and at worst the
+///     transport's honesty test measured a culled band for weeks.
+/// ZONE_FAR therefore sits INSIDE the measured cut with margin: every dot the
+/// engine spawns is now renderable + decodable on this client. The far disk
+/// cells no player can reach are zero-budget by construction (the scheduler
+/// skipped them at delivery before; it does not spawn them at all now), and
+/// the pack-seeded static paint beyond the chunk radius is untouched — the
+/// LOD-purity proof keeps its territory, the live transport keeps its cut.
+pub const ZONE_FAR: f64 = 48.0;
 
 /// v5.3.1 view-frustum spawn gate. The client's vertical FOV is a video
 /// setting (30..110); the server cannot read it, so the cone assumes the
@@ -1557,11 +1572,13 @@ mod tests {
     #[test]
     fn spawn_visible_gate_band_and_cone() {
         let cos_half = cos_half_cone();
-        // Eye at the origin looking south (+Z); dot 50 blocks ahead: visible.
+        // Eye at the origin looking south (+Z); dot 40 blocks ahead: visible
+        // (ZONE_FAR = 48 — a dot at the old 50-block test distance would now
+        // sit beyond the far gate, run 42358652148's measured client cut).
         let s = Spawn {
             x: 0.0,
             y: 80.0,
-            z: 50.0,
+            z: 40.0,
         };
         let eye = [0.0, 80.0, 0.0];
         let look = look_dir(0.0, 0.0);
@@ -1570,7 +1587,7 @@ mod tests {
         let s = Spawn {
             x: 0.0,
             y: 80.0,
-            z: -50.0,
+            z: -40.0,
         };
         assert!(!spawn_visible(&s, eye, look, true, cos_half));
         // Inside the cone but too close (inside the 28-block cull bubble).
@@ -1580,7 +1597,8 @@ mod tests {
             z: 20.0,
         };
         assert!(!spawn_visible(&s, eye, look, true, cos_half));
-        // Inside the cone but beyond the 112-block decode zone: permanent
+        // Inside the cone but beyond the decode zone (ZONE_FAR = 48 — run
+        // 42358652148 measured the client's particle cut at ~50 m): permanent
         // undecodable garbage — never spawned.
         let s = Spawn {
             x: 0.0,
@@ -1592,7 +1610,7 @@ mod tests {
         let s = Spawn {
             x: 0.0,
             y: 80.0,
-            z: 50.0,
+            z: 40.0,
         };
         assert!(!spawn_visible(&s, eye, look, false, cos_half));
         // Sideways dot at the cone edge: 90 degrees off the look axis.
@@ -1606,11 +1624,13 @@ mod tests {
 
     #[test]
     fn spawn_gate_zone_is_symmetric_3d() {
-        // A dot 50 blocks straight BELOW the eye decodes fine when the
+        // A dot 38 blocks straight BELOW the eye decodes fine when the
         // player looks down at it with sky in view (high vantage, horizon
-        // in frame): the band test is 3D, not horizontal.
+        // in frame): the band test is 3D, not horizontal. (The old 50-block
+        // drop left the dot exactly ON the old ZONE_FAR edge — moved inside
+        // the new [28, 48] band, same angles, same verdict.)
         let cos_half = cos_half_cone();
-        let eye = [0.0, 130.0, 0.0];
+        let eye = [0.0, 118.0, 0.0];
         let s = Spawn {
             x: 0.0,
             y: 80.0,

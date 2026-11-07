@@ -48,8 +48,17 @@ FILL_Y0=60; FILL_Y1=170
 #   - near gate: >= 30 blocks (CULL_RADIUS+2);
 #   - vanilla purity: > 64 blocks (server view-distance 4) so the marker
 #     zone stays pure-LOD territory;
-#   - client particle cull: < 128 blocks (renderDistance 8).
-# 75 blocks satisfies all four; 100 failed the first one.
+#   - client particle cut: ~50 m EFFECTIVE (run 42358652148 band-edge walk:
+#     alive at 30/40/50 m, dead from 60 m on BOTH legs) — NOT the options.txt
+#     renderDistance:8; the vanilla client syncs its render distance to the
+#     login packet's viewDistance at join, so the cut tracks the server's
+#     view-distance chunk radius (4 x 16 = 64 m) with a fog margin. 75 m
+#     FAILED this constraint — verdict [C]: the marker band (75-105 m) was
+#     client-culled on every run. The engine now fits inside the cut
+#     (ZONE_FAR 112 -> 48), and the §5b near-vantage pass proves the
+#     transport end-to-end from INSIDE the cut.
+# 75 blocks satisfies the first three; the measured cut killed the fourth;
+# the near-vantage pass (§5b) completes the proof pipeline-side.
 VX=$(( CX - 75 )); VY=150; VYAW=270; VPITCH=5
 mkdir -p "$SHOTS"
 FAILURES=0
@@ -850,6 +859,53 @@ NOW_JOIN=$(join_count)
 echo "### stream diag after probes:" >> "$SUMMARY"
 grep "stream: tick" /tmp/server.log | tail -3 >> "$SUMMARY" || true
 grep -E "edits \+[0-9]+p/[0-9]+c/[0-9]+e" /tmp/server.log | tail -2 || true
+
+# ---- 5b. v6.13 NEAR-VANTAGE TRANSPORT PROOF (G3 menu item 3, verdict [C]) ----
+# The band-edge walk (run 42358652148) measured the client particle cut at
+# ~50 m on BOTH legs, and the far vantage's own probe shots read
+# strobe_hits=0 / mask_hits=0 on EVERY probe — at 75-105 m the dots are
+# client-culled and the capture decodes NOTHING. With ZONE_FAR now inside
+# the measured cut (112 -> 48) this pass proves the transport END-TO-END
+# from a vantage where the dots CAN render: eye at CX-30, y=100 — the HI
+# plane (y=120) and the LO plane (y=80) both sit at 3D sqrt(30^2+20^2) =
+# 36.1 m, dead-center inside the decode band [CULL_RADIUS+2, ZONE_FAR-2] =
+# [30, 46] AND inside the measured ~50 m cut. Purity caveat (documented,
+# accepted): at 30 m the marker sits INSIDE the vanilla chunk radius
+# (server view-distance 4 = 64 blocks), so the fill blocks also render
+# vanilla-side — this leg proves the PIPELINE (dots render -> capture
+# decodes -> paint follows); the far leg at 75 m keeps the LOD-purity proof
+# for the pack-seeded paint. 26.3 tp pitch is inverted: -10 = UP 10 degrees
+# (sky in view for the rot channel; the marker dome top at y=170 stays in
+# frame from 30 m).
+note "near-vantage transport proof (30 m, both planes at 3D 36 m)"
+assert_online "near vantage" || exit 1
+srv "time set noon"
+srv "gamemode spectator Stepan"
+srv "tp Stepan $((CX - 30)) 100 $CZ 270 -10"
+sleep 12   # the zone scheduler re-serves the near cone within a lap
+shot 15_near_v0 || exit 1
+LM0=$(lens_metrics "15_near_v0")
+sleep 8
+shot 15_near_v1 || exit 1
+LM1=$(lens_metrics "15_near_v1")
+ND=$(paint_px "$SHOTS/15_near_v0.png" "$SHOTS/15_near_v1.png")
+sum "- near vantage (30 m): changed px v0->v1 = ${ND:-?} (the strobing stream dots are the only moving scene content; the far vantage read 0 decode hits on every probe), lens v0: $LM0"
+sum "- near vantage lens v1: $LM1 (strobe_hits > 0 = the capture DECODES the stream when the dots render inside the client cut)"
+echo "- near vantage changed px v0->v1: ${ND:-?}" >> "$PROBE_LOG"
+echo "- near vantage lens v0: $LM0" >> "$PROBE_LOG"
+echo "- near vantage lens v1: $LM1" >> "$PROBE_LOG"
+# the marker at 30 m: red-family px vs the pre-edit baseline (the fill
+# blocks + the painted marker; the vanilla-side render is the documented
+# confound of this leg)
+python3 "$BENCH_DIR/visual_diff.py" \
+     "$SHOTS/10_before_edit.png" "$SHOTS/15_near_v1.png" \
+     --probe red --min-probe "$MIN_PROBE" --min-change 0 \
+     --out "$SHOTS/diff_near_vantage.png" > /tmp/probe_out.txt 2>&1
+NRED=$(grep -o 'probe\[red\] px = [0-9]*' /tmp/probe_out.txt | grep -o '[0-9]*$')
+sum "- near vantage marker red px: ${NRED:-?} (>= $MIN_PROBE = the marker is ON SCREEN from the in-cut vantage; the far leg's red=141 was near-terrain family — the marker band itself was culled)"
+echo "- near vantage marker red px: ${NRED:-?}" >> "$PROBE_LOG"
+srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"   # back to the far vantage for leg 2's continuity
+sleep 3
 
 # ---- 6. leg 2: kick + rejoin, the marker must persist ------------------------
 srv "kick Stepan"
