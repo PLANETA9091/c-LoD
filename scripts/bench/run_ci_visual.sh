@@ -662,7 +662,7 @@ done
 # while the LOD paint stood in them (run 42358652148 baseline/far, ~40k px).
 LODPX=$(lod_silhouette 10_before_edit)
 note "lod paint baseline: ${LODPX:-?} cols"
-sum "- lod_silhouette_cols: ${LODPX:-?} (LOD paint ON SCREEN at 75 m if > 20 — the march-drawn marker column; vanilla cannot render there, chunk edge 64 m; #255 re-measures 49, the ZONE_FAR=48 regression #256 and the control read 0)"
+sum "- ${LODPX:-?} (LOD paint ON SCREEN at 75 m if > 20 — the march-drawn marker column; vanilla cannot render there, chunk edge 64 m; #255 re-measures 49, the ZONE_FAR=48 regression #256 and the control read 0)"
 
 # ---- 4b. PARTICLE RENDER PROBE (v6.4.9, separates two failure domains) ------
 # Run 41256576023: the client accepted 446k level_particles packets but the
