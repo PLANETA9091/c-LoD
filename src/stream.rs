@@ -108,6 +108,7 @@ pub const CULL_RADIUS: f64 = 28.0;
 ///     75-105 m marker band (3D 81/104 m from the y=151.6 vantage) never
 ///     rendered on any run — invisible waste at best, and at worst the
 ///     transport's honesty test measured a culled band for weeks.
+///
 /// ZONE_FAR therefore sits INSIDE the measured cut with margin: every dot the
 /// engine spawns is now renderable + decodable on this client. The far disk
 /// cells no player can reach are zero-budget by construction (the scheduler
