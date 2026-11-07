@@ -35,7 +35,11 @@ grep -q "^pauseOnLostFocus:" "$OPT" && sed -i 's/^pauseOnLostFocus:.*/pauseOnLos
 grep -q "^renderDistance:" "$OPT" && sed -i 's/^renderDistance:.*/renderDistance:8/' "$OPT" || echo "renderDistance:8" >> "$OPT"
 grep -q "^fullscreen:" "$OPT" && sed -i 's/^fullscreen:.*/fullscreen:false/' "$OPT" || echo "fullscreen:false" >> "$OPT"
 grep -q "^graphicsMode:" "$OPT" && sed -i 's/^graphicsMode:.*/graphicsMode:0/' "$OPT" || echo "graphicsMode:0" >> "$OPT"
-grep -q "^mipmapLevels:" "$OPT" && sed -i 's/^mipmapLevels:.*/mipmapLevels:0/' "$OPT" || echo "mipmapLevels:0" >> "$OPT"
+# v6.17 PARITY: mipmap was 0 here while the voxy reference leg ships 4 —
+# every vanilla-textured surface rendered sharper for us than for the
+# reference, a per-pixel diff class on every terrain pair. Match the
+# reference (run_client_voxy.sh) exactly.
+grep -q "^mipmapLevels:" "$OPT" && sed -i 's/^mipmapLevels:.*/mipmapLevels:4/' "$OPT" || echo "mipmapLevels:4" >> "$OPT"
 grep -q "^entityShadows:" "$OPT" && sed -i 's/^entityShadows:.*/entityShadows:false/' "$OPT" || echo "entityShadows:false" >> "$OPT"
 grep -q "^onboardAccessibility:" "$OPT" && sed -i 's/^onboardAccessibility:.*/onboardAccessibility:false/' "$OPT" || echo "onboardAccessibility:false" >> "$OPT"
 grep -q "^tutorialStep:" "$OPT" && sed -i 's/^tutorialStep:.*/tutorialStep:none/' "$OPT" || echo "tutorialStep:none" >> "$OPT"

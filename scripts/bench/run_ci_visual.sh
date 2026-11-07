@@ -1055,23 +1055,26 @@ echo "### stream diag after probes:" >> "$SUMMARY"
 grep "stream: tick" /tmp/server.log | tail -3 >> "$SUMMARY" || true
 grep -E "edits \+[0-9]+p/[0-9]+c/[0-9]+e" /tmp/server.log | tail -2 || true
 
-# ---- 5b. PARITY TOUR (v6.16): the c-LoD half of the Voxy parity gate --------
-# The user's gate: the voxy-reference leg shoots a fixed matrix (the SHARED
-# scripts/bench/parity_vantages.txt — one file, both legs, no drift); THIS
-# leg shoots the SAME rows from THIS client into $SHOTS/parity/ as
-# parity_<name>.png. The parity-gate CI job pairs them BY NAME and fails
-# the run below 100% pixel-exact match. Non-fatal by design: a missing or
+# ---- 5b. PARITY DEBUG TOUR (v6.16, v6.17 demoted to evidence lane) ----------
+# The v6.16 parity tour shot the matrix from the SESSION-1 client: the DEBUG
+# pack (the capture-lens panels paint the right ~27% of every frame — run
+# #281's triptychs), on the view-distance-4 server (the vanilla world ends
+# at 64 m while the voxy reference leg legitimately renders to 128 m) and
+# inside a client carrying the whole visual-CI session state. v6.17 keeps
+# the tour as EXTRA EVIDENCE but moves the GATE's input to the dedicated
+# parity-world session (§7b): same view-distance as voxy, PRODUCTION pack
+# (no lens, no panels), fresh client. Non-fatal by design: a missing or
 # failed tour shot shows up as a FAIL pair in the gate report, it never
 # aborts the transport proof. Runs on the session-1 client (before the
 # leg-2 kick) with a 10 s settle per vantage — the rot/camera channels
 # re-arm on the tp, the heightfield is persistent, the march paints from
 # what has already decoded.
 if [ "${CLOD_CONTROL:-0}" != "1" ]; then
-  PDIR="$SHOTS/parity"; mkdir -p "$PDIR"
+  PDIR="$SHOTS/parity_dbg"; mkdir -p "$PDIR"
   PARITY="$BENCH_DIR/parity_vantages.txt"
   PTOT=$(grep -cv -e '^$' -e '^#' "$PARITY" 2>/dev/null || echo 0)
-  sum "- parity tour: $PTOT vantages (the voxy-reference matrix, session-1 client)"
-  ct "parity tour start"
+  sum "- parity debug tour: $PTOT vantages (session-1 client, DEBUG pack — evidence only, the gate pairs the §7b world session)"
+  ct "parity debug tour start"
   PN=0
   while read -r PNAME PYAW PPITCH PX PY PZ <&3; do
     case "$PNAME" in ''|\#*) continue;; esac
@@ -1085,10 +1088,10 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     srv "tp Stepan $PX $PY $PZ $PYAW $PPITCH"
     sleep 10
     PN=$((PN + 1))
-    shot "parity/$PNAME" || true
-    ct "parity shot $PNAME ($PN/$PTOT)"
+    shot "parity_dbg/$PNAME" || true
+    ct "parity debug shot $PNAME ($PN/$PTOT)"
   done 3< "$PARITY"
-  sum "- parity tour done: $PN shots in parity/ (the gate pairs and diffs them)"
+  sum "- parity debug tour done: $PN shots in parity_dbg/ (the §7b world session feeds the gate)"
 fi
 
 # ---- 6. leg 2: kick + rejoin, the marker must persist ------------------------
@@ -1259,6 +1262,95 @@ sum "- edit channel: $LINK_ERR linkage errors, $DISPATCH_ERR failed event dispat
 if [ "${LINK_ERR:-0}" -gt 0 ] || [ "${DISPATCH_ERR:-0}" -gt 0 ]; then
   fail "the edit channel threw $LINK_ERR linkage / $DISPATCH_ERR dispatch errors — the event push cannot be trusted this run"
 fi
+
+# ---- 7b. THE PARITY WORLD (v6.17): the session the gate deserves -------------
+# Run #281's triptychs split the parity diff into classes we were MEASURING
+# but not COMPARING: our lens panels (the debug pack paints the right ~27%
+# of every frame), our data horizon (view-distance 4 = vanilla ends at 64 m;
+# the voxy leg's server ships 8 = 128 m and its frames contain terrain ours
+# never receives), and our session state. This block rebuilds the world the
+# way the voxy leg sees it and shoots the SAME matrix from a DEDICATED
+# client:
+#   - view-distance 8 in server.properties (the voxy leg's server value);
+#   - the PRODUCTION pack (CLOD_EXTRA_OPTS without debug_lens — packgen
+#     ships no lens pass, no ClodLens UBO, no panels; test
+#     debug_lens_pack_ships_lens_production_does_not);
+#   - the SAME built world: the mountains + marker were placed in session 1
+#     and live in the same level dir; the voxy leg builds the identical
+#     structures (run_voxy_shots.sh §3b), so both worlds = seed + structures;
+#   - the same shared matrix, the same spectator pose, the same noon pin.
+# Non-fatal by design: the transport verdict above is already computed; a
+# parity-world failure degrades to missing shots (FAIL pairs in the gate),
+# never to a red transport run.
+if [ "${CLOD_CONTROL:-0}" != "1" ]; then
+  ct "parity world: rebuilding the session"
+  DIST="${MC_TEST_DIST:-$HOME/mc-test/dist}"
+  PROP="$DIST/server.properties"
+  if [ -f "$PROP" ]; then
+    sed -i 's/^view-distance=.*/view-distance=8/' "$PROP"
+    grep -qE '^view-distance=' "$PROP" || echo 'view-distance=8' >> "$PROP"
+    sum "- parity world: view-distance=8 (the voxy leg's server value)"
+  else
+    note "parity world: server.properties not found at $PROP — session runs on vd 4"
+  fi
+  # The production pack: no lens pass, no panels. The debug cell window
+  # stays — the march's center hint is harmless without the lens.
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false"
+  bash "$BENCH_DIR/boot_server.sh" \
+    || note "parity world: boot_server.sh rc=$? (continuing — the gate degrades to FAIL pairs)"
+  srv "gamerule doDaylightCycle false"
+  srv "time set noon"
+  # Fresh client: the session-1/leg-2 processes hold the X display — kill
+  # them first (their sessions died with the old server anyway).
+  pkill -f "net.minecraft.client.main.Main" 2>/dev/null || true
+  sleep 3
+  bash "$BENCH_DIR/run_client.sh" || note "parity world: run_client.sh rc=$?"
+  PW=$(join_count)
+  for _ in $(seq 1 240); do
+    [ "$(join_count)" -gt "$PW" ] 2>/dev/null && break
+    sleep 2
+  done
+  wait_log "Stepan joined the game" /tmp/server.log 240 \
+    || note "parity world: join never seen (gate degrades to FAIL pairs)"
+  sum "- parity world: joined session 3 ($(date -u +%H:%M:%S))"
+  sleep 5
+  accept_pack_prompt parityworld 30 || note "parity world: pack prompt never accepted"
+  sleep 10
+  srv "gamemode spectator Stepan"
+  # v6.17: the fresh server rescans the disk (the level is the same, the
+  # Streamer is new) — the march paints from the STREAMED buffers, so give
+  # the scan the same budget the voxy leg gives its meshing (MESH_WAIT 240)
+  # and both legs render a COMPLETE world before the matrix.
+  PCELLS=0
+  for _ in $(seq 1 120); do
+    PCELLS=$(curl -s http://127.0.0.1:8199/clod-pack.info \
+             | grep -o 'cells=[0-9]*' | head -1 | cut -d= -f2)
+    PCELLS="${PCELLS:-0}"
+    [ "$PCELLS" -ge 65000 ] 2>/dev/null && break
+    sleep 2
+  done
+  sum "- parity world: scan populated (cells=$PCELLS; the march paints from these buffers)"
+  # THE PARITY WORLD TOUR — the same matrix, now from the production-pack
+  # client on the voxy-identical world. settle 10 s like §5b.
+  mkdir -p "$SHOTS/parity"
+  PARITY="$BENCH_DIR/parity_vantages.txt"
+  PTOT=$(grep -cv -e '^$' -e '^#' "$PARITY" 2>/dev/null || echo 0)
+  sum "- parity world tour: $PTOT vantages (production pack, vd 8, shared structures)"
+  PW_N=0
+  while read -r PNAME PYAW PPITCH PX PY PZ <&3; do
+    case "$PNAME" in ''|\#*) continue;; esac
+    PX=$(( ${PX//CX/$CX} )); PZ=$(( ${PZ//CZ/$CZ} ))
+    srv "time set noon"
+    srv "tp Stepan $PX $PY $PZ $PYAW $PPITCH"
+    sleep 10
+    shot "parity/$PNAME" || true
+    PW_N=$((PW_N + 1))
+    ct "parity world shot $PNAME ($PW_N/$PTOT)"
+  done 3< "$PARITY"
+  sum "- parity world tour done: $PW_N shots in parity/ (the gate pairs voxy/<name>.png vs parity/<name>.png)"
+  srv "time set noon"
+fi
+
 if [ "$FAILURES" = "0" ] && [ "$FOUND1" = "1" ] && [ "$FOUND2" = "1" ]; then
   echo "CI VISUAL: ALL LEGS PASS"
   # v6.6.2: the evidence rides the artifact (GITHUB_STEP_SUMMARY is not

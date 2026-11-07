@@ -43,6 +43,12 @@ grep -q "^renderDistance:" "$OPT" && sed -i 's/^renderDistance:.*/renderDistance
 grep -q "^fullscreen:" "$OPT" && sed -i 's/^fullscreen:.*/fullscreen:false/' "$OPT" || echo "fullscreen:false" >> "$OPT"
 grep -q "^graphicsMode:" "$OPT" && sed -i 's/^graphicsMode:.*/graphicsMode:0/' "$OPT" || echo "graphicsMode:0" >> "$OPT"
 grep -q "^mipmapLevels:" "$OPT" && sed -i 's/^mipmapLevels:.*/mipmapLevels:4/' "$OPT" || echo "mipmapLevels:4" >> "$OPT"
+# v6.17 PARITY: the c-LoD leg pins particles:2 (ALL — the v6.10.0 lesson:
+# MINIMAL culls non-forced particles and censors the bursts). Pin the SAME
+# value here so the reference client spawns vanilla particles under the
+# identical rules — a missing pin is a hidden asymmetry the gate would
+# measure as renderer diff.
+grep -q "^particles:" "$OPT" && sed -i 's/^particles:.*/particles:2/' "$OPT" || echo "particles:2" >> "$OPT"
 grep -q "^entityShadows:" "$OPT" && sed -i 's/^entityShadows:.*/entityShadows:false/' "$OPT" || echo "entityShadows:false" >> "$OPT"
 grep -q "^onboardAccessibility:" "$OPT" && sed -i 's/^onboardAccessibility:.*/onboardAccessibility:false/' "$OPT" || echo "onboardAccessibility:false" >> "$OPT"
 grep -q "^tutorialStep:" "$OPT" && sed -i 's/^tutorialStep:.*/tutorialStep:none/' "$OPT" || echo "tutorialStep:none" >> "$OPT"

@@ -793,7 +793,14 @@ jobs:
       - name: Pixel-perfect parity diff (100% = green, anything less = red)
         run: |
           VOXY=$(dirname "$(find voxy -name '01_aerial_west.png' | head -1)" 2>/dev/null || true)
-          OURS=$(dirname "$(find ours -name '*01_aerial_west.png' | head -1)" 2>/dev/null || true)
+          # v6.17: the visual artifact now carries TWO tour dirs — parity/
+          # (the §7b parity-world session: production pack, vd 8 — the gate's
+          # input) and parity_dbg/ (the §5b session-1 debug tour: evidence
+          # only). The old bare-name glob would pick either nondeterministically
+          # (find order between siblings is unspecified) and could pair the
+          # gate against the PANEL-painted debug frames — pin the path.
+          OURS=$(dirname "$(find ours -type f -path '*parity/01_aerial_west.png' | head -1)" 2>/dev/null || true)
+          [ -n "${OURS:-}" ] || OURS=$(dirname "$(find ours -name '*01_aerial_west.png' | head -1)" 2>/dev/null || true)
           echo "voxy dir: ${VOXY:-NONE} / ours dir: ${OURS:-NONE}"
           if [ -z "${VOXY:-}" ]; then
             echo "FAIL: the voxy reference artifact carries no shots"

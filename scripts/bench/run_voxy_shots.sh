@@ -65,6 +65,45 @@ srv "weather clear"
 srv "gamemode spectator Stepan"
 sleep 2
 
+# 3b. THE SHARED STRUCTURES (v6.17): the c-LoD leg's world is the seed PLUS
+#     two terraced mountains + the 5x111x5 red marker column (placed with
+#     the vanilla forceload+fill mechanism — the v6.15 terrain range and the
+#     v6.14 marker). v6.16's gate compared a BUILT world against a PRISTINE
+#     one: even a perfect renderer could never pair the frames, because the
+#     voxy world did not contain the structures ours renders (run #281,
+#     10_marker_ray: voxy real landscape vs our sky+towers). The reference
+#     leg now places the IDENTICAL structures at the IDENTICAL coords from
+#     run_ci_visual.sh §3a2/§5 (P1 (CX-4,CZ-20) tops 150/175/185; P2
+#     (CX-2,CZ+16) tops 155/180/190; marker CX±2 y60..170) BEFORE the
+#     meshing wait, so voxy's WorldImporter imports and meshes them like
+#     any other chunk. Not fatal on failure: a "position not loaded" hit
+#     degrades that pair's parity honestly in the gate report.
+build_mountain() { # cx cz top1 top2 top3 label
+  local mx="$1" mz="$2" h1="$3" h2="$4" h3="$5" lb="$6"
+  srv "forceload add $((mx - 12)) $((mz - 12)) $((mx + 12)) $((mz + 12))"
+  sleep 2
+  srv "fill $((mx - 6)) 55 $((mz - 6)) $((mx + 6)) $((h1 - 1)) $((mz + 6)) minecraft:stone"
+  srv "fill $((mx - 6)) $h1 $((mz - 6)) $((mx + 6)) $h1 $((mz + 6)) minecraft:grass_block"
+  srv "fill $((mx - 4)) $((h1 + 1)) $((mz - 4)) $((mx + 4)) $((h2 - 1)) $((mz + 4)) minecraft:stone"
+  srv "fill $((mx - 4)) $h2 $((mz - 4)) $((mx + 4)) $h2 $((mz + 4)) minecraft:grass_block"
+  srv "fill $((mx - 2)) $((h2 + 1)) $((mz - 2)) $((mx + 2)) $h3 $((mz + 2)) minecraft:stone"
+  sleep 2
+  echo "mountain $lb placed at $mx,$mz (tops $h1/$h2/$h3)"
+}
+for spec in "P1 $((CX - 4)) $((CZ - 20)) 150 175 185" \
+            "P2 $((CX - 2)) $((CZ + 16)) 155 180 190"; do
+  read -r MLB MMX MMZ MH1 MH2 MH3 <<< "$spec"
+  build_mountain "$MMX" "$MMZ" "$MH1" "$MH2" "$MH3" "$MLB"
+done
+srv "forceload add $((CX - 48)) $((CZ - 48)) $((CX + 48)) $((CZ + 48))"
+sleep 2
+srv "fill $((CX - 2)) 60 $((CZ - 2)) $((CX + 2)) 170 $((CZ + 2)) minecraft:red_concrete"
+sleep 2
+STRUCT_NL=$(grep -c "That position is not loaded" /tmp/server.log 2>/dev/null || true)
+t "shared structures built (not-loaded hits: $STRUCT_NL)"
+echo "shared structures built (not-loaded hits: ${STRUCT_NL:-?})"
+srv "time set noon"
+
 # 4. let Voxy scan+mesh the loaded chunks (WorldImporter). The first boot also
 #    pays the Knot runtime remap. Meshing budget scales with the runner.
 echo "waiting for voxy meshing..."
