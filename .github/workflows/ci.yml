@@ -765,7 +765,14 @@ jobs:
     # from the Voxy ground truth, and each iteration must move exact % up.
     name: parity gate (c-LoD vs Voxy — pixel-perfect, 100% or red)
     needs: [visual, voxy-reference]
-    if: always()
+    # v6.16.4: the gate needs BOTH legs' artifacts — on push both legs skip,
+    # and an always() gate compared a voxy artifact that does not exist
+    # against an ours artifact that does not exist: every pair read
+    # FAIL(no ours shot) and the AUTHOR's push CI went red on a run that
+    # never rendered anything (run #279: builds green, gate red, zero
+    # clients). The gate belongs to the dispatch runs only — where both
+    # legs actually shoot the matrix.
+    if: always() && needs.visual.result != 'skipped' && needs.voxy-reference.result != 'skipped'
     runs-on: ubuntu-latest
     permissions:
       contents: write
