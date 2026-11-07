@@ -58,3 +58,24 @@ radius, which itself flaps run-to-run — see G4.)
 
 G4 (the run-crossing flap) stays queued; leg-2 scene death (0/12) remains a
 separate class.
+
+## Where to look — the "I see no LOD" explainer (sheet D)
+
+`sheet-D-where-is-lod.png` answers the natural first reaction to sheets B/C —
+"there is no LOD in these screenshots":
+
+1. **The dark column IS the LOD content** — the engine paints the stream column
+   with glyph literals through the shader pack; at contact-sheet tile size the
+   glyphs are unreadable, the 3x zoom shows the green ring/literal glyphs plainly.
+2. **The white blob** = the 20 m end_rod burst (535 px) — particles render
+   inside the ~50 m cut.
+3. **The right-side panels** are harness sky-grid calibration references, not
+   game content.
+4. **The 70 m walk tile is a photograph of empty sky** — the far stream/marker
+   content (75-105 m) sits beyond the effective render cut: THAT absence is the
+   measured defect ([C]), not a missing capture.
+5. **The live-edit diff** (red column) proves the paint mechanism itself works
+   near-field.
+
+Bottom line: the near LOD renders and paints; the far band is culled by the
+client — the sheets document the cut, the zooms document the carrier.
