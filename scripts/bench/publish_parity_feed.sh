@@ -39,9 +39,17 @@ git worktree add --detach /tmp/pfeed HEAD || exit 0
 )
 if git show-ref --verify --quiet refs/remotes/origin/ci-verdicts; then
   ( cd /tmp/pfeed \
-    && git checkout -B ci-verdicts origin/ci-verdicts \
-    && git rm -rf --quiet . 2>/dev/null || true ) || { echo "WARN: ci-verdicts checkout failed"; exit 0; }
+    && git checkout -B ci-verdicts origin/ci-verdicts ) || { echo "WARN: ci-verdicts checkout failed"; exit 0; }
 fi
+# v6.16.6 THE BRANCH WIPE, caught by my own repair: the previous revision ran
+# `git rm -rf --quiet .` AFTER the checkout -B — every parity feed commit
+# deleted the WHOLE ci-verdicts content (verdicts, instruments, sheets A-G,
+# latest.md, roadmap.md) before adding its parity files, and the branch
+# collapsed to gallery/parity-run-* alone (runs #276/#278/#281's feed
+# commits did it three times; the CI verdict feed's own publisher puts the
+# rm BEFORE the checkout — the orphan dance only — which is the correct
+# order). The checkout -B already resets the index+worktree to the remote
+# branch; NOTHING else is removed — the feed APPENDS.
 
 RD="/tmp/pfeed/gallery/parity-run-${RUN_NO}"
 mkdir -p "$RD"
