@@ -1453,8 +1453,11 @@ mod tests {
         s.set_cell(2, 2, cell(70, false, [1, 2, 3]), 0);
         // The view decodes cell (2,2): both plane probes sit in the band
         // and inside the frustum cone (see decodable_by_any geometry).
+        // Eye at the plane midheight, 35 blocks north of the cell center:
+        // 3D sqrt(35^2+20^2) = 40.3 — inside [30, 46] (the old 50-block
+        // stand-off left the cell beyond ZONE_FAR = 48).
         let views = [ViewHint {
-            eye: [10.0, 100.0, 60.0],
+            eye: [10.0, 100.0, 45.0],
             look: [0.0, 0.0, -1.0],
             now: 10,
             age_ticks: u64::MAX,
@@ -1474,7 +1477,7 @@ mod tests {
         let mut b: Vec<Spawn> = Vec::new();
         for t in 11..(11 + EDIT_HOLD_TICKS + 2) {
             let views = [ViewHint {
-                eye: [10.0, 100.0, 60.0],
+                eye: [10.0, 100.0, 45.0],
                 look: [0.0, 0.0, -1.0],
                 now: t,
                 age_ticks: u64::MAX,
@@ -1669,8 +1672,14 @@ mod tests {
     }
 
     fn vhint(x: f64, z: f64, yaw_deg: f64, pitch_deg: f64, now: u64) -> ViewHint {
+        // EYE AT THE PLANE MIDHEIGHT (y=100): with ZONE_FAR = 48 (run
+        // 42358652148's measured ~50 m client particle cut) both plane
+        // probes (y=80/120, dy = ±20) only fit inside [CULL_RADIUS+2,
+        // ZONE_FAR-2] from an eye near the midplane — a ground eye (the old
+        // 64+1.62) can never reach the HI plane (min 3D 54.4 > 46) and the
+        // fixtures would stream nothing. Cells must sit 30..41 m away.
         ViewHint {
-            eye: [x, 64.0 + 1.62, z],
+            eye: [x, 100.0, z],
             look: look_dir(yaw_deg as f32, pitch_deg as f32),
             now,
             age_ticks: u64::MAX, // a settled client — the edit window may arm
@@ -1910,10 +1919,12 @@ mod tests {
         let _ = s.tick_batch(2048, &[v]);
         assert_eq!(s.dirty_pending, 0, "filling the disk never marks dirty");
         // Edit a cell far ahead of the row-major cursor: deep in the
-        // frustum band (z ~ 200), inside the decode band. Grid is 128x128
-        // cells (region 256 / cell 2), so (66,100) is in, (128,*) would be
-        // out of the grid entirely.
-        let (ex, ez) = (66u32, 100u32);
+        // frustum band (z ~ 167), inside the decode band from the midplane
+        // eye (dx 5, dz 39, 3D 44.1 <= ZONE_FAR-2). Grid is 128x128 cells
+        // (region 256 / cell 2), so (66,83) is in, (128,*) would be out of
+        // the grid entirely. (The old (66,100) sat at 3D 74.7 — beyond the
+        // measured cut, undecodable by construction since v6.13.)
+        let (ex, ez) = (66u32, 83u32);
         s.set_cell(ex, ez, cell(90, false, [200, 100, 50]), 101);
         assert_eq!(s.dirty_pending, 1);
         // Tiny budget: ONLY the dirty cell may stream (phase 0 cap = 4
@@ -2045,8 +2056,9 @@ mod tests {
         let v = vhint(128.0, 128.0, 0.0, 0.0, 100);
         let _ = s.tick_batch(2048, &[v]);
         // Edit BEHIND the player's back (north, -Z): not decodable now.
-        // (66,20) sits ~88 blocks behind the eye — valid grid cell.
-        s.set_cell(66, 20, cell(95, false, [200, 50, 50]), 101);
+        // (66,45) sits ~38 blocks behind the eye (world z 90), inside the
+        // decode band once the view turns (3D sqrt(38^2+20^2) = 42.9).
+        s.set_cell(66, 45, cell(95, false, [200, 50, 50]), 101);
         assert_eq!(s.dirty_pending, 1);
         let v2 = vhint(128.0, 128.0, 0.0, 0.0, 101);
         let before = s.dirty_streams;
@@ -2077,10 +2089,13 @@ mod tests {
     /// v6.4.2 regression (CI visual run 2026-10-31): the config names the
     /// disk CENTER, the Streamer takes the ORIGIN (center - region/2 — the
     /// same conversion engine::arm_from_config and the pack's GridInfo now
-    /// apply). With the center passed verbatim the disk shifted (+256,+256),
-    /// the CI vantage 100 blocks west of the named center fell outside every
-    /// decode band (both plane probes need [CULL_RADIUS+2, ZONE_FAR-2]) and
-    /// the scheduler streamed NOTHING (cone 0 zone 0, spawned 0, wire 0p).
+    /// apply). With the center passed verbatim the disk shifted (+256,+256).
+    /// v6.13 extension: the test now ALSO pins the verdict-[C] geometry —
+    /// the far CI vantage (75 blocks west, eye y=151.62) is beyond the
+    /// measured ~50 m client cut for BOTH planes and must spawn nothing,
+    /// while the near midheight vantage (30 blocks west, eye y=100) streams
+    /// (both plane probes need [CULL_RADIUS+2, ZONE_FAR-2] — only a
+    /// midheight eye inside the cut satisfies them simultaneously).
     #[test]
     fn center_anchored_disk_streams_from_an_off_center_vantage() {
         let (cx, cz, region) = (-930.0, 796.0, 512);
@@ -2091,24 +2106,43 @@ mod tests {
                 s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
             }
         }
-        // the CI vantage: 75 blocks west of the named center (v6.4.2 — the
-        // LO plane caps the horizontal decode distance at ~83 blocks, and
-        // vanilla purity needs > 64), eye y=150+1.62, looking east (Bukkit
-        // yaw -90 == 270), pitch 5 down.
-        let v = ViewHint {
+        // THE VERDICT-[C] REGRESSION (run 42358652148): the CI far vantage
+        // (75 blocks west, eye y=151.62) sits beyond the measured ~50 m
+        // client particle cut for BOTH planes (HI 3D 81.4, LO 103.7) — the
+        // engine must spawn NOTHING there. The pre-v6.13 code spawned dots
+        // the client culled on every run while the scheduler's counters
+        // reported phantom coverage; this pin says the far vantage reads
+        // zero BY CONSTRUCTION (the near-vantage bench pass 5b carries the
+        // live proof, the far leg keeps the pack-paint purity proof).
+        let far = ViewHint {
             eye: [cx - 75.0, 150.0 + 1.62, cz],
             look: look_dir(-90.0, 5.0),
             now: 400,
             age_ticks: u64::MAX,
         };
-        let b: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        let _: Vec<Spawn> = s.tick_batch(2048, &[far]).to_vec();
+        assert_eq!(
+            s.cone_cells + s.zone_cells,
+            0,
+            "the far vantage is beyond the client cut for both planes — nothing may spawn (verdict [C])"
+        );
+        // The NEAR vantage (the 5b bench pass: 30 blocks west, eye y=100 —
+        // the plane midheight) puts both probes at 3D 36.1: dead-center
+        // inside [CULL_RADIUS+2, ZONE_FAR-2]. Cells stream, and every spawn
+        // stays inside the disk that the config center implies:
+        // [-1186..-674] x [540..1052].
+        let near = ViewHint {
+            eye: [cx - 30.0, 100.0, cz],
+            look: look_dir(-90.0, 0.0),
+            now: 400,
+            age_ticks: u64::MAX,
+        };
+        let b: Vec<Spawn> = s.tick_batch(2048, &[near]).to_vec();
         assert!(
             s.cone_cells + s.zone_cells > 0,
-            "no cells decoded from the off-center vantage — center->origin is broken"
+            "no cells decoded from the in-cut vantage — center->origin is broken"
         );
         assert!(!b.is_empty());
-        // the spawned cells must sit inside the disk that the config center
-        // implies: [-1186..-674] x [540..1052]
         for sp in b.iter() {
             assert!(sp.x >= cx - half && sp.x <= cx + half);
             assert!(sp.z >= cz - half && sp.z <= cz + half);
@@ -2132,7 +2166,7 @@ mod tests {
             }
         }
         let view_at = |now: u64| ViewHint {
-            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            eye: [cx - 35.0, 100.0, cz],
             look: look_dir(-90.0, 5.0),
             now,
             age_ticks: u64::MAX, // settled client
@@ -2258,7 +2292,7 @@ mod tests {
         // to paint) never arms the window, even on a real edit...
         s.set_cell(128, 128, cell(90, false, [142, 33, 33]), 5001);
         let fresh = ViewHint {
-            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            eye: [cx - 35.0, 100.0, cz],
             look: look_dir(-90.0, 5.0),
             now: 5000,
             age_ticks: 10, // joined 1 s ago
@@ -2305,13 +2339,13 @@ mod tests {
             }
         }
         let settled = |now: u64| ViewHint {
-            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            eye: [cx - 35.0, 100.0, cz],
             look: look_dir(-90.0, 5.0),
             now,
             age_ticks: u64::MAX,
         };
         let fresh_at = |now: u64, joined: u64| ViewHint {
-            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            eye: [cx - 35.0, 100.0, cz],
             look: look_dir(-90.0, 5.0),
             now,
             age_ticks: now.saturating_sub(joined),
@@ -2405,7 +2439,7 @@ mod tests {
             }
         }
         let fresh_at = |now: u64, joined: u64| ViewHint {
-            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            eye: [cx - 35.0, 100.0, cz],
             look: look_dir(-90.0, 5.0),
             now,
             age_ticks: now.saturating_sub(joined),
@@ -2428,7 +2462,7 @@ mod tests {
         // until it expires. Past the span no new entries are queued and the
         // steady state resumes with no holds and no reset electrons.
         let settled = ViewHint {
-            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            eye: [cx - 35.0, 100.0, cz],
             look: look_dir(-90.0, 5.0),
             now: 200,
             age_ticks: u64::MAX,
@@ -2438,7 +2472,7 @@ mod tests {
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled]).to_vec();
         for t in 202..(201 + EDIT_HOLD_TICKS) {
             let v = ViewHint {
-                eye: [cx - 75.0, 150.0 + 1.62, cz],
+                eye: [cx - 35.0, 100.0, cz],
                 look: look_dir(-90.0, 5.0),
                 now: t,
                 age_ticks: u64::MAX,
@@ -2446,7 +2480,7 @@ mod tests {
             let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
         }
         let v = ViewHint {
-            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            eye: [cx - 35.0, 100.0, cz],
             look: look_dir(-90.0, 5.0),
             now: 201 + EDIT_HOLD_TICKS,
             age_ticks: u64::MAX,
@@ -2502,7 +2536,7 @@ mod tests {
             }
         }
         let settled = |now: u64| ViewHint {
-            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            eye: [cx - 35.0, 100.0, cz],
             look: look_dir(-90.0, 5.0),
             now,
             age_ticks: u64::MAX,
@@ -2555,7 +2589,7 @@ mod tests {
             }
         }
         let settled = |now: u64| ViewHint {
-            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            eye: [cx - 35.0, 100.0, cz],
             look: look_dir(-90.0, 5.0),
             now,
             age_ticks: u64::MAX,
@@ -2631,7 +2665,7 @@ mod tests {
             }
         }
         let settled = |now: u64| ViewHint {
-            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            eye: [cx - 35.0, 100.0, cz],
             look: look_dir(-90.0, 5.0),
             now,
             age_ticks: u64::MAX,
@@ -2693,7 +2727,7 @@ mod tests {
             }
         }
         let settled = |now: u64| ViewHint {
-            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            eye: [cx - 35.0, 100.0, cz],
             look: look_dir(-90.0, 5.0),
             now,
             age_ticks: u64::MAX,
@@ -2782,7 +2816,7 @@ mod tests {
             }
         }
         let view_at = |now: u64| ViewHint {
-            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            eye: [cx - 35.0, 100.0, cz],
             look: look_dir(-90.0, 5.0),
             now,
             age_ticks: u64::MAX,
@@ -2830,7 +2864,7 @@ mod tests {
             }
         }
         let view_at = |now: u64| ViewHint {
-            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            eye: [cx - 35.0, 100.0, cz],
             look: look_dir(-90.0, 5.0),
             now,
             age_ticks: u64::MAX,
@@ -2877,12 +2911,13 @@ mod tests {
         // View A (west-looking — the strip is behind it, never decodable
         // by A) is the only audience during the backlog's aging — the 150
         // stale cells stay queued for the whole warm-up.
-        // The stale backlog: 150 cells ALL inside B's band+cone (|dx| <=
-        // 60 at dz 32..38, d in (30..110)), marked dirty at tick 1000.
-        // They must be decodable-by-B so the OLD code would have counted
-        // them; that is the regression being pinned.
+        // The stale backlog: 150 cells mostly OUTSIDE B's new band (world
+        // x 150..248 — dx 22..120 from the midplane eye; only the nearest
+        // ~5 columns fit inside [30, 46]), marked dirty at tick 1000. A
+        // decodable-by-B subset survives so the OLD code would still have
+        // counted them; that is the regression being pinned.
         for i in 0..150u32 {
-            let cx = 45 + i % 50; // world x 90..188
+            let cx = 75 + i % 50; // world x 150..248
             let cz = 80 + i / 50; // world z 160..165
             s.set_cell(cx, cz, cell(90 + (i % 8) as i16, false, [90, 90, 90]), 1000);
         }
@@ -2896,7 +2931,7 @@ mod tests {
         // View B arrives: its band covers the backlog AND the fresh edit.
         // The fresh edit (1 recent decodable cell) must win the window.
         let b = vhint(128.0, 128.0, 0.0, 0.0, 1500);
-        s.set_cell(66, 84, cell(170, false, [142, 33, 33]), 1500);
+        s.set_cell(66, 83, cell(170, false, [142, 33, 33]), 1500);
         assert_eq!(s.dirty_pending, 151);
         let a2 = vhint(40.0, 64.0, 90.0, 0.0, 1500);
         let batch: Vec<Spawn> = s.tick_batch(256, &[a2, b]).to_vec();
@@ -2942,15 +2977,34 @@ mod tests {
                 s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
             }
         }
-        // 150 fresh decodable dirty cells in the view's band+cone (|dx|
-        // <= 60 at dz 32..38 — every cell decodable), all marked at the
-        // decision tick: a wave by the EDIT_HOLD_MAX_BATCH signature.
-        for i in 0..150u32 {
-            let cx = 40 + i % 50; // world x 80..178
-            let cz = 80 + i / 50; // world z 160..165
-            s.set_cell(cx, cz, cell(90 + (i % 8) as i16, false, [90, 90, 90]), 1000);
+        // Fresh decodable dirty cells filling the wave signature: every
+        // cell whose center sits inside the [30, 46] band from the midplane
+        // eye (dx²+dz² <= (ZONE_FAR-2)² - 20² — the exact horizontal bound
+        // for BOTH plane probes at dy = ±20) — the wedge holds ~120 cells,
+        // more than EDIT_HOLD_MAX_BATCH: a wave. All marked at the decision
+        // tick, none of them stale.
+        let mut n = 0u32;
+        for cz in 79..=98u32 {
+            for cx in 50..=82u32 {
+                let dx = 2.0 * f64::from(cx) + 1.0 - 128.0;
+                let dz = 2.0 * f64::from(cz) + 1.0 - 128.0;
+                let d2 = dx * dx + dz * dz;
+                if d2 > 1714.0 {
+                    continue; // beyond ZONE_FAR-2 at dy=±20 — not decodable
+                }
+                let cos = dz / d2.sqrt(); // look = +Z, level
+                if cos <= cos_half_cone() - 0.02 {
+                    continue; // outside the frustum cone
+                }
+                s.set_cell(cx, cz, cell(90 + (n % 8) as i16, false, [90, 90, 90]), 1000);
+                n += 1;
+            }
         }
-        assert_eq!(s.dirty_pending, 150);
+        assert!(
+            n > 100,
+            "the band wedge must hold more than EDIT_HOLD_MAX_BATCH decodable cells (the wave signature)"
+        );
+        assert_eq!(s.dirty_pending, n);
         let v = vhint(128.0, 128.0, 0.0, 0.0, 1000);
         let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
         assert_eq!(s.edit_hold, 0, "a fresh wave never holds");
