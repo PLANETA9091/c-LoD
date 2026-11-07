@@ -1,3 +1,5 @@
+> 🔧 **NEW — THE PAINT PROOF (`run-42373612484-verdict-paint.md` + `gallery/sheet-F-вот-лоды.png`):** «это красный столб, а не лоды» — верно, и вот лоды: силуэт колонны-маркера на 75 м ЗА краем чанков (64 м) в каждом базовом кадре #255/#264 — рисует только clod:lod_terrain. Живая линейка v6.14: пак 52 колонки / контроль 0 / регрессия ZONE_FAR=48 0. «Кат ~50 м» = артефакт контраста (белое на светлом небе); ZONE_FAR=112 — значение продукта; fix/band-inside-cut — демо точек, в мерж не кандидат. G6: линейка LOD-колонок — постоянный гейт CI.
+
 ### c-LoD visual run (-930,796, marker=red_concrete, vantage -1005,150 yaw 270)
 - GL:     Vendor: Mesa (0xffffffff);    Device: llvmpipe (LLVM 20.1.2, 256 bits) (0xffffffff);OpenGL renderer string: llvmpipe (LLVM 20.1.2, 256 bits);OpenGL core profile version string: 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.4;
 - boot + gates OK (12:43:31)
