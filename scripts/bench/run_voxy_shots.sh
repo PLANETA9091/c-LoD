@@ -75,6 +75,13 @@ grep -iE "voxy" /tmp/voxy_client.log | tail -6 || true
 
 SHOT_N=0
 shot() { # name yaw pitch x y z
+  # v6.16.5: pin the light before EVERY shot — run #278 proved the 26.3
+  # clock drifts through doDaylightCycle false (the leg set noon once at
+  # 18:40:15 and by shot 09, 6.6 min later, the world was at night: the
+  # parity matrix compared voxy night against our noon on the LATE rows).
+  # Our own leg re-issues 'time set noon' before every phase for exactly
+  # this reason (the v6.4.8 lesson); the reference leg now does too.
+  srv "time set noon"
   srv "tp Stepan $4 $5 $6 $2 $3"
   sleep 3
   # -nostdin (v6.16.2): ffmpeg eats stdin — inside the matrix read-loop it

@@ -1080,6 +1080,8 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     # command parser rejects: the shot would silently capture the previous
     # vantage). Decimal y values never enter $(()) — they pass through.
     PX=$(( ${PX//CX/$CX} )); PZ=$(( ${PZ//CZ/$CZ} ))
+    srv "time set noon"  # v6.16.5: the clock drifts (see run #278) — pin
+                         # the light per vantage like the voxy leg now does
     srv "tp Stepan $PX $PY $PZ $PYAW $PPITCH"
     sleep 10
     PN=$((PN + 1))
