@@ -1,0 +1,12 @@
+fetching Paper 26.3 (no local jar found)
+api ok, downloading paper-26.3-244.jar
+voxy reference server up (pid 3879, seed clodbench2026)
+voxy client pid 4053 (xvfb 4033)
+voxy client joined
+waiting for voxy meshing...
+	at knot//me.cortex.voxy.client.core.VoxyRenderSystem.<init>(VoxyRenderSystem.java:147)
+	at knot//net.minecraft.client.renderer.LevelRenderer.voxy$createEngineDirect(LevelRenderer.java:2905)
+	at knot//net.minecraft.client.renderer.LevelRenderer.voxy$createRenderer(LevelRenderer.java:2897)
+	at knot//net.minecraft.client.renderer.extract.LevelExtractor.handler$bie000$voxy$reload(LevelExtractor.java:3253)
+[12:37:17] [Render thread/INFO]: [me.cx.vy.ct.ce.VoxyRenderSystem]: Voxy render system created with 536870912 geometry capacity, using pipeline 'NormalRenderPipeline' with renderer 'MDICSectionRenderer'
+[12:37:18] [Render thread/INFO]: [me.cx.vy.cl.VoxyInstance]: Dedicated voxy thread pool size: 1
