@@ -1,3 +1,5 @@
+> 🔧 **NEW — THE TERRAIN RANGE (`run-42393812250-verdict-terrain.md` + `gallery/sheet-G-горы-и-флап.png`):** «это не лоды, а я прошу о лоды» — ответ: ветка feat/visible-terrain строит НАСТОЯЩИЙ дальний рельеф — две террасные горы на 66..82 м (за краем чанков 64 м, внутри декод-полосы 83.5 м), сканер стримит их высоты (grass rgb [134,183,131] в clod-cells), fallback-палитра красит ландшафтно. Блокер — флап capture-коммита (класс автора v6.10.0, +3 рана подряд): точка зрения y=150 оправдана, глаза не виноваты. CUT WALK v6.15.2 замерил рендер внутри рана: 20м 577px / 40м 77px / 60м 2px / 75м 356px / 100м 0px — «кат» НЕ монотонный, рендер и capture — разные флапающие домены. Следующий шаг — G7c capture-retry (rejoin при пустом capture до проб).
+
 ### c-LoD visual run (-930,796, marker=red_concrete, vantage -1005,150 yaw 270)
 - GL:     Vendor: Mesa (0xffffffff);    Device: llvmpipe (LLVM 20.1.2, 256 bits) (0xffffffff);OpenGL renderer string: llvmpipe (LLVM 20.1.2, 256 bits);OpenGL core profile version string: 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.4;
 - boot + gates OK (16:59:12)
