@@ -822,7 +822,7 @@ print(1 if warn > 30 else 0)" | grep -q "^1$"; then
   cp "$SUMMARY" "$SHOTS/summary.md" 2>/dev/null || true
   exit 1
 fi
-srv "particle minecraft:end_rod $((CX - 2)) 150 $CZ 1 1 1 0 1200 force"
+srv "particle minecraft:end_rod $((CX - 2)) 150 $CZ 1 1 1 0 60 force"
 sleep 1
 shot 09b_burst_far || exit 1
 BF=$(python3 - <<'PYEOF'
@@ -838,6 +838,53 @@ print(n)
 PYEOF
 )
 echo "- burst_far white px: ${BF:-?} (renderer alive in the marker zone if > 20)" | tee -a "$SUMMARY"
+
+# ---- 4b2. THE CUT WALK (v6.15.2, feat/visible-terrain — the G4 instrument) ---
+# G4's flap: the client's far particle render comes and goes ACROSS RUNS on
+# identical geometry (#246 alive at 80 m, #255 cut ~50 m, #264 alive at 75 m
+# = 376 px, #267 dead at 75 m at the y=120 eye, #269 dead at 75 m at the
+# PROVEN y=150 eye with the close burst alive at 561 px) — and the whole
+# decode proof rides on it: no rendered dot, no capture, no paint. This
+# walk measures the cut INSIDE the run: three console end_rod bursts on the
+# marker ray (20 m already fired as burst_close, 75 m as burst_far), short
+# 60-tick lifetimes so consecutive shots never overlap:
+#   40 m -> 09w40, 60 m -> 09w60, 100 m -> 09w100
+# each counted white in the central window (x 500..780 — azimuth-aligned
+# with the marker ray; the marker column is dark and the range paint is
+# green/brown, neither can fake white). The measured cut = the largest
+# distance clearing 20 px; it lands in the summary next to the rest — every
+# future run names its own cut, and a decode failure with cut >= 83 m
+# convicts the capture (G7a) while cut < 83 m convicts the flap (G4).
+WALK_CUT="none"
+# the close burst (400 ticks, 20 s) must be dead before the first walk
+# shot — its dots sit inside the walk window (x 500..780, y 300..540);
+# the far burst now expires in 3 s (60 ticks) for the same reason.
+sleep 25
+for wspec in "40 $((VX + 40)) 09w40" "60 $((VX + 60)) 09w60" "100 $((VX + 100)) 09w100"; do
+  read -r WD WX WSHOT <<< "$wspec"
+  srv "particle minecraft:end_rod $WX 150 $CZ 0.2 0.2 0.2 0 60 force"
+  sleep 1
+  shot "$WSHOT" || exit 1
+  WC=$(python3 - "$SHOTS/$WSHOT.png" <<'PYEOF'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB')
+px = im.load(); n = 0
+for y in range(300, 540):
+    for x in range(500, 780):
+        r, g, b = (c / 255.0 for c in px[x, y])
+        if min(r, g, b) > 0.75 and max(r, g, b) - min(r, g, b) < 0.15:
+            n += 1
+print(n)
+PYEOF
+)
+  echo "- cut walk ${WD} m: ${WC:-?} white px (> 20 = rendered)" | tee -a "$SUMMARY"
+  if [ "${WC:-0}" -gt 20 ] 2>/dev/null; then
+    WALK_CUT=$WD
+  fi
+  sleep 5
+done
+sum "- measured far-render cut: ${WALK_CUT} m (G4 flap instrument; the decode proof needs >= 83 m from the y=151.6 eye)"
 
 # v6.7.3 RENDERER PREFLIGHT (run 41396294510 lesson): the burst gates were
 # advisory text only — a dead client renderer burned the whole 12-minute
