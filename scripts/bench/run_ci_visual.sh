@@ -254,6 +254,34 @@ print(f"lens_red={red} lens_black={black} lens_water={water} lens_dark={dark} le
 PYEOF
 }
 
+# v6.14 LOD PAINT PROOF (the answer to «это какой-то красный столб, а не лоды»):
+# the march paints the marker-column silhouette into the sky region at 75 m —
+# pixels NO vanilla path can produce there (chunk edge is 64 m at server
+# view-distance 4, so no chunk geometry exists behind those pixels; dust
+# particles are white/green; the lens panels sit at x >= 940). Measured on
+# the #255 baseline (640-space column rgb ~[51,81,71], sky ~[190,200,230]):
+# the silhouette is the ONLY dark content in the column's screen band.
+# The ruler scans the column's screen band (x [560,760], y [180,700],
+# 1280-space) with r+g+b < 330 and counts X-COLUMNS whose dark run reaches
+# 250 px — the silhouette is ~470 px tall there, while every UI band on the
+# same frames (the chat-verification toast ~150 px, the chat lines ~60 px)
+# stays far below the threshold. Pack leg healthy ~ 40-70 columns
+# (run 42358652148 re-measures 52); ZONE_FAR=48 regression run 42364516378
+# and the pack-free control: 0.
+lod_silhouette() { # shot_name -> prints "lod_silhouette_cols=N"
+  python3 - "$SHOTS/$1.png" <<'PYEOF' 2>/dev/null || { echo "lod_silhouette_cols=?"; return 0; }
+import sys
+import numpy as np
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB')
+a = np.array(im).astype(int)
+band = a[180:700, 560:760, :]
+dark = (band.sum(axis=2) < 330)
+cols = dark.sum(axis=0)
+print(f"lod_silhouette_cols={int((cols >= 250).sum())}")
+PYEOF
+}
+
 paint_px() { # a.png b.png -> changed pixel count, ALWAYS a single line
   # v6.4.2 FIX: visual_diff.py asserts against --min-change and exits 1 when
   # below it; with the 2000000000 sentinel the assertion always fired, and
@@ -507,6 +535,13 @@ if [ "${CLOD_CONTROL:-0}" = "1" ]; then
   else
     sum "- frame motion: drift=${DRIFT} px — the pack-free client repaints (the renderer loop is alive)"
   fi
+  # v6.14: the CONTROL half of the paint proof — the same ruler on the same
+  # vantage with NO pack and NO module: the silhouette must read ~0. Any
+  # dark column here would mean a vanilla/environment source and would
+  # invalidate the differential (the pack arm's paint must exceed it).
+  CLODPX=$(lod_silhouette 10_before_edit)
+  ct "control lod_silhouette=${CLODPX:-?} cols"
+  sum "- control lod_silhouette_cols: ${CLODPX:-?} (must be 0 — no pack, no march; the differential vs the pack arm IS the paint proof)"
   note "control: particle render probe (console bursts)"
   ct "console bursts fire"
   srv "particle minecraft:end_rod $((VX + 20)) 150 $CZ 0.2 0.2 0.2 0 400 force"
@@ -617,6 +652,17 @@ for t in 1 2 3 4 5 6; do
 done
 [ "$DRIFT" -le 1500 ] 2>/dev/null \
   || fail "no stable baseline after 6 tries (drift=$DRIFT) — the A/B would lie"
+
+# ---- 4a2. LOD PAINT PROOF on the settled baseline (v6.14) --------------------
+# The marker column (5x111x5 red_concrete, y 60..170) stands 75 m east of the
+# eye — 11 m BEYOND the vanilla chunk edge (64 m). Its silhouette on this
+# baseline is drawn by the clod:lod_terrain march out of the PERSISTENT
+# decoded heightfield, not by any vanilla renderer. This is the metric the
+# gallery rounds kept missing: the far frames were captioned «пустое небо»
+# while the LOD paint stood in them (run 42358652148 baseline/far, ~40k px).
+LODPX=$(lod_silhouette 10_before_edit)
+note "lod paint baseline: ${LODPX:-?} cols"
+sum "- lod_silhouette_cols: ${LODPX:-?} (LOD paint ON SCREEN at 75 m if > 20 — the march-drawn marker column; vanilla cannot render there, chunk edge 64 m; #255 re-measures 49, the ZONE_FAR=48 regression #256 and the control read 0)"
 
 # ---- 4b. PARTICLE RENDER PROBE (v6.4.9, separates two failure domains) ------
 # Run 41256576023: the client accepted 446k level_particles packets but the
@@ -830,8 +876,9 @@ for k in $(seq 0 23); do
        --out "$SHOTS/diff_live_edit.png" > /tmp/probe_out.txt 2>&1
   PC=$(grep -o 'probe\[red\] px = [0-9]*' /tmp/probe_out.txt | grep -o '[0-9]*$')
   PS=$(grep -o 'paint px = [0-9]*' /tmp/probe_out.txt | grep -o '[0-9]*$')
-  echo "probe$k red=${PC:-?} paint=${PS:-?} $LM" >> "$PROBE_LOG"
-  sum "- probe $k: red=${PC:-?} paint=${PS:-?} $LM (need red>=$MIN_PROBE paint>=$MIN_CHANGE)"
+  LP=$(lod_silhouette "12_after_edit_probe$k")
+  echo "probe$k red=${PC:-?} paint=${PS:-?} ${LP} $LM" >> "$PROBE_LOG"
+  sum "- probe $k: red=${PC:-?} paint=${PS:-?} ${LP} $LM (need red>=$MIN_PROBE paint>=$MIN_CHANGE lod>20)"
   if grep -q "VISUAL OK" /tmp/probe_out.txt; then
     FOUND1=1
     note "marker VISIBLE on screen after edit (probe $k, ~$((k * 5 + 5)) s)"
