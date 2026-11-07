@@ -55,7 +55,12 @@ sleep 5
 
 # 3. world state: lock NOON + clear weather + spectator (same as the c-LoD leg)
 srv "gamerule doDaylightCycle false"
-srv "time set 6000"
+srv "time set noon"  # v6.16.3: was 'time set 6000' — NIGHT in the 26.3 tick
+# scale (the v6.4.8 strobe lesson, un-applied on the reference leg): the
+# parity gate was comparing voxy NIGHT frames against c-LoD NOON frames
+# (run #276's 09_after_mesh triptych: voxy dark forest + stars vs our noon
+# sky — a time-of-day diff masquerading as a renderer diff). The parity
+# matrix must run BOTH legs at the same fixed noon.
 srv "weather clear"
 srv "gamemode spectator Stepan"
 sleep 2
