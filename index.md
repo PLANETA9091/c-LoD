@@ -37,3 +37,4 @@ git apply instrument-chain-full-v6.12.patch   # onto fix/leg2-arm-race @ 35eb53b
 git push                                      # or: workflow_dispatch ci.yml on the branch
 python3 triage.py <run summary.md>            # the verdict, automatic
 ```
+- run 42358652148 (#255) CONTROL 5e36f36: CONTROL PASS, drift=drift=210641
