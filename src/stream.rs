@@ -3004,7 +3004,7 @@ mod tests {
             n > 100,
             "the band wedge must hold more than EDIT_HOLD_MAX_BATCH decodable cells (the wave signature)"
         );
-        assert_eq!(s.dirty_pending, n);
+        assert_eq!(s.dirty_pending, n as usize);
         let v = vhint(128.0, 128.0, 0.0, 0.0, 1000);
         let _: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
         assert_eq!(s.edit_hold, 0, "a fresh wave never holds");
