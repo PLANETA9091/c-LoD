@@ -79,6 +79,24 @@ fi
 
 srv() { echo "$1" > /tmp/server.in; }
 
+# v6.11 THE STREAM-SHAPE BURST: fire the stream's EXACT packet shape —
+# /particle with count=0 emits ONE ClientboundLevelParticlesPacket with
+# count=0, delta 0/0/0, speed 0, force — byte-identical to what the engine
+# builds PER DOT (jni.rs build_particle_packet: "count=0 -> exactly one
+# particle at the point, zero drift"; the whole bit-stream rides these
+# single-particle packets). Every burst cell in this script instead sends
+# ONE packet with count=1200 (server/client-side expansion) — the packet
+# SHAPE axis was unmeasured. A 12x10 grid of single-packet dots, 1 block
+# apart around the given spot, makes the per-dot path measurable: 120
+# dots x multi-px each >> the >20 threshold, no expansion involved.
+stream_burst() { # type_id x y z [n]
+  local t="$1" x="$2" y="$3" z="$4" n="${5:-120}" i ox oz
+  for i in $(seq 0 $((n - 1))); do
+    ox=$(( i % 12 )); oz=$(( i / 12 ))
+    srv "particle $t $((x + ox)) $y $((z + oz)) 0 0 0 0 0 force"
+  done
+}
+
 wait_log() { # pattern file timeout_loops
   for _ in $(seq 1 "$3"); do
     grep -q "$1" "$2" 2>/dev/null && return 0
@@ -520,6 +538,80 @@ if [ "${CLOD_CONTROL:-0}" = "1" ]; then
   else
     sum "- **CONTROL FAIL:** the pack-free vanilla client draws NOTHING (close=${BC:-0}) — the environment kills the render by itself; the pack is exonerated"
   fi
+  # v6.10.2d THE CONTROL TYPE MATRIX: the control arm has only ever fired
+  # end_rod — DUST on the pack-free client is UNMEASURED, and the #248/#250
+  # bytecode+log mining (instrument note 2026-11-07) exonerated the pack
+  # CONTENT (leg-2's own client.log: 'Returning cached file since actual
+  # hash matches requested' — the cache-hit returns the byte-identical file
+  # at the identical path, and the pack is shader-only: no textures at all).
+  # One green dust burst at the SAME NEAR spot, counted as changed px vs the
+  # end_rod shot (successive baselines: the dying end_rod can only inflate
+  # total, never green), splits the two remaining suspects IN THIS ARM:
+  #   dust renders here (>20 changed-green) -> dust renders WITHOUT the
+  #       pack: the break needs the pack PRESENT (the capture chains
+  #       interacting with the dust pass) or the relog-session state —
+  #       the leg-1 dust probe (base patch) splits those two;
+  #   dust ~0 here -> dust does not render on this build/environment AT
+  #       ALL (P0: migrate the carrier type; the whole bit-stream is dust).
+  sleep 4
+  srv "particle minecraft:dust{color:[0.0,1.0,0.0],scale:1.0} $((VX + 20)) 150 $CZ 0.2 0.2 0.2 0 400 force"
+  sleep 1
+  shot 09b_control_greendust || exit 1
+  CDM=$(changed_class 09_burst_close 09b_control_greendust)
+  CDG=$(echo "$CDM" | grep -o 'green=[0-9]*' | cut -d= -f2)
+  CDT=$(echo "$CDM" | grep -o 'total=[0-9]*' | cut -d= -f2)
+  sum "- control type matrix: green dust NEAR (20 m) changed-green ${CDG:-?} / total ${CDT:-?} vs the end_rod shot (> 20 = dust renders without the pack — the break needs the pack present or relog state; ~0 = dust unrenderable on the build, P0)"
+  if [ "${CDG:-0}" -gt 20 ]; then
+    sum "- **CONTROL DUST RENDERS** (changed-green=${CDG}): the break requires the pack's PRESENCE (capture-chain x dust-pass interaction) or relog-session state — the leg-1 dust probe names which"
+  else
+    sum "- **CONTROL DUST DEAD** (changed-green=${CDG:-0}): dust does not render on this build/environment at all — P0: migrate the carrier type"
+  fi
+  # v6.10.2f THE CONTROL CARRIER CELL (correction note 2026-11-07): the control
+  # client is PACK-FREE — no capture/eraser shaders exist at all, so the
+  # carrier type renders RAW here. The stream's carrier is happy_villager
+  # (jni.rs: it REPLACED the v5.0 dust carrier — dust is documented degenerate
+  # on the 26.3 software backends), so the control's decisive type is THIS,
+  # not dust: control villager > 20 = the carrier renders without the pack;
+  # ~0 = the carrier type is broken on this build/environment itself (P0 —
+  # migrate the carrier; the flap note TESTS.md v6.9.14 already documents a
+  # run-crossing flap for it).
+  sleep 4
+  srv "particle minecraft:happy_villager $((VX + 20)) 150 $CZ 0.2 0.2 0.2 0 400 force"
+  sleep 1
+  shot 09c_control_villager || exit 1
+  CVL=$(changed_class 09b_control_greendust 09c_control_villager)
+  CVG=$(echo "$CVL" | grep -o 'green=[0-9]*' | cut -d= -f2)
+  CVT=$(echo "$CVL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+  sum "- control CARRIER (happy_villager, pack-free — no capture shaders) NEAR: changed-green ${CVG:-?} / total ${CVT:-?} vs the control dust shot (> 20 = the carrier renders raw; ~0 = the carrier type is broken on this build — P0)"
+  # v6.11 THE STREAM-SHAPE CELLS, control arm (dossier 2026-11-07): the
+  # pack-free client has NO capture shaders and NO eraser — the raw
+  # renderability of the engine's PER-DOT packet path. end_rod first (the
+  # known-alive type), then the carrier on the same shape:
+  #   end_rod stream-shape > 20 (control burst alive)  -> the count=0
+  #       single-dot path renders on this build — with the burst cells the
+  #       whole packet-shape axis is exonerated;
+  #   end_rod stream-shape ~ 0 (control burst alive)   -> THE count=0
+  #       single-dot path is broken on this build (P0 — the stream dies by
+  #       SHAPE on every client; the engine must batch dots into count>0
+  #       packets — no carrier migration can help);
+  #   carrier stream-shape ~ 0 with end_rod stream alive -> the count=0
+  #       CARRIER path specifically fails (type/pool at the packet level).
+  sleep 4
+  stream_burst minecraft:end_rod $((VX + 20)) 150 $CZ
+  sleep 1
+  shot 09d_control_endrod_stream || exit 1
+  CES=$(changed_class 09c_control_villager 09d_control_endrod_stream)
+  CEW=$(echo "$CES" | grep -o 'white=[0-9]*' | cut -d= -f2)
+  CET=$(echo "$CES" | grep -o 'total=[0-9]*' | cut -d= -f2)
+  sum "- control STREAM-SHAPE end_rod (count=0 x120 NEAR — the engine's exact per-dot packet, no expansion): changed-white ${CEW:-?} / total ${CET:-?} vs the control villager shot (> 20 with the burst alive = the per-dot packet path renders, shape exonerated; ~0 with the burst alive = the count=0 path is broken on this build — P0: batch the dots)"
+  sleep 4
+  stream_burst minecraft:happy_villager $((VX + 20)) 150 $CZ
+  sleep 1
+  shot 09e_control_villager_stream || exit 1
+  CVS=$(changed_class 09d_control_endrod_stream 09e_control_villager_stream)
+  CVSG=$(echo "$CVS" | grep -o 'green=[0-9]*' | cut -d= -f2)
+  CVST=$(echo "$CVS" | grep -o 'total=[0-9]*' | cut -d= -f2)
+  sum "- control STREAM-SHAPE carrier (happy_villager count=0 x120, pack-free): changed-green ${CVSG:-?} / total ${CVST:-?} vs the end_rod stream shot (> 20 = the per-dot CARRIER path renders raw; ~0 with end_rod stream alive = the per-dot carrier path specifically fails — type/pool at the packet level)"
   cp "$SUMMARY" "$SHOTS/summary.md" 2>/dev/null || true
   exit 0
 fi
@@ -769,6 +861,97 @@ PYEOF
   fi
 fi
 
+# ---- 4c. THE LEG-1 DUST PROBE (v6.10.2; the feed's decisive instrument) ------
+# The bit-stream is 100% dust (word_spawns -> Spawn at the LAYER_Y planes) and
+# at IDENTICAL coords/delta/force on leg-2 dust reads 0 changed px twice
+# (#248 stacked delta 0 0 0 inconclusive, #250 fair delta 1 1 1) while end_rod
+# at the same coords renders 318-324 (#250 FAR, twice). But the harness fires
+# dust ONLY on leg-2 — the missing cell is the SAME burst on leg 1, where this
+# client demonstrably renders (end_rod 543/530/407 raw, marker red 1183/1117,
+# chains painted).
+# The leg-1 answer splits the two remaining root-cause candidates in ONE run:
+#   leg-1 green dust > 0   -> dust renders on a live client; the leg-2 zero is
+#                             session-specific -> the fresh-session capture/
+#                             decode path (the dust-vs-end_rod asymmetry rides
+#                             the relog, e.g. the reload-time particles.png
+#                             atlas rebuild vs the dust quad blit);
+#   leg-1 green = 0 + white = 0 (total ~0) -> dust does not render on this
+#                             client/build AT ALL (26.3/llvmpipe) -> the
+#                             carrier type itself is the root cause; the
+#                             stream must leave dust (P0 engine finding).
+# A dedicated pre-burst baseline (09d) keeps the changed count free of the
+# <=1500 px paint-wave drift the 10/11 pair tolerates; the white-dust burst
+# at the proven NEAR spot (end_rod 543 raw there) splits color-specific from
+# type-specific when green reads 0 (the eraser's fog-invariant arm fires on
+# green excess even on leg 1 — total/white are the signal there). Successive
+# baselines (09d->09e->09f) isolate each burst: a dying neighbour burst can
+# only inflate `total` (its pixels revert to sky = unclassified delta), never
+# the counted class.
+note "leg-1 dust probe (carrier-type discriminator)"
+shot 09d_leg1_predust || exit 1
+srv "particle minecraft:dust{color:[0.0,1.0,0.0],scale:1.0} $((CX - 1)) 150 $CZ 1 1 1 0 600 force"
+sleep 1
+shot 09e_leg1_greendust_far || exit 1
+L1GL=$(changed_class 09d_leg1_predust 09e_leg1_greendust_far)
+L1GD=$(echo "$L1GL" | grep -o 'green=[0-9]*' | cut -d= -f2)
+L1GT=$(echo "$L1GL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+sum "- leg-1 green dust (80 m, leg-2 geometry) changed-green ${L1GD:-?} / total ${L1GT:-?} vs predust (> 100 green = dust renders on a live client — the leg-2 zero is session-specific; green 0 with total ~0 = dust never renders here, the carrier type IS the root cause)"
+sleep 2
+srv "particle minecraft:dust{color:[1.0,1.0,1.0],scale:1.0} $((VX + 20)) 150 $CZ 0.2 0.2 0.2 0 400 force"
+sleep 1
+shot 09f_leg1_whitedust_near || exit 1
+L1WL=$(changed_class 09e_leg1_greendust_far 09f_leg1_whitedust_near)
+L1WC=$(echo "$L1WL" | grep -o 'white=[0-9]*' | cut -d= -f2)
+L1WT=$(echo "$L1WL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+sum "- leg-1 white dust (20 m NEAR, proven-render spot) changed-white ${L1WC:-?} / total ${L1WT:-?} vs green-dust shot (> 20 = the dust TYPE renders; green 0 + white > 0 = color-specific break, green 0 + white 0 = dust-type break)"
+# v6.10.2f THE CARRIER REFERENCE (correction note 2026-11-07): the bit-stream's
+# carrier is happy_villager — NOT minecraft:dust (stream.rs: the villager-sparkle
+# carrier has one hue; jni.rs: happy_villager REPLACED the v5.0 dust carrier —
+# dust quads render with degenerate UVs on every 26.3 software backend, verified
+# live on GL llvmpipe AND Vulkan lavapipe). Every dust cell in this run measures
+# a DOCUMENTED-DEAD type; this cell measures the ACTUAL carrier on the client
+# that demonstrably works — the reference twin for the leg-2 villager cell.
+# 20 m NEAR is OUTSIDE the decode band [CULL_RADIUS=28 .. ZONE_FAR=112], so the
+# eraser's color net cannot eat it (dust_mask.fsh repaints carrier-hue pixels
+# in-band only) — the count is a true renderability datapoint.
+sleep 2
+srv "particle minecraft:happy_villager $((VX + 20)) 150 $CZ 0.2 0.2 0.2 0 400 force"
+sleep 1
+shot 09g_leg1_villager_near || exit 1
+L1VL=$(changed_class 09f_leg1_whitedust_near 09g_leg1_villager_near)
+L1VG=$(echo "$L1VL" | grep -o 'green=[0-9]*' | cut -d= -f2)
+L1VT=$(echo "$L1VL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+sum "- leg-1 CARRIER (happy_villager) 20 m NEAR: changed-green ${L1VG:-?} / total ${L1VT:-?} vs white-dust shot (> 20 = the carrier renders on the healthy client — the leg-2 villager twin's reference; ~0 with end_rod alive = the carrier type itself is dead on BOTH legs — the flap at its extreme, carrier must change)"
+# v6.11 leg-1 STREAM-SHAPE cells (dossier 2026-11-07) — the healthy-client
+# reference twins for the leg-2 per-dot path. end_rod first: white is
+# IMMUNE to the eraser's color net, so this is the clean shape read on a
+# packed client. Then the carrier on the same shape: NOTE the color net
+# (dust_mask.fsh v5.3.2b) erases carrier hue EVERYWHERE — its 2px
+# out-of-band tier fires on ANY carrier-hue pixel, band only sets the disc
+# radius (3px in-band / 2px out) — so villager cells on packed legs are
+# eraser-overlaid and the leg-1 vs leg-2 TWIN COMPARISON is the signal:
+#   leg-1 end_rod stream ~ 0 (leg-1 bursts alive) -> the count=0 path is
+#       dead on BOTH legs — a 26.3-client single-particle bug class, P0:
+#       the engine must batch dots regardless of the leg-2 anomaly;
+#   leg-1 end_rod stream > 20 -> healthy reference established; leg-2's
+#       twin cell now reads cleanly against it.
+sleep 2
+stream_burst minecraft:end_rod $((VX + 20)) 150 $CZ
+sleep 1
+shot 09h_leg1_endrod_stream || exit 1
+L1ESL=$(changed_class 09g_leg1_villager_near 09h_leg1_endrod_stream)
+L1ESW=$(echo "$L1ESL" | grep -o 'white=[0-9]*' | cut -d= -f2)
+L1EST=$(echo "$L1ESL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+sum "- leg-1 STREAM-SHAPE end_rod (count=0 x120 NEAR — the engine's exact per-dot packet): changed-white ${L1ESW:-?} / total ${L1EST:-?} vs the villager NEAR shot (> 20 = the per-dot path renders on the healthy client — the leg-2 twin's reference; ~0 with the bursts alive = the count=0 path is dead on BOTH legs — P0: batch the dots)"
+sleep 2
+stream_burst minecraft:happy_villager $((VX + 20)) 150 $CZ
+sleep 1
+shot 09i_leg1_villager_stream || exit 1
+L1VSL=$(changed_class 09h_leg1_endrod_stream 09i_leg1_villager_stream)
+L1VSG=$(echo "$L1VSL" | grep -o 'green=[0-9]*' | cut -d= -f2)
+L1VST=$(echo "$L1VSL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+sum "- leg-1 STREAM-SHAPE carrier (happy_villager count=0 x120 NEAR): changed-green ${L1VSG:-?} / total ${L1VST:-?} vs the end_rod stream shot (the healthy twin for the leg-2 per-dot carrier read: ~ 0 green = the 2px color net erases the per-dot carrier hue on a HEALTHY packed client — the expected design read; > 20 = the net misses the per-dot geometry — dot-size/pool class on the healthy leg)"
+
 # ---- 5. THE LIVE EDIT (no relog!) + probe loop -------------------------------
 note "placing $MARKER column at $CX,$CZ (y $FILL_Y0..$FILL_Y1)"
 # v6.4.2 FIX (CI visual run 2026-10-31): the marker zone sits 100 blocks from
@@ -810,6 +993,14 @@ echo "### stream diag after fill:" >> "$SUMMARY"
 grep "stream: tick" /tmp/server.log | tail -2 >> "$SUMMARY" || true
 srv "time set noon"  # v6.4.8: the probe loop must run in daylight
 PROBE_LOG="$SHOTS/probe_counts.txt"; : > "$PROBE_LOG"
+# v6.10.2c THE CACHED-PACK CONTROL (evidence arm, leg 1): leg 1 is the
+# FIRST-DOWNLOAD arm (fresh runner, empty server-pack cache, yellow prompt,
+# Proceed click). Record the pack flow lines the client actually logged so
+# the leg-2 half of the differential below reads against the real leg-1
+# flow, not an assumed one.
+echo "- leg-1 pack flow (client.log):" >> "$PROBE_LOG"
+grep -iE "download|resource.?pack|applying" /tmp/client.log 2>/dev/null | tail -8 >> "$PROBE_LOG" \
+  || echo "  (no pack lines)" >> "$PROBE_LOG"
 for k in $(seq 0 23); do
   assert_online "edit probe $k" || exit 1
   # v6.9.8: re-arm noon EVERY probe — the day/night boundary can cross
@@ -856,6 +1047,36 @@ srv "kick Stepan"
 wait_log "Stepan left the game" /tmp/server.log 30 \
   || pkill -f "net.minecraft.client.main.Main" 2>/dev/null || true
 sleep 3
+# v6.10.2c THE CACHED-PACK CONTROL (the decisive A/B on the log-mining
+# note's leading suspect): leg-1 = first download + prompt + Proceed
+# (measured); leg-2 = relog into the SAME client dir ($HOME/mc-test/client),
+# the pack is already in the client's server-pack cache ('downloads', the
+# DownloadQueue cacheDir in 26.3) and loads via the cached path with no
+# prompt (the accept_pack_prompt leg2 note: 'cached pack auto-accept?') —
+# the ONE measured client-side difference between the rendering leg and
+# the dead leg. This control removes the cache while the client is DOWN,
+# forcing leg 2 to re-download from the plugin HTTP server (engine.rs
+# pack_url: /clod-pack.zip) and take the SAME load path leg 1 took. One
+# variable flips, the type matrix already on board reads the answer:
+#   leg-2 particles RENDER (white NEAR > 20, dust > 0) -> the cached-pack
+#       load path IS the mechanism; the fix re-resolves the pack/particles
+#       on a cached apply (or wipes + re-pushes per session);
+#   leg-2 stays dead (~0, matrix unchanged vs #248/#250) -> the cache is
+#       exonerated; the break survives an identical load flow and the
+#       next variable up the ladder is the persistent gameDir state
+#       itself (a fresh gameDir for leg 2).
+PACK_CACHE="$HOME/mc-test/client/downloads"
+if [ -d "$PACK_CACHE" ]; then
+  NPACK=$(find "$PACK_CACHE" -type f 2>/dev/null | wc -l)
+  echo "- leg-2 cached-pack control: cache inventory BEFORE removal ($NPACK files):" >> "$PROBE_LOG"
+  find "$PACK_CACHE" -type f -printf '  %s %p\n' 2>/dev/null | head -8 >> "$PROBE_LOG"
+  rm -rf "$PACK_CACHE"
+  sum "- leg-2 CACHED-PACK CONTROL: removed the server-pack cache ($NPACK files) — leg 2 re-downloads the pack (fresh load path, same as leg 1)"
+  echo "- leg-2 cached-pack control: cache removed ($NPACK files)" >> "$PROBE_LOG"
+else
+  sum "- leg-2 cached-pack control: cache dir absent at relog (leg 2 already loads fresh — control is a no-op this run)"
+  echo "- leg-2 cached-pack control: cache dir absent" >> "$PROBE_LOG"
+fi
 JOIN2=$(join_count)
 bash "$BENCH_DIR/run_client.sh" || fail "run_client.sh (rejoin) exited nonzero"
 REJOINED=0
@@ -873,6 +1094,20 @@ accept_pack_prompt leg2 30
 assert_online "after leg-2 pack accept" || exit 1
 sleep 15
 assert_online "15 s after leg-2 pack accept" || exit 1
+# v6.10.2c (evidence arm, leg 2): after the cache wipe the client must
+# RE-download before the prompt/applied state — these lines prove whether
+# it did. The client.log grep runs late enough that download+apply have
+# finished (or the run already failed above); the download-queue event
+# log (DownloadQueue's log.json under 'downloads') records the fetch
+# itself with URL + result when it exists.
+echo "- leg-2 pack flow (client.log):" >> "$PROBE_LOG"
+grep -iE "download|resource.?pack|applying" /tmp/client.log 2>/dev/null | tail -8 >> "$PROBE_LOG" \
+  || echo "  (no pack lines)" >> "$PROBE_LOG"
+DLQ=$(find "$HOME/mc-test/client/downloads" -name 'log.json' 2>/dev/null | head -1)
+if [ -n "${DLQ:-}" ]; then
+  echo "- leg-2 download-queue log.json ($DLQ):" >> "$PROBE_LOG"
+  tail -c 1200 "$DLQ" >> "$PROBE_LOG"; echo >> "$PROBE_LOG"
+fi
 srv "time set noon"  # v6.4.8: was 'time set 6000' — night in the 26.3 scale
 srv "gamemode spectator Stepan"
 srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"
@@ -967,6 +1202,156 @@ GD=$(echo "$GDL" | grep -o 'green=[0-9]*' | cut -d= -f2)
 GDT=$(echo "$GDL" | grep -o 'total=[0-9]*' | cut -d= -f2)
 sum "- leg-2 carrier probe green dust (80 m): changed-green px ${GD:-?} / total changed ${GDT:-?} vs baseline (> 100 green = a stable green carrier exists; total > 0 with green ~0 = the dust renders but fog washes it — a ruler problem, not a carrier problem)"
 echo "- leg-2 green dust changed-green px: ${GD:-?} total changed: ${GDT:-?}" >> "$PROBE_LOG"
+# v6.10.2 THE LEG-2 TYPE MATRIX (the feed's follow-up cell, fired in-run):
+# every leg-2 dust datapoint so far was FAR (80 m) — two questions remain
+# that the end_rod-vs-dust pair cannot separate on leg 2:
+#   white dust at the NEAR coords (20 m) — end_rod proves the spot renders
+#   (495/479 changed) and fog is negligible there, so a zero here convicts
+#   the dust TYPE (or its color path), not distance/fog;
+#   happy_villager at the NEAR coords — the second non-dust type (the old
+#   carrier): a render here with dust 0 narrows the break to dust; a zero
+#   here TOO says the relog client renders end_rod and nothing else.
+# Successive baselines (greendust -> whitedust -> villager) isolate each
+# burst: a dying neighbour can only inflate `total`, never the counted
+# class; the eraser (if the tier-flip re-armed the chains) can eat green —
+# total is the signal for the villager reading.
+sleep 2
+srv "particle minecraft:dust{color:[1.0,1.0,1.0],scale:1.0} $((VX + 20)) 150 $CZ 0.2 0.2 0.2 0 400 force"
+sleep 1
+shot 14_leg2_burst_whitedust || exit 1
+L2WDL=$(changed_class 14_leg2_burst_greendust 14_leg2_burst_whitedust)
+L2WDC=$(echo "$L2WDL" | grep -o 'white=[0-9]*' | cut -d= -f2)
+L2WDT=$(echo "$L2WDL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+sum "- leg-2 type matrix white dust NEAR (20 m): changed-white ${L2WDC:-?} / total ${L2WDT:-?} vs green-dust shot (> 20 = dust renders on the relog client NEAR — the FAR zero is distance/fog; 0 with the end_rod NEAR burst alive (495/479) = the dust TYPE is unrendered on leg 2)"
+echo "- leg-2 white dust NEAR changed-white: ${L2WDC:-?} total: ${L2WDT:-?}" >> "$PROBE_LOG"
+sleep 2
+srv "particle minecraft:happy_villager $((VX + 20)) 150 $CZ 0.2 0.2 0.2 0 400 force"
+sleep 1
+shot 14_leg2_burst_villager || exit 1
+L2HVL=$(changed_class 14_leg2_burst_whitedust 14_leg2_burst_villager)
+L2HVG=$(echo "$L2HVL" | grep -o 'green=[0-9]*' | cut -d= -f2)
+L2HVT=$(echo "$L2HVL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+sum "- leg-2 type matrix happy_villager NEAR (20 m): changed-green ${L2HVG:-?} / total ${L2HVT:-?} vs white-dust shot (the old carrier on the relog client; total is the signal — the eraser can eat green)"
+echo "- leg-2 happy_villager NEAR changed-green: ${L2HVG:-?} total: ${L2HVT:-?}" >> "$PROBE_LOG"
+# v6.10.2b THE PLANE CONTROL (log-mining addendum, 2026-11-06): the wire
+# counters in #248/#250 proved the stream dots ARRIVE at the leg-2 client
+# continuously (+189-378 particles per 100-tick window, fail 0, gate-passed)
+# and none of them render — but end_rod has only ever been fired at Y=150
+# (eye level). This burst fires end_rod at the stream's OWN plane (Y=120,
+# the hword plane, marker zone, delta 1 1 1 — the exact geometry of the dots
+# the client refuses to render):
+#   renders (> 20) -> the planes are fine; the break is dust-TYPE-only —
+#                      the carrier must change type, not altitude;
+#   ~0             -> the break rides the plane/depth position TOO (the
+#                      reversed-Z class from the stream doc's own caveat:
+#                      below-horizon particles lose to the sky) — the
+#                      carrier must change type AND possibly in Y.
+sleep 2
+srv "particle minecraft:end_rod $((CX - 1)) 120 $CZ 1 1 1 0 1200 force"
+sleep 1
+shot 14_leg2_burst_endrod_plane || exit 1
+EPL=$(changed_class 14_leg2_burst_villager 14_leg2_burst_endrod_plane)
+EPC=$(echo "$EPL" | grep -o 'white=[0-9]*' | cut -d= -f2)
+EPT=$(echo "$EPL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+sum "- leg-2 plane control end_rod at Y=120 (80 m, the hword plane): changed-white ${EPC:-?} / total ${EPT:-?} vs villager shot (> 20 = the planes render — the break is dust-type-only; ~0 with end_rod@150 alive (495/479) = the break rides the plane/depth too)"
+echo "- leg-2 end_rod@Y120 changed-white: ${EPC:-?} total: ${EPT:-?}" >> "$PROBE_LOG"
+# v6.10.2e THE PLANE x TYPE CROSS (feed addendum, 2026-11-07): the type matrix
+# fires dust at Y=150 ONLY, and the plane control fires END_ROD at Y=120 ONLY —
+# the interaction cell (dust AT the stream planes) is unmeasured, while the
+# engine's actual dots are dust at LAYER_Y=[80,120] (stream.rs:71: hword rides
+# Y=120, cword Y=80) and the whole stream is dead on leg-2. Two bursts mirror
+# the end_rod@Y120 burst EXACTLY (same 80 m spot, same delta 1 1 1, count
+# 1200, force) with only the type swapped, plus the second engine plane:
+#   dust@120 renders (with end_rod@120 > 20) -> the client renders dust at the
+#       exact engine geometry: the dead stream points at the ENGINE side
+#       (spawn/packet/dot content), not the client renderer;
+#   dust@120 ~0 with end_rod@120 > 20 and dust@150 NEAR rendering -> dust is
+#       PLANE-sensitive (the type x plane interaction) -> move LAYER_Y or the
+#       per-plane carrier;
+#   dust@120 AND dust@80 ~0 (end_rod@150 alive) -> the whole plane depth loses
+#       on leg-2 (the reversed-Z class) -> the carrier must change altitude
+#       AND type. White is immune to the eraser; successive baselines keep a
+#       dying neighbour in `total` only (dust dies in ~1.5 s, the +3 s cadence
+#       leaves it fully dead before the next baseline).
+sleep 2
+srv "particle minecraft:dust{color:[1.0,1.0,1.0],scale:1.0} $((CX - 1)) 120 $CZ 1 1 1 0 1200 force"
+sleep 1
+shot 14_leg2_burst_whitedust_plane || exit 1
+L2WPL=$(changed_class 14_leg2_burst_endrod_plane 14_leg2_burst_whitedust_plane)
+L2WPC=$(echo "$L2WPL" | grep -o 'white=[0-9]*' | cut -d= -f2)
+L2WPT=$(echo "$L2WPL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+sum "- leg-2 plane x type cross: white dust at Y=120 (80 m, the hword plane — the end_rod@Y120 burst with ONLY the type swapped): changed-white ${L2WPC:-?} / total ${L2WPT:-?} vs the end_rod@Y120 shot (> 20 with end_rod@120 alive = dust renders at the exact engine geometry — the dead stream points at the engine spawn/packet path, not the client renderer; ~0 = the type x plane interaction, move LAYER_Y or the per-plane carrier)"
+echo "- leg-2 white dust@Y120 changed-white: ${L2WPC:-?} total: ${L2WPT:-?}" >> "$PROBE_LOG"
+sleep 2
+srv "particle minecraft:dust{color:[1.0,1.0,1.0],scale:1.0} $((CX - 1)) 80 $CZ 1 1 1 0 1200 force"
+sleep 1
+shot 14_leg2_burst_whitedust_cword || exit 1
+L2WCL=$(changed_class 14_leg2_burst_whitedust_plane 14_leg2_burst_whitedust_cword)
+L2WCC=$(echo "$L2WCL" | grep -o 'white=[0-9]*' | cut -d= -f2)
+L2WCT=$(echo "$L2WCL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+sum "- leg-2 cword plane: white dust at Y=80 (80 m, the cword plane, same burst geometry): changed-white ${L2WCC:-?} / total ${L2WCT:-?} vs the dust@Y120 shot (> 20 = the cword plane renders dust too — planes fully exonerated for dust; ~0 with dust@120 > 20 = the Y=80 plane specifically loses (deepest below-horizon) — drop or move it; both ~0 = the whole plane depth loses on leg-2, reversed-Z class)"
+echo "- leg-2 white dust@Y80 changed-white: ${L2WCC:-?} total: ${L2WCT:-?}" >> "$PROBE_LOG"
+# v6.10.2f THE ERASER TEST (correction note 2026-11-07): the stream's carrier
+# is happy_villager (NOT dust), the dots ride the planes Y=120 (hword) and
+# Y=80 (cword), and BOTH the spot (75 m) and the planes sit INSIDE the decode
+# band [CULL_RADIUS=28 .. ZONE_FAR=112] where dust_mask.fsh's color net
+# REPAINTS every carrier-hue pixel from its surroundings — the stealth
+# eraser. On a HEALTHY capture chain this burst renders AND gets erased:
+# changed-green ~ 0 BY DESIGN. So this cell does NOT measure renderability —
+# it measures the ERASER TAIL of the capture pipeline on the relog client:
+#   ~0 (with the NEAR villager cell alive on leg 2)  -> the eraser is ALIVE
+#       on leg 2: the stream dots die BEFORE display (render-path/pool),
+#       never reach capture (mask_hits=0 consistent) — dot-geometry/pool;
+#   > 20 -> the eraser is BLIND on leg 2: the capture tail is down, and any
+#       dot that rendered would be VISIBLE — their total absence localizes
+#       the death to the particle render path itself (with end_rod@120
+#       alive, the plane/depth class is exonerated for the carrier too).
+sleep 2
+srv "particle minecraft:happy_villager $((CX - 1)) 120 $CZ 1 1 1 0 1200 force"
+sleep 1
+shot 14_leg2_burst_villager_plane || exit 1
+L2VPL=$(changed_class 14_leg2_burst_whitedust_cword 14_leg2_burst_villager_plane)
+L2VPG=$(echo "$L2VPL" | grep -o 'green=[0-9]*' | cut -d= -f2)
+L2VPT=$(echo "$L2VPL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+sum "- leg-2 ERASER TEST: CARRIER (happy_villager) at Y=120 in-band (75 m, the hword plane): changed-green ${L2VPG:-?} / total ${L2VPT:-?} vs the dust@Y80 shot (~ 0 = the eraser is ALIVE on leg 2 — stream dots die pre-display; > 20 = the eraser is BLIND on leg 2 — the capture tail is down)"
+echo "- leg-2 carrier@Y120 in-band changed-green: ${L2VPG:-?} total: ${L2VPT:-?}" >> "$PROBE_LOG"
+# v6.11 THE STREAM-SHAPE CELLS on the relog leg (dossier 2026-11-07) — the
+# decisive PACKET-SHAPE split. The stream's wire payload is ONE count=0
+# packet PER DOT (jni.rs build_particle_packet: overrideLimiter=true,
+# alwaysShow=true, delta 0/0/0, speed 0, count=0 — sent in a
+# ClientboundBundlePacket per tick); every burst cell above is ONE packet
+# with count=1200. end_rod first — white is immune to the color net, so
+# this is the CLEAN per-dot path read on the relog client:
+#   > 20 (NEAR end_rod burst 479/495 alive) -> the count=0 single-dot
+#       path RENDERS on the relog client — packet shape exonerated; the
+#       stream's death must ride the type (the villager flap), the
+#       in-band eraser (the cell above), the BUNDLE wrapper (engine-only,
+#       no /particle equivalent) or the trickle cadence — the published
+#       cells split all but the bundle, which becomes the named suspect;
+#   ~ 0 (burst alive) -> THE count=0 single-dot path is DEAD on the relog
+#       client: the stream's per-dot packets die BY SHAPE — the engine
+#       must batch (count>0 packets or per-dot bundles of bursts); this
+#       is the P0 fix row and it does not exist in any client shader.
+sleep 2
+stream_burst minecraft:end_rod $((VX + 20)) 150 $CZ
+sleep 1
+shot 14_leg2_burst_endrod_stream || exit 1
+L2ESL=$(changed_class 14_leg2_burst_villager_plane 14_leg2_burst_endrod_stream)
+L2ESW=$(echo "$L2ESL" | grep -o 'white=[0-9]*' | cut -d= -f2)
+L2EST=$(echo "$L2ESL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+sum "- leg-2 STREAM-SHAPE end_rod (count=0 x120 NEAR — the engine's exact per-dot packet, eraser-immune): changed-white ${L2ESW:-?} / total ${L2EST:-?} vs the villager@Y120 shot (> 20 with the NEAR burst alive = the per-dot path renders — shape exonerated, suspects narrow to type/bundle/cadence; ~0 with the burst alive = the count=0 path is DEAD on the relog client — the stream dies by packet shape, the engine must batch dots)"
+echo "- leg-2 end_rod stream-shape changed-white: ${L2ESW:-?} total: ${L2EST:-?}" >> "$PROBE_LOG"
+# carrier stream-shape — the per-dot CARRIER path (the color net overlays
+# this cell; the leg-1 twin 09i is the reference):
+sleep 2
+stream_burst minecraft:happy_villager $((VX + 20)) 150 $CZ
+sleep 1
+shot 14_leg2_burst_villager_stream || exit 1
+L2VSL=$(changed_class 14_leg2_burst_endrod_stream 14_leg2_burst_villager_stream)
+L2VSG=$(echo "$L2VSL" | grep -o 'green=[0-9]*' | cut -d= -f2)
+L2VST=$(echo "$L2VSL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+sum "- leg-2 STREAM-SHAPE carrier (happy_villager count=0 x120 NEAR): changed-green ${L2VSG:-?} / total ${L2VST:-?} vs the end_rod stream shot (read against the leg-1 twin: leg-2 ~ leg-1 = the per-dot carrier path behaves like the healthy leg — carrier exonerated at NEAR; leg-2 green > 20 with leg-1 ~ 0 = the eraser is blind on leg 2 at per-dot geometry; leg-2 ~ 0 with end_rod stream alive = the per-dot CARRIER path specifically dies — type/pool class)"
+echo "- leg-2 villager stream-shape changed-green: ${L2VSG:-?} total: ${L2VST:-?}" >> "$PROBE_LOG"
 L2_SCENE_ALIVE=0
 for k in $(seq 0 11); do
   assert_online "relog probe $k" || exit 1
