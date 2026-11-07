@@ -40,17 +40,24 @@ FILL_Y0=60; FILL_Y1=170
 # vantage: 75 blocks west of the marker, looking east (Bukkit yaw 270).
 # THE GEOMETRY CONSTRAINTS (v6.4.2 — run 2026-10-31 stood at 100 m and the
 # marker never decoded): the SERVER decode band requires BOTH plane probes
-# (y=120 and y=80) inside [30, 110] 3D of the eye — from an eye at y=151.6
-# the LO plane (dy=-71.6) caps the horizontal distance at ~83 blocks, so a
-# 100 m vantage left every marker cell outside the band (cone 0 zone 0,
-# spawned 0, wire 0p the whole run). The constraints chain:
-#   - server decode band (LO plane): horizontal <= ~83 blocks;
+# (y=120 and y=80) inside [30, 110] 3D of the eye.
+# v6.15 (feat/visible-terrain): the eye drops 150 -> 120. Two wins from the
+# same one-line move, both answering "the user sees no LODs":
+#   1. the LO plane (y=80) is now dy=-41.6, so the band's horizontal cap
+#      widens from ~83 blocks (eye 151.6) to sqrt(110^2-41.6^2) = ~102 —
+#      there is ROOM behind the marker for a real terrain range;
+#   2. the ground sits ~56 blocks below the eye, so the bottom quarter of
+#      the frame covers rays hitting the terrain plane at 64..100 m — the
+#      LOD march paints an actual GROUND PLANE there (from 151.6 those rays
+#      needed >= 46 deg and never entered the frame).
+# The constraints chain (eye y = 121.6):
+#   - server decode band (LO plane): horizontal <= ~102 blocks;
 #   - near gate: >= 30 blocks (CULL_RADIUS+2);
-#   - vanilla purity: > 64 blocks (server view-distance 4) so the marker
-#     zone stays pure-LOD territory;
+#   - vanilla purity: > 64 blocks (server view-distance 4) so everything
+#     the range occupies stays pure-LOD territory;
 #   - client particle cull: < 128 blocks (renderDistance 8).
-# 75 blocks satisfies all four; 100 failed the first one.
-VX=$(( CX - 75 )); VY=150; VYAW=270; VPITCH=5
+# 75 blocks satisfies all four; 100 failed the first one (at the old eye).
+VX=$(( CX - 75 )); VY=120; VYAW=270; VPITCH=5
 mkdir -p "$SHOTS"
 FAILURES=0
 FOUND1=0; FOUND2=0
@@ -585,6 +592,62 @@ done
 note "stream live: cells=$CELLS (the fill below re-streams its columns via the event push, so full scan completion is not required)"
 sum "- stream live: cells=$CELLS"
 
+# ---- 3a2. THE TERRAIN RANGE (v6.15, feat/visible-terrain) --------------------
+# THE USER ASK: every gallery round so far rendered ONE free-standing marker
+# column in empty sky ("это какой-то красный столб, а не лоды"). The world
+# around CENTER with seed clodbench2026 is flat plains — the heightfield has
+# no relief to march, so the honest frame IS a lone column. This section
+# gives the disk real far-terrain: three terraced mountains 66..100 m east
+# of the eye, i.e. BEYOND the vanilla chunk edge (64 m) but INSIDE the
+# decode band (~102 m from the lowered eye) — pure-LOD territory. They are
+# built with vanilla forceload+fill (the marker's own mechanism), stay
+# forceloaded for the whole leg, and the scanner streams their heights like
+# any edit: the clod:lod_terrain march then paints an actual LANDSCAPE.
+#
+# Composition from the eye at (CX-75, 121.6), yaw 270 (east), pitch 5:
+#   - P1 «северная» center (CX+10, CZ-22): terraces 21/13/7, tops 118/146/172
+#   - P2 «центральная»  center (CX+14, CZ+8): terraces 21/13/7, tops 122/150/174
+#   - P3 «южная»       center (CX+4, CZ+30): terraces 21/13/7, tops 112/138/164
+#   - grass_block tops on T1/T2 (green slopes), stone caps on T3 (gray peaks)
+#   - the red marker (placed later, §5) stays free-standing IN FRONT of the
+#     range: red calibration stick against green LOD mountains.
+# Geometry audit (worst cells vs the band, eye y=121.62):
+#   - farthest footprint corner: P2 (CX+24,CZ+18) -> dx=99, dz=18,
+#     3D to LO plane sqrt(99^2+18^2+41.6^2)=107.7 <= 110 OK;
+#   - nearest footprint edge: dx=66 >= 30 OK; all < 128 (client cull) OK;
+#   - height byte = surface_y+64: max 174+64=238 <= 255 OK;
+#   - every fill <= 32768 blocks OK; peaks never touch the marker 5x5 OK.
+build_mountain() { # cx cz top1 top2 top3 label
+  local mx="$1" mz="$2" h1="$3" h2="$4" h3="$5" lb="$6"
+  srv "forceload add $((mx - 14)) $((mz - 14)) $((mx + 14)) $((mz + 14))"
+  sleep 2
+  srv "fill $((mx - 10)) 55 $((mz - 10)) $((mx + 10)) $((h1 - 1)) $((mz + 10)) minecraft:stone"
+  srv "fill $((mx - 10)) $h1 $((mz - 10)) $((mx + 10)) $h1 $((mz + 10)) minecraft:grass_block"
+  srv "fill $((mx - 6)) $((h1 + 1)) $((mz - 6)) $((mx + 6)) $((h2 - 1)) $((mz + 6)) minecraft:stone"
+  srv "fill $((mx - 6)) $h2 $((mz - 6)) $((mx + 6)) $h2 $((mz + 6)) minecraft:grass_block"
+  srv "fill $((mx - 3)) $((h2 + 1)) $((mz - 3)) $((mx + 3)) $h3 $((mz + 3)) minecraft:stone"
+  sleep 2
+  note "mountain $lb placed at $mx,$mz (tops $h1/$h2/$h3)"
+}
+MTN_NOT_LOADED=0
+for spec in "P1 $((CX + 10)) $((CZ - 22)) 118 146 172" \
+            "P2 $((CX + 14)) $((CZ + 8)) 122 150 174" \
+            "P3 $((CX + 4)) $((CZ + 30)) 112 138 164"; do
+  read -r MLB MMX MMZ MH1 MH2 MH3 <<< "$spec"
+  build_mountain "$MMX" "$MMZ" "$MH1" "$MH2" "$MH3" "$MLB"
+done
+sleep 3
+MTN_NOT_LOADED=$(grep -c "That position is not loaded" /tmp/server.log 2>/dev/null || true)
+if [ "${MTN_NOT_LOADED:-0}" -gt 0 ]; then
+  fail "a range fill hit an unloaded chunk after forceload ($MTN_NOT_LOADED hits)"
+else
+  note "terrain range landed (no 'position not loaded' after forceload)"
+fi
+grep -iE "Changed [0-9]+ block|Filled" /tmp/server.log | tail -1 \
+  || note "range fill summary not in log"
+sum "- terrain range: 3 terraced mountains at (CX+10,CZ-22)/(CX+14,CZ+8)/(CX+4,CZ+30), tops 172/174/164, grass slopes + stone caps, 66..100 m from the eye (pure-LOD band, chunk edge 64 m)"
+srv "time set noon"
+
 # ---- 3b. paint-settle note (the wait itself runs after the first tp, §4) -----
 # v6.4.2 FIX (run 41237303358): a fresh client receives the WHOLE disk over
 # its first minutes; the baseline tries fired mid-wave and drifted ~118k px
@@ -663,6 +726,32 @@ done
 LODPX=$(lod_silhouette 10_before_edit)
 note "lod paint baseline: ${LODPX:-?} cols"
 sum "- ${LODPX:-?} (LOD paint ON SCREEN at 75 m if > 20 — the march-drawn marker column; vanilla cannot render there, chunk edge 64 m; #255 re-measures 49, the ZONE_FAR=48 regression #256 and the control read 0)"
+
+# ---- 4a3. TERRAIN-GREEN RULER (v6.15, feat/visible-terrain) ------------------
+# The v6.14 silhouette ruler keys on the marker's DARK column. The v6.15
+# range paints BRIGHT: grass slopes (fogged green) and stone caps. This
+# ruler counts terrain-green pixels in the sky region (x < 940 — UI-immune,
+# the lens panels live at x >= 940): green-dominant, not sky-blue, not the
+# marker red. On the v6.14 baselines this number is ~0 (flat plains — the
+# only paint was the dark column); with the range streamed and marched it
+# must be in the tens of thousands. The CONTROL arm reads ~0 on the same
+# world because the control client has no pack: no march, no paint.
+TERRAIN_PX=$(python3 - <<'PYEOF'
+from PIL import Image
+import os
+im = Image.open(f"{os.environ.get('SHOTS','/home/runner/mc-test/shots/ci-visual')}/10_before_edit.png").convert('RGB')
+px = im.load(); n = 0
+for y in range(0, 720):
+    for x in range(0, 940):
+        r, g, b = (c / 255.0 for c in px[x, y])
+        # grass green (fog-faded): green dominant over both red and blue
+        if g > r + 0.06 and g > b + 0.06 and g > 0.22:
+            n += 1
+print(n)
+PYEOF
+)
+note "terrain-green baseline: ${TERRAIN_PX:-?} px"
+sum "- ${TERRAIN_PX:-?} terrain-green px in the sky region (LOD MOUNTAINS on screen if > 5000; v6.14 flat-world baselines read ~0, the pack-free control reads ~0)"
 
 # ---- 4b. PARTICLE RENDER PROBE (v6.4.9, separates two failure domains) ------
 # Run 41256576023: the client accepted 446k level_particles packets but the
