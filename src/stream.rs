@@ -2080,7 +2080,7 @@ mod tests {
         }
         assert_eq!(s.dirty_streams, before + 1);
         assert_eq!(s.dirty_pending, 0);
-        let (wx, wz) = s.cell_origin(66, 20);
+        let (wx, wz) = s.cell_origin(66, 45);
         assert!(b
             .iter()
             .any(|sp| (sp.x - (wx + 1.0)).abs() < 2.1 && (sp.z - (wz + 1.0)).abs() < 2.1));
