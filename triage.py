@@ -1,12 +1,26 @@
 #!/usr/bin/env python3
-"""triage.py — c-LoD visual forensics verdict automator (v6.11).
+"""triage.py — c-LoD visual forensics verdict automator (v6.11.1).
 
 Reads a CI run's probe log (probes.txt as published on the ci-verdicts feed,
-or the run summary.md — both carry the same `sum` bullet lines), extracts
-every instrument cell, evaluates the published decision rows (v6.10.0
-renderer gate -> v6.10.2f carrier/eraser -> v6.11 stream-shape) and prints
-the verdict + the next action. Missing cells degrade gracefully (pre-chain
-runs report exactly which cells are absent).
+or the run summary.md — v6.11.1 parses BOTH line formats: the summary.md
+'changed-white N / total M' style and the probe_counts.txt 'changed-white: N
+total: M' colon style, via per-cell anchor lists), extracts every instrument
+cell, evaluates the published decision rows (v6.10.0 renderer gate ->
+v6.10.2f carrier/eraser -> v6.11 stream-shape -> v6.11.1 band cull) and
+prints the verdict + the next action. Missing cells degrade gracefully
+(pre-chain runs report exactly which cells are absent).
+
+v6.11.1 additions (from run 42355686504, the first instrumented run):
+  * VERDICT [C] — the BAND CULL: a VANILLA end_rod burst dead at the marker
+    band (75-105 m) on the HEALTHY leg (l1_far <= 20 with l1_near alive)
+    means nothing renders beyond the client's loaded chunk radius
+    (view-distance 4 = 64 m) — the stream's dots die before any engine-side
+    mechanism matters; supersedes [B] for that run (bundle question becomes
+    second-order until the band renders).
+  * l1_near_endrod / l1_far_endrod cells (the leg-1 burst_close/burst_far
+    lines).
+  * fixed the l2_scene0 parse (the anchor window's own 'leg-2' digits used
+    to win; now the count after the colon is read).
 
 Usage:
   python3 triage.py <probe_log.txt|summary.md>
@@ -19,27 +33,30 @@ import sys
 # Regex candidates are tried in order: the first match wins. The second
 # candidate keeps pre-chain artifacts (#248/#250 era) parseable.
 CELLS = {
-    "l2_near_endrod":   ("leg-2 renderer probe NEAR", [r"white px:\s*(\d+)\s+raw\s*/\s*(\d+)\s+changed", r"white px:\s*(\d+)\s+changed:\s*(\d+)"], ("raw", "changed")),
-    "l2_far_endrod":    ("leg-2 renderer probe FAR", [r"white px:\s*(\d+)\s+raw\s*/\s*(\d+)\s+changed", r"white px:\s*(\d+)\s+changed:\s*(\d+)"], ("raw", "changed")),
-    "l2_greendust":     ("leg-2 carrier probe green dust (80 m): changed-green px", [r"(\d+)\s*/\s*total changed\s*(\d+)"], ("green", "total")),
-    "l2_whitedust":     ("leg-2 type matrix white dust NEAR (20 m): changed-white", [r"(\d+)\s*/\s*total\s*(\d+)"], ("white", "total")),
-    "l2_villager":      ("leg-2 type matrix happy_villager NEAR (20 m): changed-green", [r"(\d+)\s*/\s*total\s*(\d+)"], ("green", "total")),
-    "l2_endrod_120":    ("leg-2 plane control end_rod at Y=120", [r"changed-white\s*(\d+)\s*/\s*total\s*(\d+)"], ("white", "total")),
-    "l2_dust_120":      ("leg-2 plane x type cross: white dust at Y=120", [r"changed-white\s*(\d+)\s*/\s*total\s*(\d+)"], ("white", "total")),
-    "l2_dust_80":       ("leg-2 cword plane: white dust at Y=80", [r"changed-white\s*(\d+)\s*/\s*total\s*(\d+)"], ("white", "total")),
-    "l2_eraser":        ("leg-2 ERASER TEST: CARRIER (happy_villager) at Y=120 in-band", [r"changed-green\s*(\d+)\s*/\s*total\s*(\d+)"], ("green", "total")),
-    "l2_endrod_stream": ("leg-2 STREAM-SHAPE end_rod", [r"changed-white\s*(\d+)\s*/\s*total\s*(\d+)"], ("white", "total")),
-    "l2_villager_stream": ("leg-2 STREAM-SHAPE carrier", [r"changed-green\s*(\d+)\s*/\s*total\s*(\d+)"], ("green", "total")),
-    "l1_greendust":     ("leg-1 green dust (80 m, leg-2 geometry) changed-green", [r"(\d+)\s*/\s*total\s*(\d+)"], ("green", "total")),
-    "l1_whitedust":     ("leg-1 white dust (20 m NEAR, proven-render spot) changed-white", [r"(\d+)\s*/\s*total\s*(\d+)"], ("white", "total")),
-    "l1_villager":      ("leg-1 CARRIER (happy_villager) 20 m NEAR: changed-green", [r"(\d+)\s*/\s*total\s*(\d+)"], ("green", "total")),
-    "l1_endrod_stream": ("leg-1 STREAM-SHAPE end_rod", [r"changed-white\s*(\d+)\s*/\s*total\s*(\d+)"], ("white", "total")),
-    "l1_villager_stream": ("leg-1 STREAM-SHAPE carrier", [r"changed-green\s*(\d+)\s*/\s*total\s*(\d+)"], ("green", "total")),
-    "ctl_dust":         ("control type matrix: green dust NEAR (20 m) changed-green", [r"(\d+)\s*/\s*total\s*(\d+)"], ("green", "total")),
-    "ctl_villager":     ("control CARRIER (happy_villager, pack-free", [r"changed-green\s*(\d+)\s*/\s*total\s*(\d+)"], ("green", "total")),
-    "ctl_endrod_stream": ("control STREAM-SHAPE end_rod", [r"changed-white\s*(\d+)\s*/\s*total\s*(\d+)"], ("white", "total")),
+    # anchor lists: [summary.md format, probe_counts.txt format] — first hit wins
+    "l2_near_endrod":   (["leg-2 renderer probe NEAR"], [r"white px:\s*(\d+)\s+raw\s*/\s*(\d+)\s+changed", r"white px:\s*(\d+)\s+changed:\s*(\d+)"], ("raw", "changed")),
+    "l2_far_endrod":    (["leg-2 renderer probe FAR"], [r"white px:\s*(\d+)\s+raw\s*/\s*(\d+)\s+changed", r"white px:\s*(\d+)\s+changed:\s*(\d+)"], ("raw", "changed")),
+    "l2_greendust":     (["leg-2 carrier probe green dust (80 m): changed-green px", "leg-2 green dust changed-green px"], [r"(\d+)\s*/\s*total changed\s*(\d+)", r"changed-green px:\s*(\d+)\s+total changed:\s*(\d+)"], ("green", "total")),
+    "l2_whitedust":     (["leg-2 type matrix white dust NEAR (20 m): changed-white", "leg-2 white dust NEAR changed-white"], [r"(\d+)\s*/\s*total\s*(\d+)", r"changed-white:\s*(\d+)\s+total:\s*(\d+)"], ("white", "total")),
+    "l2_villager":      (["leg-2 type matrix happy_villager NEAR (20 m): changed-green", "leg-2 happy_villager NEAR changed-green"], [r"(\d+)\s*/\s*total\s*(\d+)", r"changed-green:\s*(\d+)\s+total:\s*(\d+)"], ("green", "total")),
+    "l2_endrod_120":    (["leg-2 plane control end_rod at Y=120", "leg-2 end_rod@Y120 changed-white"], [r"changed-white\s*(\d+)\s*/\s*total\s*(\d+)", r"changed-white:\s*(\d+)\s+total:\s*(\d+)"], ("white", "total")),
+    "l2_dust_120":      (["leg-2 plane x type cross: white dust at Y=120", "leg-2 white dust@Y120 changed-white"], [r"changed-white\s*(\d+)\s*/\s*total\s*(\d+)", r"changed-white:\s*(\d+)\s+total:\s*(\d+)"], ("white", "total")),
+    "l2_dust_80":       (["leg-2 cword plane: white dust at Y=80", "leg-2 white dust@Y80 changed-white"], [r"changed-white\s*(\d+)\s*/\s*total\s*(\d+)", r"changed-white:\s*(\d+)\s+total:\s*(\d+)"], ("white", "total")),
+    "l2_eraser":        (["leg-2 ERASER TEST: CARRIER (happy_villager) at Y=120 in-band", "leg-2 carrier@Y120 in-band changed-green"], [r"changed-green\s*(\d+)\s*/\s*total\s*(\d+)", r"changed-green:\s*(\d+)\s+total:\s*(\d+)"], ("green", "total")),
+    "l2_endrod_stream": (["leg-2 STREAM-SHAPE end_rod", "leg-2 end_rod stream-shape changed-white"], [r"changed-white\s*(\d+)\s*/\s*total\s*(\d+)", r"changed-white:\s*(\d+)\s+total:\s*(\d+)"], ("white", "total")),
+    "l2_villager_stream": (["leg-2 STREAM-SHAPE carrier", "leg-2 villager stream-shape changed-green"], [r"changed-green\s*(\d+)\s*/\s*total\s*(\d+)", r"changed-green:\s*(\d+)\s+total:\s*(\d+)"], ("green", "total")),
+    "l1_near_endrod":   (["burst_close white px"], [r"(\d+)"], ("white",)),
+    "l1_far_endrod":    (["burst_far white px"], [r"(\d+)"], ("white",)),
+    "l1_greendust":     (["leg-1 green dust (80 m, leg-2 geometry) changed-green"], [r"(\d+)\s*/\s*total\s*(\d+)"], ("green", "total")),
+    "l1_whitedust":     (["leg-1 white dust (20 m NEAR, proven-render spot) changed-white"], [r"(\d+)\s*/\s*total\s*(\d+)"], ("white", "total")),
+    "l1_villager":      (["leg-1 CARRIER (happy_villager) 20 m NEAR: changed-green"], [r"(\d+)\s*/\s*total\s*(\d+)"], ("green", "total")),
+    "l1_endrod_stream": (["leg-1 STREAM-SHAPE end_rod"], [r"changed-white\s*(\d+)\s*/\s*total\s*(\d+)"], ("white", "total")),
+    "l1_villager_stream": (["leg-1 STREAM-SHAPE carrier"], [r"changed-green\s*(\d+)\s*/\s*total\s*(\d+)"], ("green", "total")),
+    "ctl_dust":         (["control type matrix: green dust NEAR (20 m) changed-green"], [r"(\d+)\s*/\s*total\s*(\d+)"], ("green", "total")),
+    "ctl_villager":     (["control CARRIER (happy_villager, pack-free"], [r"changed-green\s*(\d+)\s*/\s*total\s*(\d+)"], ("green", "total")),
+    "ctl_endrod_stream": (["control STREAM-SHAPE end_rod"], [r"changed-white\s*(\d+)\s*/\s*total\s*(\d+)"], ("white", "total")),
     "ctl_villager_stream": ("control STREAM-SHAPE carrier", [r"changed-green\s*(\d+)\s*/\s*total\s*(\d+)"], ("green", "total")),
-    "l2_scene0":        ("leg-2 baseline scene px (x<940):", [r"(\d+)"], ("scene",)),
+    "l2_scene0":        (["leg-2 baseline scene px (x<940):", "leg-2 baseline scene px:"], [r":\s*(\d+)"], ("scene",)),
     "flag_cached_wipe": ("leg-2 CACHED-PACK CONTROL: removed the server-pack cache", None, None),
     "flag_cached_noop": ("leg-2 cached-pack control: cache dir absent", None, None),
     "flag_scene_dead":  ("LEG-2 SCENE DEAD", None, None),
@@ -54,7 +71,12 @@ ALIVE = 20  # the chain's convention: > 20 changed px = rendered
 def parse(text):
     cells = {}
     for name, (anchor, rxs, groups) in CELLS.items():
-        i = text.find(anchor)
+        anchors = anchor if isinstance(anchor, (list, tuple)) else [anchor]
+        i = -1
+        for a in anchors:
+            i = text.find(a)
+            if i >= 0:
+                break
         if i < 0:
             continue
         if rxs is None:
@@ -66,6 +88,17 @@ def parse(text):
             if m:
                 cells[name] = tuple(int(g) for g in m.groups())
                 break
+    # v6.12 band-edge walk: l1_band_cut / l2_band_cut = (largest distance in
+    # metres whose step still rendered (> ALIVE changed-white), 0 if none).
+    # Read from both line formats: 'leg-N band walk D m: changed-white N /'
+    # (summary.md) and 'leg-N band walk D m changed-white: N total:' (probe
+    # log).
+    for leg in ("1", "2"):
+        best = 0
+        for m in re.finditer(rf"leg-{leg} band walk (\d+) m: changed-white:?\s*(\d+)", text):
+            if int(m.group(2)) > ALIVE:
+                best = max(best, int(m.group(1)))
+        cells[f"l{leg}_band_cut"] = (best,)
     return cells
 
 
@@ -77,7 +110,7 @@ def fmt(v):
     return "?"
 
 
-def evaluate(cells):
+def evaluate(cells, text=""):
     out = []
     add = out.append
 
@@ -99,8 +132,16 @@ def evaluate(cells):
                    "l1_whitedust", "ctl_dust", "ctl_villager"]
     missing = [c for c in chain_cells if c not in cells]
     if missing:
-        add(f"VERDICT: PRE-CHAIN RUN — instrument cells absent ({len(missing)}: {', '.join(missing[:4])}…). "
-            "Apply instrument-chain-full-v6.11.patch (one git apply onto fix/leg2-arm-race @ 35eb53b) and re-run.")
+        v611_cells = ["l2_endrod_stream", "l2_whitedust", "l2_eraser"]
+        if all(c not in cells for c in v611_cells):
+            add(f"VERDICT: PRE-CHAIN RUN — instrument cells absent ({len(missing)}: {', '.join(missing[:4])}…). "
+                "Apply instrument-chain-full-v6.11.patch (one git apply onto fix/leg2-arm-race @ 35eb53b) "
+                "and re-run.")
+        else:
+            add(f"VERDICT: INCOMPLETE LOG — {len(missing)} chain cells absent from THIS log "
+                f"({', '.join(missing[:4])}…). The leg-1 and control cells live in the run's summary.md "
+                "files (leg summary + the control artifact's summary) — feed triage the COMBINED summary; "
+                "a probe_counts.txt alone carries the leg-2 colon cells only.")
         return out
 
     # ---- type axis -------------------------------------------------------
@@ -120,6 +161,35 @@ def evaluate(cells):
     l2s = g("l2_endrod_stream", 0)
     l1s = g("l1_endrod_stream", 0)
     cts = g("ctl_endrod_stream", 0)
+    # ---- band cull (v6.11.1, run 42355686504) -----------------------------
+    # A VANILLA /particle end_rod burst dead at the marker band on the HEALTHY
+    # leg (while the NEAR burst renders) means the marker zone sits outside
+    # the client's loaded chunk radius — nothing renders there, vanilla or
+    # engine, so the stream's dots die before any engine-side mechanism
+    # matters. Supersedes [B] for that run.
+    l1n = g("l1_near_endrod", 0)
+    l1f = g("l1_far_endrod", 0)
+    band_cull = (l1f is not None and l1f <= ALIVE and l1n is not None and l1n > ALIVE)
+    if band_cull:
+        add(f"VERDICT [C]: THE MARKER BAND IS CULLED CLIENT-SIDE — a VANILLA end_rod burst at the marker zone "
+            f"(75-105 m) read {l1f} on the HEALTHY leg while the NEAR burst read {l1n}: nothing renders beyond "
+            "the client's loaded chunk radius (view-distance 4 = 64 m) and the stream's dots live exactly there. "
+            "Per-dot shape, carrier type and the eraser are all exonerated at NEAR — the dots die before any "
+            "engine-side mechanism matters. Next: v6.12 band-edge walk (graded 30-80 m bursts) measures the exact "
+            "cut radius; the engine fix is the decode band (ZONE_FAR) inside the measured cut, or a one-off "
+            "view-distance=8 diagnostic arm to confirm the cull. [B] (bundle wrapper) is second-order until the "
+            "band renders.")
+    for leg in ("1", "2"):
+        cut = cells.get(f"l{leg}_band_cut", (None,))[0]
+        if cut is not None and (f"l{leg}_band_cut" in cells):
+            steps = [m for m in re.finditer(rf"leg-{leg} band walk (\d+) m", text)]
+            if steps:
+                verdict = ("the stream's dots (75-105 m) sit OUTSIDE this radius — client-culled before any "
+                           "engine path matters; the engine fix is the decode band (ZONE_FAR) inside the measured cut"
+                           if cut < 75 else
+                           "the dots' band (75-105 m) starts INSIDE the render radius — the band cull does NOT "
+                           "explain the leg death; escalate to [B] (CLOD_UNBUNDLED=1)")
+                add(f"band walk leg-{leg}: effective render cut ≈ {cut} m (view-distance 4 loads 64 m) — {verdict}")
     if l2s is not None:
         if l2s <= ALIVE and near and near > ALIVE:
             add("VERDICT [A]: THE count=0 single-dot packet path is DEAD on the relog client while bursts render — "
@@ -131,10 +201,15 @@ def evaluate(cells):
             er = g("l2_eraser", 0)
             if (l1v is not None and l2v is not None and abs(l1v - l2v) <= ALIVE
                     and er is not None and er <= ALIVE):
-                add("VERDICT [B]: packet shape, carrier type (twins equal) and the in-band eraser all ALIVE — "
-                    "the remaining engine-only divergence is the ClientboundBundlePacket wrapper "
-                    "(no /particle equivalent). Next: engine diagnostic mode CLOD_UNBUNDLED=1 (send the tick's "
-                    "packets individually for one run).")
+                if band_cull:
+                    add("note: the [B] branch conditions also hold on this run (shape alive, carrier twins equal, "
+                        "eraser alive) — the CLOD_UNBUNDLED=1 diagnostic stays queued BEHIND the band fix: the "
+                        "bundle wrapper cannot matter while the dots' own band is client-culled.")
+                else:
+                    add("VERDICT [B]: packet shape, carrier type (twins equal) and the in-band eraser all ALIVE — "
+                        "the remaining engine-only divergence is the ClientboundBundlePacket wrapper "
+                        "(no /particle equivalent). Next: engine diagnostic mode CLOD_UNBUNDLED=1 (send the tick's "
+                        "packets individually for one run).")
             else:
                 add("VERDICT: shape exonerated on leg-2 — split the rest by the type/eraser cells above "
                     "(twins differ → carrier-specific; eraser > 20 → capture tail blind).")
@@ -202,13 +277,25 @@ FIXTURE_B = FIXTURE_A.replace(
     "- leg-2 STREAM-SHAPE end_rod (count=0 x120 NEAR — the engine's exact per-dot packet, eraser-immune): changed-white 3 / total 9",
     "- leg-2 STREAM-SHAPE end_rod (count=0 x120 NEAR — the engine's exact per-dot packet, eraser-immune): changed-white 704 / total 880")
 
+# v6.11.1 — the real run 42355686504 shape: streams alive everywhere, but a
+# VANILLA burst at the marker band is dead on the HEALTHY leg → VERDICT [C].
+FIXTURE_C = (FIXTURE_B
+             .replace("- leg-2 renderer probe FAR (80 m, marker zone) white px: 321 raw / 318 changed-vs-baseline",
+                      "- leg-2 renderer probe FAR (80 m, marker zone) white px: 0 raw / 0 changed-vs-baseline")
+             + """
+- burst_close white px: 524 (renderer alive if > 50)
+- burst_far white px: 0 (renderer alive in the marker zone if > 20)
+- leg-2 end_rod@Y120 changed-white: 0 total: 0
+- leg-2 white dust@Y120 changed-white: 0 total: 0
+""")
+
 
 def selftest():
     ok = True
 
     def check(name, text, needle):
         nonlocal ok
-        got = "\n".join(evaluate(parse(text)))
+        got = "\n".join(evaluate(parse(text), text))
         if needle not in got:
             ok = False
             print(f"SELFTEST FAIL [{name}]: missing '{needle}'\n{got}")
@@ -218,6 +305,48 @@ def selftest():
     check("prechain", FIXTURE_PRECHAIN, "PRE-CHAIN RUN")
     check("shape-dead-A", FIXTURE_A, "VERDICT [A]")
     check("bundle-B", FIXTURE_B, "VERDICT [B]")
+    check("band-cull-C", FIXTURE_C, "VERDICT [C]")
+    # v6.12: the band-edge walk names the cut — a walk dead at 60 m keeps [C]
+    # with the cut reported; a walk alive to 80 m escalates to [B].
+    FIXTURE_WALK = FIXTURE_C + """
+- leg-1 band walk 30 m: changed-white 410 / total 430 vs the previous step (> 20 = renders)
+- leg-1 band walk 40 m: changed-white 388 / total 402 vs the previous step (> 20 = renders)
+- leg-1 band walk 50 m: changed-white 351 / total 370 vs the previous step (> 20 = renders)
+- leg-1 band walk 60 m: changed-white 22 / total 61 vs the previous step (> 20 = renders)
+- leg-1 band walk 70 m: changed-white 0 / total 8 vs the previous step (> 20 = renders)
+- leg-1 band walk 80 m: changed-white 0 / total 4 vs the previous step (> 20 = renders)
+"""
+    check("band-walk-cut", FIXTURE_WALK, "band walk leg-1: effective render cut ≈ 60 m")
+    # the v6.11.1 colon format must parse standalone (probe_counts.txt only)
+    FIXTURE_COLON = """- leg-2 renderer probe NEAR white px: 562 raw / 562 changed-vs-baseline
+- leg-2 renderer probe FAR white px: 0 raw / 0 changed-vs-baseline
+- leg-2 white dust NEAR changed-white: 19 total: 126
+- leg-2 happy_villager NEAR changed-green: 0 total: 126
+- leg-2 end_rod@Y120 changed-white: 0 total: 0
+- leg-2 white dust@Y120 changed-white: 0 total: 0
+- leg-2 white dust@Y80 changed-white: 0 total: 0
+- leg-2 carrier@Y120 in-band changed-green: 0 total: 0
+- leg-2 end_rod stream-shape changed-white: 765 total: 765
+- leg-2 villager stream-shape changed-green: 0 total: 765
+- burst_close white px: 524 (renderer alive if > 50)
+- burst_far white px: 0 (renderer alive in the marker zone if > 20)
+- leg-2 baseline scene px: 0
+"""
+    gc = parse(FIXTURE_COLON)
+    colon_expect = {
+        "l2_near_endrod": (562, 562), "l2_far_endrod": (0, 0),
+        "l2_whitedust": (19, 126), "l2_villager": (0, 126),
+        "l2_endrod_120": (0, 0), "l2_dust_120": (0, 0), "l2_dust_80": (0, 0),
+        "l2_eraser": (0, 0), "l2_endrod_stream": (765, 765),
+        "l2_villager_stream": (0, 765), "l1_near_endrod": (524,),
+        "l1_far_endrod": (0,), "l2_scene0": (0,),
+    }
+    bad = {k: (gc.get(k), v) for k, v in colon_expect.items() if gc.get(k) != v}
+    if bad:
+        ok = False
+        print(f"SELFTEST FAIL [colon-format]: {bad}")
+    else:
+        print("selftest ok [colon-format]")
     print("SELFTEST:", "GREEN" if ok else "RED")
     return 0 if ok else 1
 
@@ -235,7 +364,7 @@ def main():
         if k in cells:
             print(f"  {k:22s} {fmt(cells[k])}")
     print("== verdict ==")
-    for line in evaluate(cells):
+    for line in evaluate(cells, text):
         print(line)
 
 

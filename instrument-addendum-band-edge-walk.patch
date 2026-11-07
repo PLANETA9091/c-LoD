@@ -1,0 +1,64 @@
+diff --git b/scripts/bench/run_ci_visual.sh b/scripts/bench/run_ci_visual.sh
+index 0000000..0000000 100644
+--- b/scripts/bench/run_ci_visual.sh
++++ b/scripts/bench/run_ci_visual.sh
+@@ -952,6 +952,32 @@ L1VSG=$(echo "$L1VSL" | grep -o 'green=[0-9]*' | cut -d= -f2)
+ L1VST=$(echo "$L1VSL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+ sum "- leg-1 STREAM-SHAPE carrier (happy_villager count=0 x120 NEAR): changed-green ${L1VSG:-?} / total ${L1VST:-?} vs the end_rod stream shot (the healthy twin for the leg-2 per-dot carrier read: ~ 0 green = the 2px color net erases the per-dot carrier hue on a HEALTHY packed client — the expected design read; > 20 = the net misses the per-dot geometry — dot-size/pool class on the healthy leg)"
+ 
++# ---- v6.12 BAND-EDGE WALK (run 42355686504 verdict [C]): graded end_rod
++# bursts along the marker azimuth measure the client's effective particle
++# render radius. Run 42355686504: the VANILLA burst died at 73-80 m
++# (burst_far=0) while NEAR (20 m) rendered 524 — the loaded chunk radius
++# (view-distance 4 = 64 m) is the suspect cut, and the stream's dots live
++# at exactly 75-105 m (decode band [CULL_RADIUS=28, ZONE_FAR=112]). Six
++# bursts at 30/40/50/60/70/80 m, one type (end_rod — eraser-immune white),
++# only the DISTANCE varies; each step diffs against the previous shot (the
++# ~3 s cadence leaves the previous step's dots dead — a dying neighbour
++# inflates total, never white). The largest alive step names the radius:
++# the engine's dots must fit inside it, else they are client-culled before
++# any engine-side mechanism (bundle, pool, eraser) matters.
++note "v6.12 band-edge walk leg-1 (graded 30-80 m end_rod bursts)"
++BW_LAST=11_baseline_settle
++for BWD in 30 40 50 60 70 80; do
++  srv "particle minecraft:end_rod $((VX + BWD)) 150 $CZ 0.2 0.2 0.2 0 400 force"
++  sleep 1
++  shot "15_bandwalk_leg1_${BWD}m" || exit 1
++  BWL=$(changed_class "$BW_LAST" "15_bandwalk_leg1_${BWD}m")
++  BWW=$(echo "$BWL" | grep -o 'white=[0-9]*' | cut -d= -f2)
++  BWT=$(echo "$BWL" | grep -o 'total=[0-9]*' | cut -d= -f2)
++  sum "- leg-1 band walk ${BWD} m: changed-white ${BWW:-?} / total ${BWT:-?} vs the previous step (> 20 = the client renders particles at ${BWD} m; the largest alive step is the effective render radius — the stream's dots at 75-105 m must fit inside it, else they are client-culled before any engine path matters)"
++  BW_LAST="15_bandwalk_leg1_${BWD}m"
++  sleep 2
++done
++
+ # ---- 5. THE LIVE EDIT (no relog!) + probe loop -------------------------------
+ note "placing $MARKER column at $CX,$CZ (y $FILL_Y0..$FILL_Y1)"
+ # v6.4.2 FIX (CI visual run 2026-10-31): the marker zone sits 100 blocks from
+@@ -1352,6 +1378,26 @@ L2VSG=$(echo "$L2VSL" | grep -o 'green=[0-9]*' | cut -d= -f2)
+ L2VST=$(echo "$L2VSL" | grep -o 'total=[0-9]*' | cut -d= -f2)
+ sum "- leg-2 STREAM-SHAPE carrier (happy_villager count=0 x120 NEAR): changed-green ${L2VSG:-?} / total ${L2VST:-?} vs the end_rod stream shot (read against the leg-1 twin: leg-2 ~ leg-1 = the per-dot carrier path behaves like the healthy leg — carrier exonerated at NEAR; leg-2 green > 20 with leg-1 ~ 0 = the eraser is blind on leg 2 at per-dot geometry; leg-2 ~ 0 with end_rod stream alive = the per-dot CARRIER path specifically dies — type/pool class)"
+ echo "- leg-2 villager stream-shape changed-green: ${L2VSG:-?} total: ${L2VST:-?}" >> "$PROBE_LOG"
++
++# ---- v6.12 band-edge walk, leg-2 (the same graded walk on the relog
++# client): run 42355686504 read NEAR alive (562) while FAR died (0) — if
++# leg-2's cut sits at the same radius as leg-1's, the leg-2 zero at the
++# marker band is the SHARED client cull, not a relog-specific death; a
++# shifted cut names a relog-specific radius (a different class entirely).
++note "v6.12 band-edge walk leg-2 (graded 30-80 m end_rod bursts)"
++BW_LAST=14_leg2_baseline
++for BWD in 30 40 50 60 70 80; do
++  srv "particle minecraft:end_rod $((VX + BWD)) 150 $CZ 0.2 0.2 0.2 0 400 force"
++  sleep 1
++  shot "15_bandwalk_leg2_${BWD}m" || exit 1
++  BWL=$(changed_class "$BW_LAST" "15_bandwalk_leg2_${BWD}m")
++  BWW=$(echo "$BWL" | grep -o 'white=[0-9]*' | cut -d= -f2)
++  BWT=$(echo "$BWL" | grep -o 'total=[0-9]*' | cut -d= -f2)
++  sum "- leg-2 band walk ${BWD} m: changed-white ${BWW:-?} / total ${BWT:-?} vs the previous step (> 20 = the relog client renders at ${BWD} m; the same cut as leg-1 = the shared client cull, a shifted cut = relog-specific radius)"
++  echo "- leg-2 band walk ${BWD} m changed-white: ${BWW:-?} total: ${BWT:-?}" >> "$PROBE_LOG"
++  BW_LAST="15_bandwalk_leg2_${BWD}m"
++  sleep 2
++done
+ L2_SCENE_ALIVE=0
+ for k in $(seq 0 11); do
+   assert_online "relog probe $k" || exit 1

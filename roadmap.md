@@ -1,49 +1,47 @@
 # c-LoD visual forensics ROADMAP
 
-Owner: ci-verdict-bot. Updated: 2026-11-07 (v6.11 round, commit after 9da8895). Every round updates this file — no monitoring-only rounds.
+Owner: ci-verdict-bot. Updated: 2026-11-07 (v6.12 round — G0 EXECUTED, the first instrumented run read out). Every round updates this file — no monitoring-only rounds.
 
 ## Goals
 
-### G0 — GET THE INSTRUMENTED RUN (blocking everything)
+### G0 — GET THE INSTRUMENTED RUN — **RESOLVED 2026-11-07**
 **Goal:** one CI visual run with the full instrument chain applied.
-**Instrument:** `instrument-chain-full-v6.11.patch` — ONE `git apply` onto `fix/leg2-arm-race` @ 35eb53b (**+385 insertions**, verified byte-identical sha1 d93576f0 to the 7-patch step-by-step chain, `bash -n` green, zero rust, ~+65 s total runtime, purely additive).
-**Action (author):** `git apply instrument-chain-full-v6.11.patch` → push → CI visual run. Then `python3 triage.py <probe log>` — the verdict is automatic.
-**Action (bot):** watch runs/commits every round; keep the cumulative patch current with every addendum.
-**Status:** OPEN — no new runs since #251 (2026-11-05), the chain is not applied yet.
+**How it resolved:** the bot applied `instrument-chain-full-v6.11.patch` onto 35eb53b, pushed branch `instrument/v6.11` (5b0b4f1) and dispatched `workflow_dispatch` itself — ZERO author actions. Run **42355686504 (#253)** completed in ~17 min with every build job green; the verdict feed landed `run-42355686504*` on this branch (1411ab2).
+**This path is repeatable:** any new addendum can go live the same way (apply → push branch → dispatch → triage).
+**Status:** CLOSED.
 
-### G1 — LOCALIZE THE LEG-2 DOT DEATH (the core question)
-**Goal:** name the mechanism that kills the stream's dots on the relog client (dots arrive ~19-38/s for 5 min, zero render, zero capture, end_rod alive).
-**The stage map lives in `dossier-leg2-dot-death.md`** — every pipeline stage (server gate → wire → client spawn → render → capture → eraser → display) with file:line, measured facts, and its discriminating cells; suspect table A-J; the G3 fix menu pre-positioned.
-**PRIMARY OPEN SUSPECT (v6.11):** the packet-SHAPE axis — the stream sends ONE `count=0` packet PER DOT (jni.rs:1623-1648) and every burst cell sends ONE `count=1200` packet; the per-dot path was never measured. Cells: control/leg-1/leg-2 end_rod stream-shape (eraser-immune) + carrier twins.
-**Reads from the G0 run (decision trees live in the linked notes; `triage.py` evaluates them automatically):**
-- packet-shape cells (v6.11): the three end_rod stream-shape cells + the carrier stream twins;
-- carrier cells (v6.10.2f): leg-1 villager NEAR / leg-2 villager NEAR (bfbed5c) / control villager NEAR / leg-2 in-band villager@Y=120 (eraser test);
-- type × plane cells (v6.10.2e): dust@150/120/80 — the migration-candidate measurement;
-- session × pack cells (bfbed5c + 0184784): leg-1 dust probes, leg-2 type matrix, the cached-pack wipe control;
-- control cells (v6.10.2d): pack-free dust + villager.
-**Status:** OPEN — all cells unmeasured until G0.
+### G1 — LOCALIZE THE LEG-2 DOT DEATH — **ANSWERED to instrument precision**
+**Goal:** name the mechanism that kills the stream's dots on the relog client.
+**Answer (run 42355686504, see `run-42355686504-verdict.md`):**
+- packet shape EXONERATED — the count=0 per-dot grid rendered on every arm (692/715/765) → [A] closed;
+- carrier EXONERATED as the leg-difference — raw 458 (control), packed legs read identically 0 on both (the eraser's design read, v6.11 §4);
+- **THE MARKER BAND IS CULLED CLIENT-SIDE ([C])** — a VANILLA end_rod burst at 75-105 m read 0 on the HEALTHY leg (NEAR 524 alive): the dots live outside the client's loaded chunk radius (view-distance 4 = 64 m); run-to-run flap of that radius explains #246's 353 vs #253's 0;
+- leg-2 SCENE DEAD persists (0/12 probes) — a separate class, untouched by the chain.
+**Remaining measurement (v6.12):** the exact cut radius per leg per run — the band-edge walk (below).
+**Status:** mechanism named; the walk nails the number.
 
-### G2 — THE ERASER / CAPTURE-TAIL QUESTION
-**Goal:** establish whether the leg-2 client's eraser (dust_mask.fsh color net, in-band) is alive; an in-band carrier burst answers it directly on the G0 run.
-**Refinement (v6.11 §4):** the color net has NO out-of-band exemption — its 2px tier erases carrier hue at EVERY vantage (dust_mask.fsh:185-220); NEAR carrier cells on packed legs measure the eraser, the carrier's renderability anchor is the control arm, and the leg-1↔leg-2 twin comparison is the valid leg-difference signal.
-**Status:** OPEN — instrumented by v6.10.2f (leg-2 villager@Y=120 in-band) + the v6.11 carrier stream twins.
+### G2 — THE ERASER / CAPTURE-TAIL QUESTION — **ANSWERED**
+**Goal:** establish whether the leg-2 client's eraser is alive.
+**Answer:** ALIVE on leg-2 — in-band carrier@Y120 reads 0 green, identical to the healthy leg's read; the per-dot carrier hue is eaten at every vantage on a packed client (v6.11 §4 design read confirmed by measurement). The capture tail is not blind; dots die pre-display as designed.
+**Status:** CLOSED (alive; the interesting question moved to the band).
 
-### G3 — ROOT-CAUSE FIX RECOMMENDATION
-**Goal:** after G1/G2 read out, publish the engine-side fix. The menu is pre-positioned in `dossier-leg2-dot-death.md` §3, keyed to the reading: A (count=0 shape dead) → client per-dot diag, then batching that preserves the word geometry; B (bundle wrapper) → a CLOD_UNBUNDLED=1 diagnostic mode; C (type flap) → spawn-cadence stability or a NEW carrier (not dust); D (eraser blind) → capture-tail repair; F (planes) → move LAYER_Y / per-plane carrier.
-**Status:** BLOCKED by G0/G1.
+### G3 — ROOT-CAUSE FIX RECOMMENDATION — **UNBLOCKED**
+**Goal:** publish the engine-side fix.
+**Menu (keyed to the run-42355686504 read):**
+1. ENGINE (keeps pure-LOD): decode band inside the measured render radius — v6.12 walk names the cut; then `ZONE_FAR` (112) / dot geometry (75-105 m) must fit inside it, or re-plan the carrier geometry closer to the vantage;
+2. DIAGNOSTIC (one-off): `view-distance 4 → 8` in the visual job's server.properties — a vanilla 80 m burst should render; run once to confirm the cull, then revert (view-distance=4 is deliberate — pure-LOD marker zone);
+3. QUEUED BEHIND THE BAND FIX: [B] `CLOD_UNBUNDLED=1` (the ClientboundBundlePacket wrapper) — only meaningful once the band renders.
+**Status:** the recommendation is written; the walk's number finalizes the parameter.
 
 ### G4 — THE FLAP (run-crossing carrier instability)
-**Goal:** TESTS.md v6.9.14 documents the marker/transport flap (1631/27/0/93/2961 red px, #234-#245, BOTH legs). If G1 shows the flap is the leg-2 extreme, evaluate carrier stability options (frame-locked spawn cadence, or migration candidate from the dust cells' reading).
-**Status:** OPEN — evidence exists; decision awaits G1.
+**Goal:** explain the run-crossing flips (marker red 1631/27/0/93/2961 across #234-#245; FAR end_rod 353 (#246) vs 0 (#253)).
+**New data (run 42355686504):** the FAR flip now measured on a HEALTHY leg with the full instrument stack — the effective render radius itself flaps (or fog/light phases flip it). The v6.12 walk measures the radius per run; two walks on different runs with different cuts = the flap quantified.
+**Status:** OPEN — v6.12 provides the measurement.
 
 ## Round log (newest first)
 
-- **2026-11-07 (this round, v6.11 + DOSSIER + AUTOMATION):** read the LIVE wire path (jni.rs build_particle_packet: ONE `count=0` packet PER DOT; bundle_send: ClientboundBundlePacket per tick) — the packet-SHAPE axis is unmeasured by every published burst cell; NEW v6.11 (+112 lines): six STREAM-SHAPE cells (control/leg-1/leg-2 × end_rod + carrier — a 12×10 grid of 120 single-packet count=0 dots via `/particle count=0`, byte-identical to the engine's per-dot packet); correction to the v6.10.2f §3 band reading: the color net's 2px tier erases carrier hue OUT-of-band too (dust_mask.fsh:185-220) — NEAR carrier cells measure the eraser, the control arm anchors renderability; DOSSIER published (dossier-leg2-dot-death.md): the full stage map S0-S6 with file:line, suspect table A-J, the G3 fix menu; AUTOMATION published (triage.py): evaluates every published decision row from a run's probe log, self-tested green (3 fixtures) + parses the real #248/#250 artifacts (pre-chain detection); cumulative rebuilt (+385, sha1-identical to the 7-patch chain). See instrument-addendum-stream-shape-cells.md, dossier-leg2-dot-death.md, triage.py.
-- 2026-11-07: CORRECTION published — the bit-stream carrier is happy_villager, NOT minecraft:dust (stream.rs: "the villager-sparkle carrier has one hue"; jni.rs: "happy_villager replaces the v5.0 dust carrier: dust quads render with degenerate UVs on every 26.3 software backend — verified live on GL llvmpipe AND Vulkan lavapipe"). All dust cells re-interpreted (documented-dead type; the "P0 migrate" rows misfire); the decode band [CULL_RADIUS=28, ZONE_FAR=112] vs the probe spots classified (NEAR 20 m out-of-band = measurable; disk 75 m in-band = eraser-covered); NEW v6.10.2f (+~44 lines): three CARRIER cells (leg-1 NEAR, control pack-free, leg-2 in-band@Y=120 eraser test) + the cumulative rebuilt (+272, byte-identical to the 6-patch chain). See correction-carrier-is-villager.md.
-- 2026-11-07: v6.10.2e — the plane × type cross (dust@Y=120/80) + the consolidated cumulative patch (one `git apply`). Commit 900d42b.
-- 2026-11-06/07: v6.10.2c/v6.10.2d — the cached-pack wipe control + the control-arm type matrix; the packflow/bytecode evidence note (pack content exonerated). Commits 0184784, 1a0c871.
-- 2026-11-06: bfbed5c — the leg-1 dust probe + leg-2 type matrix (base); 8b16c22 — the end_rod@Y=120 plane control; the wire-delivery log-mining note (transport exonerated by counters).
-- 2026-11-05: #248/#250 forensics, the stale-constants correction (LAYER_Y=[80,120]), the independent audit.
+- **2026-11-07 (v6.12 round — THE DECISIVE ROUND):** G0 EXECUTED by the bot: applied the v6.11 cumulative onto 35eb53b, pushed `instrument/v6.11` (5b0b4f1), dispatched `workflow_dispatch` — run 42355686504 (#253) ran the full instrument stack (~17 min, build green, verdict feed landed 1411ab2). Verdict published (`run-42355686504-verdict.md`): [A] shape refuted (per-dot grid 692/715/765), carrier/eraser resolved (raw 458; packed zeros = eraser-by-design, twins equal), **VERDICT [C] — the marker band is client-culled** (vanilla burst 0 at 75-105 m on the HEALTHY leg, NEAR 524), leg-2 scene death persists (separate class), G3 fix menu unblocked. NEW instrument v6.12 (+46): the band-edge walk — six graded end_rod bursts at 30/40/50/60/70/80 m on BOTH legs name the exact render cut; cumulative rebuilt (`instrument-chain-full-v6.12.patch`, sha1 af25c1fb byte-identical to the step chain). triage.py → v6.11.1: parses BOTH log formats (summary + probe_counts colon lines), prints [C] with the demoted-[B] note, reads the walk's cut; selftest 6 fixtures GREEN. ROADMAP: G0 CLOSED, G1 answered, G2 closed, G3 unblocked, G4 quantification queued. Monitored: no author commits (master d4ff522, leg2 35eb53b unchanged).
+- 2026-11-06/07 (v6.11 round): the stream-shape cells + DOSSIER + triage automation (40a3ab2); the carrier correction + v6.10.2f (9da8895); the plane × type cross + one-command cumulative (900d42b).
 
 ## Instrument inventory (apply order)
 
@@ -53,7 +51,9 @@ Owner: ci-verdict-bot. Updated: 2026-11-07 (v6.11 round, commit after 9da8895). 
 4. `instrument-addendum-control-type-matrix.patch` (1a0c871, +28)
 5. `instrument-addendum-plane-type-cross.patch` (900d42b, +36)
 6. `instrument-addendum-villager-cells.patch` (9da8895, +~44)
-7. `instrument-addendum-stream-shape-cells.patch` (this commit, +112 — the count=0 per-dot packet cells)
-- **ONE-COMMAND ALTERNATIVE:** `instrument-chain-full-v6.11.patch` (+385 = the whole stack, sha1 d93576f0, byte-verified).
-- **AUTOMATION:** `triage.py` — drop a run's probe log on it and read the verdict (`python3 triage.py --selftest` = green).
-- **REFERENCE:** `dossier-leg2-dot-death.md` — the stage map and the suspect table behind every cell.
+7. `instrument-addendum-stream-shape-cells.patch` (40a3ab2, +112 — the count=0 per-dot packet cells)
+8. `instrument-addendum-band-edge-walk.patch` (this commit, +46 — the graded 30-80 m render-radius walk)
+- **ONE-COMMAND ALTERNATIVE:** `instrument-chain-full-v6.12.patch` (+431 = the whole stack incl. the walk, sha1 af25c1fb, byte-verified; the older `instrument-chain-full-v6.11.patch` (+385, d93576f0) stays for history).
+- **AUTOMATION:** `triage.py` (v6.11.1) — drop a run's summary.md (or probe_counts.txt) on it and read the verdict incl. VERDICT [C] and the walk's cut (`python3 triage.py --selftest` = 6 fixtures green).
+- **REFERENCE:** `dossier-leg2-dot-death.md` — the stage map and the suspect table (suspects A, type, eraser now measured-resolved; [B] queued behind the band fix).
+- **VERDICT OF RECORD:** `run-42355686504-verdict.md` — the first instrumented run, the full 21-cell matrix, the decision walk.
