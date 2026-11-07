@@ -72,7 +72,10 @@ SHOT_N=0
 shot() { # name yaw pitch x y z
   srv "tp Stepan $4 $5 $6 $2 $3"
   sleep 3
-  ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -frames:v 1 "$SHOTS/$1.png" \
+  # -nostdin (v6.16.2): ffmpeg eats stdin — inside the matrix read-loop it
+  # swallowed one byte of every next row, mangling the shot names
+  # (run #275: 10_marker_ray -> 0_marker_ray).
+  ffmpeg -nostdin -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 -i :99 -frames:v 1 "$SHOTS/$1.png" \
     || t "ffmpeg FAILED on $1 (rc=$?) — continuing, the rest of the matrix still shoots"
   SHOT_N=$((SHOT_N + 1))
   t "shot $1 ok ($SHOT_N/$PARITY_N)"
@@ -86,7 +89,7 @@ shot() { # name yaw pitch x y z
 PARITY="$BENCH/parity_vantages.txt"
 PARITY_N=$(grep -cv -e '^$' -e '^#' "$PARITY")
 voxy_tour() { # every row except 09_after_mesh (it re-shoots after the lap wait)
-  while read -r PNAME PYAW PPITCH PX PY PZ; do
+  while read -r PNAME PYAW PPITCH PX PY PZ <&3; do
     case "$PNAME" in ''|\#*) continue;; esac
     [ "$PNAME" = "09_after_mesh" ] && continue
     # v6.16.1: arithmetic evaluation — "CX-75" must BECOME -1005 (the tp
@@ -94,7 +97,7 @@ voxy_tour() { # every row except 09_after_mesh (it re-shoots after the lap wait)
     # produced). Decimal y values never enter $(()) — they pass through.
     PX=$(( ${PX//CX/$CX} )); PZ=$(( ${PZ//CZ/$CZ} ))
     shot "$PNAME" "$PYAW" "$PPITCH" "$PX" "$PY" "$PZ"
-  done < "$PARITY"
+  done 3< "$PARITY"
 }
 
 voxy_tour

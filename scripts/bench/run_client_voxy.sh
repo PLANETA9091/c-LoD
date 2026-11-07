@@ -100,7 +100,7 @@ nohup "$JAVA" -Xmx"${VOXY_CLIENT_XMX:-700M}" -XX:MaxDirectMemorySize="${VOXY_CLI
   --accessToken 0 \
   --userType legacy \
   --versionType release \
-  --width 640 --height 360 \
+  --width 1280 --height 720 \
   --quickPlayMultiplayer "127.0.0.1:25565" \
   > /tmp/voxy_client.log 2>&1 &
 CLI=$!

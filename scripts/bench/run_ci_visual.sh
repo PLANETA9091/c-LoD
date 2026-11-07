@@ -140,7 +140,9 @@ assert_online() { # $1 = tag — fail fast once the client is out of the game
 }
 
 shot() { # name
-  ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 \
+  # -nostdin (v6.16.2): ffmpeg eats stdin — inside the parity tour's
+  # matrix read-loop it mangled every shot name after the first (#275).
+  ffmpeg -nostdin -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 \
     -i :99 -frames:v 1 "$SHOTS/$1.png" 2>>"$SHOTS/ffmpeg.err" \
     && note "shot $1" || { fail "screenshot $1 failed"; return 1; }
 }
@@ -1071,7 +1073,7 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   sum "- parity tour: $PTOT vantages (the voxy-reference matrix, session-1 client)"
   ct "parity tour start"
   PN=0
-  while read -r PNAME PYAW PPITCH PX PY PZ; do
+  while read -r PNAME PYAW PPITCH PX PY PZ <&3; do
     case "$PNAME" in ''|\#*) continue;; esac
     # v6.16.1: the row tokens go through ARITHMETIC evaluation — "CX-75"
     # must become -1005, not the literal string "-930-75" (a tp arg the
@@ -1083,7 +1085,7 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     PN=$((PN + 1))
     shot "parity/$PNAME" || true
     ct "parity shot $PNAME ($PN/$PTOT)"
-  done < "$PARITY"
+  done 3< "$PARITY"
   sum "- parity tour done: $PN shots in parity/ (the gate pairs and diffs them)"
 fi
 
