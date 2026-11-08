@@ -504,14 +504,13 @@ sum "- GL: ${GLINFO:-unavailable (glxinfo/xvfb-run missing)}"
 # the client's committed decode state rides every probe screenshot as two
 # panels on the right edge (color lattice + height bytes), so a lost dot
 # (the v6.6.2 fragility) is VISIBLE as lens_black instead of guessed.
-# v6.18.2: the session-1 pack ALSO carries the un-fog engagement mask
-# (unfog=true;unfog_debug=true — the debug_unfog chain: lens + mask) — the
-# §5b parity_dbg tour then shows WHERE the vanilla->voxy fog swap fires per
-# vantage (GREEN), where the vanilla fog is unrecoverable (RED), where the
-# camera channel was blind (BLUE). The transport probes are unaffected: the
-# swap is a no-op below the rd-pair start (115.2 m at vd 8), the marker
-# zone sits at 75 m.
-export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=true;unfog=true;unfog_debug=true"
+# v6.18.5 REVERT: the session-1 pack must NOT carry the un-fog engagement
+# mask — run #290 proved the mask's overlays SATURATE THE TRANSPORT PROBES
+# (probe 0 red=129083 = the mask's red overlay counted as marker red;
+# scene=128875 = the overlays; the LEG-1/LEG-2 "PASS"es of #290 are
+# threshold artifacts, not a transport recovery). The engagement evidence
+# lives on the §7b mask8 client only (the parity world, vd 8).
+export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=true"
 CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" || {
   echo "FAIL: boot/gates"; tail -40 /tmp/server.log; exit 1; }
 sum "- boot + gates OK ($(date -u +%H:%M:%S))"
@@ -1099,47 +1098,9 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     ct "parity debug shot $PNAME ($PN/$PTOT)"
   done 3< "$PARITY"
   sum "- parity debug tour done: $PN shots in parity_dbg/ (the §7b world session feeds the gate)"
-  # v6.18.4 MASK FORENSICS: the dbg pack's un-fog pass is the ENGAGEMENT
-  # MASK — count its decisions per vantage (GREEN = the vanilla->voxy fog
-  # swap applied, RED = the vanilla fog saturated (unrecoverable), BLUE =
-  # the camera channel blind, DIM = the fogs already agree) and decode the
-  # fog-state block the mask prints into the sky at (300,2)/(301,2):
-  #   (300,2) = (envStart/8, envEnd/8, rdEnd/16, marker 200)
-  #   (301,2) = (FogColor.rgb, conf)
-  # The live pair ends the fog-model guessing (the #289 mask showed the RED
-  # band the static model called impossible).
-  python3 - "$PDIR" "$PARITY" <<'PYEOF' 2>/dev/null || sum "- mask forensics: python step failed (non-fatal)"
-import sys, os
-from PIL import Image
-d, matrix = sys.argv[1], sys.argv[2]
-GREEN = (60, 220, 80); RED = (250, 60, 50); BLUE = (70, 100, 250)
-def close(px, ref, tol=90):
-    return all(abs(int(a) - b) < tol for a, b in zip(px[:3], ref))
-rows = [l.split() for l in open(matrix) if l.strip() and not l.startswith('#')]
-for name, *_ in rows:
-    p = os.path.join(d, f"{name}.png")
-    if not os.path.exists(p):
-        continue
-    im = Image.open(p).convert("RGB")
-    px = im.load(); w, h = im.size
-    g = r = b = dim = 0
-    for y in range(0, h, 4):
-        for x in range(0, w, 4):
-            c = px[x, y]
-            if close(c, GREEN): g += 1
-            elif close(c, RED): r += 1
-            elif close(c, BLUE): b += 1
-            elif sum(c) < 330 and abs(c[0]-c[1]) < 24 and abs(c[1]-c[2]) < 24: dim += 1
-    print(f"- mask {name}: green={g*16} red={r*16} blue={b*16} dim={dim*16} (px, sampled /16)")
-st = os.path.join(d, "01_aerial_west.png")
-if os.path.exists(st):
-    im = Image.open(st).convert("RGB"); px = im.load()
-    a = px[300, 2]; c = px[301, 2]
-    # the screen grab carries RGB only (the marker byte rides alpha and is
-    # lost) — decode the pair straight from the RGB bytes:
-    print(f"- fog state raw (300,2)=({a[0]},{a[1]},{a[2]}) (301,2)=({c[0]},{c[1]},{c[2]})")
-    print(f"- fog state decoded: envStart={a[0]*8} envEnd={a[1]*8} rdEnd={a[2]*16} fogColor=({c[0]},{c[1]},{c[2]})")
-PYEOF
+  # v6.18.5: the §5b mask forensics block is GONE — the session-1 pack no
+  # longer carries the mask (the #290 probe pollution); the engagement
+  # evidence = the §7b mask8 client below.
 fi
 
 # ---- 6. leg 2: kick + rejoin, the marker must persist ------------------------
@@ -1434,16 +1395,38 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     shot "parity_dbg8/$MN" || true
   done
   sum "- mask8: the un-fog engagement masks shot on the PARITY WORLD (vd 8) — parity_dbg8/01m|07m|10m"
-  # The fog state from the PARITY WORLD client — the pair the §7b frames
-  # were actually fogged with (the §5b state rides the vd-4 session).
-  python3 - "$SHOTS/parity_dbg8/01m.png" <<'PYEOF' 2>/dev/null || sum "- mask8 state: decode failed (non-fatal)"
-import sys
+  # v6.18.5: the mask forensics + the fog-state decode go through `sum` —
+  # the #290 python printed to stdout and never reached the summary.
+  M8FORENSICS=$(mktemp)
+  python3 - "$SHOTS/parity_dbg8" > "$M8FORENSICS" 2>/dev/null <<'PYEOF' || true
+import sys, os
 from PIL import Image
-im = Image.open(sys.argv[1]).convert("RGB"); px = im.load()
-a = px[300, 2]; c = px[301, 2]
-print(f"- mask8 fog state raw (300,2)=({a[0]},{a[1]},{a[2]}) (301,2)=({c[0]},{c[1]},{c[2]})")
-print(f"- mask8 fog state decoded: envStart={a[0]*8} envEnd={a[1]*8} rdEnd={a[2]*16} fogColor=({c[0]},{c[1]},{c[2]})")
+GREEN = (60, 220, 80); RED = (250, 60, 50); BLUE = (70, 100, 250)
+def close(px, ref, tol=90):
+    return all(abs(int(a) - b) < tol for a, b in zip(px[:3], ref))
+for name in ("01m", "07m", "10m"):
+    p = os.path.join(sys.argv[1], f"{name}.png")
+    if not os.path.exists(p):
+        continue
+    im = Image.open(p).convert("RGB"); px = im.load(); w, h = im.size
+    g = r = b = dim = 0
+    for y in range(0, h, 4):
+        for x in range(0, w, 4):
+            c = px[x, y]
+            if close(c, GREEN): g += 1
+            elif close(c, RED): r += 1
+            elif close(c, BLUE): b += 1
+            elif sum(c) < 330 and abs(c[0]-c[1]) < 24 and abs(c[1]-c[2]) < 24: dim += 1
+    print(f"- mask8 {name}: green={g*16} red={r*16} blue={b*16} dim={dim*16} (px, sampled /16)")
+st = os.path.join(sys.argv[1], "01m.png")
+if os.path.exists(st):
+    im = Image.open(st).convert("RGB"); px = im.load()
+    a = px[300, 2]; c = px[301, 2]
+    print(f"- mask8 fog state raw (300,2)=({a[0]},{a[1]},{a[2]}) (301,2)=({c[0]},{c[1]},{c[2]})")
+    print(f"- mask8 fog state decoded: envStart={a[0]*8} envEnd={a[1]*8} rdEnd={a[2]*16} fogColor=({c[0]},{c[1]},{c[2]})")
 PYEOF
+  while IFS= read -r l; do sum "$l"; done < "$M8FORENSICS"
+  rm -f "$M8FORENSICS"
 fi
 
 if [ "$FAILURES" = "0" ] && [ "$FOUND1" = "1" ] && [ "$FOUND2" = "1" ]; then
