@@ -24,3 +24,11 @@
 # voxy-mesh ground AND exposes any dust column the eraser missed (a painted
 # column here would light up the diff — that is the point of the row).
 11_topdown 90 89 CX 140 CZ
+# v6.18.3 THE MESH RACE ROW: 07_far_north shot a SECOND time at the tour's
+# end (#286 vs #287 vs #288: the voxy far-north mesh arrives mid-tour — the
+# importer threads race the 10 s settle, so the pair flips between the
+# honest march-vs-mesh gap (85.4% in #286) and vacuity (99.5% in #287) and
+# the mid-state (92.3% in #288)). By the SECOND visit the importer had the
+# whole tour to catch up; both legs shoot the same row, the differ pairs by
+# name.
+12_far_north_re 180 5 CX 160 -220
