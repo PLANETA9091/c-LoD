@@ -601,7 +601,10 @@ mod tests {
                 .1,
         )
         .to_string();
-        assert!(!raw_fsh.contains("#define MESH_DEBUG"), "probe leaked to prod");
+        assert!(
+            !raw_fsh.contains("#define MESH_DEBUG"),
+            "probe leaked to prod"
+        );
         assert!(raw_fsh.contains("// __MESH_DEBUG__"), "marker must stay");
         let dbg = build(&Config::parse("mesh_debug=true;mesh_paint=true"));
         let dbg_fsh = String::from_utf8_lossy(
@@ -613,7 +616,10 @@ mod tests {
         )
         .to_string();
         assert!(dbg_fsh.contains("#define MESH_DEBUG 1"), "probe must ship");
-        assert!(!dbg_fsh.contains("// __MESH_DEBUG__"), "marker must be replaced");
+        assert!(
+            !dbg_fsh.contains("// __MESH_DEBUG__"),
+            "marker must be replaced"
+        );
         assert_ne!(dbg.sha1_hex, raw.sha1_hex);
     }
 
