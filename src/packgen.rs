@@ -127,6 +127,9 @@ pub fn build(cfg: &Config) -> Pack {
         ("__ATMO_STRENGTH__", fmt_f(0.92)),
         // 26.3 device depth: d = depth_near / eyeZ (infinite far, sky == 0.0).
         ("__DEPTH_NEAR__", fmt_f(cfg.depth_near)),
+        // v6.19 G8d MESH PAINT: 1.0 arms the march's vanilla path (the
+        // depth-tested paint-over in lod_terrain.fsh).
+        ("__MESH_PAINT__", fmt_f(if cfg.mesh_paint { 1.0 } else { 0.0 })),
         // SKY-GRID geometry (must match src/stream.rs exactly).
         // v6.4.2: the config names the disk CENTER (see engine::arm_from_config);
         // GridInfo.xy is the disk ORIGIN (the shader maps world->cell via
@@ -345,6 +348,10 @@ mod tests {
         let blob = String::from_utf8_lossy(&pack.zip);
         assert!(!blob.contains("__FOV__"), "tokens must be substituted");
         assert!(
+            !blob.contains("__MESH_PAINT__"),
+            "mesh-paint token must be substituted"
+        );
+        assert!(
             !blob.contains("__ORIGIN_X__"),
             "grid tokens must be substituted"
         );
@@ -527,6 +534,43 @@ mod tests {
             both_chain.contains("clod:post/unfog") && both_chain.contains("clod:post/debug_lens"),
             "the combo chain carries both passes"
         );
+    }
+
+    #[test]
+    fn mesh_paint_flag_rides_the_lod_terrain_ubo() {
+        // v6.19 G8d: production ships PaintParams.y = 0.0 (the vanilla path
+        // stays pass-through); mesh_paint=true flips the SAME chain variant
+        // to 1.0 — the parity-world knob, one re-push on the runner.
+        let extract_paint = |zip: &Vec<u8>| -> String {
+            let entries = zip_entries(zip);
+            let chain = String::from_utf8_lossy(
+                &entries
+                    .iter()
+                    .find(|(n, _)| n == "assets/clod/post_effect/lod_terrain.json")
+                    .unwrap()
+                    .1,
+            )
+            .to_string();
+            assert!(chain.contains("ClodPaint"), "PaintParams block missing");
+            assert!(!chain.contains("__MESH_PAINT__"), "token unsubstituted");
+            chain
+        };
+        let prod = build(&Config::parse(""));
+        let prod_chain = extract_paint(&prod.zip);
+        assert!(
+            prod_chain.contains("\"value\": [0.05, 0.0, 0.0, 0.0]"),
+            "production PaintParams must be depth-near + disabled: {prod_chain}"
+        );
+        let painted = build(&Config::parse("mesh_paint=true"));
+        let painted_chain = extract_paint(&painted.zip);
+        assert!(
+            painted_chain.contains("\"value\": [0.05, 1, 0.0, 0.0]"),
+            "mesh_paint=true must arm PaintParams.y: {painted_chain}"
+        );
+        assert_ne!(painted.sha1_hex, prod.sha1_hex, "pack SHA must change");
+        // Determinism on the new knob.
+        let painted2 = build(&Config::parse("mesh_paint=true"));
+        assert_eq!(painted.zip, painted2.zip);
     }
 
     #[test]

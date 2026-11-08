@@ -34,7 +34,13 @@
 // The light term is the exact vanilla 26.3 overworld lightmap texel (0,15)
 // reconstructed from the day.json keyframes driven by the live fog color.
 //
-// Non-sky pixels pass through untouched: real chunks always win.
+// v6.19 G8d MESH PAINT: non-sky pixels no longer pass through untouched.
+// The vanilla fragment's ray distance is reconstructed from the device depth,
+// the heightfield is marched up to it, and a hit paints the unified march
+// look OVER the vanilla pixel (mesh_paint=true): our whole frame becomes one
+// representation — the march — exactly like the voxy leg renders its mesh
+// everywhere it holds data. Where vanilla is genuinely closer, vanilla keeps
+// the pixel. mesh_paint=false keeps the pre-G8d behavior byte-for-byte.
 
 uniform sampler2D InSampler;      // minecraft:main color
 uniform sampler2D InDepthSampler; // minecraft:main depth
@@ -67,6 +73,14 @@ layout(std140) uniform ClodParams {
 // fog payload row arrives; live fog replaces it the moment the sky is seen.
 layout(std140) uniform ClodFog {
     vec4 FogParams;
+};
+
+// v6.19 G8d: x = 26.3 projection near plane (device depth linearization,
+// live-verified: d = near/eyeZ, infinite far — the same constant the capture
+// passes decode with), y = mesh paint enable (1.0 = the march depth-tests
+// and paints over the vanilla band).
+layout(std140) uniform ClodPaint {
+    vec4 PaintParams;
 };
 
 layout(std140) uniform ClodColors {
@@ -430,6 +444,77 @@ vec3 erase_dust(float r) {
     return texture(InSampler, texCoord).rgb;
 }
 
+// ---- the march (v6.19: extracted for the G8d dual-path caller) -------------
+// First ENTERING crossing of the streamed surface along the view ray,
+// sampled from t0 up to tCap. Steps grow with the screen-space footprint of
+// one streamed cell; a 7-step bisection converges on the crossing. Returns
+// -1.0 when the ray never enters the field (open sky, out-of-data, or the
+// ceiling/box early-out).
+float march_terrain(vec3 cam, vec3 dir, float t0, float tCap, float tanH,
+                    float cell, float horizon) {
+    // Rays that leave the heightfield from above can never hit: early-out
+    // against the ceiling + the march box.
+    if (dir.y > 0.0) {
+        float toCeil = (RegionInfo.w + 8.0 - cam.y) / dir.y;
+        float toEdge = 1.0e9;
+        if (dir.x > 0.0) toEdge = min(toEdge, (cam.x + horizon - cam.x) / dir.x);
+        if (dir.x < 0.0) toEdge = min(toEdge, (cam.x - horizon - cam.x) / dir.x);
+        if (dir.z > 0.0) toEdge = min(toEdge, (cam.z + horizon - cam.z) / dir.z);
+        if (dir.z < 0.0) toEdge = min(toEdge, (cam.z - horizon - cam.z) / dir.z);
+        if (toCeil < toEdge) {
+            return -1.0;
+        }
+    }
+
+    float t = t0;
+    float dt = max(cell * 0.5, t * (2.0 * tanH / max(ScreenSize.y, 1.0)));
+
+    // Sign convention: above = groundY - rayY; POSITIVE means the ray is
+    // UNDER the surface. A hit is the ENTERING crossing (above-ground ->
+    // underground). The seed is the UNCLAMPED sample at the march start —
+    // a ray born inside the field (the eye under a canopy cell) flags no
+    // entering crossing until it exits and re-enters, so those pixels stay
+    // vanilla (conservative; the v5.x camera seed was dead — the first loop
+    // iteration overwrote it with exactly this unclamped start sample).
+    bool wflag; bool okflag;
+    float prevT = t0;
+    float prevDiff = ground_at(cam.xz + dir.xz * t0, smooth_w(t0), 0.0, wflag, okflag)
+                     - (cam.y + dir.y * t0);
+
+    for (int i = 0; i < MAX_STEPS; ++i) {
+        t = min(t + dt, tCap);
+        dt = max(cell * 0.5, t * (2.0 * tanH / max(ScreenSize.y, 1.0)));
+
+        vec2 xz = cam.xz + dir.xz * t;
+        float above = ground_at(xz, smooth_w(t), 0.0, wflag, okflag) - (cam.y + dir.y * t);
+
+        if (above > 0.0 && prevDiff <= 0.0) {
+            // Entering crossing between prevT and t; bisection converges on
+            // the first sample where the ray is underground.
+            float lo = prevT;
+            float hi = t;
+            for (int b = 0; b < BISECT; ++b) {
+                float mid = (lo + hi) * 0.5;
+                vec2 mxz = cam.xz + dir.xz * mid;
+                bool mw; bool mo;
+                float g = ground_at(mxz, smooth_w(mid), 0.0, mw, mo);
+                if (g - (cam.y + dir.y * mid) > 0.0) {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            return (lo + hi) * 0.5;
+        }
+        prevT = t;
+        prevDiff = above;
+        if (t >= tCap) {
+            break;
+        }
+    }
+    return -1.0;
+}
+
 void main() {
     vec4 scene = texture(InSampler, texCoord);
     float depth = texture(InDepthSampler, texCoord).r;
@@ -447,12 +532,7 @@ void main() {
 
     // 26.3 device depth (live-verified): d = near/eyeZ, infinite far plane —
     // the sky and the sun/moon quads sit at EXACTLY 0.0, real terrain reads
-    // positive values that grow with proximity. Real chunks always win.
-    if (depth > 1.0e-6) {
-        fragColor = scene;
-        return;
-    }
-
+    // positive values that grow with proximity.
     vec4 rot = texelFetch(RotSampler, ivec2(0, 0), 0);
     float conf = rot.b;
     float minConf = LodParams.w;
@@ -490,72 +570,40 @@ void main() {
     // stale data beyond that is stamp-rejected anyway.
     float horizon = region * 2.0;
 
-    // Rays that leave the heightfield from above can never hit: early-out
-    // against the ceiling + the march box.
-    if (dir.y > 0.0) {
-        float toCeil = (maxY + 8.0 - cam.y) / dir.y;
-        float toEdge = 1.0e9;
-        if (dir.x > 0.0) toEdge = min(toEdge, (cam.x + horizon - cam.x) / dir.x);
-        if (dir.x < 0.0) toEdge = min(toEdge, (cam.x - horizon - cam.x) / dir.x);
-        if (dir.z > 0.0) toEdge = min(toEdge, (cam.z + horizon - cam.z) / dir.z);
-        if (dir.z < 0.0) toEdge = min(toEdge, (cam.z - horizon - cam.z) / dir.z);
-        if (toCeil < toEdge) {
-            fragColor = scene; // leaves the heightfield from above: sky
+    // v6.19 G8d MESH PAINT — the vanilla path. The vanilla fragment's ray
+    // distance is reconstructed from the device depth (eyeZ = DEPTH_NEAR /
+    // depth; a point t along the view ray sits at view-z t*dot(dir,F)), the
+    // heightfield is marched from just ahead of the eye UP TO that distance,
+    // and a hit paints the unified march look OVER the vanilla pixel (the
+    // run #292 verdict: the representation gap is the 01-10 diff class —
+    // voxy renders its greedy-quad mesh of the same blocks, our client the
+    // vanilla chunk renderer; the march is the only painter we own). The
+    // march cap tVan*1.15+4 IS the paint rule — the surface must stand in
+    // front of the vanilla geometry, with a +15%/4 m slack absorbing the
+    // 2 m cell quantization and the reconstructed-basis error. Where
+    // vanilla is genuinely closer (builds, entities), vanilla keeps the
+    // pixel. mesh_paint=false keeps the pre-G8d pass-through.
+    float tVan = -1.0;
+    if (depth > 1.0e-6) {
+        if (PaintParams.y < 0.5) {
+            fragColor = scene; // real chunks always win (pre-G8d behavior)
             return;
         }
+        float eyeZ = PaintParams.x / depth;
+        tVan = eyeZ / max(dot(dir, F), 1.0e-4);
     }
     if (dir.y == 0.0) {
         dir.y = 1.0e-6;
     }
 
-    // March: start at the LOD near edge (real chunks live inside it), step
-    // proportional to the screen-space footprint of one streamed cell.
-    float t = near;
-    float dt = max(cell * 0.5, t * (2.0 * tanH / max(ScreenSize.y, 1.0)));
-    float tHit = -1.0;
-
-    // Sign convention: above = groundY - rayY; POSITIVE means the ray is
-    // UNDER the surface. A hit is the ENTERING crossing (above-ground ->
-    // underground), seeded at the camera (t = 0, clamped above-ground).
-    bool dw; bool dok;
-    float prevT = 0.0;
-    float prevDiff = min(ground_at(cam.xz, 0.0, 0.0, dw, dok) - cam.y, -1.0);
-
-    vec2 xz = cam.xz + dir.xz * t;
-    bool wflag; bool okflag;
-    float above = ground_at(xz, smooth_w(t), 0.0, wflag, okflag) - (cam.y + dir.y * t);
-
-    for (int i = 0; i < MAX_STEPS; ++i) {
-        prevT = t;
-        prevDiff = above;
-        t = min(t + dt, horizon);
-        dt = max(cell * 0.5, t * (2.0 * tanH / max(ScreenSize.y, 1.0)));
-
-        xz = cam.xz + dir.xz * t;
-        above = ground_at(xz, smooth_w(t), 0.0, wflag, okflag) - (cam.y + dir.y * t);
-
-        if (above > 0.0 && prevDiff <= 0.0) {
-            // Entering crossing between prevT and t; bisection converges on
-            // the first sample where the ray is underground.
-            float lo = prevT;
-            float hi = t;
-            for (int b = 0; b < BISECT; ++b) {
-                float mid = (lo + hi) * 0.5;
-                vec2 mxz = cam.xz + dir.xz * mid;
-                bool mw; bool mo;
-                float g = ground_at(mxz, smooth_w(mid), 0.0, mw, mo);
-                if (g - (cam.y + dir.y * mid) > 0.0) {
-                    hi = mid;
-                } else {
-                    lo = mid;
-                }
-            }
-            tHit = (lo + hi) * 0.5;
-            break;
-        }
-        if (t >= horizon) {
-            break;
-        }
+    float tHit;
+    if (tVan > 0.0) {
+        // Vanilla path: march from just ahead of the eye; the cap bounds
+        // both the march and the ownership test.
+        tHit = march_terrain(cam, dir, 1.0, min(horizon, tVan * 1.15 + 4.0), tanH, cell, horizon);
+    } else {
+        // Sky path: start at the LOD near edge (real chunks live inside it).
+        tHit = march_terrain(cam, dir, near, horizon, tanH, cell, horizon);
     }
 
     if (tHit < 0.0) {
@@ -659,8 +707,11 @@ void main() {
     // paints ONLY beyond the vanilla chunk bubble. Real chunks own the
     // inside of vanRD by depth; chunk-load gaps during fast motion now show
     // vanilla sky instead of a flat dome wall.
+    // v6.19 G8d: the depth-tested vanilla path bypasses the near gate — the
+    // per-pixel depth comparison already decided ownership; the gate stays
+    // on the sky path exactly as v5.3 shipped it.
     float rd = fogLive ? max(vanRD, 64.0) : 128.0;
-    float gate = smoothstep(rd * 0.92, rd * 1.10, tHit);
+    float gate = (tVan > 0.0) ? 1.0 : smoothstep(rd * 0.92, rd * 1.10, tHit);
 
     vec3 outCol = mix(mix(scene.rgb, lit, fade * gate), scene.rgb, fadeOut);
     fragColor = vec4(outCol, scene.a);

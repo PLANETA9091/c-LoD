@@ -1308,7 +1308,10 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # residual class — vanilla fog on the far forest vs the crisp voxy mesh)
   # and drops the atmosphere veil: it would re-tint the un-fogged band by
   # 2.6-6.4% while the voxy leg ships no veil.
-  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;atmosphere=false"
+  # v6.19 G8d MESH PAINT: the march depth-tests the vanilla band and paints
+  # the unified march look wherever the streamed surface stands in front —
+  # the run #292 representation-gap verdict's v7-class lever (rows 01-10).
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false"
   bash "$BENCH_DIR/boot_server.sh" \
     || note "parity world: boot_server.sh rc=$? (continuing — the gate degrades to FAIL pairs)"
   srv "gamerule doDaylightCycle false"

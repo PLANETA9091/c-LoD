@@ -200,6 +200,9 @@
                 "ClodFog": [
                     { "name": "FogParams", "type": "vec4", "value": [__FOG_START__, __FOG_END__, __FOV__, 0.0] }
                 ],
+                "ClodPaint": [
+                    { "name": "PaintParams", "type": "vec4", "value": [__DEPTH_NEAR__, __MESH_PAINT__, 0.0, 0.0] }
+                ],
                 "ClodColors": [
                     { "name": "ColLow", "type": "vec4", "value": __COL_LOW__ },
                     { "name": "ColHigh", "type": "vec4", "value": __COL_HIGH__ },

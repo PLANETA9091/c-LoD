@@ -28,6 +28,24 @@ Voxy does NOT render a heightfield. It renders real block geometry:
     grayscale: `computeColour`).
   - the face id — normals are AXIS-ALIGNED per quad (`ssao.comp:face2norm`
     converts face→normal; there are NO smooth vertex normals).
+- The octree IS the LOD hierarchy (verified in the vendored source, the
+  "does voxy even have LoDs" question): `WorldEngine.java:15`
+  `MAX_LOD_LAYER = 4` — 5 layers, 32^3 sections up to 512^3 roots;
+  `common/world/other/Mipper.java` mips a 2x2x2 child cube into ONE parent
+  voxel by blockstate opacity (`getBlockStateOpacity`, densest corner wins)
+  — real detail reduction per level; `HierarchicalOcclusionTraverser`
+  walks `MAX_ITERATIONS = MAX_LOD_LAYER+1` layers on the GPU and requests
+  meshes for non-bottom nodes only; `RenderGenerationService.java:43`
+  meshes per level (`lvl = MAX_LOD_LAYER - getLevel(pos)`). The released
+  jar ships the whole pipeline under `assets/voxy/shaders/lod/`.
+  The caveat that feeds the "no LoDs" intuition: 0.2.20-beta has NO
+  seedgen — far LOD data exists only for chunks the client SAW
+  (WorldImporter) or imported from DH, so on a fresh server the far band
+  is empty until the tour itself feeds the importer (the reason row
+  12_far_north_re exists: the far-north mesh arrives only by the second
+  visit, #286-288). c-LoD by contrast has NO detail levels: one scale
+  (the 2 m heightfield march, 216-color lattice) — a distant-terrain
+  impostor, not a hierarchy.
 - Data sources (`commonImpl/importers/`): `WorldImporter` (scans chunks the
   client has loaded) and `DHImporter` (imports Distant Horizons data). In
   0.2.20 there is NO seedgen — far LODs on a vanilla multiplayer server only

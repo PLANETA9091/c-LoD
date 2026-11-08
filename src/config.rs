@@ -144,6 +144,13 @@ pub struct Config {
     /// fog saturated, BLUE = the channel blind, DIM = the fogs agree).
     /// Requires unfog=true; the §5b parity_dbg lane reads the masks.
     pub unfog_debug: bool,
+    /// v6.19 G8d MESH PAINT: the march depth-tests the vanilla fragments and
+    /// paints the unified march look OVER the vanilla band wherever the
+    /// streamed surface stands in front (assets/glsl/lod_terrain.fsh — the
+    /// run #292 verdict: the representation gap is the 01-10 diff class, the
+    /// march is the only painter we own). Pack SHA changes; the parity world
+    /// boots with it, production stays mesh_paint=false.
+    pub mesh_paint: bool,
     /// v6.7.1 MULTI-BEAT: retry beats a genuine edit gets after its release
     /// (total decode chances = edit_beats + 1). Each retry re-runs the
     /// hold→release sequence with a fresh reset electron, so a beat whose
@@ -195,6 +202,7 @@ impl Default for Config {
             debug_lens: false,
             unfog: false,
             unfog_debug: false,
+            mesh_paint: false,
             atmosphere: true,
             edit_beats: crate::stream::EDIT_BEATS_DEFAULT,
         }
@@ -351,6 +359,11 @@ impl Config {
         // v6.18.2: unfog_debug=true — the engagement-mask evidence shader.
         if let Some(v) = get("unfog_debug") {
             cfg.unfog_debug = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
+        // v6.19: mesh_paint=true — G8d, the march paints over the vanilla
+        // band where the streamed data stands in front (mesh unification).
+        if let Some(v) = get("mesh_paint") {
+            cfg.mesh_paint = matches!(v.trim(), "1" | "true" | "yes" | "on");
         }
         // v6.18: atmosphere=false — never attach the veil effect.
         if let Some(v) = get("atmosphere") {
@@ -520,6 +533,22 @@ mod tests {
         for v in ["0", "false", "off", ""] {
             assert!(!Config::parse(&format!("debug_lens={v}")).debug_lens, "{v}");
         }
+    }
+
+    #[test]
+    fn mesh_paint_knob() {
+        // v6.19 G8d: the march's vanilla path ships only when explicitly
+        // armed; the parity world boots with mesh_paint=true.
+        assert!(!Config::parse("").mesh_paint, "production default is off");
+        for v in ["1", "true", "yes", "on"] {
+            assert!(Config::parse(&format!("mesh_paint={v}")).mesh_paint, "{v}");
+        }
+        for v in ["0", "false", "off", ""] {
+            assert!(!Config::parse(&format!("mesh_paint={v}")).mesh_paint, "{v}");
+        }
+        // Combines with the unfog chain flag (the parity boot's full set).
+        let c = Config::parse("debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false");
+        assert!(c.mesh_paint && c.unfog && !c.debug_lens && !c.atmosphere);
     }
 
     #[test]
