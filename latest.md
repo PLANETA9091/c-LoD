@@ -1,3 +1,5 @@
+> 🧪 **NEW — v6.18.4 THE FOG-STATE BLOCK (run #289 masks decoded + пуш 7a065ba):** маски #289 расшифровали раунд: красная полоса mask01 = ПЫЛЬ-НОСИТЕЛЬ (сессия §5b живёт на vd 4 — за 64 м нет ванильной геометрии, маска фотографирует точки carriers в сатурации), СИНЕГО НЕТ ВЕЗДЕ (канал жив, group B жив — вторая полоса работает), гора = DIM (туманы согласны рядом). Статическая модель пары — вот что неверно. Инструменты: (1) блок fog-состояния — маска печатает ЖИВУЮ пару в небо на (300,2)/(301,2), пробы декодируют её в summary → фид; (2) счётчики маски по вантажам; (3) MASK-КЛИЕНТ НА PARITY-МИРЕ (vd 8, debug-пак, 01m/07m/10m) — маска на том мире, который меряет гейт. 12_far_north_re работает: 85.4% (меш успевает на втором визите).
+
 ### c-LoD visual run (-930,796, marker=red_concrete, vantage -1005,150 yaw 270)
 - GL:     Vendor: Mesa (0xffffffff);    Device: llvmpipe (LLVM 20.1.2, 256 bits) (0xffffffff);OpenGL renderer string: llvmpipe (LLVM 20.1.2, 256 bits);OpenGL core profile version string: 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.4;
 - boot + gates OK (10:34:46)
