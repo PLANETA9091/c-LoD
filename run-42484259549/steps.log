@@ -1,0 +1,41 @@
+2026-11-08T13:17:47Z X11+GL+pip start
+2026-11-08T13:18:25Z X11+GL+pip ok
+2026-11-08T13:18:25Z sRGB shim start
+2026-11-08T13:18:25Z sRGB shim ok
+2026-11-08T13:18:32Z setup_client start
+2026-11-08T13:18:37Z setup_client ok
+2026-11-08T13:18:37Z fabric layer start
+2026-11-08T13:18:37Z voxy-setup: version json ok
+2026-11-08T13:18:37Z voxy-setup: loader profile ok
+2026-11-08T13:18:37Z voxy-setup: mod fetch check: fabric-api-0.165.0+26.3.jar
+2026-11-08T13:18:37Z voxy-setup: mod ok: fabric-api-0.165.0+26.3.jar
+2026-11-08T13:18:37Z voxy-setup: mod fetch check: sodium-fabric-0.9.2+mc26.3.jar
+2026-11-08T13:18:37Z voxy-setup: mod ok: sodium-fabric-0.9.2+mc26.3.jar
+2026-11-08T13:18:37Z voxy-setup: mod fetch check: voxy-0.2.20-beta.jar
+2026-11-08T13:18:37Z voxy-setup: mod ok: voxy-0.2.20-beta.jar
+2026-11-08T13:18:37Z voxy-setup: writing voxy config (rd=8, threads=2)
+2026-11-08T13:18:37Z voxy-setup: fabric layer ready
+2026-11-08T13:18:37Z fabric layer ok
+2026-11-08T13:18:39Z voxy leg start
+2026-11-08T13:18:39Z voxy leg: start (full leg stdout/stderr teed to voxy-leg.log)
+2026-11-08T13:19:10Z voxy leg: server up (Done ( in voxy_server.log)
+2026-11-08T13:19:13Z voxy leg: client launch issued
+2026-11-08T13:19:49Z voxy leg: client joined
+2026-11-08T13:20:08Z voxy leg: shared structures built (not-loaded hits: )
+2026-11-08T13:20:08Z voxy leg: meshing wait 240s
+2026-11-08T13:24:08Z voxy leg: meshing wait done
+2026-11-08T13:24:20Z voxy leg: shot 01_aerial_west ok (1/12)
+2026-11-08T13:24:32Z voxy leg: shot 02_aerial_south ok (2/12)
+2026-11-08T13:24:43Z voxy leg: shot 03_aerial_north ok (3/12)
+2026-11-08T13:24:55Z voxy leg: shot 04_aerial_east ok (4/12)
+2026-11-08T13:25:07Z voxy leg: shot 05_oblique ok (5/12)
+2026-11-08T13:25:18Z voxy leg: shot 06_ground_west ok (6/12)
+2026-11-08T13:25:30Z voxy leg: shot 07_far_north ok (7/12)
+2026-11-08T13:25:41Z voxy leg: shot 08_back_inside ok (8/12)
+2026-11-08T13:25:53Z voxy leg: shot 10_marker_ray ok (9/12)
+2026-11-08T13:26:04Z voxy leg: shot 11_topdown ok (10/12)
+2026-11-08T13:26:16Z voxy leg: shot 12_far_north_re ok (11/12)
+2026-11-08T13:26:16Z voxy leg: lap wait 120s
+2026-11-08T13:28:27Z voxy leg: shot 09_after_mesh ok (12/12)
+2026-11-08T13:28:27Z voxy leg: done (12 shots in /home/runner/mc-test/voxy-shots)
+2026-11-08T13:28:27Z voxy leg ok
