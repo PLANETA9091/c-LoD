@@ -139,6 +139,11 @@ pub struct Config {
     /// debug_lens=true keeps the debug chain (the lens variant has no unfog
     /// pass); the parity world runs debug_lens=false + unfog=true.
     pub unfog: bool,
+    /// v6.18.2 EVIDENCE: ship the un-fog ENGAGEMENT MASK instead of the
+    /// render (unfog_debug.fsh: GREEN = the swap applied, RED = the vanilla
+    /// fog saturated, BLUE = the channel blind, DIM = the fogs agree).
+    /// Requires unfog=true; the §5b parity_dbg lane reads the masks.
+    pub unfog_debug: bool,
     /// v6.7.1 MULTI-BEAT: retry beats a genuine edit gets after its release
     /// (total decode chances = edit_beats + 1). Each retry re-runs the
     /// hold→release sequence with a fresh reset electron, so a beat whose
@@ -189,6 +194,7 @@ impl Default for Config {
             debug_cell: None,
             debug_lens: false,
             unfog: false,
+            unfog_debug: false,
             atmosphere: true,
             edit_beats: crate::stream::EDIT_BEATS_DEFAULT,
         }
@@ -342,6 +348,10 @@ impl Config {
         if let Some(v) = get("unfog") {
             cfg.unfog = matches!(v.trim(), "1" | "true" | "yes" | "on");
         }
+        // v6.18.2: unfog_debug=true — the engagement-mask evidence shader.
+        if let Some(v) = get("unfog_debug") {
+            cfg.unfog_debug = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
         // v6.18: atmosphere=false — never attach the veil effect.
         if let Some(v) = get("atmosphere") {
             cfg.atmosphere = matches!(v.trim(), "1" | "true" | "yes" | "on");
@@ -494,6 +504,10 @@ mod tests {
         for v in ["0", "false", "off", ""] {
             assert!(!Config::parse(&format!("unfog={v}")).unfog, "{v}");
         }
+        // v6.18.2: the evidence mask is a separate knob, default off.
+        assert!(!Config::parse("unfog=true").unfog_debug);
+        assert!(Config::parse("unfog=true;unfog_debug=true").unfog_debug);
+        assert!(!Config::parse("unfog_debug=true").unfog);
     }
 
     #[test]

@@ -63,12 +63,16 @@ pub fn build(cfg: &Config) -> Pack {
     // pack's SHA differs (one-time re-push on the CI runner — expected).
     // v6.18 UN-FOG: `unfog=true` swaps in the un-fog chain (the inversion
     // pass between dust_mask and the march — assets/glsl/unfog.fsh) and
-    // ships its shader; same one-time-re-push semantics. debug_lens wins
-    // the template choice (the debug chain has no unfog pass; the parity
-    // world session runs debug_lens=false + unfog=true).
+    // ships its shader; same one-time-re-push semantics. The combo with
+    // debug_lens ships BOTH (the §5b evidence lane: lens + un-fog); the
+    // parity world session runs the plain production unfog chain.
     let debug_lens = cfg.debug_lens;
-    let unfog = cfg.unfog && !debug_lens;
-    let lod_terrain_tpl = if debug_lens {
+    let unfog = cfg.unfog;
+    let lod_terrain_tpl = if debug_lens && unfog {
+        // v6.18.2: the debug chain + the un-fog pass — the §5b evidence lane
+        // (lens panels + the un-fog engagement map in one client).
+        include_str!("../assets/post_effect/lod_terrain_debug_unfog.json")
+    } else if debug_lens {
         include_str!("../assets/post_effect/lod_terrain_debug.json")
     } else if unfog {
         include_str!("../assets/post_effect/lod_terrain_unfog.json")
@@ -82,8 +86,17 @@ pub fn build(cfg: &Config) -> Pack {
     let atmo_start = fmt_f(cfg.lod_near * 0.85);
     let atmo_end = fmt_f(cfg.veil_far);
     // Static fallback fog (pre-first-frame only): spans the march horizon.
-    let fog_start = cfg.lod_near * 1.05;
-    let fog_end = cfg.region_blocks as f32 * 1.5;
+    // v6.18.2: the static fallback fog = the REAL 26.3 overworld defaults,
+    // read from the client.jar itself: dimension attributes
+    // visual/fog_start_distance = 0.0 and visual/fog_end_distance = 1024.0
+    // (EnvironmentAttributes.<clinit> defaults; the overworld dimension_type
+    // JSON overrides neither). With this pair the march's no-channel fog
+    // EXACTLY equals the voxy finish() formula the 07_far_north pair
+    // verified at 99.5% (#287) — the pre-channel frames stop carrying a
+    // foreign fog class. The previous values (lod_near*1.05, region*1.5)
+    // were pre-v4.2 guesses from before the fog semantics were extracted.
+    let fog_start = 0.0f32;
+    let fog_end = 1024.0f32;
 
     let veil_rgba = [
         cfg.color_veil[0],
@@ -151,9 +164,23 @@ pub fn build(cfg: &Config) -> Pack {
         m2.push(("__LENS_X__", fmt_f(lx as f32)));
         m2.push(("__LENS_Z__", fmt_f(lz as f32)));
         m2.push(("__LENS_WIN__", fmt_f(win as f32)));
-        return build_zip(lod_terrain_tpl, atmosphere_tpl, m2, debug_lens, unfog);
+        return build_zip(
+            lod_terrain_tpl,
+            atmosphere_tpl,
+            m2,
+            debug_lens,
+            unfog,
+            cfg.unfog_debug,
+        );
     }
-    build_zip(lod_terrain_tpl, atmosphere_tpl, map, debug_lens, unfog)
+    build_zip(
+        lod_terrain_tpl,
+        atmosphere_tpl,
+        map,
+        debug_lens,
+        unfog,
+        cfg.unfog_debug,
+    )
 }
 
 fn build_zip(
@@ -162,9 +189,17 @@ fn build_zip(
     map: Vec<(&str, String)>,
     debug_lens: bool,
     unfog: bool,
+    unfog_debug: bool,
 ) -> Pack {
     let lod_terrain_json = substitute(lod_terrain_tpl, &map);
     let atmosphere_json = substitute(atmosphere_tpl, &map);
+    // v6.18.2: the evidence lane points the chain's un-fog pass at the mask
+    // shader (the string occurs exactly once — the pass fragment_shader).
+    let lod_terrain_json = if unfog && unfog_debug {
+        lod_terrain_json.replace("clod:post/unfog", "clod:post/unfog_debug")
+    } else {
+        lod_terrain_json
+    };
 
     let col_scan = include_str!("../assets/glsl/col_scan.fsh");
     let rot_solve = include_str!("../assets/glsl/rot_solve.fsh");
@@ -174,9 +209,14 @@ fn build_zip(
     let lod_terrain = include_str!("../assets/glsl/lod_terrain.fsh");
     let clod_blit = include_str!("../assets/glsl/clod_blit.fsh");
     let atmosphere = include_str!("../assets/glsl/atmosphere.fsh");
-    // v6.18: the un-fog shader ships ONLY in the unfog pack.
+    // v6.18: the un-fog shader ships in EVERY unfog variant; unfog_debug
+    // swaps the chain's pass to the engagement-mask shader (evidence lane).
     let unfog_fsh = if unfog {
-        Some(include_str!("../assets/glsl/unfog.fsh"))
+        Some(if unfog_debug {
+            include_str!("../assets/glsl/unfog_debug.fsh")
+        } else {
+            include_str!("../assets/glsl/unfog.fsh")
+        })
     } else {
         None
     };
@@ -224,7 +264,12 @@ fn build_zip(
         clod_blit.as_bytes(),
     );
     if let Some(fsh) = unfog_fsh {
-        zip.add("assets/clod/shaders/post/unfog.fsh", fsh.as_bytes());
+        let name = if unfog_debug {
+            "assets/clod/shaders/post/unfog_debug.fsh"
+        } else {
+            "assets/clod/shaders/post/unfog.fsh"
+        };
+        zip.add(name, fsh.as_bytes());
     }
     zip.add(
         "assets/clod/shaders/post/atmosphere.fsh",
@@ -404,6 +449,11 @@ mod tests {
             !chain.contains("__UNFOG"),
             "unfog tokens must never leak into a shipped chain"
         );
+        // v6.18.2: the fallback fog pair = the client.jar overworld defaults.
+        assert!(
+            chain.contains("[0.0, 1024,"),
+            "the ClodFog fallback must be the real overworld pair (0, 1024)"
+        );
 
         let unf = build(&Config::parse("unfog=true"));
         let entries = zip_entries(&unf.zip);
@@ -447,18 +497,73 @@ mod tests {
             !chain.contains("__DEPTH_NEAR__"),
             "depth-near token must be substituted"
         );
-        // Determinism holds; and the debug knob still wins the template.
+        // Determinism holds; and the combo (debug_lens + unfog) ships BOTH —
+        // the v6.18.2 §5b evidence lane (lens panels + the un-fog pass).
         let unf2 = build(&Config::parse("unfog=true"));
         assert_eq!(unf.zip, unf2.zip);
         assert_ne!(unf.sha1_hex, prod.sha1_hex);
         let both = build(&Config::parse("debug_lens=true;unfog=true"));
         let both_entries = zip_entries(&both.zip);
         assert!(
-            !both_entries
+            both_entries
                 .iter()
                 .any(|(n, _)| n == "assets/clod/shaders/post/unfog.fsh"),
-            "debug chain has no unfog pass — the combo ships the debug pack"
+            "the combo ships the un-fog shader (the evidence lane)"
         );
+        assert!(
+            both_entries
+                .iter()
+                .any(|(n, _)| n == "assets/clod/shaders/post/debug_lens.fsh"),
+            "the combo keeps the lens"
+        );
+        let both_chain = String::from_utf8_lossy(
+            &both_entries
+                .iter()
+                .find(|(n, _)| n == "assets/clod/post_effect/lod_terrain.json")
+                .unwrap()
+                .1,
+        );
+        assert!(
+            both_chain.contains("clod:post/unfog") && both_chain.contains("clod:post/debug_lens"),
+            "the combo chain carries both passes"
+        );
+    }
+
+    #[test]
+    fn unfog_debug_swaps_the_mask_shader() {
+        // v6.18.2: unfog_debug=true points the chain's un-fog pass at the
+        // engagement-mask shader and ships it under its own name.
+        let prod = build(&Config::parse("unfog=true"));
+        let dbg = build(&Config::parse("unfog=true;unfog_debug=true"));
+        let entries = zip_entries(&dbg.zip);
+        assert!(
+            entries
+                .iter()
+                .any(|(n, _)| n == "assets/clod/shaders/post/unfog_debug.fsh"),
+            "the mask shader must ship"
+        );
+        assert!(
+            !entries
+                .iter()
+                .any(|(n, _)| n == "assets/clod/shaders/post/unfog.fsh"),
+            "the render shader is replaced, not accompanied"
+        );
+        let chain = String::from_utf8_lossy(
+            &entries
+                .iter()
+                .find(|(n, _)| n == "assets/clod/post_effect/lod_terrain.json")
+                .unwrap()
+                .1,
+        );
+        assert!(
+            chain.contains("clod:post/unfog_debug"),
+            "the pass must reference the mask shader"
+        );
+        assert!(!chain.contains("clod:post/unfog\""), "no bare unfog ref");
+        assert_ne!(dbg.sha1_hex, prod.sha1_hex);
+        // The mask without unfog stays inert (nothing ships, chain untouched).
+        let solo = build(&Config::parse("unfog_debug=true"));
+        assert_eq!(solo.zip, build(&Config::parse("")).zip);
     }
 
     #[test]

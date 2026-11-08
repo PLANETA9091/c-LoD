@@ -504,7 +504,14 @@ sum "- GL: ${GLINFO:-unavailable (glxinfo/xvfb-run missing)}"
 # the client's committed decode state rides every probe screenshot as two
 # panels on the right edge (color lattice + height bytes), so a lost dot
 # (the v6.6.2 fragility) is VISIBLE as lens_black instead of guessed.
-export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=true"
+# v6.18.2: the session-1 pack ALSO carries the un-fog engagement mask
+# (unfog=true;unfog_debug=true — the debug_unfog chain: lens + mask) — the
+# §5b parity_dbg tour then shows WHERE the vanilla->voxy fog swap fires per
+# vantage (GREEN), where the vanilla fog is unrecoverable (RED), where the
+# camera channel was blind (BLUE). The transport probes are unaffected: the
+# swap is a no-op below the rd-pair start (115.2 m at vd 8), the marker
+# zone sits at 75 m.
+export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=true;unfog=true;unfog_debug=true"
 CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" || {
   echo "FAIL: boot/gates"; tail -40 /tmp/server.log; exit 1; }
 sum "- boot + gates OK ($(date -u +%H:%M:%S))"
