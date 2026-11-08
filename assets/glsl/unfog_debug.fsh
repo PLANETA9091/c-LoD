@@ -91,6 +91,11 @@ float fog_linear(float d, float s, float e) {
     return (d - s) / (e - s);
 }
 
+// v6.18.4: the fog-state block lives in main()'s sky branch — two fixed
+// sky pixels, (300,2) = (envStart/8, envEnd/8, rdEnd/16, marker 200),
+// (301,2) = (FogColor.rgb, conf). The run's probes decode them from the
+// PNG and print the ACTUAL pair the client fogged with into the summary.
+
 void main() {
     vec4 color = texelFetch(InSampler, ivec2(clamp(texCoord, 0.0, 1.0) * ScreenSize), 0);
     float depth = texture(InDepthSampler, texCoord).r;
@@ -99,6 +104,23 @@ void main() {
     vec4 fogCol = texelFetch(RotSampler, ivec2(1, 0), 0);
     vec4 fogRng = texelFetch(RotSampler, ivec2(0, 1), 0);
     bool fogLive = fogRng.a > 0.5 && fogCol.a > 0.004;
+    // v6.18.4 FOG-STATE BLOCK: BEFORE every gate — the state prints even
+    // when the channel is blind (that is exactly what it must diagnose).
+    //   (300,2) = (envStart/8, envEnd/8, rdEnd/16, marker 200)
+    //   (301,2) = (FogColor.rgb, conf)
+    if (ivec2(gl_FragCoord.xy) == ivec2(300, 2)) {
+        fragColor = vec4(
+            clamp(fogRng.r * 255.0, 0.0, 255.0) / 255.0,
+            clamp(fogRng.g * 255.0, 0.0, 255.0) / 255.0,
+            clamp(fogRng.b * 255.0, 0.0, 255.0) / 255.0,
+            200.0 / 255.0
+        );
+        return;
+    }
+    if (ivec2(gl_FragCoord.xy) == ivec2(301, 2)) {
+        fragColor = vec4(fogCol.rgb, rotP.b);
+        return;
+    }
     if (!fogLive || rotP.b < 0.25) {
         // channel blind -> BLUE overlay (the pass cannot be exact here)
         fragColor = vec4(mix(color.rgb, vec3(0.2, 0.3, 1.0), 0.6), color.a);

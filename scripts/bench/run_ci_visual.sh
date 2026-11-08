@@ -1099,6 +1099,47 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     ct "parity debug shot $PNAME ($PN/$PTOT)"
   done 3< "$PARITY"
   sum "- parity debug tour done: $PN shots in parity_dbg/ (the §7b world session feeds the gate)"
+  # v6.18.4 MASK FORENSICS: the dbg pack's un-fog pass is the ENGAGEMENT
+  # MASK — count its decisions per vantage (GREEN = the vanilla->voxy fog
+  # swap applied, RED = the vanilla fog saturated (unrecoverable), BLUE =
+  # the camera channel blind, DIM = the fogs already agree) and decode the
+  # fog-state block the mask prints into the sky at (300,2)/(301,2):
+  #   (300,2) = (envStart/8, envEnd/8, rdEnd/16, marker 200)
+  #   (301,2) = (FogColor.rgb, conf)
+  # The live pair ends the fog-model guessing (the #289 mask showed the RED
+  # band the static model called impossible).
+  python3 - "$PDIR" "$PARITY" <<'PYEOF' 2>/dev/null || sum "- mask forensics: python step failed (non-fatal)"
+import sys, os
+from PIL import Image
+d, matrix = sys.argv[1], sys.argv[2]
+GREEN = (60, 220, 80); RED = (250, 60, 50); BLUE = (70, 100, 250)
+def close(px, ref, tol=90):
+    return all(abs(int(a) - b) < tol for a, b in zip(px[:3], ref))
+rows = [l.split() for l in open(matrix) if l.strip() and not l.startswith('#')]
+for name, *_ in rows:
+    p = os.path.join(d, f"{name}.png")
+    if not os.path.exists(p):
+        continue
+    im = Image.open(p).convert("RGB")
+    px = im.load(); w, h = im.size
+    g = r = b = dim = 0
+    for y in range(0, h, 4):
+        for x in range(0, w, 4):
+            c = px[x, y]
+            if close(c, GREEN): g += 1
+            elif close(c, RED): r += 1
+            elif close(c, BLUE): b += 1
+            elif sum(c) < 330 and abs(c[0]-c[1]) < 24 and abs(c[1]-c[2]) < 24: dim += 1
+    print(f"- mask {name}: green={g*16} red={r*16} blue={b*16} dim={dim*16} (px, sampled /16)")
+st = os.path.join(d, "01_aerial_west.png")
+if os.path.exists(st):
+    im = Image.open(st).convert("RGB"); px = im.load()
+    a = px[300, 2]; c = px[301, 2]
+    # the screen grab carries RGB only (the marker byte rides alpha and is
+    # lost) — decode the pair straight from the RGB bytes:
+    print(f"- fog state raw (300,2)=({a[0]},{a[1]},{a[2]}) (301,2)=({c[0]},{c[1]},{c[2]})")
+    print(f"- fog state decoded: envStart={a[0]*8} envEnd={a[1]*8} rdEnd={a[2]*16} fogColor=({c[0]},{c[1]},{c[2]})")
+PYEOF
 fi
 
 # ---- 6. leg 2: kick + rejoin, the marker must persist ------------------------
@@ -1360,6 +1401,49 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   done 3< "$PARITY"
   sum "- parity world tour done: $PW_N shots in parity/ (the gate pairs voxy/<name>.png vs parity/<name>.png)"
   srv "time set noon"
+  # v6.18.4 THE MASK ON THE PARITY WORLD: the §5b masks ride the session-1
+  # client (view-distance 4 — no vanilla geometry beyond 64 m, so the masks
+  # photograph the DUST carrier, not the forest; run #289's mask01 red band
+  # = the saturated carrier dots). The engagement map the gate needs must
+  # come from the PARITY WORLD itself (vd 8, the mountains + forest in
+  # view): one more client on the SAME booted server (the level already
+  # carries the structures; the Streamer state persists), the debug pack
+  # with the mask shader, three diagnostic vantages into parity_dbg8/.
+  # Non-fatal by design (evidence, never the gate's input).
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;unfog_debug=true"
+  pkill -f "net.minecraft.client.main.Main" 2>/dev/null || true
+  sleep 3
+  bash "$BENCH_DIR/run_client.sh" || note "mask8: run_client.sh rc=$?"
+  MW=$(join_count)
+  for _ in $(seq 1 120); do
+    [ "$(join_count)" -gt "$MW" ] 2>/dev/null && break
+    sleep 2
+  done
+  sleep 5
+  accept_pack_prompt mask8 30 || note "mask8: pack prompt never accepted"
+  sleep 5
+  srv "gamemode spectator Stepan"
+  mkdir -p "$SHOTS/parity_dbg8"
+  for row in "01m 90 15 CX 140 CZ" "07m 180 5 CX 160 -220" "10m 270 5 CX-75 151.6 CZ"; do
+    set -- $row
+    MN="$1"; MYAW="$2"; MPITCH="$3"; MX="$4"; MY="$5"; MZ="$6"
+    MX=$(( ${MX//CX/$CX} )); MZ=$(( ${MZ//CZ/$CZ} ))
+    srv "time set noon"
+    srv "tp Stepan $MX $MY $MZ $MYAW $MPITCH"
+    sleep 10
+    shot "parity_dbg8/$MN" || true
+  done
+  sum "- mask8: the un-fog engagement masks shot on the PARITY WORLD (vd 8) — parity_dbg8/01m|07m|10m"
+  # The fog state from the PARITY WORLD client — the pair the §7b frames
+  # were actually fogged with (the §5b state rides the vd-4 session).
+  python3 - "$SHOTS/parity_dbg8/01m.png" <<'PYEOF' 2>/dev/null || sum "- mask8 state: decode failed (non-fatal)"
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert("RGB"); px = im.load()
+a = px[300, 2]; c = px[301, 2]
+print(f"- mask8 fog state raw (300,2)=({a[0]},{a[1]},{a[2]}) (301,2)=({c[0]},{c[1]},{c[2]})")
+print(f"- mask8 fog state decoded: envStart={a[0]*8} envEnd={a[1]*8} rdEnd={a[2]*16} fogColor=({c[0]},{c[1]},{c[2]})")
+PYEOF
 fi
 
 if [ "$FAILURES" = "0" ] && [ "$FOUND1" = "1" ] && [ "$FOUND2" = "1" ]; then
