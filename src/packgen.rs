@@ -129,7 +129,10 @@ pub fn build(cfg: &Config) -> Pack {
         ("__DEPTH_NEAR__", fmt_f(cfg.depth_near)),
         // v6.19 G8d MESH PAINT: 1.0 arms the march's vanilla path (the
         // depth-tested paint-over in lod_terrain.fsh).
-        ("__MESH_PAINT__", fmt_f(if cfg.mesh_paint { 1.0 } else { 0.0 })),
+        (
+            "__MESH_PAINT__",
+            fmt_f(if cfg.mesh_paint { 1.0 } else { 0.0 }),
+        ),
         // SKY-GRID geometry (must match src/stream.rs exactly).
         // v6.4.2: the config names the disk CENTER (see engine::arm_from_config);
         // GridInfo.xy is the disk ORIGIN (the shader maps world->cell via
