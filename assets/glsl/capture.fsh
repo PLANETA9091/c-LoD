@@ -186,8 +186,25 @@ void probe_word(vec2 cellWorld, float planeY, float sub, out uint word, out bool
                 // dead payload and to the cylindrical-vs-forward fog model
                 // mismatch). Neutrals fail the second arm on g > r; sky
                 // fails on contrast ~ 0 (the ring IS the backdrop).
-                bool absolute = pc.g > 0.40 && pc.g > pc.r + 0.08 && pc.g > pc.b + 0.08;
-                bool relative = (raw.g - raw.b) - ringGB > 0.06 && raw.g > raw.r + 0.02;
+                // v6.20.0 UNIVERSAL LOCAL-CONTRAST GATE (#305 forensics):
+                // BOTH arms now require the fog-invariant ring delta. The
+                // absolute arm alone fired on every grass/foliage pixel a
+                // probe landed on — vanilla grass reads g ~ 0.49 and passes
+                // g > 0.40 && g > r + 0.08 && g > b + 0.08 — a standing
+                // false-dot field the OR-merge locked into the persistent
+                // words; the march then painted the garbage bytes as the
+                // #305 far-band towers (black lattice-0 cells, wrong
+                // heights, the purple = the 2x2 color average of red fill
+                // next to false water). The §5b lanes stayed clean only
+                // because the synthetic palette's green (g = 0.40) misses
+                // the absolute gate by 0.005. The ring delta is the dot's
+                // real signature, fog-invariant (fog scales the dot and
+                // the ring identically): +0.7 over sky, +0.13 over grass,
+                // +0.4 over stone, +0.83 over water; a backdrop false
+                // positive reads 0.
+                bool delta = (raw.g - raw.b) - ringGB > 0.06;
+                bool absolute = delta && pc.g > 0.40 && pc.g > pc.r + 0.08 && pc.g > pc.b + 0.08;
+                bool relative = delta && raw.g > raw.r + 0.02;
                 if (absolute || relative) {
                     dust = true;
                     break;
@@ -205,7 +222,18 @@ void probe_word(vec2 cellWorld, float planeY, float sub, out uint word, out bool
             else slot3 = true;
         }
     }
-    allSlots = allSlots && slot0 && slot1 && slot2 && slot3;
+    // v6.20.0 ROW-COMPLETE = the word is complete: every slot's dot was
+    // found in THIS frame (each found dot contributes its 2-bit column, so
+    // a row without its dot decodes as column 0 = zero bits — garbage the
+    // old allSlots could never catch: it ANDed the 16-probe grid where 12
+    // probes are structurally empty and was therefore always false, which
+    // also silently killed the v6.2 fresh-replace edit path). The old mark
+    // = anyHit stamped a PARTIAL first decode as decoded forever — the OR
+    // cannot heal rows whose dots are swallowed by terrain above the
+    // stream planes (LAYER_Y = 80/120 vs the §7b world's 190 m summits),
+    // so those cells painted garbage bytes for the whole session. The mark
+    // now flips only on a row-complete frame.
+    allSlots = slot0 && slot1 && slot2 && slot3;
 }
 
 void main() {
@@ -276,7 +304,7 @@ void main() {
         // decodes keep the legacy OR self-heal.
         outByte = (reset && allSlots) ? fresh : (prevByte | fresh);
     }
-    float mark = anyHit ? 1.0 : prev.a;
+    float mark = allSlots ? 1.0 : prev.a;
     // .b = the FRESH word (this frame, not merged) for the eraser mask.
     fragColor = vec4(
         float(outByte) / 255.0,
