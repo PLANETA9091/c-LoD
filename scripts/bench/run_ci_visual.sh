@@ -1367,11 +1367,15 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # photograph the DUST carrier, not the forest; run #289's mask01 red band
   # = the saturated carrier dots). The engagement map the gate needs must
   # come from the PARITY WORLD itself (vd 8, the mountains + forest in
-  # view): one more client on the SAME booted server (the level already
-  # carries the structures; the Streamer state persists), the debug pack
-  # with the mask shader, three diagnostic vantages into parity_dbg8/.
+  # view): a DEDICATED boot — server (the mask pack: the module builds the
+  # debug_unfog chain; run #290 proved the mask8 client silently kept the
+  # PRODUCTION pack when only the client was recycled — the state block
+  # pixels read as plain sky, the pack never reached the client) + fresh
+  # client, three diagnostic vantages into parity_dbg8/.
   # Non-fatal by design (evidence, never the gate's input).
   export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;unfog_debug=true"
+  CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" \
+    || note "mask8: boot_server.sh rc=$? (the mask evidence degrades, the gate unaffected)"
   pkill -f "net.minecraft.client.main.Main" 2>/dev/null || true
   sleep 3
   bash "$BENCH_DIR/run_client.sh" || note "mask8: run_client.sh rc=$?"
