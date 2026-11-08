@@ -1320,18 +1320,26 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # session carries its own probe (mesh_debug): the gate is red regardless,
   # one diagnostic round of probe-contaminated frames is the cheapest way
   # to see the armed chain's own engagement map + delivered uniform bytes.
-  # v6.19.7 THE UNFOG A/B: #300 killed the atmosphere hypothesis (atmosphere
-  # ON in parity — the capture STILL dead, magenta=0) and sharpened the
-  # cross-session table: every session that RAN unfog.fsh (the production
-  # unfog chain) has a dead capture; every session that ran ANYTHING ELSE
-  # in that slot (debug_lens, unfog_debug) has a live one — the mask8 lane
-  # swaps the pass shader, so it never executed unfog.fsh at all. THE A/B:
-  # this parity boot drops the unfog pass entirely (unfog=false -> the plain
-  # chain); if the west-band heartbeat (x310 alpha) and the engagement map
-  # come alive, the unfog pass is the GL-state killer and the fog chapter
-  # reopens with a REAL bug, not a no-op. The #285 residual class returns
-  # on vanilla pixels this round — a known, accepted cost.
-  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;mesh_paint=true;mesh_debug=true"
+  # v6.19.7 THE UNFOG A/B VERDICT (run #301): the unfog pass is CLEARED —
+  # the parity boot with unfog=false (the plain chain) stayed dead: the
+  # west-band heartbeat (0,0), magenta=0, while the mask8 lane in the SAME
+  # run decoded the west band FULLY (x309h=235 = a live ~172 height, x310c
+  # alpha=254) and painted 90128 px. The post-tour stream counters finally
+  # exposed the real class: the parity server's LAST diag (at the 07
+  # vantage — OUTSIDE the disk, z=-220 vs the disk edge CZ-256 — cone 0 is
+  # CORRECT there) reads wire bundle 0p/0b cache 0/24576 — the session-3
+  # process never recorded a single delivered particle, and the production
+  # pack has NEVER painted in CI (the §7b session is the only plain-chain
+  # lane; leg-1/§5b run the debug chain, mask8 the debug_unfog chain —
+  # all alive). v6.19.8 SPLITS WORLD-vs-CHAIN: the parity boot now runs
+  # THE DEBUG CHAIN (debug_lens=true — the windows paint the client's
+  # capture targets on screen, the v6.7.3 all-zero classifier names a dead
+  # pipeline per panel) + the mesh probes. Alive windows on the parity
+  # world => the plain chain's pack is the killer (the last pass
+  # clod_blit-vs-debug_lens is then the only structural difference left);
+  # dark windows => the §7b session's STREAM starves regardless of chain
+  # and the tour-window server counters (the preserved log) name it.
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=true;mesh_paint=true;mesh_debug=true"
   bash "$BENCH_DIR/boot_server.sh" \
     || note "parity world: boot_server.sh rc=$? (continuing — the gate degrades to FAIL pairs)"
   srv "gamerule doDaylightCycle false"
@@ -1387,9 +1395,25 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # v6.19.7: the parity session's OWN stream counters — the leg-1 section
   # greps the shared /tmp/server.log at ITS point, nobody ever dumped the
   # session-3 counters (the wire/cone numbers the starving-capture question
-  # asks first).
-  { echo "### parity world stream counters (session 3)";
-    grep -E "\[c-LoD\] stream: tick" /tmp/server.log | tail -2 || true; } >> "$SUMMARY"
+  # asks first). v6.19.8: ALSO the per-metric MAXIMA over the whole session
+  # (the post-tour diag sits at the outside-disk 07 vantage where cone 0 is
+  # correct — the tour-window values are the evidence) + the log itself
+  # rides the artifact before the mask8 boot overwrites it.
+  { echo "### parity world stream counters (session 3, tail + maxima)";
+    grep -E "\[c-LoD\] stream: tick" /tmp/server.log | tail -2 || true;
+    for m in cone zone "wire bundle"; do
+      V=$(grep -oE "${m} [0-9]+" /tmp/server.log | awk '{print $2}' | sort -n | tail -1);
+      echo "- parity stream max ${m}: ${V:-0}";
+    done; } >> "$SUMMARY"
+  cp /tmp/server.log "$SHOTS/parity/server.log" 2>/dev/null || true
+  # v6.19.8: the parity session runs the DEBUG chain — the lens windows
+  # paint the client's capture targets; decode them with the established
+  # v6.7 forensics (the all-zero classifier names a dead pipeline per
+  # panel) straight into the summary.
+  LM=$(mktemp); lens_metrics parity/01_aerial_west > "$LM" 2>/dev/null || true
+  { echo "### parity world capture lens (debug chain on the §7b world)";
+    cat "$LM"; } >> "$SUMMARY"
+  rm -f "$LM"
   # v6.19.5: the parity session carries the mesh probe (mesh_debug=true) —
   # decode it here, the same way the mask8 forensics decodes its own block.
   PWPROBE=$(mktemp)
