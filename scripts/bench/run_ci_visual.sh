@@ -1340,8 +1340,22 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # dark windows => the §7b session's STREAM starves regardless of chain
   # and the tour-window server counters (the preserved log) name it.
   export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=true;mesh_paint=true;mesh_debug=true"
-  bash "$BENCH_DIR/boot_server.sh" \
+  # v6.19.9 THE ROOT CAUSE (#302's maxima nailed it): parity stream max
+  # cone 0, max zone 0 — the scheduler never sent ONE cell the whole
+  # session — and the reason is the v6.4.2 regression class verbatim: THIS
+  # boot dropped CLOD_CENTER, so boot_server.sh fell back to its 256,320
+  # default and the disk armed 1186 blocks from the tour's (-930,796);
+  # the player stood outside every decode band the whole tour, the wire
+  # delivered nothing, the client's capture starved, the march painted
+  # nothing — every parity table since v6.17 paired voxy against an EMPTY
+  # frame. The mask8 lane always passed CLOD_CENTER explicitly — that is
+  # why it was the only live §7b evidence all along. THE FIX: the same
+  # explicit center the other two boots pass. The lens crop dir also gets
+  # created (lens_metrics saves the crop under lens_<name>/ and died on
+  # the missing directory — the #302 lens decode printed ?).
+  CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" \
     || note "parity world: boot_server.sh rc=$? (continuing — the gate degrades to FAIL pairs)"
+  mkdir -p "$SHOTS/lens_parity"
   srv "gamerule doDaylightCycle false"
   srv "time set noon"
   # Fresh client: the session-1/leg-2 processes hold the X display — kill
