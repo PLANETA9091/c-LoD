@@ -170,6 +170,15 @@ float smooth_w2(float t) {
 // Sample the streamed ground at a world xz. Returns the surface Y, or -1e8
 // for "no data" (void, never decoded). Water cells stream their real
 // surface height; the water FLAG lives in the color word (idx 216).
+// v6.21.0: the COLOR word no longer gates the GEOMETRY — the §7b world's
+// mid-band cells (80..120 m, below the HI plane) decode their height word
+// (the dots at Y=120 stand above them) while their color dots sit at Y=80
+// INSIDE the terrain and can never decode; the old color gate made the
+// march blind to exactly the band the transport CAN carry. A cell with a
+// height word but no color word is a valid surface whose paint falls to
+// the caller's height fallback (color_at returns the sentinel); a cell
+// with neither word is still void. Water stays color-gated (the flag lives
+// in the color word — an undecoded color word cannot claim water).
 float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
     float cell = RegionInfo.y;             // blocks per cell
     ivec2 celli = ivec2(floor((xz - GridInfo.xy) / cell)); // 0..255
@@ -179,13 +188,10 @@ float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
         return -1.0e8; // outside the streamed disk
     }
     vec4 c = texelFetch(ColBufSampler, celli, 0);
-    if (c.a < 0.5) {
-        return -1.0e8; // no word ever decoded for this cell
-    }
-    water = abs(c.r * 255.0 - 216.0) < 0.5;
+    water = c.a >= 0.5 && abs(c.r * 255.0 - 216.0) < 0.5;
     vec4 h = texelFetch(HeightSampler, celli, 0);
     if (h.a < 0.5) {
-        return -1.0e8; // height word not decoded yet
+        return -1.0e8; // height word not decoded yet (or the cell is void)
     }
     ok = true;
     float h0 = h.r * 255.0 - 64.0;
@@ -242,6 +248,14 @@ float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
 // water fallback color.
 vec3 color_at(ivec2 celli, float w, float w2, out bool water) {
     vec4 c = texelFetch(ColBufSampler, celli, 0);
+    // v6.21.0: an undecoded color word is the height-fallback sentinel (the
+    // mid-band cells paint ColLow/ColHigh by height — see ground_at). It is
+    // NOT lattice index 0: before this gate the (0,0,0,0) texel decoded as
+    // idx 0 = pure black, one of the #305 dark classes.
+    if (c.a < 0.5) {
+        water = false;
+        return vec3(-1.0);
+    }
     float idx = floor(c.r * 255.0 + 0.5);
     water = idx > 215.5;
     if (water) {
