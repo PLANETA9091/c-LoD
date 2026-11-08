@@ -1,18 +1,18 @@
 ### c-LoD visual run (-930,796, marker=red_concrete, vantage -1005,150 yaw 270)
 - GL:     Vendor: Mesa (0xffffffff);    Device: llvmpipe (LLVM 20.1.2, 256 bits) (0xffffffff);OpenGL renderer string: llvmpipe (LLVM 20.1.2, 256 bits);OpenGL core profile version string: 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.4;
-- boot + gates OK (17:39:46)
+- boot + gates OK (18:11:19)
 - sky-grid armed
-- joined session 1 (17:40:13)
+- joined session 1 (18:11:43)
 - stream live: cells=65536
 - terrain range: 2 terraced mountains at (CX-4,CZ-20)/(CX-2,CZ+16), tops 185/190, grass terraces + stone caps, 66..82 m from the eye (inside the 83.5 m band, chunk edge 64 m)
 - scan complete=1 (cells=cells=65536/65536)
-- paint settled=1 (wire 54185p)
+- paint settled=1 (wire 54110p)
 - baseline try 1: drift=0 px
 - lod_silhouette_cols=0 (LOD paint ON SCREEN at 75 m if > 20 — the march-drawn marker column; vanilla cannot render there, chunk edge 64 m; #255 re-measures 49, the ZONE_FAR=48 regression #256 and the control read 0)
 - 0 terrain-green px in the sky region (LOD MOUNTAINS on screen if > 5000; the range paints ColLow-green on low terraces via the fallback palette; flat-world baselines and the pack-free control read ~0)
-- burst_close white px: 504 (renderer alive if > 50)
-- burst_far white px: 326 (renderer alive in the marker zone if > 20)
-- cut walk 40 m: 79 white px (> 20 = rendered)
+- burst_close white px: 589 (renderer alive if > 50)
+- burst_far white px: 0 (renderer alive in the marker zone if > 20)
+- cut walk 40 m: 71 white px (> 20 = rendered)
 - cut walk 60 m: 0 white px (> 20 = rendered)
 - cut walk 100 m: 0 white px (> 20 = rendered)
 - measured far-render cut: 40 m (G4 flap instrument; the decode proof needs >= 83 m from the y=151.6 eye)
@@ -21,27 +21,27 @@
 ### /clod-cells AFTER FILL (server belief)
 ```
 # cx cz wx wz height water valid rgb last_age dirty hword cword
-122 122 -942 784 68 0 1 [97, 119, 97] 1150 0 0x8400 0x3100
-123 122 -940 784 71 0 1 [97, 119, 97] 1150 0 0x8700 0x3100
-124 122 -938 784 68 0 1 [97, 119, 97] 1150 0 0x8400 0x3100
-125 122 -936 784 62 1 1 [63, 118, 228] 1150 0 0x7e00 0xd800
-126 122 -934 784 62 1 1 [63, 118, 228] 1144 0 0x7e00 0xd800
-127 122 -932 784 62 1 1 [63, 118, 228] 1144 0 0x7e00 0xd800
-128 122 -930 784 62 1 1 [63, 118, 228] 1143 0 0x7e00 0xd800
-129 122 -928 784 64 0 1 [134, 183, 131] 1143 0 0x8000 0x5c00
-130 122 -926 784 66 0 1 [134, 183, 131] 1142 0 0x8200 0x5c00
-131 122 -924 784 75 0 1 [97, 119, 97] 1142 0 0x8b00 0x3100
+122 122 -942 784 68 0 1 [97, 119, 97] 1080 0 0x8400 0x3100
+123 122 -940 784 71 0 1 [97, 119, 97] 1079 0 0x8700 0x3100
+124 122 -938 784 68 0 1 [97, 119, 97] 1079 0 0x8400 0x3100
+125 122 -936 784 62 1 1 [63, 118, 228] 1079 0 0x7e00 0xd800
+126 122 -934 784 62 1 1 [63, 118, 228] 1078 0 0x7e00 0xd800
+127 122 -932 784 62 1 1 [63, 118, 228] 1078 0 0x7e00 0xd800
+128 122 -930 784 62 1 1 [63, 118, 228] 1077 0 0x7e00 0xd800
+129 122 -928 784 64 0 1 [134, 183, 131] 1077 0 0x8000 0x5c00
+130 122 -926 784 66 0 1 [134, 183, 131] 1076 0 0x8200 0x5c00
+131 122 -924 784 75 0 1 [97, 119, 97] 1075 0 0x8b00 0x3100
 132 122 -922 784 77 0 1 [97, 119, 97] 18446744073709551615 1 0x8d00 0x3100
 133 122 -920 784 75 0 1 [97, 119, 97] 18446744073709551615 1 0x8b00 0x3100
 134 122 -918 784 73 0 1 [97, 119, 97] 18446744073709551615 1 0x8900 0x3100
-122 123 -942 786 70 0 1 [97, 119, 97] 1150 0 0x8600 0x3100
-123 123 -940 786 65 0 1 [97, 119, 97] 1150 0 0x8100 0x3100
-124 123 -938 786 65 0 1 [97, 119, 97] 1150 0 0x8100 0x3100
-125 123 -936 786 62 1 1 [63, 118, 228] 1150 0 0x7e00 0xd800
+122 123 -942 786 70 0 1 [97, 119, 97] 1080 0 0x8600 0x3100
+123 123 -940 786 65 0 1 [97, 119, 97] 1080 0 0x8100 0x3100
+124 123 -938 786 65 0 1 [97, 119, 97] 1079 0 0x8100 0x3100
+125 123 -936 786 62 1 1 [63, 118, 228] 1079 0 0x7e00 0xd800
 ```
 ### stream diag after fill:
-[c-LoD] stream: tick 1900 65536/65536 cells, lap 595, cone 5335 zone 648 dirty 767 (q 12545) ewin 249 rbeat 0p/0 rearm 0c/0t rescan 405583c/2314e, edits +5006p/3778c/586e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 315 forced 197, native 65536c/1089ch fail 0 (3w q 0) helper on, trees 1089ch/fail 0, wire bundle 54527p/140b fail 0 ~0 kB/s cache 11474/24576 h43053 m11474 e0
-[17:43:07 INFO]: [c-LoD] stream: tick 1900 65536/65536 cells, lap 595, cone 5335 zone 648 dirty 767 (q 12545) ewin 249 rbeat 0p/0 rearm 0c/0t rescan 405583c/2314e, edits +5006p/3778c/586e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 315 forced 197, native 65536c/1089ch fail 0 (3w q 0) helper on, trees 1089ch/fail 0, wire bundle 54527p/140b fail 0 ~0 kB/s cache 11474/24576 h43053 m11474 e0
+[c-LoD] stream: tick 1900 65536/65536 cells, lap 599, cone 5383 zone 644 dirty 736 (q 11315) ewin 217 rbeat 0p/0 rearm 0c/0t rescan 415945c/1723e, edits +6192p/4671c/672e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 324 forced 188, native 65536c/1089ch fail 0 (3w q 0) helper on, trees 1089ch/fail 0, wire bundle 54605p/118b fail 0 ~0 kB/s cache 11436/24576 h43169 m11436 e0
+[18:14:39 INFO]: [c-LoD] stream: tick 1900 65536/65536 cells, lap 599, cone 5383 zone 644 dirty 736 (q 11315) ewin 217 rbeat 0p/0 rearm 0c/0t rescan 415945c/1723e, edits +6192p/4671c/672e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 324 forced 188, native 65536c/1089ch fail 0 (3w q 0) helper on, trees 1089ch/fail 0, wire bundle 54605p/118b fail 0 ~0 kB/s cache 11436/24576 h43169 m11436 e0
 - probe 0: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
 - probe 1: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
 - probe 2: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
@@ -51,45 +51,45 @@
 - probe 6: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
 - probe 7: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
 - probe 8: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
-- probe 9: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
-- probe 10: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
-- probe 11: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
-- probe 12: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
-- probe 13: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
-- probe 14: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
-- probe 15: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
+- probe 9: red=0 paint=384 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=5 mask_hits=30 (need red>=60 paint>=300 lod>20)
+- probe 10: red=0 paint=192 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=1 mask_hits=27 (need red>=60 paint>=300 lod>20)
+- probe 11: red=0 paint=388 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=? cam_z_b=? az_b=? el_b=? strobe_hits=22 mask_hits=22 (need red>=60 paint>=300 lod>20)
+- probe 12: red=0 paint=384 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=4 mask_hits=30 (need red>=60 paint>=300 lod>20)
+- probe 13: red=0 paint=192 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=1 mask_hits=30 (need red>=60 paint>=300 lod>20)
+- probe 14: red=0 paint=396 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=198114 lens_zero=0 rot=decoded cam_x_b=? cam_z_b=? az_b=? el_b=? strobe_hits=22 mask_hits=22 (need red>=60 paint>=300 lod>20)
+- probe 15: red=0 paint=384 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=12 mask_hits=30 (need red>=60 paint>=300 lod>20)
 - probe 16: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
 - probe 17: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
 - probe 18: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
 - probe 19: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
-- probe 20: red=0 paint=384 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=3 mask_hits=30 (need red>=60 paint>=300 lod>20)
-- probe 21: red=0 paint=404 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=198114 lens_zero=0 rot=decoded cam_x_b=? cam_z_b=? az_b=? el_b=? strobe_hits=22 mask_hits=22 (need red>=60 paint>=300 lod>20)
-- probe 22: red=0 paint=384 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=14 mask_hits=30 (need red>=60 paint>=300 lod>20)
-- probe 23: red=0 paint=384 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=3 mask_hits=30 (need red>=60 paint>=300 lod>20)
+- probe 20: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
+- probe 21: red=0 paint=0 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red>=60 paint>=300 lod>20)
+- probe 22: red=0 paint=387 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=198114 lens_zero=0 rot=decoded cam_x_b=? cam_z_b=? az_b=? el_b=? strobe_hits=22 mask_hits=22 (need red>=60 paint>=300 lod>20)
+- probe 23: red=0 paint=384 lod_silhouette_cols=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=12 mask_hits=30 (need red>=60 paint>=300 lod>20)
 ### stream diag after probes:
-[17:46:17 INFO]: [c-LoD] stream: tick 3800 65536/65536 cells, lap 863, cone 11370 zone 1288 dirty 792 (q 12570) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 1017583c/2388e, edits +6518p/4842c/928e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 315 forced 197, native 65536c/1089ch fail 0 (3w q 0) helper on, trees 1089ch/fail 0, wire bundle 107912p/205b fail 0 ~112 kB/s cache 11539/24576 h96373 m11539 e0
-[c-LoD] stream: tick 3900 65536/65536 cells, lap 963, cone 14040 zone 1288 dirty 792 (q 12570) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 1051700c/2388e, edits +6521p/4845c/928e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 315 forced 197, native 65536c/1089ch fail 0 (3w q 0) helper on, trees 1089ch/fail 0, wire bundle 129176p/227b fail 0 ~112 kB/s cache 11539/24576 h117637 m11539 e0
-[17:46:27 INFO]: [c-LoD] stream: tick 3900 65536/65536 cells, lap 963, cone 14040 zone 1288 dirty 792 (q 12570) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 1051700c/2388e, edits +6521p/4845c/928e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 315 forced 197, native 65536c/1089ch fail 0 (3w q 0) helper on, trees 1089ch/fail 0, wire bundle 129176p/227b fail 0 ~112 kB/s cache 11539/24576 h117637 m11539 e0
+[18:17:29 INFO]: [c-LoD] stream: tick 3600 65536/65536 cells, lap 1159, cone 18093 zone 1284 dirty 756 (q 11328) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 961357c/1780e, edits +7521p/5586c/936e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 324 forced 188, native 65536c/1089ch fail 0 (3w q 0) helper on, trees 1089ch/fail 0, wire bundle 161115p/235b fail 0 ~56 kB/s cache 11440/24576 h149675 m11440 e0
+[c-LoD] stream: tick 3700 65536/65536 cells, lap 1259, cone 20763 zone 1284 dirty 756 (q 11328) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 997439c/1781e, edits +7525p/5590c/937e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 324 forced 188, native 65536c/1089ch fail 0 (3w q 0) helper on, trees 1089ch/fail 0, wire bundle 182381p/257b fail 0 ~112 kB/s cache 11440/24576 h170941 m11440 e0
+[18:17:39 INFO]: [c-LoD] stream: tick 3700 65536/65536 cells, lap 1259, cone 20763 zone 1284 dirty 756 (q 11328) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 997439c/1781e, edits +7525p/5590c/937e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 324 forced 188, native 65536c/1089ch fail 0 (3w q 0) helper on, trees 1089ch/fail 0, wire bundle 182381p/257b fail 0 ~112 kB/s cache 11440/24576 h170941 m11440 e0
 - parity debug tour: 12 vantages (session-1 client, DEBUG pack — evidence only, the gate pairs the §7b world session)
 - parity debug tour done: 12 shots in parity_dbg/ (the §7b world session feeds the gate)
-- joined session 2 (17:49:11)
+- joined session 2 (18:20:26)
 - leg-2 baseline scene px (x<940): 0 (0 = the relog client paints no world at all)
-- leg-2 renderer probe NEAR (20 m) white px: 551 raw / 551 changed-vs-baseline (> 20 = the client renders particles)
-- leg-2 renderer probe FAR (80 m, marker zone) white px: 341 raw / 340 changed-vs-baseline (> 20 = no distance cut; ~0 with NEAR alive = particles beyond the client chunk radius do not render)
-- leg-2 carrier probe green dust (80 m): changed-green px 0 / total changed 8 vs baseline (> 100 green = a stable green carrier exists; total > 0 with green ~0 = the dust renders but fog washes it — a ruler problem, not a carrier problem)
+- leg-2 renderer probe NEAR (20 m) white px: 517 raw / 517 changed-vs-baseline (> 20 = the client renders particles)
+- leg-2 renderer probe FAR (80 m, marker zone) white px: 0 raw / 0 changed-vs-baseline (> 20 = no distance cut; ~0 with NEAR alive = particles beyond the client chunk radius do not render)
+- leg-2 carrier probe green dust (80 m): changed-green px 0 / total changed 10 vs baseline (> 100 green = a stable green carrier exists; total > 0 with green ~0 = the dust renders but fog washes it — a ruler problem, not a carrier problem)
 - LEG-2 SCENE DEAD: the relog client paints ZERO scene pixels (x<940) — pure sky + lens panels; the fresh-session capture chain never commits (renderer-dead class, #227/#228); these probes measure a worldless client, not the transport
-- relog probe 0: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=2 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
-- relog probe 1: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=29 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
-- relog probe 2: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=5 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
-- relog probe 3: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=3 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
-- relog probe 4: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=19 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
-- relog probe 5: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=2 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
-- relog probe 6: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
-- relog probe 7: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=13 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
-- relog probe 8: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=2 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
-- relog probe 9: red=0 scene=7 lens_red=0 lens_black=0 lens_water=0 lens_dark=198114 lens_zero=0 rot=decoded cam_x_b=? cam_z_b=? az_b=? el_b=? strobe_hits=22 mask_hits=22 (need red >= 60; scene > 0 = the client paints a world at all)
-- relog probe 10: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=8 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
-- relog probe 11: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=3 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
+- relog probe 0: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
+- relog probe 1: red=0 scene=37 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=? cam_z_b=? az_b=? el_b=? strobe_hits=22 mask_hits=22 (need red >= 60; scene > 0 = the client paints a world at all)
+- relog probe 2: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=10 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
+- relog probe 3: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=2 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
+- relog probe 4: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red >= 60; scene > 0 = the client paints a world at all)
+- relog probe 5: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=11 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
+- relog probe 6: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=2 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
+- relog probe 7: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=0 (need red >= 60; scene > 0 = the client paints a world at all)
+- relog probe 8: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=20 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
+- relog probe 9: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=6 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
+- relog probe 10: red=0 scene=0 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 strobe_hits=0 mask_hits=30 (need red >= 60; scene > 0 = the client paints a world at all)
+- relog probe 11: red=0 scene=9 lens_red=0 lens_black=0 lens_water=0 lens_dark=198114 lens_zero=0 rot=decoded cam_x_b=? cam_z_b=? az_b=? el_b=? strobe_hits=22 mask_hits=22 (need red >= 60; scene > 0 = the client paints a world at all)
 - **FAIL:** marker lost after relog — stream state is not persistent/deterministic
 
 ### client log forensics (pipeline/particle/atlas — v6.8.2)
@@ -97,24 +97,24 @@
 ALSA lib confmisc.c:1342:(snd_func_refer) error evaluating name
 ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_refer returned error: No such file or directory
 ALSA lib conf.c:5731:(snd_config_expand) Evaluate error: No such file or directory
-[17:49:07] [Render thread/ERROR]: Error starting SoundSystem. Turning off sounds & music
+[18:20:23] [Render thread/ERROR]: Error starting SoundSystem. Turning off sounds & music
 java.lang.IllegalStateException: Failed to open OpenAL device
 	at net.minecraft.client.sounds.SoundEngine.reload(SoundEngine.java:110)
 	at net.minecraft.server.packs.resources.SimplePreparableReloadListener.lambda$reload$1(SimplePreparableReloadListener.java:15)
 	at net.minecraft.server.packs.resources.SimpleReloadInstance.lambda$prepareTasks$3(SimpleReloadInstance.java:59)
-[17:49:07] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
-[17:49:07] [Render thread/INFO]: Created: 256x128x0 minecraft:textures/atlas/celestials.png-atlas
-[17:49:07] [Render thread/INFO]: Created: 128x128x0 minecraft:textures/atlas/decorated_pot.png-atlas
-[17:49:07] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
-[17:49:07] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
-[17:49:07] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
-[17:49:07] [Render thread/INFO]: Created: 2048x2048x4 minecraft:textures/atlas/blocks.png-atlas
-[17:49:07] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/items.png-atlas
-[17:49:07] [Render thread/INFO]: Created: 1024x1024x0 minecraft:textures/atlas/gui.png-atlas
-[17:49:07] [Render thread/INFO]: Created: 128x64x0 minecraft:textures/atlas/map_decorations.png-atlas
-[17:49:07] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/chest.png-atlas
-[17:49:07] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/shulker_boxes.png-atlas
-[17:49:15] [Render thread/INFO]: Reloading ResourceManager: vanilla, vanilla, server/00000000/6b1f2f7e-9c0d-4a4b-8b0a-b10d1b4ab100
+[18:20:23] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
+[18:20:23] [Render thread/INFO]: Created: 256x128x0 minecraft:textures/atlas/celestials.png-atlas
+[18:20:23] [Render thread/INFO]: Created: 128x128x0 minecraft:textures/atlas/decorated_pot.png-atlas
+[18:20:23] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
+[18:20:23] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
+[18:20:23] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
+[18:20:23] [Render thread/INFO]: Created: 2048x2048x4 minecraft:textures/atlas/blocks.png-atlas
+[18:20:23] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/items.png-atlas
+[18:20:23] [Render thread/INFO]: Created: 1024x1024x0 minecraft:textures/atlas/gui.png-atlas
+[18:20:23] [Render thread/INFO]: Created: 128x64x0 minecraft:textures/atlas/map_decorations.png-atlas
+[18:20:23] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/chest.png-atlas
+[18:20:23] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/shulker_boxes.png-atlas
+[18:20:30] [Render thread/INFO]: Reloading ResourceManager: vanilla, vanilla, server/00000000/6b1f2f7e-9c0d-4a4b-8b0a-b10d1b4ab100
 ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_card_inum returned error: No such file or directory
 ALSA lib confmisc.c:422:(snd_func_concat) error evaluating strings
 ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_concat returned error: No such file or directory
@@ -127,70 +127,70 @@ ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_concat returned er
 ALSA lib confmisc.c:1342:(snd_func_refer) error evaluating name
 ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_refer returned error: No such file or directory
 ALSA lib conf.c:5731:(snd_config_expand) Evaluate error: No such file or directory
-[17:49:17] [Render thread/ERROR]: Error starting SoundSystem. Turning off sounds & music
+[18:20:32] [Render thread/ERROR]: Error starting SoundSystem. Turning off sounds & music
 java.lang.IllegalStateException: Failed to open OpenAL device
 	at net.minecraft.client.sounds.SoundEngine.reload(SoundEngine.java:110)
 	at net.minecraft.server.packs.resources.SimplePreparableReloadListener.lambda$reload$1(SimplePreparableReloadListener.java:15)
 	at net.minecraft.server.packs.resources.SimpleReloadInstance.lambda$prepareTasks$3(SimpleReloadInstance.java:59)
-[17:49:17] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
-[17:49:17] [Render thread/INFO]: Created: 256x128x0 minecraft:textures/atlas/celestials.png-atlas
-[17:49:17] [Render thread/INFO]: Created: 128x128x0 minecraft:textures/atlas/decorated_pot.png-atlas
-[17:49:17] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
-[17:49:17] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
-[17:49:17] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
-[17:49:17] [Render thread/INFO]: Created: 2048x2048x4 minecraft:textures/atlas/blocks.png-atlas
-[17:49:17] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/items.png-atlas
-[17:49:17] [Render thread/INFO]: Created: 1024x1024x0 minecraft:textures/atlas/gui.png-atlas
-[17:49:17] [Render thread/INFO]: Created: 128x64x0 minecraft:textures/atlas/map_decorations.png-atlas
-[17:49:17] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/chest.png-atlas
-[17:49:17] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/shulker_boxes.png-atlas
+[18:20:32] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
+[18:20:32] [Render thread/INFO]: Created: 256x128x0 minecraft:textures/atlas/celestials.png-atlas
+[18:20:32] [Render thread/INFO]: Created: 128x128x0 minecraft:textures/atlas/decorated_pot.png-atlas
+[18:20:32] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
+[18:20:32] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
+[18:20:32] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
+[18:20:32] [Render thread/INFO]: Created: 2048x2048x4 minecraft:textures/atlas/blocks.png-atlas
+[18:20:32] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/items.png-atlas
+[18:20:32] [Render thread/INFO]: Created: 1024x1024x0 minecraft:textures/atlas/gui.png-atlas
+[18:20:32] [Render thread/INFO]: Created: 128x64x0 minecraft:textures/atlas/map_decorations.png-atlas
+[18:20:32] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/chest.png-atlas
+[18:20:32] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/shulker_boxes.png-atlas
 ```
 
 ### /clod-cells AFTER PROBES (server belief)
 ```
 # cx cz wx wz height water valid rgb last_age dirty hword cword
-122 122 -942 784 68 0 1 [97, 119, 97] 54 0 0x8400 0x3100
-123 122 -940 784 71 0 1 [97, 119, 97] 54 0 0x8700 0x3100
-124 122 -938 784 68 0 1 [97, 119, 97] 53 0 0x8400 0x3100
-125 122 -936 784 62 1 1 [63, 118, 228] 53 0 0x7e00 0xd800
-126 122 -934 784 62 1 1 [63, 118, 228] 52 0 0x7e00 0xd800
-127 122 -932 784 62 1 1 [63, 118, 228] 52 0 0x7e00 0xd800
-128 122 -930 784 62 1 1 [63, 118, 228] 51 0 0x7e00 0xd800
-129 122 -928 784 64 0 1 [134, 183, 131] 51 0 0x8000 0x5c00
-130 122 -926 784 66 0 1 [134, 183, 131] 50 0 0x8200 0x5c00
-131 122 -924 784 75 0 1 [97, 119, 97] 49 0 0x8b00 0x3100
-132 122 -922 784 77 0 1 [97, 119, 97] 3598 0 0x8d00 0x3100
-133 122 -920 784 75 0 1 [97, 119, 97] 3598 0 0x8b00 0x3100
-134 122 -918 784 73 0 1 [97, 119, 97] 3598 0 0x8900 0x3100
-122 123 -942 786 70 0 1 [97, 119, 97] 55 0 0x8600 0x3100
-123 123 -940 786 65 0 1 [97, 119, 97] 54 0 0x8100 0x3100
-124 123 -938 786 65 0 1 [97, 119, 97] 54 0 0x8100 0x3100
-125 123 -936 786 62 1 1 [63, 118, 228] 53 0 0x7e00 0xd800
+122 122 -942 784 68 0 1 [97, 119, 97] 57 0 0x8400 0x3100
+123 122 -940 784 71 0 1 [97, 119, 97] 57 0 0x8700 0x3100
+124 122 -938 784 68 0 1 [97, 119, 97] 56 0 0x8400 0x3100
+125 122 -936 784 62 1 1 [63, 118, 228] 56 0 0x7e00 0xd800
+126 122 -934 784 62 1 1 [63, 118, 228] 55 0 0x7e00 0xd800
+127 122 -932 784 62 1 1 [63, 118, 228] 55 0 0x7e00 0xd800
+128 122 -930 784 62 1 1 [63, 118, 228] 54 0 0x7e00 0xd800
+129 122 -928 784 64 0 1 [134, 183, 131] 54 0 0x8000 0x5c00
+130 122 -926 784 66 0 1 [134, 183, 131] 53 0 0x8200 0x5c00
+131 122 -924 784 75 0 1 [97, 119, 97] 52 0 0x8b00 0x3100
+132 122 -922 784 77 0 1 [97, 119, 97] 18446744073709551615 1 0x8d00 0x3100
+133 122 -920 784 75 0 1 [97, 119, 97] 18446744073709551615 1 0x8b00 0x3100
+134 122 -918 784 73 0 1 [97, 119, 97] 18446744073709551615 1 0x8900 0x3100
+122 123 -942 786 70 0 1 [97, 119, 97] 58 0 0x8600 0x3100
+123 123 -940 786 65 0 1 [97, 119, 97] 57 0 0x8100 0x3100
+124 123 -938 786 65 0 1 [97, 119, 97] 57 0 0x8100 0x3100
+125 123 -936 786 62 1 1 [63, 118, 228] 56 0 0x7e00 0xd800
 ```
 - edit channel: 0 linkage errors, 0 failed event dispatches (both must be 0)
 - parity world: view-distance=8 (the voxy leg's server value)
-- parity world: joined session 3 (17:54:26)
+- parity world: joined session 3 (18:25:27)
 - parity world: scan populated (cells=65536; the march paints from these buffers)
 - parity world tour: 12 vantages (production pack, vd 8, shared structures)
 - parity world tour done: 12 shots in parity/ (the gate pairs voxy/<name>.png vs parity/<name>.png)
 ### parity world stream counters (session 3, tail + maxima)
-[c-LoD] stream: tick 2800 65536/65536 cells, lap 2237, cone 53872 zone 5092 dirty 142 (q 10894) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 1840169c/501e, edits +93p/91c/13e drop 0, spawned 0 / failed 0, cam0 yaw -180 pitch 5, wish 392 forced 502, native 33920c/955ch fail 0 (3w q 0) helper on, trees 955ch/fail 0, wire bundle 453804p/534b fail 0 ~0 kB/s cache 23905/24576 h356171 m97633 e73728
-[17:58:50 INFO]: [c-LoD] stream: tick 2800 65536/65536 cells, lap 2237, cone 53872 zone 5092 dirty 142 (q 10894) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 1840169c/501e, edits +93p/91c/13e drop 0, spawned 0 / failed 0, cam0 yaw -180 pitch 5, wish 392 forced 502, native 33920c/955ch fail 0 (3w q 0) helper on, trees 955ch/fail 0, wire bundle 453804p/534b fail 0 ~0 kB/s cache 23905/24576 h356171 m97633 e73728
-- parity stream max cone: 53872
-- parity stream max zone: 5092
+[c-LoD] stream: tick 2700 65536/65536 cells, lap 1833, cone 42681 zone 3114 dirty 87 (q 13422) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 1796478c/616e, edits +84p/82c/17e drop 0, spawned 0 / failed 0, cam0 yaw -180 pitch 5, wish 390 forced 499, native 34936c/950ch fail 0 (3w q 0) helper on, trees 950ch/fail 0, wire bundle 348317p/383b fail 0 ~0 kB/s cache 22618/24576 h313411 m34906 e12288
+[18:29:46 INFO]: [c-LoD] stream: tick 2700 65536/65536 cells, lap 1833, cone 42681 zone 3114 dirty 87 (q 13422) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 1796478c/616e, edits +84p/82c/17e drop 0, spawned 0 / failed 0, cam0 yaw -180 pitch 5, wish 390 forced 499, native 34936c/950ch fail 0 (3w q 0) helper on, trees 950ch/fail 0, wire bundle 348317p/383b fail 0 ~0 kB/s cache 22618/24576 h313411 m34906 e12288
+- parity stream max cone: 42681
+- parity stream max zone: 3114
 - parity stream max wire bundle: bundle
 ### parity world capture lens (debug chain on the §7b world)
-lens_red=75 lens_black=1225 lens_water=5577 lens_dark=180366 lens_zero=0 rot=decoded cam_x_b=? cam_z_b=? az_b=? el_b=? strobe_hits=22 mask_hits=22
-- parity mesh probe @png_y=2: x306=(255,255,255) x307=(13,254,0) x308=(0,254,0) x309h=(196,0,0) x310c=(254,0,0)
-- parity mesh probe @png_y=717: x306=(255,255,255) x307=(13,254,0) x308=(0,254,0) x309h=(196,0,0) x310c=(254,0,0)
-- parity mesh engagement: magenta-ish=297136 of 921600 sampled px
+lens_red=0 lens_black=0 lens_water=0 lens_dark=0 lens_zero=0 rot=none scan=0 carriers=0
+- parity mesh probe @png_y=2: x306=(151,184,255) x307=(151,184,255) x308=(151,184,255) x309h=(151,184,255) x310c=(151,184,255)
+- parity mesh probe @png_y=717: x306=(1,1,1) x307=(14,28,63) x308=(1,1,1) x309h=(14,28,63) x310c=(1,1,1)
+- parity mesh engagement: magenta-ish=4672 of 921600 sampled px
 - mask8: the un-fog engagement masks shot on the PARITY WORLD (vd 8) — parity_dbg8/01m|07m|10m
-- mask8 01m: green=272 red=64 blue=111216 dim=170064 (px, sampled /16)
-- mask8 07m: green=12048 red=0 blue=221376 dim=5824 (px, sampled /16)
-- mask8 10m: green=1088 red=0 blue=215264 dim=84016 (px, sampled /16)
-- mesh probe @png_y=2: x306=(255,255,255) x307=(13,254,0) x308=(0,254,0) x309h=(195,0,0) x310c=(254,0,0)
-- mesh probe @png_y=717: x306=(255,255,255) x307=(13,254,0) x308=(0,254,0) x309h=(195,0,0) x310c=(254,0,0)
-- mesh engagement: magenta-ish=2560 of 921600 sampled px (the vanilla-path paint coverage)
+- mask8 01m: green=864 red=5360 blue=110400 dim=169168 (px, sampled /16)
+- mask8 07m: green=12032 red=0 blue=221344 dim=5824 (px, sampled /16)
+- mask8 10m: green=10992 red=2976 blue=213072 dim=120560 (px, sampled /16)
+- mesh probe @png_y=2: x306=(255,255,255) x307=(13,254,0) x308=(0,254,0) x309h=(64,0,0) x310c=(254,0,0)
+- mesh probe @png_y=717: x306=(255,255,255) x307=(13,254,0) x308=(0,254,0) x309h=(64,0,0) x310c=(254,0,0)
+- mesh engagement: magenta-ish=109408 of 921600 sampled px (the vanilla-path paint coverage)
 - mask8 fog state @png_y=2: raw (300)=(151,184,255) (301)=(151,184,255)
-- mask8 fog state @png_y=717: raw (300)=(0,128,8) (301)=(179,206,255)
-- mask8 fog state decoded: envStart=0 envEnd=1024 rdEnd=128 fogColor=(179,206,255)
+- mask8 fog state @png_y=717: raw (300)=(99,12,104) (301)=(137,61,180)
+- mask8 fog state decoded: envStart=792 envEnd=96 rdEnd=1664 fogColor=(137,61,180)
