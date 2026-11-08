@@ -1,6 +1,7 @@
 #version 330
 #extension GL_ARB_separate_shader_objects : require
 #include <minecraft:globals.glsl>
+// __MESH_DEBUG__
 
 // c-LoD pass (v5.0 "SKY-GRID BIT-STREAM"): the actual level-of-distant-detail
 // renderer.
@@ -516,6 +517,38 @@ float march_terrain(vec3 cam, vec3 dir, float t0, float tCap, float tanH,
 }
 
 void main() {
+#ifdef MESH_DEBUG
+    // v6.19.2 MESH DEBUG probe (compile-time — a #define CANNOT fail to
+    // bind, unlike the PaintParams UBO): three sky-row pixels carry the
+    // live markers; the runner decodes BOTH PNG ends (GL y-flip: a block
+    // written at GL y=2 lands at PNG y=h-3).
+    //   x=306: constant WHITE — the NEW shader is live (zero uniforms)
+    //   x=307: r = PaintParams.x (delivered DEPTH_NEAR, ~0.05 -> ~13/255)
+    //          g = PaintParams.y (delivered MESH PAINT arm, 1.0 -> 254/255)
+    //   x=308: r = 255 iff MESH_DEBUG && PaintParams.y < 0.5 — shader live
+    //          but uniform dead (the binding-failure signature)
+    //          g = conf (the rot channel confidence)
+    ivec2 sxy = ivec2(gl_FragCoord.xy);
+    if (sxy.y == 2 || sxy.y == int(ScreenSize.y) - 3) {
+        if (sxy.x == 306) {
+            fragColor = vec4(1.0, 1.0, 1.0, 1.0);
+            return;
+        }
+        if (sxy.x == 307) {
+            fragColor = vec4(clamp(PaintParams.x * 254.0, 0.0, 255.0) / 255.0,
+                             clamp(PaintParams.y * 254.0, 0.0, 255.0) / 255.0,
+                             0.0, 1.0);
+            return;
+        }
+        if (sxy.x == 308) {
+            vec4 rot0 = texelFetch(RotSampler, ivec2(0, 0), 0);
+            fragColor = vec4(PaintParams.y < 0.5 ? 1.0 : 0.0,
+                             clamp(rot0.b * 254.0, 0.0, 255.0) / 255.0,
+                             0.0, 1.0);
+            return;
+        }
+    }
+#endif
     vec4 scene = texture(InSampler, texCoord);
     float depth = texture(InDepthSampler, texCoord).r;
     vec2 px = texCoord * ScreenSize;
@@ -586,8 +619,14 @@ void main() {
     float tVan = -1.0;
     if (depth > 1.0e-6) {
         if (PaintParams.y < 0.5) {
+#ifdef MESH_DEBUG
+            // Armed shader + dead uniform: the whole screen goes magenta.
+            fragColor = vec4(1.0, 0.0, 1.0, scene.a);
+            return;
+#else
             fragColor = scene; // real chunks always win (pre-G8d behavior)
             return;
+#endif
         }
         float eyeZ = PaintParams.x / depth;
         tVan = eyeZ / max(dot(dir, F), 1.0e-4);
@@ -714,5 +753,13 @@ void main() {
     float gate = (tVan > 0.0) ? 1.0 : smoothstep(rd * 0.92, rd * 1.10, tHit);
 
     vec3 outCol = mix(mix(scene.rgb, lit, fade * gate), scene.rgb, fadeOut);
+#ifdef MESH_DEBUG
+    // v6.19.2: the vanilla-path ENGAGEMENT MAP — every pixel the depth-
+    // tested march owns carries a 35% magenta lift, unmistakable in the
+    // mask8 frames and in the pixel forensics.
+    if (tVan > 0.0) {
+        outCol = mix(outCol, vec3(1.0, 0.0, 1.0), 0.35);
+    }
+#endif
     fragColor = vec4(outCol, scene.a);
 }

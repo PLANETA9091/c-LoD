@@ -212,7 +212,16 @@ fn build_zip(
     let rot_copy = include_str!("../assets/glsl/rot_copy.fsh");
     let capture = include_str!("../assets/glsl/capture.fsh");
     let dust_mask = include_str!("../assets/glsl/dust_mask.fsh");
-    let lod_terrain = include_str!("../assets/glsl/lod_terrain.fsh");
+    // v6.19.2 MESH DEBUG: the probe rides a COMPILE-TIME #define — it cannot
+    // fail to bind (the PaintParams UBO is the suspect the probe tests).
+    // The marker line stays a comment in the default build (glslang sees the
+    // raw file; the game sees the substituted one).
+    let lod_terrain = if cfg.mesh_debug {
+        include_str!("../assets/glsl/lod_terrain.fsh")
+            .replace("// __MESH_DEBUG__", "#define MESH_DEBUG 1")
+    } else {
+        include_str!("../assets/glsl/lod_terrain.fsh").to_string()
+    };
     let clod_blit = include_str!("../assets/glsl/clod_blit.fsh");
     let atmosphere = include_str!("../assets/glsl/atmosphere.fsh");
     // v6.18: the un-fog shader ships in EVERY unfog variant; unfog_debug
@@ -574,6 +583,35 @@ mod tests {
         // Determinism on the new knob.
         let painted2 = build(&Config::parse("mesh_paint=true"));
         assert_eq!(painted.zip, painted2.zip);
+    }
+
+    #[test]
+    fn mesh_debug_defines_ship_in_the_march_shader() {
+        // v6.19.2: the probe is a compile-time #define in the shipped fsh —
+        // the default build keeps the marker line a comment.
+        let raw = build(&Config::parse(""));
+        let raw_fsh = String::from_utf8_lossy(
+            &zip_entries(&raw.zip)
+                .iter()
+                .find(|(n, _)| n == "assets/clod/shaders/post/lod_terrain.fsh")
+                .unwrap()
+                .1,
+        )
+        .to_string();
+        assert!(!raw_fsh.contains("#define MESH_DEBUG"), "probe leaked to prod");
+        assert!(raw_fsh.contains("// __MESH_DEBUG__"), "marker must stay");
+        let dbg = build(&Config::parse("mesh_debug=true;mesh_paint=true"));
+        let dbg_fsh = String::from_utf8_lossy(
+            &zip_entries(&dbg.zip)
+                .iter()
+                .find(|(n, _)| n == "assets/clod/shaders/post/lod_terrain.fsh")
+                .unwrap()
+                .1,
+        )
+        .to_string();
+        assert!(dbg_fsh.contains("#define MESH_DEBUG 1"), "probe must ship");
+        assert!(!dbg_fsh.contains("// __MESH_DEBUG__"), "marker must be replaced");
+        assert_ne!(dbg.sha1_hex, raw.sha1_hex);
     }
 
     #[test]

@@ -151,6 +151,12 @@ pub struct Config {
     /// march is the only painter we own). Pack SHA changes; the parity world
     /// boots with it, production stays mesh_paint=false.
     pub mesh_paint: bool,
+    /// v6.19.2 MESH DEBUG: compile-time probe in the march — a #define
+    /// (cannot fail to bind, unlike a suspect UBO) that paints three probe
+    /// pixels (shader-live marker + the delivered PaintParams values) and a
+    /// 35% magenta engagement map on every vanilla-path pixel. CI evidence
+    /// lane only (the mask8 boot); production stays mesh_debug=false.
+    pub mesh_debug: bool,
     /// v6.7.1 MULTI-BEAT: retry beats a genuine edit gets after its release
     /// (total decode chances = edit_beats + 1). Each retry re-runs the
     /// hold→release sequence with a fresh reset electron, so a beat whose
@@ -203,6 +209,7 @@ impl Default for Config {
             unfog: false,
             unfog_debug: false,
             mesh_paint: false,
+            mesh_debug: false,
             atmosphere: true,
             edit_beats: crate::stream::EDIT_BEATS_DEFAULT,
         }
@@ -364,6 +371,11 @@ impl Config {
         // band where the streamed data stands in front (mesh unification).
         if let Some(v) = get("mesh_paint") {
             cfg.mesh_paint = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
+        // v6.19.2: mesh_debug=true — the compile-time probe (#define) in the
+        // march; evidence lane only.
+        if let Some(v) = get("mesh_debug") {
+            cfg.mesh_debug = matches!(v.trim(), "1" | "true" | "yes" | "on");
         }
         // v6.18: atmosphere=false — never attach the veil effect.
         if let Some(v) = get("atmosphere") {
@@ -546,6 +558,10 @@ mod tests {
         for v in ["0", "false", "off", ""] {
             assert!(!Config::parse(&format!("mesh_paint={v}")).mesh_paint, "{v}");
         }
+        // v6.19.2: the probe flag is independent of the paint flag.
+        assert!(!Config::parse("").mesh_debug);
+        assert!(Config::parse("mesh_debug=true").mesh_debug);
+        assert!(!Config::parse("mesh_debug=true").mesh_paint);
         // Combines with the unfog chain flag (the parity boot's full set).
         let c = Config::parse("debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false");
         assert!(c.mesh_paint && c.unfog && !c.debug_lens && !c.atmosphere);

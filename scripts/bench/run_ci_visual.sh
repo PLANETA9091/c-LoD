@@ -1364,6 +1364,10 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     ct "parity world shot $PNAME ($PW_N/$PTOT)"
   done 3< "$PARITY"
   sum "- parity world tour done: $PW_N shots in parity/ (the gate pairs voxy/<name>.png vs parity/<name>.png)"
+  # v6.19.2: preserve the parity client's log BEFORE the mask8 boot overwrites
+  # it — the pack SHA the gate frames actually rendered is the first thing a
+  # frozen-parity question asks (the #295 mesh-paint freeze had no witness).
+  cp /tmp/client.log "$SHOTS/parity/client.log" 2>/dev/null || true
   srv "time set noon"
   # v6.18.4 THE MASK ON THE PARITY WORLD: the §5b masks ride the session-1
   # client (view-distance 4 — no vanilla geometry beyond 64 m, so the masks
@@ -1376,7 +1380,12 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # pixels read as plain sky, the pack never reached the client) + fresh
   # client, three diagnostic vantages into parity_dbg8/.
   # Non-fatal by design (evidence, never the gate's input).
-  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;unfog_debug=true"
+  # v6.19.2 MESH DEBUG: the mask8 lane doubles as the G8d engagement probe —
+  # mesh_paint=true arms the vanilla path, mesh_debug=true compiles the
+  # probe (#define: shader-live marker + the delivered PaintParams bytes +
+  # a 35% magenta lift on every vanilla-path pixel). The #295 freeze
+  # (parity table identical pre/post G8d) had no witness — this boot is it.
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;unfog_debug=true;mesh_paint=true;mesh_debug=true"
   CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" \
     || note "mask8: boot_server.sh rc=$? (the mask evidence degrades, the gate unaffected)"
   pkill -f "net.minecraft.client.main.Main" 2>/dev/null || true
@@ -1402,6 +1411,9 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     shot "parity_dbg8/$MN" || true
   done
   sum "- mask8: the un-fog engagement masks shot on the PARITY WORLD (vd 8) — parity_dbg8/01m|07m|10m"
+  cp /tmp/client.log "$SHOTS/parity_dbg8/client.log" 2>/dev/null || true
+  # v6.19.2: preserve the mask8 client's log — the pack SHA + any post-chain
+  # config warnings (the uniform-binding suspect) live only here.
   # v6.18.5: the mask forensics + the fog-state decode go through `sum` —
   # the #290 python printed to stdout and never reached the summary.
   M8FORENSICS=$(mktemp)
@@ -1425,6 +1437,28 @@ for name in ("01m", "07m", "10m"):
             elif close(c, BLUE): b += 1
             elif sum(c) < 330 and abs(c[0]-c[1]) < 24 and abs(c[1]-c[2]) < 24: dim += 1
     print(f"- mask8 {name}: green={g*16} red={r*16} blue={b*16} dim={dim*16} (px, sampled /16)")
+st = os.path.join(sys.argv[1], "01m.png")
+if os.path.exists(st):
+    im = Image.open(st).convert("RGB"); px = im.load()
+    w, h = im.size
+    # v6.19.2 MESH DEBUG probe decode: the march writes three markers at
+    # GL y=2 and GL y=h-3 (the PNG sees y=h-3 and y=2 — the GL y-flip).
+    #   x=306 WHITE = the probe shader is live (no uniform involved)
+    #   x=307 r/g = the delivered PaintParams.x/.y (bytes of v*254)
+    #   x=308 r = 255 iff the shader is live but PaintParams.y < 0.5
+    #         g = the rot-channel confidence byte
+    for yy in (2, h - 3):
+        m1 = px[306, yy]; m2 = px[307, yy]; m3 = px[308, yy]
+        print(f"- mesh probe @png_y={yy}: x306=({m1[0]},{m1[1]},{m1[2]}) x307=({m2[0]},{m2[1]},{m2[2]}) x308=({m3[0]},{m3[1]},{m3[2]})")
+    # The magenta engagement map: every vanilla-path pixel carries a 35%
+    # lift toward (255,0,255) — r and b rise above g together.
+    mag = 0; tot = 0
+    for y in range(0, h, 4):
+        for x in range(0, w, 4):
+            c = px[x, y]; tot += 1
+            if c[0] > c[1] + 60 and c[2] > c[1] + 60:
+                mag += 1
+    print(f"- mesh engagement: magenta-ish={mag*16} of {tot*16} sampled px (the vanilla-path paint coverage)")
 st = os.path.join(sys.argv[1], "01m.png")
 if os.path.exists(st):
     im = Image.open(st).convert("RGB"); px = im.load()
