@@ -177,6 +177,7 @@ pub fn build(cfg: &Config) -> Pack {
             debug_lens,
             unfog,
             cfg.unfog_debug,
+            cfg.mesh_debug,
         );
     }
     build_zip(
@@ -186,6 +187,7 @@ pub fn build(cfg: &Config) -> Pack {
         debug_lens,
         unfog,
         cfg.unfog_debug,
+        cfg.mesh_debug,
     )
 }
 
@@ -196,6 +198,7 @@ fn build_zip(
     debug_lens: bool,
     unfog: bool,
     unfog_debug: bool,
+    mesh_debug: bool,
 ) -> Pack {
     let lod_terrain_json = substitute(lod_terrain_tpl, &map);
     let atmosphere_json = substitute(atmosphere_tpl, &map);
@@ -216,7 +219,7 @@ fn build_zip(
     // fail to bind (the PaintParams UBO is the suspect the probe tests).
     // The marker line stays a comment in the default build (glslang sees the
     // raw file; the game sees the substituted one).
-    let lod_terrain = if cfg.mesh_debug {
+    let lod_terrain = if mesh_debug {
         include_str!("../assets/glsl/lod_terrain.fsh")
             .replace("// __MESH_DEBUG__", "#define MESH_DEBUG 1")
     } else {
