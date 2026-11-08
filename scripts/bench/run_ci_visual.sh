@@ -1425,9 +1425,17 @@ for name in ("01m", "07m", "10m"):
 st = os.path.join(sys.argv[1], "01m.png")
 if os.path.exists(st):
     im = Image.open(st).convert("RGB"); px = im.load()
-    a = px[300, 2]; c = px[301, 2]
-    print(f"- mask8 fog state raw (300,2)=({a[0]},{a[1]},{a[2]}) (301,2)=({c[0]},{c[1]},{c[2]})")
-    print(f"- mask8 fog state decoded: envStart={a[0]*8} envEnd={a[1]*8} rdEnd={a[2]*16} fogColor=({c[0]},{c[1]},{c[2]})")
+    w, h = im.size
+    # GL gl_FragCoord.y grows UPWARD, the PNG grows DOWNWARD: the block
+    # written at GL y=2 lands at PNG y=h-3. Read both ends, take the one
+    # that differs from the local sky (the #292 probe read the wrong end
+    # and 'decoded' the sky gradient).
+    for yy in (2, h - 3):
+        a = px[300, yy]; c = px[301, yy]
+        marker = yy == 2 and False or (a[0] > 240 and a[1] < 40)
+        print(f"- mask8 fog state @png_y={yy}: raw (300)=({a[0]},{a[1]},{a[2]}) (301)=({c[0]},{c[1]},{c[2]})")
+        if not (abs(int(a[0]) - 151) < 12 and abs(int(a[1]) - 184) < 12):
+            print(f"- mask8 fog state decoded: envStart={a[0]*8} envEnd={a[1]*8} rdEnd={a[2]*16} fogColor=({c[0]},{c[1]},{c[2]})")
 PYEOF
   while IFS= read -r l; do sum "$l"; done < "$M8FORENSICS"
   rm -f "$M8FORENSICS"
