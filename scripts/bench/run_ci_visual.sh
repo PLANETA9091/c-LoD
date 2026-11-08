@@ -1320,7 +1320,18 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # session carries its own probe (mesh_debug): the gate is red regardless,
   # one diagnostic round of probe-contaminated frames is the cheapest way
   # to see the armed chain's own engagement map + delivered uniform bytes.
-  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;mesh_debug=true;atmosphere=false"
+  # v6.19.6 THE A/B: #299's probe answered the rest — the parity shader is
+  # live (x306 white), the uniform binds (x307=(13,254)), the rot channel
+  # is fully converged (x308.g=254) — and STILL magenta=0, while the mask8
+  # session in the SAME RUN painted 160240 px. One structural difference
+  # remains across EVERY session that ever painted: THE ATMOSPHERE CHAIN
+  # WAS ATTACHED (leg-1 debug, §5b, mask8 — all atmosphere=on; the parity
+  # session is the only atmosphere=false one, and the only one whose capture
+  # never decoded — the 07 frame is pure sky+dome, the "march-vs-mesh 85.4%"
+  # rows were vacuity). A/B: the parity boot keeps the veil attached this
+  # round; the x=309/310 capture-heartbeat bytes (the raw height/color word
+  # at the disk-center cell) name the capture alive or dead either way.
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;mesh_debug=true"
   bash "$BENCH_DIR/boot_server.sh" \
     || note "parity world: boot_server.sh rc=$? (continuing — the gate degrades to FAIL pairs)"
   srv "gamerule doDaylightCycle false"
@@ -1384,7 +1395,8 @@ if os.path.exists(p):
     im = Image.open(p).convert("RGB"); px = im.load(); w, h = im.size
     for yy in (2, h - 3):
         m1 = px[306, yy]; m2 = px[307, yy]; m3 = px[308, yy]
-        print(f"- parity mesh probe @png_y={yy}: x306=({m1[0]},{m1[1]},{m1[2]}) x307=({m2[0]},{m2[1]},{m2[2]}) x308=({m3[0]},{m3[1]},{m3[2]})")
+        m4 = px[309, yy]; m5 = px[310, yy]
+        print(f"- parity mesh probe @png_y={yy}: x306=({m1[0]},{m1[1]},{m1[2]}) x307=({m2[0]},{m2[1]},{m2[2]}) x308=({m3[0]},{m3[1]},{m3[2]}) x309h=({m4[0]},{m4[1]},{m4[2]}) x310c=({m5[0]},{m5[1]},{m5[2]})")
     mag = 0; tot = 0
     for y in range(0, h, 4):
         for x in range(0, w, 4):
@@ -1480,7 +1492,8 @@ if os.path.exists(st):
     #         g = the rot-channel confidence byte
     for yy in (2, h - 3):
         m1 = px[306, yy]; m2 = px[307, yy]; m3 = px[308, yy]
-        print(f"- mesh probe @png_y={yy}: x306=({m1[0]},{m1[1]},{m1[2]}) x307=({m2[0]},{m2[1]},{m2[2]}) x308=({m3[0]},{m3[1]},{m3[2]})")
+        m4 = px[309, yy]; m5 = px[310, yy]
+        print(f"- mesh probe @png_y={yy}: x306=({m1[0]},{m1[1]},{m1[2]}) x307=({m2[0]},{m2[1]},{m2[2]}) x308=({m3[0]},{m3[1]},{m3[2]}) x309h=({m4[0]},{m4[1]},{m4[2]}) x310c=({m5[0]},{m5[1]},{m5[2]})")
     # The magenta engagement map: every vanilla-path pixel carries a 35%
     # lift toward (255,0,255) — r and b rise above g together.
     mag = 0; tot = 0

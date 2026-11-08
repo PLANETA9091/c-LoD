@@ -547,6 +547,22 @@ void main() {
                              0.0, 1.0);
             return;
         }
+        // v6.19.6 THE CAPTURE HEARTBEAT: the delivered uniform is proven, the
+        // #299 round left exactly one suspect class — the CAPTURE. x=309
+        // reads the RAW height byte at the disk-center cell (0 = the word
+        // never decoded; ~127 = a live height ~63), x=310 the RAW color
+        // byte (216 = the water lattice word the center cell streams).
+        if (sxy.x == 309) {
+            vec4 h = texelFetch(HeightSampler, ivec2(128, 128), 0);
+            fragColor = vec4(clamp(h.r * 254.0, 0.0, 255.0) / 255.0, 0.0, 0.0, 1.0);
+            return;
+        }
+        if (sxy.x == 310) {
+            vec4 c = texelFetch(ColBufSampler, ivec2(128, 128), 0);
+            fragColor = vec4(clamp(c.r * 254.0, 0.0, 255.0) / 255.0,
+                             clamp(c.a * 254.0, 0.0, 255.0) / 255.0, 0.0, 1.0);
+            return;
+        }
     }
 #endif
     vec4 scene = texture(InSampler, texCoord);
