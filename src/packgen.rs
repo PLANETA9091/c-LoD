@@ -61,9 +61,17 @@ pub fn build(cfg: &Config) -> Pack {
     // capture-lens pass appended after the blit) and ships its shader. The
     // production pack is byte-identical to the pre-v6.7 artifact; the debug
     // pack's SHA differs (one-time re-push on the CI runner — expected).
+    // v6.18 UN-FOG: `unfog=true` swaps in the un-fog chain (the inversion
+    // pass between dust_mask and the march — assets/glsl/unfog.fsh) and
+    // ships its shader; same one-time-re-push semantics. debug_lens wins
+    // the template choice (the debug chain has no unfog pass; the parity
+    // world session runs debug_lens=false + unfog=true).
     let debug_lens = cfg.debug_lens;
+    let unfog = cfg.unfog && !debug_lens;
     let lod_terrain_tpl = if debug_lens {
         include_str!("../assets/post_effect/lod_terrain_debug.json")
+    } else if unfog {
+        include_str!("../assets/post_effect/lod_terrain_unfog.json")
     } else {
         include_str!("../assets/post_effect/lod_terrain.json")
     };
@@ -143,9 +151,9 @@ pub fn build(cfg: &Config) -> Pack {
         m2.push(("__LENS_X__", fmt_f(lx as f32)));
         m2.push(("__LENS_Z__", fmt_f(lz as f32)));
         m2.push(("__LENS_WIN__", fmt_f(win as f32)));
-        return build_zip(lod_terrain_tpl, atmosphere_tpl, m2, debug_lens);
+        return build_zip(lod_terrain_tpl, atmosphere_tpl, m2, debug_lens, unfog);
     }
-    build_zip(lod_terrain_tpl, atmosphere_tpl, map, debug_lens)
+    build_zip(lod_terrain_tpl, atmosphere_tpl, map, debug_lens, unfog)
 }
 
 fn build_zip(
@@ -153,6 +161,7 @@ fn build_zip(
     atmosphere_tpl: &str,
     map: Vec<(&str, String)>,
     debug_lens: bool,
+    unfog: bool,
 ) -> Pack {
     let lod_terrain_json = substitute(lod_terrain_tpl, &map);
     let atmosphere_json = substitute(atmosphere_tpl, &map);
@@ -165,6 +174,12 @@ fn build_zip(
     let lod_terrain = include_str!("../assets/glsl/lod_terrain.fsh");
     let clod_blit = include_str!("../assets/glsl/clod_blit.fsh");
     let atmosphere = include_str!("../assets/glsl/atmosphere.fsh");
+    // v6.18: the un-fog shader ships ONLY in the unfog pack.
+    let unfog_fsh = if unfog {
+        Some(include_str!("../assets/glsl/unfog.fsh"))
+    } else {
+        None
+    };
     // v6.7: the capture lens ships ONLY in the debug pack.
     let debug_lens_fsh = if debug_lens {
         Some(include_str!("../assets/glsl/debug_lens.fsh"))
@@ -208,6 +223,9 @@ fn build_zip(
         "assets/clod/shaders/post/clod_blit.fsh",
         clod_blit.as_bytes(),
     );
+    if let Some(fsh) = unfog_fsh {
+        zip.add("assets/clod/shaders/post/unfog.fsh", fsh.as_bytes());
+    }
     zip.add(
         "assets/clod/shaders/post/atmosphere.fsh",
         atmosphere.as_bytes(),
@@ -357,6 +375,90 @@ mod tests {
         assert_eq!(dbg.zip, dbg2.zip);
         // And its SHA differs from production (one-time re-push on arm).
         assert_ne!(dbg.sha1_hex, prod.sha1_hex);
+    }
+
+    #[test]
+    fn unfog_pack_ships_pass_production_does_not() {
+        // v6.18: the un-fog pass is a parity-session knob. The production
+        // pack must stay byte-identical to the pre-unfog artifact (no
+        // unfog.fsh entry, no clod_unfog target, march In = minecraft:main);
+        // the unfog pack carries all three and retargets the march's In.
+        let prod = build(&Config::parse(""));
+        let prod_entries = zip_entries(&prod.zip);
+        let names: Vec<String> = prod_entries.iter().map(|(n, _)| n.clone()).collect();
+        assert!(!names.iter().any(|n| n.contains("unfog")));
+        let chain = String::from_utf8_lossy(
+            &prod_entries
+                .iter()
+                .find(|(n, _)| n == "assets/clod/post_effect/lod_terrain.json")
+                .unwrap()
+                .1,
+        );
+        assert!(
+            !chain.contains("clod:post/unfog"),
+            "unfog pass in production chain"
+        );
+        assert!(!chain.contains("clod_unfog"), "unfog target in production");
+        assert!(!chain.contains("ClodUnfog"), "unfog UBO in production");
+        assert!(
+            !chain.contains("__UNFOG"),
+            "unfog tokens must never leak into a shipped chain"
+        );
+
+        let unf = build(&Config::parse("unfog=true"));
+        let entries = zip_entries(&unf.zip);
+        assert!(
+            entries
+                .iter()
+                .any(|(n, _)| n == "assets/clod/shaders/post/unfog.fsh"),
+            "unfog pack must ship the shader"
+        );
+        let chain = String::from_utf8_lossy(
+            &entries
+                .iter()
+                .find(|(n, _)| n == "assets/clod/post_effect/lod_terrain.json")
+                .unwrap()
+                .1,
+        );
+        assert!(chain.contains("clod:post/unfog"), "unfog pass missing");
+        assert!(chain.contains("ClodUnfog"), "unfog UBO missing");
+        assert!(
+            chain.contains("\"clod_unfog\""),
+            "clod_unfog target missing"
+        );
+        // The march reads the UN-FOGGED frame, not minecraft:main — but ONLY
+        // the march pass; the captures must keep reading the raw frame.
+        let march = chain.find("clod:post/lod_terrain").unwrap();
+        let in_after = &chain[march..march + 700];
+        assert!(
+            in_after.contains("\"target\": \"clod_unfog\""),
+            "march In must read the un-fogged frame"
+        );
+        // The unfog pass sits between the eraser and the march.
+        let mask = chain.find("clod:post/dust_mask").unwrap();
+        let unfog = chain.find("clod:post/unfog").unwrap();
+        assert!(
+            mask < unfog && unfog < march,
+            "chain order mask -> unfog -> march"
+        );
+        // Depth near rides the pass UBO.
+        assert!(chain.contains("UnfogInfo"), "UnfogInfo uniform missing");
+        assert!(
+            !chain.contains("__DEPTH_NEAR__"),
+            "depth-near token must be substituted"
+        );
+        // Determinism holds; and the debug knob still wins the template.
+        let unf2 = build(&Config::parse("unfog=true"));
+        assert_eq!(unf.zip, unf2.zip);
+        assert_ne!(unf.sha1_hex, prod.sha1_hex);
+        let both = build(&Config::parse("debug_lens=true;unfog=true"));
+        let both_entries = zip_entries(&both.zip);
+        assert!(
+            !both_entries
+                .iter()
+                .any(|(n, _)| n == "assets/clod/shaders/post/unfog.fsh"),
+            "debug chain has no unfog pass — the combo ships the debug pack"
+        );
     }
 
     #[test]

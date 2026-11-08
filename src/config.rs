@@ -71,6 +71,13 @@ pub struct Config {
     /// Post-effect ids (namespace) installed into the generated pack.
     pub effect_terrain: String,
     pub effect_atmosphere: String,
+    /// v6.18: attach the atmosphere veil effect at all. Production default
+    /// true (the veil hides the render-distance edge). The parity sessions
+    /// run atmosphere=false: the veil would re-tint the un-fogged far band
+    /// (smoothstep(lod_near*0.85, veil_far) * 0.92 = 2.6-6.4% at 64..128 m)
+    /// while the voxy reference leg ships no veil — a foreign residual the
+    /// pixel gate would measure forever. CLOD_OPTS: atmosphere=false.
+    pub atmosphere: bool,
     /// Palette: LOD terrain colors (linear RGB 0..1).
     pub color_low: [f32; 3],
     pub color_high: [f32; 3],
@@ -123,6 +130,15 @@ pub struct Config {
     /// screen. CI-only observability — the pack SHA changes (one re-push on
     /// the runner), production stays debug_lens=false forever.
     pub debug_lens: bool,
+    /// v6.18 UN-FOG: ship the chain variant whose extra pass inverts the
+    /// vanilla fog on the vanilla-rendered pixels (assets/glsl/unfog.fsh —
+    /// the exact fog.glsl + FogRenderer.bytecode math), so the far terrain
+    /// inside the vanilla render distance reads crisp like a Voxy mesh.
+    /// Parity-session knob — the pack SHA changes (one re-push on the
+    /// runner), production stays unfog=false forever. Combines with nothing:
+    /// debug_lens=true keeps the debug chain (the lens variant has no unfog
+    /// pass); the parity world runs debug_lens=false + unfog=true.
+    pub unfog: bool,
     /// v6.7.1 MULTI-BEAT: retry beats a genuine edit gets after its release
     /// (total decode chances = edit_beats + 1). Each retry re-runs the
     /// hold→release sequence with a fresh reset electron, so a beat whose
@@ -172,6 +188,8 @@ impl Default for Config {
             native_edits: true,
             debug_cell: None,
             debug_lens: false,
+            unfog: false,
+            atmosphere: true,
             edit_beats: crate::stream::EDIT_BEATS_DEFAULT,
         }
     }
@@ -320,6 +338,14 @@ impl Config {
         if let Some(v) = get("debug_lens") {
             cfg.debug_lens = matches!(v.trim(), "1" | "true" | "yes" | "on");
         }
+        // v6.18: unfog=true — ship the un-fog chain variant.
+        if let Some(v) = get("unfog") {
+            cfg.unfog = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
+        // v6.18: atmosphere=false — never attach the veil effect.
+        if let Some(v) = get("atmosphere") {
+            cfg.atmosphere = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
         // v6.7.1: edit_beats — bounded retry beats per genuine edit.
         if let Some(v) = get("edit_beats").and_then(|v| v.parse::<u32>().ok()) {
             cfg.edit_beats = v.clamp(0, crate::stream::EDIT_BEATS_MAX);
@@ -447,6 +473,27 @@ mod tests {
         assert_eq!(c.debug_cell, Some((-930, 796)));
         let c = Config::parse("debug_cell_x=0;debug_cell_z=64");
         assert_eq!(c.debug_cell, Some((0, 64)));
+    }
+
+    #[test]
+    fn atmosphere_knob() {
+        // v6.18: the veil attaches unless explicitly disabled.
+        assert!(Config::parse("").atmosphere, "production default is on");
+        assert!(!Config::parse("atmosphere=false").atmosphere);
+        assert!(Config::parse("atmosphere=true").atmosphere);
+        assert!(!Config::parse("atmosphere=0").atmosphere);
+    }
+
+    #[test]
+    fn unfog_knob() {
+        // v6.18: the un-fog pass ships only when explicitly armed.
+        assert!(!Config::parse("").unfog, "production default is off");
+        for v in ["1", "true", "yes", "on"] {
+            assert!(Config::parse(&format!("unfog={v}")).unfog, "{v}");
+        }
+        for v in ["0", "false", "off", ""] {
+            assert!(!Config::parse(&format!("unfog={v}")).unfog, "{v}");
+        }
     }
 
     #[test]

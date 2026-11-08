@@ -1,0 +1,225 @@
+{
+    "targets": {
+        "clod_scan": { "width": 640, "height": 2 },
+        "clod_rot_a": { "width": 2, "height": 2, "persistent": true },
+        "clod_rot_b": { "width": 2, "height": 2, "persistent": true },
+        "clod_h_a": { "width": 256, "height": 256, "persistent": true },
+        "clod_h_b": { "width": 256, "height": 256, "persistent": true },
+        "clod_c_a": { "width": 256, "height": 256, "persistent": true },
+        "clod_c_b": { "width": 256, "height": 256, "persistent": true },
+        "clod_reset": {},
+        "clod_mask": {},
+        "clod_swap": {},
+        "clod_unfog": {}
+    },
+    "passes": [
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/col_scan",
+            "inputs": [
+                { "sampler_name": "In", "target": "minecraft:main" }
+            ],
+            "output": "clod_scan"
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/rot_solve",
+            "inputs": [
+                { "sampler_name": "Scan", "target": "clod_scan" },
+                { "sampler_name": "In", "target": "minecraft:main" },
+                { "sampler_name": "Prev", "target": "clod_rot_a" }
+            ],
+            "output": "clod_rot_b"
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/rot_copy",
+            "inputs": [
+                { "sampler_name": "In", "target": "clod_rot_b" }
+            ],
+            "output": "clod_rot_a"
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/capture",
+            "inputs": [
+                { "sampler_name": "In", "target": "minecraft:main" },
+                { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
+                { "sampler_name": "Prev", "target": "clod_h_b" },
+                { "sampler_name": "Rot", "target": "clod_rot_a" },
+                { "sampler_name": "Reset", "target": "minecraft:main" }
+            ],
+            "output": "clod_reset",
+            "uniforms": {
+                "ClodGrid": [
+                    { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __PLANE_HI_Y__, __PLANE_LO_Y__] }
+                ],
+                "ClodStream": [
+                    { "name": "StreamInfo", "type": "vec4", "value": [__CELL__, __SUB__, __RESET_Y__, 2.0] }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/capture",
+            "inputs": [
+                { "sampler_name": "In", "target": "minecraft:main" },
+                { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
+                { "sampler_name": "Prev", "target": "clod_h_b" },
+                { "sampler_name": "Rot", "target": "clod_rot_a" },
+                { "sampler_name": "Reset", "target": "clod_reset" }
+            ],
+            "output": "clod_h_a",
+            "uniforms": {
+                "ClodGrid": [
+                    { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __PLANE_HI_Y__, __PLANE_LO_Y__] }
+                ],
+                "ClodStream": [
+                    { "name": "StreamInfo", "type": "vec4", "value": [__CELL__, __SUB__, __DEPTH_NEAR__, 0.0] }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/capture",
+            "inputs": [
+                { "sampler_name": "In", "target": "minecraft:main" },
+                { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
+                { "sampler_name": "Prev", "target": "clod_c_b" },
+                { "sampler_name": "Rot", "target": "clod_rot_a" },
+                { "sampler_name": "Reset", "target": "clod_reset" }
+            ],
+            "output": "clod_c_a",
+            "uniforms": {
+                "ClodGrid": [
+                    { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __PLANE_HI_Y__, __PLANE_LO_Y__] }
+                ],
+                "ClodStream": [
+                    { "name": "StreamInfo", "type": "vec4", "value": [__CELL__, __SUB__, __DEPTH_NEAR__, 1.0] }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/capture",
+            "inputs": [
+                { "sampler_name": "In", "target": "minecraft:main" },
+                { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
+                { "sampler_name": "Prev", "target": "clod_h_a" },
+                { "sampler_name": "Rot", "target": "clod_rot_a" },
+                { "sampler_name": "Reset", "target": "clod_reset" }
+            ],
+            "output": "clod_h_b",
+            "uniforms": {
+                "ClodGrid": [
+                    { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __PLANE_HI_Y__, __PLANE_LO_Y__] }
+                ],
+                "ClodStream": [
+                    { "name": "StreamInfo", "type": "vec4", "value": [__CELL__, __SUB__, __DEPTH_NEAR__, 0.0] }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/capture",
+            "inputs": [
+                { "sampler_name": "In", "target": "minecraft:main" },
+                { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
+                { "sampler_name": "Prev", "target": "clod_c_a" },
+                { "sampler_name": "Rot", "target": "clod_rot_a" },
+                { "sampler_name": "Reset", "target": "clod_reset" }
+            ],
+            "output": "clod_c_b",
+            "uniforms": {
+                "ClodGrid": [
+                    { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __PLANE_HI_Y__, __PLANE_LO_Y__] }
+                ],
+                "ClodStream": [
+                    { "name": "StreamInfo", "type": "vec4", "value": [__CELL__, __SUB__, __DEPTH_NEAR__, 1.0] }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/dust_mask",
+            "inputs": [
+                { "sampler_name": "Height", "target": "clod_h_b" },
+                { "sampler_name": "ColBuf", "target": "clod_c_b" },
+                { "sampler_name": "Height2", "target": "clod_h_a" },
+                { "sampler_name": "ColBuf2", "target": "clod_c_a" },
+                { "sampler_name": "In", "target": "minecraft:main" },
+                { "sampler_name": "Rot", "target": "clod_rot_a" }
+            ],
+            "output": "clod_mask",
+            "uniforms": {
+                "ClodGrid": [
+                    { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __PLANE_HI_Y__, __PLANE_LO_Y__] }
+                ],
+                "ClodStream": [
+                    { "name": "StreamInfo", "type": "vec4", "value": [__CELL__, __SUB__, __DEPTH_NEAR__, 0.0] }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/unfog",
+            "inputs": [
+                { "sampler_name": "In", "target": "minecraft:main" },
+                { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
+                { "sampler_name": "Rot", "target": "clod_rot_a" }
+            ],
+            "output": "clod_unfog",
+            "uniforms": {
+                "ClodUnfog": [
+                    { "name": "UnfogInfo", "type": "vec4", "value": [__DEPTH_NEAR__, 0.0, 0.0, 0.0] }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/lod_terrain",
+            "inputs": [
+                { "sampler_name": "In", "target": "clod_unfog" },
+                { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
+                { "sampler_name": "Height", "target": "clod_h_b" },
+                { "sampler_name": "ColBuf", "target": "clod_c_b" },
+                { "sampler_name": "Rot", "target": "clod_rot_a" },
+                { "sampler_name": "Mask", "target": "clod_mask" }
+            ],
+            "output": "clod_swap",
+            "uniforms": {
+                "ClodGrid": [
+                    { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __PLANE_HI_Y__, __PLANE_LO_Y__] }
+                ],
+                "ClodRegion": [
+                    { "name": "RegionInfo", "type": "vec4", "value": [__REGION_BLOCKS__, __CELL__, __SEA_LEVEL__, __MAX_HEIGHT__] }
+                ],
+                "ClodParams": [
+                    { "name": "LodParams", "type": "vec4", "value": [__LOD_NEAR__, __MAX_HEIGHT__, __SEA_LEVEL__, __MIN_CONF__] }
+                ],
+                "ClodFog": [
+                    { "name": "FogParams", "type": "vec4", "value": [__FOG_START__, __FOG_END__, __FOV__, 0.0] }
+                ],
+                "ClodColors": [
+                    { "name": "ColLow", "type": "vec4", "value": __COL_LOW__ },
+                    { "name": "ColHigh", "type": "vec4", "value": __COL_HIGH__ },
+                    { "name": "ColWater", "type": "vec4", "value": __COL_WATER__ },
+                    { "name": "VeilColor", "type": "vec4", "value": __VEIL_RGBA__ }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/clod_blit",
+            "inputs": [
+                { "sampler_name": "In", "target": "clod_swap" }
+            ],
+            "output": "minecraft:main",
+            "uniforms": {
+                "BlitConfig": [
+                    { "name": "ColorModulate", "type": "vec4", "value": [1.0, 1.0, 1.0, 1.0] }
+                ]
+            }
+        }
+    ]
+}

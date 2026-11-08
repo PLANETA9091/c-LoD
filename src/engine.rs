@@ -864,8 +864,13 @@ fn manage_players(state: &Arc<State>, env: Env) {
         let have_pack = pack.is_some();
         if let Some(handle) = jni::player_by_uuid(env, &p.uuid) {
             let want_terrain = have_pack && tier == Tier::Full && keys.terrain != 0;
-            let want_atmo =
-                have_pack && (tier == Tier::Full || tier == Tier::Veil) && keys.atmosphere != 0;
+            // v6.18: cfg.atmosphere=false (parity sessions) never attaches
+            // the veil — it would re-tint the un-fogged far band while the
+            // voxy reference leg ships no veil.
+            let want_atmo = have_pack
+                && state.cfg.atmosphere
+                && (tier == Tier::Full || tier == Tier::Veil)
+                && keys.atmosphere != 0;
 
             if want_terrain && !st.terrain_on {
                 let tkey = unsafe { as_obj(keys.terrain) };

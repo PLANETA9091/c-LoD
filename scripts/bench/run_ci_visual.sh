@@ -1295,7 +1295,11 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   fi
   # The production pack: no lens pass, no panels. The debug cell window
   # stays — the march's center hint is harmless without the lens.
-  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false"
+  # v6.18 UN-FOG: the parity session arms the un-fog pass (the run #285
+  # residual class — vanilla fog on the far forest vs the crisp voxy mesh)
+  # and drops the atmosphere veil: it would re-tint the un-fogged band by
+  # 2.6-6.4% while the voxy leg ships no veil.
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;atmosphere=false"
   bash "$BENCH_DIR/boot_server.sh" \
     || note "parity world: boot_server.sh rc=$? (continuing — the gate degrades to FAIL pairs)"
   srv "gamerule doDaylightCycle false"

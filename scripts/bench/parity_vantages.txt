@@ -18,3 +18,9 @@
 08_back_inside 90 0 CX 120 CZ
 09_after_mesh 90 15 CX 140 CZ
 10_marker_ray 270 5 CX-75 151.6 CZ
+# v6.18 G8b DUST CONTROL: straight down from y=140 (above both data planes
+# HI=120/LO=80, ground 62-78 m below the eye — inside the crisp band). No
+# sky pixels -> the march paints nothing: the pair measures the vanilla-vs-
+# voxy-mesh ground AND exposes any dust column the eraser missed (a painted
+# column here would light up the diff — that is the point of the row).
+11_topdown 90 89 CX 140 CZ
