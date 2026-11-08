@@ -1339,7 +1339,21 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # clod_blit-vs-debug_lens is then the only structural difference left);
   # dark windows => the §7b session's STREAM starves regardless of chain
   # and the tour-window server counters (the preserved log) name it.
-  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=true;mesh_paint=true;mesh_debug=true"
+  # v6.19.10 THE HONEST GATE ROUND: #303 validated the whole pipeline on the
+  # parity world (stream max cone 53872 / zone 5092 — was 0/0; the capture
+  # heartbeat x309h=196, alpha 254 — decoded; the mesh engagement 297136 px
+  # — the vanilla path painting) with the full observability stack. The
+  # stack comes OFF for the honest measurement: the production parity
+  # config is debug_lens=false (no panels), unfog=true (the #292 no-op
+  # stays — #301 cleared it of the capture murder), mesh_paint=true (G8d
+  # itself), NO mesh_debug (the magenta tint and the probe pixels are
+  # evidence tools, not the render), atmosphere=false (the veil would
+  # re-tint the band 2.6-6.4% vs the voxy leg that ships none). The table
+  # this round is the project's FIRST honest march-vs-mesh parity row set:
+  # near rows = the unified march look against the voxy mesh (the G8d
+  # representation-gap lever's real number), far rows = the honest band.
+  # CLOD_CENTER stays explicit — the v6.19.9 root cause never returns.
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false"
   # v6.19.9 THE ROOT CAUSE (#302's maxima nailed it): parity stream max
   # cone 0, max zone 0 — the scheduler never sent ONE cell the whole
   # session — and the reason is the v6.4.2 regression class verbatim: THIS
