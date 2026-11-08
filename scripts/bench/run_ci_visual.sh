@@ -1311,7 +1311,16 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # v6.19 G8d MESH PAINT: the march depth-tests the vanilla band and paints
   # the unified march look wherever the streamed surface stands in front —
   # the run #292 representation-gap verdict's v7-class lever (rows 01-10).
-  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false"
+  # v6.19.5 THE PARITY-SESSION WITNESS: #298 split the suspect list — the
+  # mask8 client (debug_unfog chain) bound PaintParams (probe x307=(13,254))
+  # and painted 78624 magenta-ish px, while THIS session's client downloaded
+  # the armed pack (sha 99f0ca64, cache-miss proven) and its frames stayed
+  # 99.2% identical to pre-G8d #293. The unfog-chain march either never ran
+  # the vanilla path or ran it blind. Until the split is named, the parity
+  # session carries its own probe (mesh_debug): the gate is red regardless,
+  # one diagnostic round of probe-contaminated frames is the cheapest way
+  # to see the armed chain's own engagement map + delivered uniform bytes.
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;mesh_debug=true;atmosphere=false"
   bash "$BENCH_DIR/boot_server.sh" \
     || note "parity world: boot_server.sh rc=$? (continuing — the gate degrades to FAIL pairs)"
   srv "gamerule doDaylightCycle false"
@@ -1364,6 +1373,28 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     ct "parity world shot $PNAME ($PW_N/$PTOT)"
   done 3< "$PARITY"
   sum "- parity world tour done: $PW_N shots in parity/ (the gate pairs voxy/<name>.png vs parity/<name>.png)"
+  # v6.19.5: the parity session carries the mesh probe (mesh_debug=true) —
+  # decode it here, the same way the mask8 forensics decodes its own block.
+  PWPROBE=$(mktemp)
+  python3 - "$SHOTS/parity" > "$PWPROBE" 2>/dev/null <<'PYEOF' || true
+import sys, os
+from PIL import Image
+p = os.path.join(sys.argv[1], "01_aerial_west.png")
+if os.path.exists(p):
+    im = Image.open(p).convert("RGB"); px = im.load(); w, h = im.size
+    for yy in (2, h - 3):
+        m1 = px[306, yy]; m2 = px[307, yy]; m3 = px[308, yy]
+        print(f"- parity mesh probe @png_y={yy}: x306=({m1[0]},{m1[1]},{m1[2]}) x307=({m2[0]},{m2[1]},{m2[2]}) x308=({m3[0]},{m3[1]},{m3[2]})")
+    mag = 0; tot = 0
+    for y in range(0, h, 4):
+        for x in range(0, w, 4):
+            c = px[x, y]; tot += 1
+            if c[0] > c[1] + 60 and c[2] > c[1] + 60:
+                mag += 1
+    print(f"- parity mesh engagement: magenta-ish={mag*16} of {tot*16} sampled px")
+PYEOF
+  while IFS= read -r l; do sum "$l"; done < "$PWPROBE"
+  rm -f "$PWPROBE"
   # v6.19.2: preserve the parity client's log BEFORE the mask8 boot overwrites
   # it — the pack SHA the gate frames actually rendered is the first thing a
   # frozen-parity question asks (the #295 mesh-paint freeze had no witness).
