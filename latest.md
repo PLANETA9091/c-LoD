@@ -179,3 +179,4 @@ java.lang.IllegalStateException: Failed to open OpenAL device
 - parity world: scan populated (cells=65536; the march paints from these buffers)
 - parity world tour: 10 vantages (production pack, vd 8, shared structures)
 - parity world tour done: 10 shots in parity/ (the gate pairs voxy/<name>.png vs parity/<name>.png)
+- probe: sandbox restart recovery check 2026-11-08T09:02:07Z — round: v6.18 UN-FOG implementation starting.
