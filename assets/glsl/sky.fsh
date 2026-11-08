@@ -32,18 +32,39 @@ layout(location = 0) out vec4 fragColor;
 //     x14     = renderEnd / 16      FogRenderDistanceEnd (render distance proxy)
 //     x15     = checksum B          (x8..x14 + 61) mod 256
 //
+// v6.18.1 SECOND STRIP (run #286 = 42466249389): the parity-world vantages
+// flank the frame with the v6.15 mountains — the leftmost 16 columns are
+// TERRAIN at every row, no intact payload row exists, the channel decays
+// below the 0.25 gate and the whole downstream (capture, march, the v6.18
+// un-fog) goes blind exactly on the pairs the gate measures (01-10 unmoved,
+// the white fog band still in our frames). The SAME 16 bytes now also ride
+// the fixed columns 632..647 (the CI gate frame is 1280x720; both legs
+// shoot 1280x720): the top-center of those vantages is SKY in every frame
+// of the tour, so the channel arms at the shot pose and stays armed through
+// the settle. Same layout, same checksums: byte k lives at x=k (left strip)
+// and x=632+k (center strip); the scanner (col_scan) validates both and
+// reports which one won in the slice's alpha. No new UBOs (the vanilla sky
+// program binds no Globals — a Globals include here would kill the program,
+// the run #232 failure class), no RGB changes (alpha of the scene target is
+// never displayed). GUI overdraw (hotbar/bossbar rows) fails the checksum
+// on its rows only — the topmost-intact-row scan self-heals, as before.
+//
 // RGB stays 100% vanilla — alpha of the scene target is never displayed.
 // Downstream writes (terrain alpha = 1.0, clouds, particles, weather, GUI)
 // fail the magic/checksum checks; the post chain scans the column top-down
 // for the topmost INTACT row, so transient overdraw self-heals within a
-// frame for as long as any sky row is visible in the leftmost 16 columns.
+// frame for as long as any sky row is visible in either strip.
 void main() {
     vec4 color = apply_fog(ColorModulator, sphericalVertexDistance,
         cylindricalVertexDistance, 0.0, FogSkyEnd, FogSkyEnd, FogSkyEnd, FogColor);
 
     ivec2 px = ivec2(gl_FragCoord.xy);
-    if (px.x < 16) {
-        if (px.x < 8) {
+    // v6.18.1: the payload rides TWO strips — the v4.2 left edge (x 0..15)
+    // and the fixed center columns (x 632..647). Byte k lives at x=k and
+    // x=632+k; the scanner validates both independently.
+    if (px.x < 16 || (px.x >= 632 && px.x < 648)) {
+        int k = px.x < 16 ? px.x : px.x - 632;
+        if (k < 8) {
             // Group A: camera basis (v4.1 encoding, byte-for-byte stable).
             vec3 fwd = transpose(mat3(ModelViewMat)) * vec3(0.0, 0.0, -1.0);
             float az = atan(fwd.z, fwd.x);                          // (-pi, pi]
@@ -59,13 +80,13 @@ void main() {
             int fovq = int(clamp((fovDeg - 5.0) / 115.0, 0.0, 1.0) * 254.0 + 0.5);
             int chk = (199 + 99 + azh + azl + elh + ell + fovq) & 255;
 
-            int b = px.x == 0 ? 199
-                  : px.x == 1 ? 99
-                  : px.x == 2 ? azh
-                  : px.x == 3 ? azl
-                  : px.x == 4 ? elh
-                  : px.x == 5 ? ell
-                  : px.x == 6 ? fovq
+            int b = k == 0 ? 199
+                  : k == 1 ? 99
+                  : k == 2 ? azh
+                  : k == 3 ? azl
+                  : k == 4 ? elh
+                  : k == 5 ? ell
+                  : k == 6 ? fovq
                   : chk;
             color.a = float(b) / 255.0;
         } else {
@@ -85,13 +106,13 @@ void main() {
             int rdq  = int(floor(clamp(FogRenderDistanceEnd / 16.0, 0.0, 255.0) + 0.5));
             int chk2 = (fogR + fogG + fogB + fogA + stq + enq + rdq + 61) & 255;
 
-            int b = px.x == 8  ? fogR
-                  : px.x == 9  ? fogG
-                  : px.x == 10 ? fogB
-                  : px.x == 11 ? fogA
-                  : px.x == 12 ? stq
-                  : px.x == 13 ? enq
-                  : px.x == 14 ? rdq
+            int b = k == 8  ? fogR
+                  : k == 9  ? fogG
+                  : k == 10 ? fogB
+                  : k == 11 ? fogA
+                  : k == 12 ? stq
+                  : k == 13 ? enq
+                  : k == 14 ? rdq
                   : chk2;
             color.a = float(b) / 255.0;
         }

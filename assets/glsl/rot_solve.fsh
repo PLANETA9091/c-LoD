@@ -8,7 +8,12 @@
 //   pixel (1,0) = fogColor (R,G,B,A exactly as the sky shader saw the UBO)
 //   pixel (0,1) = fogRange (R = envStart/8/255, G = envEnd/8/255,
 //                           B = renderEnd/16/255, A = 1 once decoded)
-//   pixel (1,1) = unused (0)
+//   pixel (1,1) = day-state (R = tick/24000, G = valid)
+//
+// v6.18.1: the payload rides TWO strips (left x 0..15, center x 632..647 —
+// sky.fsh); the scanner reports the winning strip in the slice's alpha and
+// every byte read below goes through strip_base() — the decode is
+// strip-agnostic.
 //
 // Camera: the payload is measured, not fitted — confidence jumps to 1 on
 // the first valid row and the basis is frame-exact. When the column is
@@ -56,18 +61,27 @@ float resolve_day_tick(vec3 fogRgb, float prevTick, bool prevValid) {
     return tEve; // bootstrap
 }
 
-int best_row(int group) {
+int best_row(int group, out float strip) {
     int best = -1;
+    strip = 0.0;
     for (int j = 0; j < SLICES; ++j) {
         vec4 s = texelFetch(ScanSampler, ivec2(j, group), 0);
         if (s.r > 0.5) {
             int y = int(s.g * 255.0 + 0.5) * 256 + int(s.b * 255.0 + 0.5);
             if (y > best) {
                 best = y;
+                // v6.18.1: the slice's alpha names the winning strip
+                // (0 = left base 0, 1 = center base 632) — see col_scan.fsh.
+                strip = s.a > 0.5 ? 1.0 : 0.0;
             }
         }
     }
     return best;
+}
+
+// v6.18.1: the winning strip's byte base (left = 0, center = 632).
+int strip_base(float strip) {
+    return strip > 0.5 ? 632 : 0;
 }
 
 void main() {
@@ -77,11 +91,13 @@ void main() {
         // Camera pixel (v4.1 semantics).
         vec4 prev = texelFetch(PrevSampler, ivec2(0, 0), 0);
         vec4 rot = vec4(prev.r, prev.g, prev.b * 0.95, prev.a);
-        int best = best_row(0);
+        float strip;
+        int best = best_row(0, strip);
         if (best >= 0) {
             float a[6];
+            int base = strip_base(strip);
             for (int i = 2; i < 8; ++i) {
-                a[i - 2] = texelFetch(InSampler, ivec2(i, best), 0).a * 255.0;
+                a[i - 2] = texelFetch(InSampler, ivec2(base + i, best), 0).a * 255.0;
             }
             float azq = a[0] * 256.0 + a[1];
             float elq = a[2] * 256.0 + a[3];
@@ -94,11 +110,13 @@ void main() {
     } else if (px == ivec2(1, 0)) {
         // Fog color pixel: persist the previous decode until a valid row.
         vec4 prev = texelFetch(PrevSampler, ivec2(1, 0), 0);
-        int best = best_row(1);
+        float strip;
+        int best = best_row(1, strip);
         if (best >= 0) {
             vec4 f;
+            int base = strip_base(strip);
             for (int i = 8; i < 12; ++i) {
-                f[i - 8] = texelFetch(InSampler, ivec2(i, best), 0).a;
+                f[i - 8] = texelFetch(InSampler, ivec2(base + i, best), 0).a;
             }
             fragColor = f;
         } else {
@@ -107,11 +125,13 @@ void main() {
     } else if (px == ivec2(0, 1)) {
         // Fog range pixel: bytes are (start/8, end/8, renderEnd/16).
         vec4 prev = texelFetch(PrevSampler, ivec2(0, 1), 0);
-        int best = best_row(1);
+        float strip;
+        int best = best_row(1, strip);
         if (best >= 0) {
-            float st = texelFetch(InSampler, ivec2(12, best), 0).a * 255.0;
-            float en = texelFetch(InSampler, ivec2(13, best), 0).a * 255.0;
-            float rd = texelFetch(InSampler, ivec2(14, best), 0).a * 255.0;
+            int base = strip_base(strip);
+            float st = texelFetch(InSampler, ivec2(base + 12, best), 0).a * 255.0;
+            float en = texelFetch(InSampler, ivec2(base + 13, best), 0).a * 255.0;
+            float rd = texelFetch(InSampler, ivec2(base + 14, best), 0).a * 255.0;
             fragColor = vec4(st / 255.0, en / 255.0, rd / 255.0, 1.0);
         } else {
             fragColor = prev;
@@ -121,11 +141,13 @@ void main() {
         // (group B, bytes x8..x10) and persist it for the next frame's
         // dawn/dusk branch continuity. R = tick / 24000, G = valid.
         vec4 prev = texelFetch(PrevSampler, ivec2(1, 1), 0);
-        int best = best_row(1);
+        float strip;
+        int best = best_row(1, strip);
         if (best >= 0) {
-            vec3 f = vec3(texelFetch(InSampler, ivec2(8, best), 0).a,
-                          texelFetch(InSampler, ivec2(9, best), 0).a,
-                          texelFetch(InSampler, ivec2(10, best), 0).a);
+            int base = strip_base(strip);
+            vec3 f = vec3(texelFetch(InSampler, ivec2(base + 8, best), 0).a,
+                          texelFetch(InSampler, ivec2(base + 9, best), 0).a,
+                          texelFetch(InSampler, ivec2(base + 10, best), 0).a);
             float t = resolve_day_tick(f, prev.r * 24000.0, prev.g > 0.5);
             fragColor = vec4(t / 24000.0, 1.0, 0.0, 1.0);
         } else {
