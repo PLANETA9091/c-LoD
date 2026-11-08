@@ -1320,18 +1320,18 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # session carries its own probe (mesh_debug): the gate is red regardless,
   # one diagnostic round of probe-contaminated frames is the cheapest way
   # to see the armed chain's own engagement map + delivered uniform bytes.
-  # v6.19.6 THE A/B: #299's probe answered the rest — the parity shader is
-  # live (x306 white), the uniform binds (x307=(13,254)), the rot channel
-  # is fully converged (x308.g=254) — and STILL magenta=0, while the mask8
-  # session in the SAME RUN painted 160240 px. One structural difference
-  # remains across EVERY session that ever painted: THE ATMOSPHERE CHAIN
-  # WAS ATTACHED (leg-1 debug, §5b, mask8 — all atmosphere=on; the parity
-  # session is the only atmosphere=false one, and the only one whose capture
-  # never decoded — the 07 frame is pure sky+dome, the "march-vs-mesh 85.4%"
-  # rows were vacuity). A/B: the parity boot keeps the veil attached this
-  # round; the x=309/310 capture-heartbeat bytes (the raw height/color word
-  # at the disk-center cell) name the capture alive or dead either way.
-  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;mesh_debug=true"
+  # v6.19.7 THE UNFOG A/B: #300 killed the atmosphere hypothesis (atmosphere
+  # ON in parity — the capture STILL dead, magenta=0) and sharpened the
+  # cross-session table: every session that RAN unfog.fsh (the production
+  # unfog chain) has a dead capture; every session that ran ANYTHING ELSE
+  # in that slot (debug_lens, unfog_debug) has a live one — the mask8 lane
+  # swaps the pass shader, so it never executed unfog.fsh at all. THE A/B:
+  # this parity boot drops the unfog pass entirely (unfog=false -> the plain
+  # chain); if the west-band heartbeat (x310 alpha) and the engagement map
+  # come alive, the unfog pass is the GL-state killer and the fog chapter
+  # reopens with a REAL bug, not a no-op. The #285 residual class returns
+  # on vanilla pixels this round — a known, accepted cost.
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;mesh_paint=true;mesh_debug=true"
   bash "$BENCH_DIR/boot_server.sh" \
     || note "parity world: boot_server.sh rc=$? (continuing — the gate degrades to FAIL pairs)"
   srv "gamerule doDaylightCycle false"
@@ -1384,6 +1384,12 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     ct "parity world shot $PNAME ($PW_N/$PTOT)"
   done 3< "$PARITY"
   sum "- parity world tour done: $PW_N shots in parity/ (the gate pairs voxy/<name>.png vs parity/<name>.png)"
+  # v6.19.7: the parity session's OWN stream counters — the leg-1 section
+  # greps the shared /tmp/server.log at ITS point, nobody ever dumped the
+  # session-3 counters (the wire/cone numbers the starving-capture question
+  # asks first).
+  { echo "### parity world stream counters (session 3)";
+    grep -E "\[c-LoD\] stream: tick" /tmp/server.log | tail -2 || true; } >> "$SUMMARY"
   # v6.19.5: the parity session carries the mesh probe (mesh_debug=true) —
   # decode it here, the same way the mask8 forensics decodes its own block.
   PWPROBE=$(mktemp)

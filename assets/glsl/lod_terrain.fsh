@@ -548,19 +548,31 @@ void main() {
             return;
         }
         // v6.19.6 THE CAPTURE HEARTBEAT: the delivered uniform is proven, the
-        // #299 round left exactly one suspect class — the CAPTURE. x=309
-        // reads the RAW height byte at the disk-center cell (0 = the word
-        // never decoded; ~127 = a live height ~63), x=310 the RAW color
-        // byte (216 = the water lattice word the center cell streams).
+        // #299 round left exactly one suspect class — the CAPTURE. v6.19.7:
+        // the heartbeat moves to the VISIBLE BAND — the 01 vantage looks
+        // WEST (yaw 90), the west-band cells (48..96, 128) sit 64..160 m
+        // west of the disk center, their HI-plane dots are on screen (the
+        // #300 center-cell read (0,0) in BOTH lanes — the cell below the
+        // eye is never in view, the heartbeat was blind, not the capture).
+        // x=309.r = the MAX raw height byte over the band (0 = no word),
+        // x=310.r = the MAX color-word ALPHA (the decoded flag itself —
+        // 254 = at least one west-band cell holds a decoded word).
         if (sxy.x == 309) {
-            vec4 h = texelFetch(HeightSampler, ivec2(128, 128), 0);
-            fragColor = vec4(clamp(h.r * 254.0, 0.0, 255.0) / 255.0, 0.0, 0.0, 1.0);
+            float mh = 0.0;
+            for (int i = 0; i < 5; ++i) {
+                vec4 h = texelFetch(HeightSampler, ivec2(48 + i * 12, 128), 0);
+                mh = max(mh, h.r);
+            }
+            fragColor = vec4(clamp(mh * 254.0, 0.0, 255.0) / 255.0, 0.0, 0.0, 1.0);
             return;
         }
         if (sxy.x == 310) {
-            vec4 c = texelFetch(ColBufSampler, ivec2(128, 128), 0);
-            fragColor = vec4(clamp(c.r * 254.0, 0.0, 255.0) / 255.0,
-                             clamp(c.a * 254.0, 0.0, 255.0) / 255.0, 0.0, 1.0);
+            float ma = 0.0;
+            for (int i = 0; i < 5; ++i) {
+                vec4 c = texelFetch(ColBufSampler, ivec2(48 + i * 12, 128), 0);
+                ma = max(ma, c.a);
+            }
+            fragColor = vec4(clamp(ma * 254.0, 0.0, 255.0) / 255.0, 0.0, 0.0, 1.0);
             return;
         }
     }
