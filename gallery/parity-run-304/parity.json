@@ -1,0 +1,102 @@
+{
+ "pairs": {
+  "01_aerial_west": {
+   "exact_pct": 52.2569,
+   "near_pct": 52.7912,
+   "mean_delta": 26.234,
+   "max_delta": 255,
+   "px_total": 921600,
+   "pass": false
+  },
+  "02_aerial_south": {
+   "exact_pct": 46.0686,
+   "near_pct": 49.1347,
+   "mean_delta": 30.592,
+   "max_delta": 254,
+   "px_total": 921600,
+   "pass": false
+  },
+  "03_aerial_north": {
+   "exact_pct": 46.2888,
+   "near_pct": 48.9729,
+   "mean_delta": 28.85,
+   "max_delta": 254,
+   "px_total": 921600,
+   "pass": false
+  },
+  "04_aerial_east": {
+   "exact_pct": 73.4123,
+   "near_pct": 75.576,
+   "mean_delta": 12.423,
+   "max_delta": 253,
+   "px_total": 921600,
+   "pass": false
+  },
+  "05_oblique": {
+   "exact_pct": 57.5569,
+   "near_pct": 58.2637,
+   "mean_delta": 19.688,
+   "max_delta": 143,
+   "px_total": 921600,
+   "pass": false
+  },
+  "06_ground_west": {
+   "exact_pct": 50.7428,
+   "near_pct": 52.0779,
+   "mean_delta": 24.427,
+   "max_delta": 254,
+   "px_total": 921600,
+   "pass": false
+  },
+  "07_far_north": {
+   "exact_pct": 85.392,
+   "near_pct": 90.2578,
+   "mean_delta": 8.109,
+   "max_delta": 248,
+   "px_total": 921600,
+   "pass": false
+  },
+  "08_back_inside": {
+   "exact_pct": 69.7384,
+   "near_pct": 83.5459,
+   "mean_delta": 11.5,
+   "max_delta": 238,
+   "px_total": 921600,
+   "pass": false
+  },
+  "09_after_mesh": {
+   "exact_pct": 59.2655,
+   "near_pct": 65.1768,
+   "mean_delta": 19.151,
+   "max_delta": 243,
+   "px_total": 921600,
+   "pass": false
+  },
+  "10_marker_ray": {
+   "exact_pct": 69.7591,
+   "near_pct": 71.1054,
+   "mean_delta": 15.788,
+   "max_delta": 254,
+   "px_total": 921600,
+   "pass": false
+  },
+  "11_topdown": {
+   "exact_pct": 30.497,
+   "near_pct": 76.0122,
+   "mean_delta": 6.77,
+   "max_delta": 223,
+   "px_total": 921600,
+   "pass": false
+  },
+  "12_far_north_re": {
+   "exact_pct": 85.3932,
+   "near_pct": 90.2592,
+   "mean_delta": 8.111,
+   "max_delta": 245,
+   "px_total": 921600,
+   "pass": false
+  }
+ },
+ "missing": [],
+ "pass": false
+}
