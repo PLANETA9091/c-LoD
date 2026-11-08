@@ -245,8 +245,12 @@ float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
 
 // Surface color of one streamed cell: the 6x6x6 RGB lattice decode.
 // Water (idx 216) returns a negative sentinel — the caller uses its own
-// water fallback color.
-vec3 color_at(ivec2 celli, float w, float w2, out bool water) {
+// water fallback color. v6.21.0: an undecoded color word ALSO returns the
+// sentinel (the height-fallback paint), flagged via `colorless` so the
+// callers can tell the two classes apart — v6.21.1 uses it to keep the
+// vanilla path off the height-only cells (repainting REAL vanilla textures
+// with the height fallback cost the #307 aerials 14-24pp of near%).
+vec3 color_at(ivec2 celli, float w, float w2, out bool water, out bool colorless) {
     vec4 c = texelFetch(ColBufSampler, celli, 0);
     // v6.21.0: an undecoded color word is the height-fallback sentinel (the
     // mid-band cells paint ColLow/ColHigh by height — see ground_at). It is
@@ -254,8 +258,10 @@ vec3 color_at(ivec2 celli, float w, float w2, out bool water) {
     // idx 0 = pure black, one of the #305 dark classes.
     if (c.a < 0.5) {
         water = false;
+        colorless = true;
         return vec3(-1.0);
     }
+    colorless = false;
     float idx = floor(c.r * 255.0 + 0.5);
     water = idx > 215.5;
     if (water) {
@@ -731,11 +737,24 @@ void main() {
     vec3 nrm = normalize(vec3(hL - hR, 2.0 * cell, hD - hU));
 
     // ---- COLOR: the Voxy model -------------------------------------------
-    bool colWater;
-    vec3 col = color_at(tc, sw, sw2, colWater);
+    bool colWater; bool colorless;
+    vec3 col = color_at(tc, sw, sw2, colWater, colorless);
     float hn = clamp((hitPos.y - sea) / max(maxY - sea, 1.0), 0.0, 1.0);
     vec3 fallback = (isWater || colWater) ? ColWater.rgb : mix(ColLow.rgb, ColHigh.rgb, smoothstep(0.15, 0.9, hn));
     vec3 albedo = colWater ? fallback : (col.r < 0.0 ? fallback : col);
+
+    // v6.21.1 THE VANILLA-PATH COLOR GATE: the height-only cells (no color
+    // word — the §7b mid-band 80..120 m whose color dots sit inside the
+    // terrain) may own SKY pixels, never VANILLA pixels: the G8d depth test
+    // would repaint REAL vanilla chunk textures with the height fallback,
+    // and the #307 aerials paid 14-24pp of near% for it (the mountains'
+    // mid-terraces sit at 16-64 m, inside the vanilla band). Over sky there
+    // is no vanilla texture to lose — the far flanks keep the honest
+    // fallback paint.
+    if (tVan > 0.0 && colorless) {
+        fragColor = scene;
+        return;
+    }
 
     // Vanilla face shade (meshing weights: up 1.0 / z 0.8 / x 0.6) applied
     // through the height-gradient normal, exactly like Voxy's baked quads.
