@@ -2928,7 +2928,7 @@ mod tests {
         for i in 0..150u32 {
             let cx = 45 + i % 50; // world x 90..188
             let cz = 80 + i / 50; // world z 160..165
-            s.set_cell(cx, cz, cell(70 + (i % 8) as i16, false, [90, 90, 90]), 1000);
+            s.set_cell(cx, cz, cell(71 + (i % 7) as i16, false, [90, 90, 90]), 1000);
         }
         assert_eq!(s.dirty_pending, 150);
         // Age the backlog past RECENT_EDIT_TICKS with A alone watching.
@@ -2992,7 +2992,7 @@ mod tests {
         for i in 0..150u32 {
             let cx = 40 + i % 50; // world x 80..178
             let cz = 80 + i / 50; // world z 160..165
-            s.set_cell(cx, cz, cell(70 + (i % 8) as i16, false, [90, 90, 90]), 1000);
+            s.set_cell(cx, cz, cell(71 + (i % 7) as i16, false, [90, 90, 90]), 1000);
         }
         assert_eq!(s.dirty_pending, 150);
         let v = vhint(128.0, 128.0, 0.0, 0.0, 1000);
@@ -3015,7 +3015,9 @@ mod tests {
         let mut s = Streamer::new(cx - half, cz - half, region, 2);
         // the disk origin lands at (-1186, 540); the named center (-930,796)
         // is cell (128, 128) for cell_size 2.
-        s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 0);
+        // Pure reporting: the dump pins height 170 -> byte 234; nothing
+        // streams here, so the rank-2 planes are irrelevant.
+        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 0);
         s.set_cell(127, 128, cell(62, true, [10, 20, 30]), 0);
         let dump = s.debug_window(-930, 796, 1, 1000);
         assert!(dump.contains("# cx cz wx wz height water valid rgb last_age dirty hword cword"));
