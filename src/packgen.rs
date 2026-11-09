@@ -817,6 +817,13 @@ mod tests {
             "v6.24 BUFFER DUMP",
             "HeightSampler, celli",
             "ColBufSampler, celli",
+            // v6.25.3 FOG PARITY (#327 forensics): the reference leg paints
+            // the far forest un-fogged (voxy dark-lum flat 65->58 across the
+            // whole 01 depth span) while the finish() emulation mixed ~0.9
+            // toward FOG_BASE_DAY — that was the ->light class (sky-pull
+            // ~9.5% of the 01 frame, 0% color-net arm coverage). The march
+            // carries exactly one fog again: FogMode.FADE MODE=1.
+            "v6.25.3 FOG PARITY",
         ] {
             assert!(
                 march.contains(marker),

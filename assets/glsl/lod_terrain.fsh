@@ -728,11 +728,11 @@ void main() {
     vec4 fogCol = texelFetch(RotSampler, ivec2(1, 0), 0);
     vec4 fogRng = texelFetch(RotSampler, ivec2(0, 1), 0);
     bool fogLive = fogRng.a > 0.5 && fogCol.a > 0.004;
-    float fStart = fogLive ? fogRng.r * 255.0 * 8.0 : FogParams.x;
-    float fEnd = fogLive ? fogRng.g * 255.0 * 8.0 : FogParams.y;
+    // v6.25.3 FOG PARITY: fStart/fEnd/fogTint/fogOpacity dropped — the
+    // NormalRenderPipeline.finish() emulation is gone (see the FOG PARITY
+    // block at the old mix site below); the fog channel still feeds the
+    // lightmap reconstruction (dayTick) and the near-gate rd.
     float vanRD = fogRng.b * 255.0 * 16.0;
-    vec3 fogTint = fogLive ? fogCol.rgb : VeilColor.rgb;
-    float fogOpacity = fogLive ? fogCol.a : 1.0;
 
     // Shade inputs at the hit: per-cell flags + per-cell gradient normal
     // (nearest reads; the normal is constant per cell = flat Voxy quads).
@@ -806,17 +806,19 @@ void main() {
     // the albedo BEFORE finish/fog (NormalRenderPipeline.java run order).
     vec3 lit = albedo * face * lightRGB * ao;
 
-    // NormalRenderPipeline.finish: linear fog over the environmental pair,
-    // saturated at max(vanillaRD, 320) * sqrt(3) blocks (3D distance).
-    float fog = 0.0;
-    if (abs(fEnd - fStart) > 1.0) {
-        float invEndFogDelta = 1.0 / (fEnd - fStart);
-        float startDelta = -fStart * invEndFogDelta;
-        float endDistance = max(vanRD, 320.0) * 1.7320508;
-        float maxFog = clamp(endDistance * invEndFogDelta + startDelta, 0.0, 1.0);
-        fog = clamp(tHit * invEndFogDelta + startDelta, 0.0, maxFog) * fogOpacity;
-    }
-    lit = mix(lit, fogTint, fog);
+    // v6.25.3 FOG PARITY — environmental fog REMOVED from the march path.
+    // Forensics (tri-panel A/B over #321/#323/#326/#327 in ci-verdicts):
+    // the reference leg paints the far forest UN-FOGGED — voxy dark-pixel
+    // median lum drifts only 65 -> 58 across the whole depth span of
+    // 01_aerial_west — while our finish() emulation reached mix ~0.9
+    // toward FOG_BASE_DAY (ours median (176,202,251) on the very pixels
+    // voxy paints (55,72,62)): a depth-gradient fog profile, ~9.8k
+    // preview-px = ~9.5% of the frame on 01, stable across every version
+    // and environment, with 0.0% coverage by the dust_mask color-net arms.
+    // That was the ->light class: not the eraser, not the shape gate —
+    // the environmental fog the march applies and the reference does not.
+    // Voxy applies exactly ONE fog to the march: FogMode.FADE MODE=1 over
+    // the last 10% of the data span — it stays below, byte-for-byte.
 
     // ---- FADE: Voxy FogMode.FADE, MODE=1 (xz only), last 10% ------------
     // The radius reference is the streamed disk edge: data beyond it is
