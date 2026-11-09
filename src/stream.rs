@@ -1567,18 +1567,14 @@ mod tests {
         assert_eq!(tier_rank(-64), 0);
         assert_eq!(tier_rank(62), 0);
         assert_eq!(tier_rank(77), 0); // 77 + 2 = 79 < 80
-        // 78 is the first cell the fixed 80 plane could not carry (the dot
-        // would sit at/below the surface): the rank climbs.
-        assert_eq!(tier_rank(78), 1);
+        assert_eq!(tier_rank(78), 1); // the fixed 80 plane cannot carry 78
         assert_eq!(tier_rank(80), 1);
         assert_eq!(tier_rank(137), 1); // 139 < 140
-        // At-surface edge: 138 + 2 = 140 is NOT strictly above the plane.
-        assert_eq!(tier_rank(138), 2);
+        assert_eq!(tier_rank(138), 2); // 140 is NOT strictly above the plane
         assert_eq!(tier_rank(190), 2); // the §7b summits (185..190)
         assert_eq!(tier_rank(197), 2); // 199 < 200
         assert_eq!(tier_rank(198), 3);
-        // Saturated: a cell above every plane spawns dead dots at most.
-        assert_eq!(tier_rank(1000), 3);
+        assert_eq!(tier_rank(1000), 3); // saturated: dead dots at most
     }
 
     #[test]

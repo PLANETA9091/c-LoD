@@ -170,8 +170,11 @@ pub fn build(cfg: &Config) -> Pack {
             "__SUB__",
             fmt_f(cfg.cell_size as f32 / crate::stream::SUB_PER_CELL as f32),
         ),
-        // v6.2 edit-reset plane (must match src/stream.rs exactly).
-        ("__RESET_Y__", fmt_f(crate::stream::RESET_Y as f32)),
+        // v6.2 edit-reset plane (must match src/stream.rs exactly); v6.22:
+        // the RANK-0 reset plane — the JSON still carries a single scalar
+        // (StreamInfo.z, legacy mode-2 lane), per-cell resets ride the
+        // ClodTiers ladder the capture walks instead.
+        ("__RESET_Y__", fmt_f(crate::stream::RS_TIERS[0] as f32)),
     ];
 
     // v6.7 lens window: 64x64 cells around the debug window center (the
