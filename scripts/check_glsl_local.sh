@@ -21,7 +21,7 @@ command -v "$GLSLANG" >/dev/null 2>&1 || "$GLSLANG" --version >/dev/null || {
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-for fsh in assets/glsl/lod_terrain.fsh assets/glsl/capture.fsh assets/glsl/col_scan.fsh assets/glsl/rot_solve.fsh assets/glsl/atmosphere.fsh; do
+for fsh in assets/glsl/lod_terrain.fsh assets/glsl/capture.fsh assets/glsl/col_scan.fsh assets/glsl/rot_solve.fsh assets/glsl/atmosphere.fsh assets/glsl/dust_mask.fsh; do
     name=$(basename "$fsh" .fsh)
     python3 - "$fsh" "$WORK/$name.frag" <<'PYEOF'
 import re
@@ -42,6 +42,7 @@ blocks = {
     'ClodFog':    ('FogParams', 'layout(std140) uniform ClodFog { vec4 FogParams; };\n'),
     'ClodColors': ('VeilColor', 'layout(std140) uniform ClodColors { vec4 ColLow; vec4 ColHigh; vec4 ColWater; vec4 VeilColor; };\n'),
     'ClodStream': ('StreamInfo','layout(std140) uniform ClodStream { vec4 StreamInfo; };\n'),
+    'ClodTiers':  ('TiersLo',   'layout(std140) uniform ClodTiers { vec4 TiersLo; vec4 TiersHi; vec4 TiersRs; };\n'),
 }
 # skip a stub block if the shader already declares its block name OR any
 # of its member names (glslang rejects duplicate globals)

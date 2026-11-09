@@ -864,4 +864,104 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn capture_mirror_arm_decodes_the_canopy_carrier() {
+        // v6.25 MIRROR LUMINANCE-DELTA ARM (#318/#319 forensics): the §7b
+        // canopy shades the rank-0/1 carriers into NEUTRAL DARK ((35,38,42),
+        // 100% of the dot class inside |g-b| <= 0.08 && |g-r| <= 0.08, lum
+        // 0.15 vs ring 0.41) — both hue arms are blind to it, the cells
+        // never decode, and their dots are never erased: the eastern fake
+        // wall on 04/06/02/10. The fix lives in BOTH consumers: the capture
+        // strobe (decode -> the eraser's projection path owns the dots) and
+        // the dust_mask color net (the strobe-miss safety net). The capture
+        // arm carries the FLOATING-CARRIER DEPTH GATE — a dark px the ray
+        // reaches before the plane is terrain shading and must never fire
+        // (the words are persistent; the net's false positives are
+        // self-repairing, the capture's are not).
+        let cfg = Config::parse("");
+        let pack = build(&cfg);
+        let entries = zip_entries(&pack.zip);
+        let capture = String::from_utf8_lossy(
+            &entries
+                .iter()
+                .find(|(n, _)| n == "assets/clod/shaders/post/capture.fsh")
+                .expect("capture.fsh missing")
+                .1,
+        );
+        for marker in [
+            "v6.25 MIRROR LUMINANCE-DELTA ARM",
+            "v6.25 FLOATING-CARRIER DEPTH GATE",
+            "(ringLum - lum) > 0.06",
+            "abs(raw.g - raw.b) <= 0.08",
+            "abs(raw.g - raw.r) <= 0.08",
+            "zScene >= z",
+            "texture(InDepthSampler, sc).r",
+        ] {
+            assert!(
+                capture.contains(marker),
+                "capture.fsh must carry the v6.25 mirror-arm marker {marker}"
+            );
+        }
+        // The mode-2 reset pass does not carry the depth near: its probe
+        // must pass depthNear = 0 (the arm disabled), the data passes pass
+        // StreamInfo.z (the __DEPTH_NEAR__ scalar the chain template fills).
+        assert!(
+            capture.contains("probe_word(cellWorld, tierY(TiersRs, r), sub, 0.0, w, hit, all)"),
+            "the reset walk must disable the mirror arm (no depth near in its UBO)"
+        );
+        assert!(
+            capture.contains(
+                "probe_word(cellWorld, tierY(ladders, r), sub, StreamInfo.z, w, hit, all)"
+            ),
+            "the data tier walk must pass the pass's depth near"
+        );
+        let mask = String::from_utf8_lossy(
+            &entries
+                .iter()
+                .find(|(n, _)| n == "assets/clod/shaders/post/dust_mask.fsh")
+                .expect("dust_mask.fsh missing")
+                .1,
+        );
+        for marker in [
+            "v6.25 MIRROR NET ARM",
+            "(ringLum - lum) > 0.06",
+            "abs(raw.g - raw.b) <= 0.08",
+            "abs(raw.g - raw.r) <= 0.08",
+        ] {
+            assert!(
+                mask.contains(marker),
+                "dust_mask.fsh must carry the v6.25 mirror-net marker {marker}"
+            );
+        }
+        // The chain templates already bind the depth texture into every
+        // capture pass (kept since v5.3 "for the chain schema") — the gate
+        // rides the existing binding, no chain change. The count: 5 capture
+        // passes + the march's own tVan read (6), +1 more when the unfog
+        // variant's extra pass rides the chain (7).
+        for cfg_s in [
+            "",
+            "debug_lens=true",
+            "unfog=true",
+            "unfog=true;debug_lens=true",
+        ] {
+            let cfg = Config::parse(cfg_s);
+            let pack = build(&cfg);
+            let entries = zip_entries(&pack.zip);
+            let chain = String::from_utf8_lossy(
+                &entries
+                    .iter()
+                    .find(|(n, _)| n == "assets/clod/post_effect/lod_terrain.json")
+                    .expect("chain missing from the pack")
+                    .1,
+            );
+            let expected = if cfg.unfog { 7 } else { 6 };
+            assert_eq!(
+                chain.matches("\"sampler_name\": \"InDepth\"").count(),
+                expected,
+                "the capture passes + the march (tVan) must bind the depth texture \
+                 (the v6.25 gate reads it)"
+            );
+        }
+    }
 }

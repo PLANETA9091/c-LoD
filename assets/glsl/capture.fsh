@@ -113,7 +113,11 @@ const float PI = 3.14159265358979;
 // frame; allSlots = every Z slot strobed (a COMPLETE word — the v6.2
 // replace gate). The strobe is the v5.3.1 5-tap cross on the UN-FOGGED
 // color; geometry must match stream.rs::word_spawns exactly.
-void probe_word(vec2 cellWorld, float planeY, float sub, out uint word, out bool anyHit, out bool allSlots) {
+// depthNear = the device depth near of THIS pass (StreamInfo.z on the data
+// passes); <= 0 disables the v6.25 mirror arm's floating-carrier depth gate
+// (the mode-2 reset pass does not carry the depth near and keeps the hue
+// arms only).
+void probe_word(vec2 cellWorld, float planeY, float sub, float depthNear, out uint word, out bool anyHit, out bool allSlots) {
     word = 0u;
     anyHit = false;
     allSlots = true;
@@ -201,6 +205,7 @@ void probe_word(vec2 cellWorld, float planeY, float sub, out uint word, out bool
             vec2 scrPx = vec2(ScreenSize);
             ivec2 basePx = ivec2(clamp(sc * scrPx, vec2(0.0), scrPx - 1.0));
             float ringGB = 0.0;
+            float ringLum = 0.0;
             for (int d = 0; d < 4; ++d) {
                 ivec2 o = d == 0 ? ivec2(3, 3)
                         : d == 1 ? ivec2(-3, 3)
@@ -209,8 +214,19 @@ void probe_word(vec2 cellWorld, float planeY, float sub, out uint word, out bool
                 ivec2 q = clamp(basePx + o, ivec2(0), ivec2(scrPx) - 1);
                 vec3 s = texelFetch(InSampler, q, 0).rgb;
                 ringGB += s.g - s.b;
+                ringLum += s.r + s.g + s.b;
             }
             ringGB *= 0.25;
+            ringLum *= 0.25 / 3.0;
+            // v6.25 FLOATING-CARRIER DEPTH GATE: the carrier is translucent
+            // and never writes depth, so the depth behind a LIVE dot is the
+            // terrain BEHIND the plane (or the sky, raw ~ 0 -> zScene huge).
+            // A dark px the ray reaches BEFORE the plane is terrain shading
+            // (a terrace shadow writes depth closer) and must never fire the
+            // mirror arm — the same one-line proof the G8d march uses
+            // (tVan = DEPTH_NEAR/depth). Sampled once at the projected
+            // center; the 5-tap cross stays a color test.
+            float zScene = depthNear / max(texture(InDepthSampler, sc).r, 1.0e-6);
             float fog = clamp(z * invEndFogDelta + startDelta, 0.0, maxFog) * fogOpacity;
             bool dust = false;
             for (int t = 0; t < 5; ++t) {
@@ -246,7 +262,28 @@ void probe_word(vec2 cellWorld, float planeY, float sub, out uint word, out bool
                 bool delta = (raw.g - raw.b) - ringGB > 0.06;
                 bool absolute = delta && pc.g > 0.40 && pc.g > pc.r + 0.08 && pc.g > pc.b + 0.08;
                 bool relative = delta && raw.g > raw.r + 0.02;
-                if (absolute || relative) {
+                // v6.25 MIRROR LUMINANCE-DELTA ARM (#318/#319 forensics):
+                // the §7b canopy shades the rank-0/1 carriers — the particle
+                // samples the blocked skylight and renders NEUTRAL DARK
+                // (measured on the #319 mask8 10m frame: (35,38,42), 100% of
+                // the dot class inside |g-b| <= 0.08 and |g-r| <= 0.08, lum
+                // 0.15 vs ring 0.41) — INVISIBLE to both hue arms, so those
+                // cells never decode and their dots are never erased: the
+                // eastern fake wall. The arm is the v6.5 ring gate with the
+                // sign flipped on LUMINANCE (the same 0.06, fog scales dot
+                // and ring identically) + the measured neutrality window
+                // (0.08 = the absolute arm's own margin) + the depth gate
+                // above. The §5b lanes are untouched: their dots pass the
+                // hue arms first, their terrain has no dark-on-bright
+                // neutral edges at the probe positions, and the tier
+                // windows + merge honesty still bound every stash.
+                float lum = (raw.r + raw.g + raw.b) * (1.0 / 3.0);
+                bool mirror = depthNear > 0.0
+                    && (ringLum - lum) > 0.06
+                    && abs(raw.g - raw.b) <= 0.08
+                    && abs(raw.g - raw.r) <= 0.08
+                    && zScene >= z;
+                if (absolute || relative || mirror) {
                     dust = true;
                     break;
                 }
@@ -312,7 +349,9 @@ void main() {
         bool hit = false;
         bool all;
         for (int r = 0; r < 4 && !hit; ++r) {
-            probe_word(cellWorld, tierY(TiersRs, r), sub, w, hit, all);
+            // depthNear = 0: the reset pass's UBO carries RESET_Y, not the
+            // depth near — the electrons keep the hue arms (v6.25).
+            probe_word(cellWorld, tierY(TiersRs, r), sub, 0.0, w, hit, all);
         }
         fragColor = vec4(hit ? 1.0 : 0.0, 0.0, 0.0, 1.0);
         return;
@@ -372,7 +411,7 @@ void main() {
         uint w;
         bool hit;
         bool all;
-        probe_word(cellWorld, tierY(ladders, r), sub, w, hit, all);
+        probe_word(cellWorld, tierY(ladders, r), sub, StreamInfo.z, w, hit, all);
         if (!hit) {
             continue;
         }

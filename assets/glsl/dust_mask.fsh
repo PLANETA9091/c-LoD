@@ -220,6 +220,7 @@ void main() {
         vec2 scrPx = vec2(ScreenSize);
         ivec2 basePx = ivec2(clamp(texCoord * scrPx, vec2(0.0), scrPx - 1.0));
         float ringGB = 0.0;
+        float ringLum = 0.0;
         for (int d = 0; d < 4; ++d) {
             ivec2 o = d == 0 ? ivec2(3, 3)
                     : d == 1 ? ivec2(-3, 3)
@@ -228,11 +229,27 @@ void main() {
             ivec2 q = clamp(basePx + o, ivec2(0), ivec2(scrPx) - 1);
             vec3 s = texelFetch(InSampler, q, 0).rgb;
             ringGB += s.g - s.b;
+            ringLum += s.r + s.g + s.b;
         }
         ringGB *= 0.25;
+        ringLum *= 0.25 / 3.0;
         bool absolute = raw.g > 0.45 && raw.g > raw.r + 0.08 && raw.g > raw.b + 0.08;
         bool relative = (raw.g - raw.b) - ringGB > 0.06 && raw.g > raw.r + 0.02;
-        if (absolute || relative) {
+        // v6.25 MIRROR NET ARM: the canopy-shadowed carrier is NEUTRAL DARK
+        // (measured (35,38,42), 100% inside |g-b| <= 0.08 && |g-r| <= 0.08,
+        // lum 0.15 vs ring 0.41 on the #319 mask8 10m frame) — the hue nets
+        // never saw it and the wall survived every frame. The arm is the
+        // v6.5 ring gate with the sign flipped on LUMINANCE (the same 0.06)
+        // + the measured neutrality window (0.08 = the absolute arm's own
+        // margin). No depth gate here (the net has no depth binding): a
+        // false positive only repaints a texel from its own unmasked
+        // surroundings — self-repairing by the v5.3.2 design, and the
+        // adaptive kernel already survives whole masked neighborhoods.
+        float lum = (raw.r + raw.g + raw.b) * (1.0 / 3.0);
+        bool mirror = (ringLum - lum) > 0.06
+            && abs(raw.g - raw.b) <= 0.08
+            && abs(raw.g - raw.r) <= 0.08;
+        if (absolute || relative || mirror) {
             marked = 1.0;
             radius = bandOK ? 3.0 : 2.0;
         }
