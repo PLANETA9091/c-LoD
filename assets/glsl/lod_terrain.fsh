@@ -596,6 +596,28 @@ void main() {
             return;
         }
     }
+    // v6.24 BUFFER DUMP: the #317 round killed the OR-ratchet (the purple
+    // wedge died, 11 of 13 rows rose) but the eastern fake-wall columns
+    // survive on 04/06/02/10 with heights the rank-0 byte windows can never
+    // encode — every armchair mechanism was refuted, so the round carries
+    // the instrument instead of a guess: a RAW window of the persistent
+    // buffers in the frame corners. Block A (GL rows 0..31 = PNG bottom
+    // rows, the y-flip lesson) = the HEIGHT bytes: R = the byte, G = the
+    // decoded flag. Block B (GL rows 32..63) = the COLOR bytes: R = the
+    // lattice index, G = the decoded flag. The window = cells x 120..183,
+    // z 112..143 — the disk center's east sector (the marker, both
+    // mountains, the 64..110 m east band the wall lives in). The mask8
+    // evidence lane (mesh_debug=true) carries the dump; the production
+    // parity boot compiles without MESH_DEBUG and the gate frames stay
+    // clean. The forensics decode names the garbage cells exactly.
+    if (sxy.x < 64 && sxy.y < 64) {
+        bool heightBlock = sxy.y < 32;
+        ivec2 celli = ivec2(120 + sxy.x, 112 + (heightBlock ? sxy.y : sxy.y - 32));
+        vec4 b = heightBlock ? texelFetch(HeightSampler, celli, 0)
+                             : texelFetch(ColBufSampler, celli, 0);
+        fragColor = vec4(b.r, b.a, 0.0, 1.0);
+        return;
+    }
 #endif
     vec4 scene = texture(InSampler, texCoord);
     float depth = texture(InDepthSampler, texCoord).r;

@@ -804,6 +804,25 @@ mod tests {
                 "capture.fsh must carry the v6.23 decode-honesty marker {marker}"
             );
         }
+        // v6.24 BUFFER DUMP: the march's evidence lane carries the raw
+        // buffer window under the same compile-time define.
+        let march = String::from_utf8_lossy(
+            &entries
+                .iter()
+                .find(|(n, _)| n == "assets/clod/shaders/post/lod_terrain.fsh")
+                .expect("lod_terrain.fsh missing")
+                .1,
+        );
+        for marker in [
+            "v6.24 BUFFER DUMP",
+            "HeightSampler, celli",
+            "ColBufSampler, celli",
+        ] {
+            assert!(
+                march.contains(marker),
+                "lod_terrain.fsh must carry the v6.24 buffer-dump marker {marker}"
+            );
+        }
         // The pack ships ONE chain file per build; the four templates are
         // selected by config, so every variant is built and checked.
         for (cfg_s, label) in [

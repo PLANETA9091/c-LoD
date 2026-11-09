@@ -1575,6 +1575,51 @@ if os.path.exists(st):
         print(f"- mask8 fog state @png_y={yy}: raw (300)=({a[0]},{a[1]},{a[2]}) (301)=({c[0]},{c[1]},{c[2]})")
         if not (abs(int(a[0]) - 151) < 12 and abs(int(a[1]) - 184) < 12):
             print(f"- mask8 fog state decoded: envStart={a[0]*8} envEnd={a[1]*8} rdEnd={a[2]*16} fogColor=({c[0]},{c[1]},{c[2]})")
+# v6.24 BUFFER DUMP decode: the march (mesh_debug lanes) writes a 64x64
+# corner block = a RAW window of the persistent buffers. GL rows 0..31 =
+# the HEIGHT bytes (PNG bottom rows h-32..h-1), GL rows 32..63 = the COLOR
+# bytes (PNG rows h-64..h-33). Window = cells x 120..183, z 112..143; the
+# disk center cell = (128,128), so dx = (120+x-128)*2 m east, dz =
+# (112+y-128)*2 m south. The #317 fake wall (east-facing 04/06/02/10
+# frames) lives exactly in this window; the decode names the garbage cells.
+for name in ("10m", "01m"):
+    p = os.path.join(sys.argv[1], f"{name}.png")
+    if not os.path.exists(p):
+        continue
+    im = Image.open(p).convert("RGB"); px = im.load(); w, h = im.size
+    heights = []; colors = []
+    for yy in range(h - 32, h):
+        row = [px[xx, yy] for xx in range(64)]
+        heights.append(row)
+    for yy in range(h - 64, h - 32):
+        row = [px[xx, yy] for xx in range(64)]
+        colors.append(row)
+    marked_h = sum(1 for row in heights for c in row if c[1] > 127)
+    marked_c = sum(1 for row in colors for c in row if c[1] > 127)
+    bvals = [c[0] for row in heights for c in row if c[1] > 127]
+    w0 = sum(1 for v in bvals if v < 142)
+    w1 = sum(1 for v in bvals if 142 <= v < 202)
+    w2 = sum(1 for v in bvals if v >= 202)
+    mx = max(bvals) if bvals else 0
+    print(f"- buffer dump {name}: marked h={marked_h}/2048 c={marked_c}/2048; height windows r0<142:{w0} r1:{w1} r2>=202:{w2} maxByte={mx}")
+    if w2:
+        out = []
+        for yy in range(32):
+            for xx in range(64):
+                c = heights[yy][xx]
+                if c[1] > 127 and c[0] >= 202:
+                    dx = (xx - 8) * 2; dz = (yy - 16) * 2
+                    out.append(f"({dx:+d},{dz:+d})h={c[0]-64}")
+                if len(out) >= 10:
+                    break
+            if len(out) >= 10:
+                break
+        print(f"- buffer dump {name}: RANK-2-WINDOW HEIGHTS (the fake-wall class): {', '.join(out)}")
+    cvals = [(c[0], heights[yy][xx]) for yy in range(32) for xx in range(64)
+             if colors[yy][xx][1] > 127 and heights[yy][xx][1] > 127]
+    water_mismatch = sum(1 for cv, hh in cvals if (cv > 215) != (hh - 64 < 62))
+    black = sum(1 for cv, hh in cvals if cv == 0)
+    print(f"- buffer dump {name}: color idx0(black)={black} water/height mismatches={water_mismatch} of {len(cvals)} pairs")
 PYEOF
   while IFS= read -r l; do sum "$l"; done < "$M8FORENSICS"
   rm -f "$M8FORENSICS"
