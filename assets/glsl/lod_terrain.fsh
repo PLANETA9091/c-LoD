@@ -728,11 +728,14 @@ void main() {
     vec4 fogCol = texelFetch(RotSampler, ivec2(1, 0), 0);
     vec4 fogRng = texelFetch(RotSampler, ivec2(0, 1), 0);
     bool fogLive = fogRng.a > 0.5 && fogCol.a > 0.004;
-    // v6.25.3 FOG PARITY: fStart/fEnd/fogTint/fogOpacity dropped — the
-    // NormalRenderPipeline.finish() emulation is gone (see the FOG PARITY
-    // block at the old mix site below); the fog channel still feeds the
-    // lightmap reconstruction (dayTick) and the near-gate rd.
+    // v6.25.3 FOG PARITY: fStart/fEnd dropped — the env-pair distances were
+    // the WRONG pair for terrain (fogged a 150 m forest to mix 0.9); the
+    // fog channel still feeds the lightmap reconstruction (dayTick), the
+    // near-gate rd, and since v6.25.4 the tint/opacity of the restored
+    // dimension-pair fog (0 -> 1024) at the mix site below.
     float vanRD = fogRng.b * 255.0 * 16.0;
+    vec3 fogTint = fogLive ? fogCol.rgb : VeilColor.rgb;
+    float fogOpacity = fogLive ? fogCol.a : 1.0;
 
     // Shade inputs at the hit: per-cell flags + per-cell gradient normal
     // (nearest reads; the normal is constant per cell = flat Voxy quads).
@@ -819,6 +822,26 @@ void main() {
     // the environmental fog the march applies and the reference does not.
     // Voxy applies exactly ONE fog to the march: FogMode.FADE MODE=1 over
     // the last 10% of the data span — it stays below, byte-for-byte.
+    //
+    // v6.25.4 FOG DISTANCE PARITY — #330 verdict: removing the fog did NOT
+    // move 01/02/03 (58.09 in the historical cluster — the halos are NOT
+    // march fog at all: the pull pixels kept (176,202,249) after the
+    // removal, i.e. the horizon-fogged VANILLA sky seen THROUGH a data
+    // hole — our stream disk ends ~256 m while the voxy leg forceloads
+    // +/-48 chunks = 768 m; that is a data-coverage class, queued next),
+    // but DID WORSEN 00/02/04 (mean d 23.5->30.9, 31.4->38.1, 48.2->58.0;
+    // max d 210->231/255): the far summits the march does own are fogged
+    // by the reference with the REAL 26.3 overworld dimension fog
+    // (fog_start 0 -> fog_end 1024, EnvironmentAttributes defaults — the
+    // same pair the static fallback below already carries). The env pair
+    // (FogEnvironmentalStart/End ~ renderDistance-sized) was the WRONG
+    // pair for terrain: it fogged a 150 m forest to mix 0.9. Restore the
+    // mix with the dimension pair: fog = tHit / 1024, live tint, live
+    // opacity. Voxy's own finish() applies the same dimension fog on top
+    // of its march — 150 m forest: mix 0.15 (dark, matches), far summits:
+    // 0.3-0.7 (fogged, matches).
+    float fog = fogLive ? clamp(tHit * (1.0 / 1024.0), 0.0, 1.0) * fogOpacity : 0.0;
+    lit = mix(lit, fogTint, fog);
 
     // ---- FADE: Voxy FogMode.FADE, MODE=1 (xz only), last 10% ------------
     // The radius reference is the streamed disk edge: data beyond it is

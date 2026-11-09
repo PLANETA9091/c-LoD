@@ -817,13 +817,15 @@ mod tests {
             "v6.24 BUFFER DUMP",
             "HeightSampler, celli",
             "ColBufSampler, celli",
-            // v6.25.3 FOG PARITY (#327 forensics): the reference leg paints
-            // the far forest un-fogged (voxy dark-lum flat 65->58 across the
-            // whole 01 depth span) while the finish() emulation mixed ~0.9
-            // toward FOG_BASE_DAY — that was the ->light class (sky-pull
-            // ~9.5% of the 01 frame, 0% color-net arm coverage). The march
-            // carries exactly one fog again: FogMode.FADE MODE=1.
-            "v6.25.3 FOG PARITY",
+            // v6.25.4 FOG DISTANCE PARITY (#330 verdict): the env pair
+            // (renderDistance-sized) fogged a 150 m forest to mix ~0.9 —
+            // that was the ->light class; #330 (fog fully removed) proved
+            // the halos are a DATA-COVERAGE hole (our disk ~256 m vs the
+            // voxy leg's +/-48 chunks = 768 m: horizon-fogged vanilla sky
+            // through the hole) AND that the far summits need the REAL
+            // dimension fog back (00/02/04 mean d worsened without it).
+            // The march now carries the dimension pair 0 -> 1024.
+            "v6.25.4 FOG DISTANCE PARITY",
         ] {
             assert!(
                 march.contains(marker),
