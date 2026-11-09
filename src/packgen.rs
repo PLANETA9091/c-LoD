@@ -924,7 +924,6 @@ mod tests {
                 .1,
         );
         for marker in [
-            "v6.25 MIRROR NET ARM",
             "(ringLum - lum) > 0.06",
             "abs(raw.g - raw.b) <= 0.08",
             "abs(raw.g - raw.r) <= 0.08",
@@ -932,6 +931,22 @@ mod tests {
             assert!(
                 mask.contains(marker),
                 "dust_mask.fsh must carry the v6.25 mirror-net marker {marker}"
+            );
+        }
+        // v6.25.1 SHAPE GATE (#321 halo read): the net arm fires only on
+        // COMPACT dark discs — every diagonal ring tap brighter than the
+        // center. Silhouette edges and shaded slopes have a dark tap and
+        // must never fire (the eraser pulled sky into the 01/02/03/09/10/11
+        // silhouettes: 01 20314 / 09 17061 / 03 13512 / 11 28562 ->light px
+        // per frame). The capture arm needs no shape gate (the depth gate).
+        for marker in [
+            "v6.25.1 SHAPE GATE",
+            "ringLumMin > lum",
+            "ringLumMin = min(ringLumMin",
+        ] {
+            assert!(
+                mask.contains(marker),
+                "dust_mask.fsh must carry the v6.25.1 shape-gate marker {marker}"
             );
         }
         // The chain templates already bind the depth texture into every
