@@ -1,0 +1,110 @@
+{
+ "pairs": {
+  "00_summit_rise": {
+   "exact_pct": 0.0,
+   "near_pct": 0.0023,
+   "mean_delta": 144.696,
+   "max_delta": 250,
+   "px_total": 921600,
+   "pass": false
+  },
+  "01_aerial_west": {
+   "exact_pct": 0.0,
+   "near_pct": 0.3387,
+   "mean_delta": 95.994,
+   "max_delta": 251,
+   "px_total": 921600,
+   "pass": false
+  },
+  "02_aerial_south": {
+   "exact_pct": 0.0,
+   "near_pct": 0.1242,
+   "mean_delta": 87.707,
+   "max_delta": 254,
+   "px_total": 921600,
+   "pass": false
+  },
+  "03_aerial_north": {
+   "exact_pct": 0.0001,
+   "near_pct": 0.1242,
+   "mean_delta": 91.493,
+   "max_delta": 253,
+   "px_total": 921600,
+   "pass": false
+  },
+  "04_aerial_east": {
+   "exact_pct": 0.0,
+   "near_pct": 0.05,
+   "mean_delta": 131.594,
+   "max_delta": 254,
+   "px_total": 921600,
+   "pass": false
+  },
+  "05_oblique": {
+   "exact_pct": 0.0,
+   "near_pct": 0.0,
+   "mean_delta": 87.995,
+   "max_delta": 254,
+   "px_total": 921600,
+   "pass": false
+  },
+  "06_ground_west": {
+   "exact_pct": 0.0002,
+   "near_pct": 0.8015,
+   "mean_delta": 86.86,
+   "max_delta": 249,
+   "px_total": 921600,
+   "pass": false
+  },
+  "07_far_north": {
+   "exact_pct": 0.0,
+   "near_pct": 0.011,
+   "mean_delta": 145.532,
+   "max_delta": 236,
+   "px_total": 921600,
+   "pass": false
+  },
+  "08_back_inside": {
+   "exact_pct": 0.0,
+   "near_pct": 0.2399,
+   "mean_delta": 94.802,
+   "max_delta": 235,
+   "px_total": 921600,
+   "pass": false
+  },
+  "09_after_mesh": {
+   "exact_pct": 0.0,
+   "near_pct": 0.4972,
+   "mean_delta": 91.445,
+   "max_delta": 235,
+   "px_total": 921600,
+   "pass": false
+  },
+  "10_marker_ray": {
+   "exact_pct": 0.0,
+   "near_pct": 0.0406,
+   "mean_delta": 122.321,
+   "max_delta": 241,
+   "px_total": 921600,
+   "pass": false
+  },
+  "11_topdown": {
+   "exact_pct": 0.0,
+   "near_pct": 0.9718,
+   "mean_delta": 33.418,
+   "max_delta": 218,
+   "px_total": 921600,
+   "pass": false
+  },
+  "12_far_north_re": {
+   "exact_pct": 0.0,
+   "near_pct": 0.0099,
+   "mean_delta": 137.313,
+   "max_delta": 235,
+   "px_total": 921600,
+   "pass": false
+  }
+ },
+ "missing": [],
+ "pass": false
+}
