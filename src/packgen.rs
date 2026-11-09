@@ -44,12 +44,13 @@ fn vec4(v: [f32; 4]) -> String {
 }
 
 /// v6.22: the rank ladder as the INSIDE of a JSON vec4 value — one
-/// fmt_f-anchored component per rank ("80.0, 140.0, 200.0, 260.0"). The
-/// .0 tails are load-bearing: a bare "80" would still parse, but the
-/// substitution assert greps the ladder verbatim.
+/// component per rank ("80.0, 140.0, 200.0, 260.0"). NOT fmt_f: fmt_f
+/// trims to "80" (the v6.19.3 lesson), and the pack assert greps the
+/// one-decimal ladder verbatim; both forms are valid JSON numbers, the
+/// .1 format just keeps the ladder self-describing.
 fn tiers_vec(v: [f64; 4]) -> String {
     v.iter()
-        .map(|&y| fmt_f(y as f32))
+        .map(|&y| format!("{y:.1}"))
         .collect::<Vec<_>>()
         .join(", ")
 }

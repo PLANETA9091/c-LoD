@@ -2004,16 +2004,16 @@ mod tests {
         s.set_cell(0, 0, cell(70, false, [100, 100, 100]), 0);
         assert_eq!(s.dirty_pending, 0);
         // Real edit (height changed on a live cell) -> dirty.
-        s.set_cell(0, 0, cell(90, false, [100, 100, 100]), 0);
+        s.set_cell(0, 0, cell(75, false, [100, 100, 100]), 0);
         assert_eq!(s.dirty_pending, 1);
         // Stream it (legacy lap): dirty cleared.
         let _ = s.tick_batch(2048, &[]);
         assert_eq!(s.dirty_pending, 0);
         // Rewrite with the same words AFTER the send: stays clean.
-        s.set_cell(0, 0, cell(90, false, [100, 100, 100]), 0);
+        s.set_cell(0, 0, cell(75, false, [100, 100, 100]), 0);
         assert_eq!(s.dirty_pending, 0, "identical words must not re-queue");
         // And a real change re-queues it.
-        s.set_cell(0, 0, cell(90, true, [100, 100, 100]), 0);
+        s.set_cell(0, 0, cell(75, true, [100, 100, 100]), 0);
         assert_eq!(s.dirty_pending, 1);
     }
 
@@ -2188,7 +2188,7 @@ mod tests {
         assert_eq!(s.edit_window, 0, "no edits -> no window");
 
         // THE EDIT: the disk-center cell (decodable, dead ahead) changes.
-        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 401);
+        s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 401);
         assert_eq!(s.dirty_pending, 1);
         // Beat 1 — HOLD: the wire goes silent FIRST (the pool drains), the
         // edit batch waits; the window covers hold + post.
@@ -2300,7 +2300,7 @@ mod tests {
 
         // v6.5.3 gates: a FRESH audience (empty pool, needs the steady state
         // to paint) never arms the window, even on a real edit...
-        s.set_cell(128, 128, cell(90, false, [142, 33, 33]), 5001);
+        s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 5001);
         let fresh = ViewHint {
             eye: [cx - 75.0, 150.0 + 1.62, cz],
             look: look_dir(-90.0, 5.0),
@@ -2317,7 +2317,7 @@ mod tests {
         // signature, and waves feed the initial paint.
         for cz in 120..140u32 {
             for cx in 120..140u32 {
-                s.set_cell(cx, cz, cell(80, false, [100, 100, 100]), 5001);
+                s.set_cell(cx, cz, cell(75, false, [100, 100, 100]), 5001);
             }
         }
         assert!(s.dirty_pending > 256, "test must build a wave");
@@ -2362,7 +2362,7 @@ mod tests {
         };
         // The genuine edit: hold -> release -> the cells are recorded.
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled(400)]).to_vec();
-        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 401);
+        s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 401);
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled(401)]).to_vec();
         for t in 402..(401 + EDIT_HOLD_TICKS) {
             let _: Vec<Spawn> = s.tick_batch(2048, &[settled(t)]).to_vec();
@@ -2478,7 +2478,7 @@ mod tests {
             age_ticks: u64::MAX,
         };
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled]).to_vec();
-        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 201);
+        s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 201);
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled]).to_vec();
         for t in 202..(201 + EDIT_HOLD_TICKS) {
             let v = ViewHint {
@@ -2553,7 +2553,7 @@ mod tests {
         };
         // A small genuine edit: hold -> release -> recorded.
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled(400)]).to_vec();
-        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 401);
+        s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 401);
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled(401)]).to_vec();
         for t in 402..(401 + EDIT_HOLD_TICKS) {
             let _: Vec<Spawn> = s.tick_batch(2048, &[settled(t)]).to_vec();
@@ -2571,7 +2571,7 @@ mod tests {
         // and must NOT become the re-arm material.
         for cz in 120..140u32 {
             for cx in 120..140u32 {
-                s.set_cell(cx, cz, cell(80, false, [100, 100, 100]), 5001);
+                s.set_cell(cx, cz, cell(75, false, [100, 100, 100]), 5001);
             }
         }
         assert!(s.dirty_pending > 256, "test must build a wave");
@@ -2606,7 +2606,7 @@ mod tests {
         };
         // The marker edit (the disk-center cell) delivers and records.
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled(400)]).to_vec();
-        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 401);
+        s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 401);
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled(401)]).to_vec();
         for t in 402..(401 + EDIT_HOLD_TICKS) {
             let _: Vec<Spawn> = s.tick_batch(2048, &[settled(t)]).to_vec();
@@ -2622,7 +2622,7 @@ mod tests {
         // re-dirties the marker cell mid-window (the post-silence cuts),
         // so both cells ride ONE release a few ticks past the naive
         // hold+1 schedule — the loop ticks until the merge registers.
-        s.set_cell(129, 128, cell(90, false, [142, 33, 33]), 500);
+        s.set_cell(129, 128, cell(70, false, [142, 33, 33]), 500);
         let mut merged = false;
         for t in 501..700 {
             let _: Vec<Spawn> = s.tick_batch(2048, &[settled(t)]).to_vec();
@@ -2684,7 +2684,7 @@ mod tests {
         // RECENT_EDIT_TICKS) — far more dots than any release cap.
         for cz in 110..118u32 {
             for cx in 105..145u32 {
-                s.set_cell(cx, cz, cell(90, false, [142, 33, 33]), 100);
+                s.set_cell(cx, cz, cell(70, false, [142, 33, 33]), 100);
             }
         }
         assert!(s.dirty_pending > 250, "test must build a deep backlog");
@@ -2744,7 +2744,7 @@ mod tests {
         };
         // The genuine edit delivers once and records its cell.
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled(400)]).to_vec();
-        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 401);
+        s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 401);
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled(401)]).to_vec();
         for t in 402..(401 + EDIT_HOLD_TICKS) {
             let _: Vec<Spawn> = s.tick_batch(2048, &[settled(t)]).to_vec();
@@ -2832,7 +2832,7 @@ mod tests {
             age_ticks: u64::MAX,
         };
         let _: Vec<Spawn> = s.tick_batch(2048, &[view_at(400)]).to_vec();
-        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 401);
+        s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 401);
         let t_rel = 401 + EDIT_HOLD_TICKS;
         let mut released = false;
         for t in 401..=t_rel + 1 {
@@ -2880,7 +2880,7 @@ mod tests {
             age_ticks: u64::MAX,
         };
         let _: Vec<Spawn> = s.tick_batch(2048, &[view_at(400)]).to_vec();
-        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 401);
+        s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 401);
         // March the engine until the episode must be over: 4 beats ×
         // (REBEAT_DELAY + hold + post margin) covers the whole timeline.
         let horizon = 401 + 4 * (REBEAT_DELAY_TICKS + EDIT_HOLD_TICKS + 2) + EDIT_WINDOW_TICKS;
@@ -2928,7 +2928,7 @@ mod tests {
         for i in 0..150u32 {
             let cx = 45 + i % 50; // world x 90..188
             let cz = 80 + i / 50; // world z 160..165
-            s.set_cell(cx, cz, cell(90 + (i % 8) as i16, false, [90, 90, 90]), 1000);
+            s.set_cell(cx, cz, cell(70 + (i % 8) as i16, false, [90, 90, 90]), 1000);
         }
         assert_eq!(s.dirty_pending, 150);
         // Age the backlog past RECENT_EDIT_TICKS with A alone watching.
@@ -2940,7 +2940,7 @@ mod tests {
         // View B arrives: its band covers the backlog AND the fresh edit.
         // The fresh edit (1 recent decodable cell) must win the window.
         let b = vhint(128.0, 128.0, 0.0, 0.0, 1500);
-        s.set_cell(66, 84, cell(170, false, [142, 33, 33]), 1500);
+        s.set_cell(66, 84, cell(70, false, [142, 33, 33]), 1500);
         assert_eq!(s.dirty_pending, 151);
         let a2 = vhint(40.0, 64.0, 90.0, 0.0, 1500);
         let batch: Vec<Spawn> = s.tick_batch(256, &[a2, b]).to_vec();
@@ -2992,7 +2992,7 @@ mod tests {
         for i in 0..150u32 {
             let cx = 40 + i % 50; // world x 80..178
             let cz = 80 + i / 50; // world z 160..165
-            s.set_cell(cx, cz, cell(90 + (i % 8) as i16, false, [90, 90, 90]), 1000);
+            s.set_cell(cx, cz, cell(70 + (i % 8) as i16, false, [90, 90, 90]), 1000);
         }
         assert_eq!(s.dirty_pending, 150);
         let v = vhint(128.0, 128.0, 0.0, 0.0, 1000);
@@ -3015,7 +3015,7 @@ mod tests {
         let mut s = Streamer::new(cx - half, cz - half, region, 2);
         // the disk origin lands at (-1186, 540); the named center (-930,796)
         // is cell (128, 128) for cell_size 2.
-        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 0);
+        s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 0);
         s.set_cell(127, 128, cell(62, true, [10, 20, 30]), 0);
         let dump = s.debug_window(-930, 796, 1, 1000);
         assert!(dump.contains("# cx cz wx wz height water valid rgb last_age dirty hword cword"));
