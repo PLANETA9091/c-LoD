@@ -1,105 +1,105 @@
 {
  "pairs": {
   "00_summit_rise": {
-   "exact_pct": 75.3291,
-   "near_pct": 78.7675,
-   "mean_delta": 23.087,
+   "exact_pct": 75.2163,
+   "near_pct": 78.7477,
+   "mean_delta": 23.459,
    "max_delta": 210,
    "px_total": 921600,
    "pass": false
   },
   "01_aerial_west": {
-   "exact_pct": 59.6998,
-   "near_pct": 70.8353,
-   "mean_delta": 21.579,
+   "exact_pct": 59.7765,
+   "near_pct": 70.9277,
+   "mean_delta": 21.627,
    "max_delta": 248,
    "px_total": 921600,
    "pass": false
   },
   "02_aerial_south": {
-   "exact_pct": 48.9336,
-   "near_pct": 66.3932,
-   "mean_delta": 32.298,
+   "exact_pct": 48.5581,
+   "near_pct": 66.3497,
+   "mean_delta": 31.378,
    "max_delta": 253,
    "px_total": 921600,
    "pass": false
   },
   "03_aerial_north": {
-   "exact_pct": 55.6611,
-   "near_pct": 74.0199,
-   "mean_delta": 16.861,
-   "max_delta": 253,
+   "exact_pct": 54.3879,
+   "near_pct": 72.6948,
+   "mean_delta": 17.11,
+   "max_delta": 250,
    "px_total": 921600,
    "pass": false
   },
   "04_aerial_east": {
-   "exact_pct": 44.225,
-   "near_pct": 53.6613,
-   "mean_delta": 49.212,
+   "exact_pct": 42.5356,
+   "near_pct": 50.4479,
+   "mean_delta": 48.23,
    "max_delta": 254,
    "px_total": 921600,
    "pass": false
   },
   "05_oblique": {
-   "exact_pct": 94.1816,
-   "near_pct": 98.962,
-   "mean_delta": 0.357,
+   "exact_pct": 93.9115,
+   "near_pct": 98.959,
+   "mean_delta": 0.36,
    "max_delta": 169,
    "px_total": 921600,
    "pass": false
   },
   "06_ground_west": {
-   "exact_pct": 58.253,
-   "near_pct": 79.427,
-   "mean_delta": 13.062,
+   "exact_pct": 37.7667,
+   "near_pct": 66.8124,
+   "mean_delta": 25.203,
    "max_delta": 249,
    "px_total": 921600,
    "pass": false
   },
   "07_far_north": {
-   "exact_pct": 86.6964,
-   "near_pct": 91.211,
-   "mean_delta": 10.074,
-   "max_delta": 226,
+   "exact_pct": 87.1185,
+   "near_pct": 95.7488,
+   "mean_delta": 1.996,
+   "max_delta": 223,
    "px_total": 921600,
    "pass": false
   },
   "08_back_inside": {
-   "exact_pct": 64.8841,
-   "near_pct": 80.3137,
-   "mean_delta": 19.917,
+   "exact_pct": 57.7832,
+   "near_pct": 61.6734,
+   "mean_delta": 49.382,
    "max_delta": 239,
    "px_total": 921600,
    "pass": false
   },
   "09_after_mesh": {
-   "exact_pct": 59.6289,
-   "near_pct": 70.7142,
-   "mean_delta": 21.728,
-   "max_delta": 233,
+   "exact_pct": 53.0964,
+   "near_pct": 63.7972,
+   "mean_delta": 25.314,
+   "max_delta": 238,
    "px_total": 921600,
    "pass": false
   },
   "10_marker_ray": {
-   "exact_pct": 70.9907,
-   "near_pct": 81.369,
-   "mean_delta": 15.961,
-   "max_delta": 236,
+   "exact_pct": 47.4746,
+   "near_pct": 65.2688,
+   "mean_delta": 30.828,
+   "max_delta": 237,
    "px_total": 921600,
    "pass": false
   },
   "11_topdown": {
-   "exact_pct": 27.7654,
-   "near_pct": 67.7477,
-   "mean_delta": 8.802,
+   "exact_pct": 27.6281,
+   "near_pct": 67.3201,
+   "mean_delta": 9.123,
    "max_delta": 223,
    "px_total": 921600,
    "pass": false
   },
   "12_far_north_re": {
-   "exact_pct": 85.5614,
-   "near_pct": 90.428,
-   "mean_delta": 8.04,
+   "exact_pct": 85.7502,
+   "near_pct": 91.6815,
+   "mean_delta": 7.761,
    "max_delta": 245,
    "px_total": 921600,
    "pass": false
