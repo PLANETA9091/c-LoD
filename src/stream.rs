@@ -63,24 +63,60 @@
 
 /// Sub-cell lattice: 4 positions per axis inside one cell.
 pub const SUB_PER_CELL: f64 = 4.0;
-/// Particle layers: the HEIGHT word rides the high layer, the COLOR word
-/// the low one (v5.1 — one carrier hue, words told apart by plane height).
-/// A layer is decodable when the particle renders in front of geometry
-/// (26.3 reversed-Z hides particles against the sky), so the low layer
-/// decodes from the ground, the high one from elevated vantage points.
-pub const LAYER_Y: [f64; 2] = [80.0, 120.0];
-/// Legacy plane constants (kept for packgen templating of the layer list).
-pub const PLANE_HI_Y: f64 = LAYER_Y[1];
-pub const PLANE_LO_Y: f64 = LAYER_Y[0];
+/// v6.22 TIERED TRANSPORT: per-cell rank planes. Rank k serves cells whose
+/// surface sits below LO_TIERS[k]: the COLOR word rides LO_TIERS[k], the
+/// HEIGHT word HI_TIERS[k] (LO + 40), the edit-reset electron RS_TIERS[k]
+/// (LO + 20). One carrier hue — words are told apart by plane height, and
+/// the two words of one cell never share a plane. Rank 0 = the v5.1 planes
+/// (80/120/100): every §5b world keeps byte-identical spawns.
+///
+/// WHY TIERS: a dot at or below the surface never renders (26.3 hides
+/// particles inside blocks), so the fixed 80/120 planes starved every cell
+/// taller than 120 — the v6.20 transport ceiling (the §7b summits 185..190
+/// lost BOTH words; only the sub-80 band and, after v6.21.0, the
+/// height-only 80..120 band ever decoded). The rank climbs with the
+/// terrain instead: the server picks the lowest tier strictly above the
+/// cell surface, and the capture — which cannot know the height before the
+/// word decodes — walks the tiers ascending with an early exit. Low cells
+/// keep the single-probe cost; mountain cells pay up to four probes. The
+/// reset electron keeps its midway slot inside the rank (data captures
+/// probe only the rank planes, the reset pass only the midway — they can
+/// never see each other's dots).
+pub const LO_TIERS: [f64; 4] = [80.0, 140.0, 200.0, 260.0];
+pub const HI_TIERS: [f64; 4] = [120.0, 180.0, 240.0, 300.0];
+pub const RS_TIERS: [f64; 4] = [100.0, 160.0, 220.0, 280.0];
+/// The intra-cell step guard: a word's 4 dots spread +-0.75 blocks around
+/// the sampled surface point (sub = cell/4, cell = 2) while ONE sampled
+/// height stands for the whole cell — a dot at or below ANY nearby column
+/// is swallowed (a safe dead cell, but never painted). The margin keeps
+/// tier-edge cells off the at-surface boundary too.
+pub const TIER_MARGIN: f64 = 2.0;
+
+/// The lowest tier strictly above the cell's surface height (+margin).
+/// Saturates at the top tier: a cell taller than every plane spawns dead
+/// dots at most — the capture never decodes it, and no garbage either.
+pub fn tier_rank(height: i16) -> usize {
+    let h = f64::from(height) + TIER_MARGIN;
+    LO_TIERS
+        .iter()
+        .position(|&lo| lo > h)
+        .unwrap_or(LO_TIERS.len() - 1)
+}
+/// Legacy rank-0 plane constants (kept for packgen templating + tests).
+pub const LAYER_Y: [f64; 2] = [LO_TIERS[0], HI_TIERS[0]];
+pub const PLANE_HI_Y: f64 = HI_TIERS[0];
+pub const PLANE_LO_Y: f64 = LO_TIERS[0];
 /// Water color index in the 6x6x6 lattice.
 pub const COLOR_WATER: u16 = 216;
 
-/// v6.2 edit-reset plane: midway between the two data planes. Same 3D
-/// eye distance as the average data dot (the spawn gate and the decode
-/// band treat it identically), but its dots project away from every data
-/// probe point — the data captures never see them and the dedicated
-/// reset pass never sees data dots. Only DIRTY streams spawn here.
-pub const RESET_Y: f64 = 100.0;
+/// v6.2 edit-reset plane, v6.22 meaning: the RANK-0 reset plane (midway
+/// between the rank-0 data planes — same 3D eye distance as the average
+/// rank-0 data dot, but its dots project away from every data probe
+/// point). Per-cell resets ride RS_TIERS[tier_rank(height)]: higher ranks
+/// keep the same midway slot inside their rank, so a dirty mountain cell's
+/// electron still renders (the fixed 100 sat below the summits — a reset
+/// command a mountain cell could never see).
+pub const RESET_Y: f64 = RS_TIERS[0];
 
 /// v5.3 proximity culling: particles never spawn within this radius (blocks,
 /// 3D, eye-centered) of a player. MUST stay well below the capture's decode
@@ -765,12 +801,17 @@ impl Streamer {
                 let (wx, wz) = self.cell_origin(cx, cz);
                 let cxw = wx + cell * 0.5;
                 let czw = wz + cell * 0.5;
-                // The cell always streams HI+LO together, so BOTH plane probe
-                // points must sit inside the band and the frustum — otherwise
-                // the gate would cull the other plane's spawns as waste.
+                // The cell always streams HI+LO together, so BOTH rank-plane
+                // probe points must sit inside the band and the frustum —
+                // otherwise the gate would cull the other plane's spawns as
+                // waste. v6.22: the planes are the CELL'S RANK planes — a
+                // mountain cell needs a high eye (its dots ride 200/240), a
+                // low cell keeps the 80/120 pair.
+                let rank = tier_rank(self.cells[idx as usize].height);
+                let planes = [LO_TIERS[rank], HI_TIERS[rank]];
                 let mut all_ok = true;
                 let mut best = f64::INFINITY;
-                for &py in &LAYER_Y {
+                for &py in &planes {
                     let dx = cxw - eye[0];
                     let dy = py - eye[1];
                     let dz = czw - eye[2];
@@ -832,19 +873,23 @@ impl Streamer {
         let cxw = wx + self.cell_size as f64 * 0.5;
         let czw = wz + self.cell_size as f64 * 0.5;
         let (hword, cword) = Self::encode_words(&cell);
-        // v5.1: the HI word rides ONLY the high layer and the LO word
-        // ONLY the low layer — the villager-sparkle carrier has one hue,
-        // so the capture pass tells words apart by plane height.
-        Self::word_spawns(hword, cxw, czw, sub, LAYER_Y[1], &mut self.batch);
-        Self::word_spawns(cword, cxw, czw, sub, LAYER_Y[0], &mut self.batch);
+        // v5.1: the HI word rides ONLY the high plane and the LO word ONLY
+        // the low plane — the villager-sparkle carrier has one hue, so the
+        // capture pass tells words apart by plane height. v6.22: the planes
+        // are the cell's RANK planes (the lowest tier strictly above the
+        // surface) — a dot inside a block never renders, so the fixed
+        // 80/120 pair starved every cell taller than 120.
+        let rank = tier_rank(cell.height);
+        Self::word_spawns(hword, cxw, czw, sub, HI_TIERS[rank], &mut self.batch);
+        Self::word_spawns(cword, cxw, czw, sub, LO_TIERS[rank], &mut self.batch);
         if edit {
             // v6.2 RESET electron: one dot at the (qx=0, qz=0) probe
-            // position on the reset plane. The client's reset pass flags
-            // the cell for the frame and the data captures replace the
-            // OR-merged word once the fresh decode completes.
+            // position on the cell's rank reset plane. The client's reset
+            // pass flags the cell for the frame and the data captures
+            // replace the OR-merged word once the fresh decode completes.
             self.batch.push(Spawn {
                 x: cxw - 1.5 * sub,
-                y: RESET_Y,
+                y: RS_TIERS[rank],
                 z: czw - 1.5 * sub,
             });
         }
@@ -964,10 +1009,10 @@ impl Streamer {
 
     /// v5.4: is this cell decodable by ANY of the views right now? The same
     /// geometry as the per-player spawn gate / the cone cache membership:
-    /// BOTH plane probe points inside the decode band [CULL_RADIUS+2,
+    /// BOTH rank-plane probe points inside the decode band [CULL_RADIUS+2,
     /// ZONE_FAR-2] and inside the frustum cone. Cells failing this for every
     /// view were always culled at delivery — the scheduler no longer spends
-    /// budget on them.
+    /// budget on them. v6.22: the planes are the cell's RANK planes.
     fn decodable_by_any(&self, idx: usize, views: &[ViewHint]) -> bool {
         let side = self.side as usize;
         let cx = (idx % side) as u32;
@@ -976,9 +1021,11 @@ impl Streamer {
         let cxw = wx + self.cell_size as f64 * 0.5;
         let czw = wz + self.cell_size as f64 * 0.5;
         let cos_half = cos_half_cone();
+        let rank = tier_rank(self.cells[idx].height);
+        let planes = [LO_TIERS[rank], HI_TIERS[rank]];
         for v in views {
             let mut all_ok = true;
-            for &py in &LAYER_Y {
+            for &py in &planes {
                 let dx = cxw - v.eye[0];
                 let dy = py - v.eye[1];
                 let dz = czw - v.eye[2];
@@ -1454,7 +1501,7 @@ mod tests {
         // A REAL edit (words changed): the dirty phase must stream the
         // cell with exactly ONE reset electron on the reset plane — after
         // the v6.5.3 hold/release sequence (a settled client drains first).
-        s.set_cell(2, 2, cell(80, false, [9, 9, 9]), 11);
+        s.set_cell(2, 2, cell(75, false, [9, 9, 9]), 11);
         assert_eq!(s.dirty_pending, 1);
         let mut b: Vec<Spawn> = Vec::new();
         for t in 11..(11 + EDIT_HOLD_TICKS + 2) {
@@ -1514,11 +1561,32 @@ mod tests {
     }
 
     #[test]
+    fn tier_rank_climbs_with_terrain() {
+        // Rank 0 keeps the v5.1 planes for every §5b-class cell (<= 77):
+        // the whole synthetic lane must stay byte-identical.
+        assert_eq!(tier_rank(-64), 0);
+        assert_eq!(tier_rank(62), 0);
+        assert_eq!(tier_rank(77), 0); // 77 + 2 = 79 < 80
+        // 78 is the first cell the fixed 80 plane could not carry (the dot
+        // would sit at/below the surface): the rank climbs.
+        assert_eq!(tier_rank(78), 1);
+        assert_eq!(tier_rank(80), 1);
+        assert_eq!(tier_rank(137), 1); // 139 < 140
+        // At-surface edge: 138 + 2 = 140 is NOT strictly above the plane.
+        assert_eq!(tier_rank(138), 2);
+        assert_eq!(tier_rank(190), 2); // the §7b summits (185..190)
+        assert_eq!(tier_rank(197), 2); // 199 < 200
+        assert_eq!(tier_rank(198), 3);
+        // Saturated: a cell above every plane spawns dead dots at most.
+        assert_eq!(tier_rank(1000), 3);
+    }
+
+    #[test]
     fn void_cells_cost_nothing() {
         let mut s = Streamer::new(0.0, 0.0, 64, 4);
         // Only 2 valid cells on the disk.
         s.set_cell(0, 0, cell(70, false, [90, 90, 90]), 0);
-        s.set_cell(15, 15, cell(80, true, [0, 0, 200]), 0);
+        s.set_cell(15, 15, cell(70, true, [0, 0, 200]), 0);
         let b: Vec<Spawn> = s.tick_batch(2048, &[]).to_vec();
         // 2 cells x (4 height + 4 color) particles each.
         assert_eq!(b.len(), 16);
@@ -1894,7 +1962,7 @@ mod tests {
         // cells (region 256 / cell 2), so (66,100) is in, (128,*) would be
         // out of the grid entirely.
         let (ex, ez) = (66u32, 100u32);
-        s.set_cell(ex, ez, cell(90, false, [200, 100, 50]), 101);
+        s.set_cell(ex, ez, cell(70, false, [200, 100, 50]), 101);
         assert_eq!(s.dirty_pending, 1);
         // Tiny budget: ONLY the dirty cell may stream (phase 0 cap = 4
         // cells at budget 32, and the dirty cell is first in the queue).
@@ -2026,7 +2094,7 @@ mod tests {
         let _ = s.tick_batch(2048, &[v]);
         // Edit BEHIND the player's back (north, -Z): not decodable now.
         // (66,20) sits ~88 blocks behind the eye — valid grid cell.
-        s.set_cell(66, 20, cell(95, false, [200, 50, 50]), 101);
+        s.set_cell(66, 20, cell(70, false, [200, 50, 50]), 101);
         assert_eq!(s.dirty_pending, 1);
         let v2 = vhint(128.0, 128.0, 0.0, 0.0, 101);
         let before = s.dirty_streams;
@@ -2626,7 +2694,7 @@ mod tests {
         assert!(s.dirty_pending > 250, "test must build a deep backlog");
         // THE FRESH EDIT lands ~800 ticks later (the backlog is stale by
         // then): the genuine-edit decision arms on it alone.
-        s.set_cell(128, 128, cell(170, false, [142, 33, 33]), 900);
+        s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 900);
         let _: Vec<Spawn> = s.tick_batch(64, &[settled(900)]).to_vec();
         for t in 901..960 {
             let _: Vec<Spawn> = s.tick_batch(64, &[settled(t)]).to_vec();

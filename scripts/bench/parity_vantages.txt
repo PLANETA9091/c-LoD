@@ -8,6 +8,16 @@
 # Rows 01-09 are the v6.8 voxy-reference matrix (proven, feeds every gallery
 # since #226); row 10 is the c-LoD marker-ray vantage (the engine's proven
 # decode vantage: 75 m east of center, eye 151.6, the paint-proof geometry).
+# v6.22 SUMMIT RISE: the tiered transport's rank-2 planes (LO=200, HI=240)
+# hold the §7b summits' words (tops 185..190). From the marker geometry
+# (66..82 m east) the eye at y=180 keeps EVERY rank-2 dot inside the decode
+# band (c@200: 72.8..84.4; h@240: 92.2..101.6 <= 110 — the y=151.6 boot eye
+# reads h@240 at 122.8: OUT, this row exists to be IN) and the pitch -12
+# frame (fov 70 -> [-23, +47]) contains the dot elevations (c: +14..+17,
+# h: +36..+42). Shot FIRST: the summit words decode here, every later row's
+# frame carries the summit paint from the persistent buffers. The upper
+# half is sky — the camera channel stays fed.
+00_summit_rise 270 -12 CX-75 180 CZ
 01_aerial_west 90 15 CX 140 CZ
 02_aerial_south 0 15 CX 140 CZ
 03_aerial_north 180 15 CX 140 CZ

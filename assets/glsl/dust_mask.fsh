@@ -15,9 +15,10 @@
 // hue strobe on the current frame — the dots are rendered and bright.
 // The fresh word (.b, written by capture this frame) carries the exact
 // live sub-positions: 4 slots x 2-bit X offset. For the pixel's view ray
-// we intersect both particle planes, walk the 3x3 cell ring around the
-// crossing, project each live sub-particle and mark the pixel when it
-// falls inside the dot's screen disc (size ~ world-size / (2 z tanH)).
+// we intersect EVERY rank particle plane (v6.22: the 4 LO tiers + the 4
+// HI tiers), walk the 3x3 cell ring around each crossing, project each
+// live sub-particle and mark the pixel when it falls inside the dot's
+// screen disc (size ~ world-size / (2 z tanH)).
 //
 // Geometry MUST match src/stream.rs::word_spawns and capture.fsh exactly:
 // spawn = cell CENTER + ((qx - 1.5) * sub, 0, (slot - 1.5) * sub).
@@ -45,6 +46,20 @@ uniform sampler2D RotSampler;     // clod_rot_a (camera channel)
 layout(std140) uniform ClodGrid {
     vec4 GridInfo;
 };
+
+// v6.22 TIERED TRANSPORT: the rank ladders (must match src/stream.rs, filled
+// through the ClodTiers UBO in every capture/dust_mask pass of the chain
+// JSON). A fresh word may ride ANY rank plane now, so the eraser crosses
+// every LO tier (color words) and every HI tier (height words).
+layout(std140) uniform ClodTiers {
+    vec4 TiersLo; // x..w = rank 0..3 color-word planes
+    vec4 TiersHi; // x..w = rank 0..3 height-word planes
+    vec4 TiersRs; // x..w = rank 0..3 reset-electron planes (no data dots)
+};
+
+float tierY(vec4 ladders, int r) {
+    return r == 0 ? ladders.x : r == 1 ? ladders.y : r == 2 ? ladders.z : ladders.w;
+}
 
 // x = cell size, y = sub quantum (cell/4), z = device depth near, w = unused
 layout(std140) uniform ClodStream {
@@ -96,9 +111,12 @@ void main() {
     float tHi = 1.0e9;
     float tLo = 1.0e9;
 
-    // Two planes: HI word on the high layer, LO word on the low layer.
-    for (int sel = 0; sel < 2; ++sel) {
-        float planeY = sel == 0 ? GridInfo.z : GridInfo.w;
+    // v6.22: EIGHT planes — every LO tier (color words) then every HI tier
+    // (height words). Rank 0 keeps the v5.1 pair first, so the §5b worlds
+    // walk the same planes in the same order they used to.
+    for (int sel = 0; sel < 8; ++sel) {
+        bool hi = sel >= 4;
+        float planeY = hi ? tierY(TiersHi, sel - 4) : tierY(TiersLo, sel);
         if (abs(dir.y) < 1.0e-4) {
             continue;
         }
@@ -107,7 +125,7 @@ void main() {
             continue; // plane behind the camera or absurdly far
         }
         t = clamp(t, 2.0, 4096.0);
-        if (sel == 0) {
+        if (hi) {
             tHi = min(tHi, t);
         } else {
             tLo = min(tLo, t);
@@ -121,9 +139,9 @@ void main() {
                 if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, ivec2(256)))) {
                     continue;
                 }
-                vec4 b = sel == 0 ? texelFetch(HeightSampler, c, 0)
+                vec4 b = hi ? texelFetch(HeightSampler, c, 0)
                                   : texelFetch(ColBufSampler, c, 0);
-                vec4 b2 = sel == 0 ? texelFetch(Height2Sampler, c, 0)
+                vec4 b2 = hi ? texelFetch(Height2Sampler, c, 0)
                                    : texelFetch(ColBuf2Sampler, c, 0);
                 if (b.g < 0.5 && b2.g < 0.5) {
                     continue; // word not strobed this frame: no live dots

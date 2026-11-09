@@ -43,6 +43,17 @@ fn vec4(v: [f32; 4]) -> String {
     )
 }
 
+/// v6.22: the rank ladder as the INSIDE of a JSON vec4 value — one
+/// fmt_f-anchored component per rank ("80.0, 140.0, 200.0, 260.0"). The
+/// .0 tails are load-bearing: a bare "80" would still parse, but the
+/// substitution assert greps the ladder verbatim.
+fn tiers_vec(v: [f64; 4]) -> String {
+    v.iter()
+        .map(|&y| fmt_f(y as f32))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn rgba(v: [f32; 3]) -> String {
     // colors are authored as RGB; the uniform is vec4 — append opaque alpha
     format!("[{}, {}, {}, 1.0]", fmt_f(v[0]), fmt_f(v[1]), fmt_f(v[2]))
@@ -149,6 +160,12 @@ pub fn build(cfg: &Config) -> Pack {
         ),
         ("__PLANE_HI_Y__", fmt_f(crate::stream::PLANE_HI_Y as f32)),
         ("__PLANE_LO_Y__", fmt_f(crate::stream::PLANE_LO_Y as f32)),
+        // v6.22 TIERED TRANSPORT: the rank ladders ride the ClodTiers UBO in
+        // every capture/dust_mask pass of the chain JSONs — the same single
+        // source of truth (src/stream.rs) as the v5.1 plane tokens above.
+        ("__TIERS_LO__", tiers_vec(crate::stream::LO_TIERS)),
+        ("__TIERS_HI__", tiers_vec(crate::stream::HI_TIERS)),
+        ("__TIERS_RS__", tiers_vec(crate::stream::RS_TIERS)),
         (
             "__SUB__",
             fmt_f(cfg.cell_size as f32 / crate::stream::SUB_PER_CELL as f32),
@@ -373,6 +390,14 @@ mod tests {
         assert!(
             !blob.contains("__PLANE_HI_Y__"),
             "plane tokens must be substituted"
+        );
+        assert!(
+            !blob.contains("__TIERS_LO__"),
+            "tier tokens must be substituted"
+        );
+        assert!(
+            blob.contains("80.0, 140.0, 200.0, 260.0"),
+            "the tier ladder must ride the pack (ClodTiers UBO)"
         );
         assert!(blob.contains("clod_h_b"), "stream targets must be present");
     }

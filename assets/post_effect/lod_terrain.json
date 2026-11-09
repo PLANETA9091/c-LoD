@@ -53,6 +53,11 @@
                 "ClodGrid": [
                     { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __PLANE_HI_Y__, __PLANE_LO_Y__] }
                 ],
+                "ClodTiers": [
+                    { "name": "TiersLo", "type": "vec4", "value": [__TIERS_LO__] },
+                    { "name": "TiersHi", "type": "vec4", "value": [__TIERS_HI__] },
+                    { "name": "TiersRs", "type": "vec4", "value": [__TIERS_RS__] }
+                ],
                 "ClodStream": [
                     { "name": "StreamInfo", "type": "vec4", "value": [__CELL__, __SUB__, __RESET_Y__, 2.0] }
                 ]
@@ -72,6 +77,11 @@
             "uniforms": {
                 "ClodGrid": [
                     { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __PLANE_HI_Y__, __PLANE_LO_Y__] }
+                ],
+                "ClodTiers": [
+                    { "name": "TiersLo", "type": "vec4", "value": [__TIERS_LO__] },
+                    { "name": "TiersHi", "type": "vec4", "value": [__TIERS_HI__] },
+                    { "name": "TiersRs", "type": "vec4", "value": [__TIERS_RS__] }
                 ],
                 "ClodStream": [
                     { "name": "StreamInfo", "type": "vec4", "value": [__CELL__, __SUB__, __DEPTH_NEAR__, 0.0] }
@@ -93,6 +103,11 @@
                 "ClodGrid": [
                     { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __PLANE_HI_Y__, __PLANE_LO_Y__] }
                 ],
+                "ClodTiers": [
+                    { "name": "TiersLo", "type": "vec4", "value": [__TIERS_LO__] },
+                    { "name": "TiersHi", "type": "vec4", "value": [__TIERS_HI__] },
+                    { "name": "TiersRs", "type": "vec4", "value": [__TIERS_RS__] }
+                ],
                 "ClodStream": [
                     { "name": "StreamInfo", "type": "vec4", "value": [__CELL__, __SUB__, __DEPTH_NEAR__, 1.0] }
                 ]
@@ -112,6 +127,11 @@
             "uniforms": {
                 "ClodGrid": [
                     { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __PLANE_HI_Y__, __PLANE_LO_Y__] }
+                ],
+                "ClodTiers": [
+                    { "name": "TiersLo", "type": "vec4", "value": [__TIERS_LO__] },
+                    { "name": "TiersHi", "type": "vec4", "value": [__TIERS_HI__] },
+                    { "name": "TiersRs", "type": "vec4", "value": [__TIERS_RS__] }
                 ],
                 "ClodStream": [
                     { "name": "StreamInfo", "type": "vec4", "value": [__CELL__, __SUB__, __DEPTH_NEAR__, 0.0] }
@@ -133,6 +153,11 @@
                 "ClodGrid": [
                     { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __PLANE_HI_Y__, __PLANE_LO_Y__] }
                 ],
+                "ClodTiers": [
+                    { "name": "TiersLo", "type": "vec4", "value": [__TIERS_LO__] },
+                    { "name": "TiersHi", "type": "vec4", "value": [__TIERS_HI__] },
+                    { "name": "TiersRs", "type": "vec4", "value": [__TIERS_RS__] }
+                ],
                 "ClodStream": [
                     { "name": "StreamInfo", "type": "vec4", "value": [__CELL__, __SUB__, __DEPTH_NEAR__, 1.0] }
                 ]
@@ -153,6 +178,11 @@
             "uniforms": {
                 "ClodGrid": [
                     { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, __PLANE_HI_Y__, __PLANE_LO_Y__] }
+                ],
+                "ClodTiers": [
+                    { "name": "TiersLo", "type": "vec4", "value": [__TIERS_LO__] },
+                    { "name": "TiersHi", "type": "vec4", "value": [__TIERS_HI__] },
+                    { "name": "TiersRs", "type": "vec4", "value": [__TIERS_RS__] }
                 ],
                 "ClodStream": [
                     { "name": "StreamInfo", "type": "vec4", "value": [__CELL__, __SUB__, __DEPTH_NEAR__, 0.0] }

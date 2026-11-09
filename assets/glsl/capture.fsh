@@ -7,12 +7,14 @@
 // The server streams LOD cells as villager-sparkle particles (the only
 // texture the 26.3 software rasterizers draw — dust quads die with
 // degenerate UVs, verified live on GL llvmpipe AND Vulkan lavapipe).
-// The HEIGHT word rides the high layer (Y=120), the COLOR word the low
-// layer (Y=80): the carrier has one hue, so the capture pass tells words
-// apart by plane height. One 16-bit word = 4 particles per layer:
-// particle slot s (Z axis, msb-first) carries bits (14-2s)..(15-2s); its X
-// sub-position inside the cell IS the 2-bit value, its Z sub-position IS
-// the slot. Sub-cell quantum = cell/4, centered.
+// v6.22 TIERED TRANSPORT: each cell's words ride its RANK planes — the
+// HEIGHT word on TiersHi[k], the COLOR word on TiersLo[k] (k = the lowest
+// tier strictly above the cell surface; rank 0 = the v5.1 120/80 pair):
+// the carrier has one hue, so the capture pass tells words apart by plane
+// height and walks the ladder per cell. One 16-bit word = 4 particles per
+// plane: particle slot s (Z axis, msb-first) carries bits (14-2s)..(15-2s);
+// its X sub-position inside the cell IS the 2-bit value, its Z sub-position
+// IS the slot. Sub-cell quantum = cell/4, centered.
 //
 // This pass decodes ONE word back into its persistent 256x256 target (1 px
 // = 1 cell). For the pixel's cell it re-projects all 16 sub-particle
@@ -60,6 +62,28 @@ layout(std140) uniform ClodGrid {
 layout(std140) uniform ClodStream {
     vec4 StreamInfo;
 };
+
+// v6.22 TIERED TRANSPORT: the rank ladders (must match src/stream.rs, which
+// fills them through the ClodTiers UBO in every capture/dust_mask pass of
+// the chain JSON). Rank k serves cells whose surface sits below TiersLo[k]:
+// the COLOR word rides TiersLo[k], the HEIGHT word TiersHi[k] (Lo + 40),
+// the edit-reset electron TiersRs[k] (Lo + 20). A dot at or below the
+// terrain never renders, so the server picks the lowest rank strictly above
+// the cell surface and this pass — which cannot know the height before the
+// word decodes — WALKS the tiers ascending per cell (the walk IS the height
+// discovery). Rank 0 = the v5.1 planes (80/120/100).
+layout(std140) uniform ClodTiers {
+    vec4 TiersLo; // x..w = rank 0..3 color-word planes
+    vec4 TiersHi; // x..w = rank 0..3 height-word planes
+    vec4 TiersRs; // x..w = rank 0..3 reset-electron planes
+};
+
+// The rank ladder member for rank r (explicit chain — desktop GLSL 330
+// allows dynamic vector indexing, but the game's post-chain compiles on
+// drivers where the scalar path is the safe one).
+float tierY(vec4 ladders, int r) {
+    return r == 0 ? ladders.x : r == 1 ? ladders.y : r == 2 ? ladders.z : ladders.w;
+}
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
@@ -262,10 +286,17 @@ void main() {
             fragColor = vec4(0.0, 0.0, 0.0, 1.0);
             return;
         }
+        // v6.22: the electron rides the cell's RANK reset plane; the walk
+        // probes the ladder ascending. A reset electron is a COMMAND, not
+        // data: one dot suffices and partial strobes mean the same thing —
+        // unlike data words, nothing here may OR-accumulate. A blind camera
+        // flags nothing (the data captures decode nothing either).
         uint w;
-        bool hit;
+        bool hit = false;
         bool all;
-        probe_word(cellWorld, StreamInfo.z, sub, w, hit, all);
+        for (int r = 0; r < 4 && !hit; ++r) {
+            probe_word(cellWorld, tierY(TiersRs, r), sub, w, hit, all);
+        }
         fragColor = vec4(hit ? 1.0 : 0.0, 0.0, 0.0, 1.0);
         return;
     }
@@ -283,14 +314,41 @@ void main() {
         return;
     }
 
-    // v5.1: one plane per pass — the HI word decodes on the high layer,
-    // the LO word on the low layer (single carrier hue).
-    float planeY = StreamInfo.w < 0.5 ? GridInfo.z : GridInfo.w;
-
-    uint word;
-    bool anyHit;
-    bool allSlots;
-    probe_word(cellWorld, planeY, sub, word, anyHit, allSlots);
+    // v5.1 -> v6.22: one plane per pass becomes a TIER WALK. The server
+    // spawns the cell's words on the lowest rank whose planes sit strictly
+    // above the terrain (a dot inside a block never renders), so the client
+    // probes the ladder ascending. The first strobe of the walk becomes the
+    // OR candidate; the first ROW-COMPLETE tier overrides it and stops the
+    // walk. For every rank below the true one the LO plane sits at/below
+    // the surface — zero same-cell strobes — so a lower-tier partial can
+    // only be cross-cell noise, which the complete word must replace. Rank
+    // 0 exits after one probe: the §5b worlds keep the exact v5.1 cost.
+    uint word = 0u;
+    bool anyHit = false;
+    bool allSlots = false;
+    uint stash = 0u;
+    bool stashed = false;
+    bool stashAll = false;
+    vec4 ladders = StreamInfo.w < 0.5 ? TiersHi : TiersLo;
+    for (int r = 0; r < 4; ++r) {
+        uint w;
+        bool hit;
+        bool all;
+        probe_word(cellWorld, tierY(ladders, r), sub, w, hit, all);
+        if (all) {
+            stash = w;
+            stashed = true;
+            stashAll = true;
+            break;
+        }
+        if (hit && !stashed) {
+            stash = w;
+            stashed = true;
+        }
+    }
+    word = stash;
+    anyHit = stashed;
+    allSlots = stashAll;
 
     vec4 prev = texelFetch(PrevSampler, px, 0);
     uint prevByte = uint(prev.r * 255.0 + 0.5);
