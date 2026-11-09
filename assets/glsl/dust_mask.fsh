@@ -221,7 +221,6 @@ void main() {
         ivec2 basePx = ivec2(clamp(texCoord * scrPx, vec2(0.0), scrPx - 1.0));
         float ringGB = 0.0;
         float ringLum = 0.0;
-        float ringLumMin = 1.0e9;
         for (int d = 0; d < 4; ++d) {
             ivec2 o = d == 0 ? ivec2(3, 3)
                     : d == 1 ? ivec2(-3, 3)
@@ -231,31 +230,25 @@ void main() {
             vec3 s = texelFetch(InSampler, q, 0).rgb;
             ringGB += s.g - s.b;
             ringLum += s.r + s.g + s.b;
-            ringLumMin = min(ringLumMin, (s.r + s.g + s.b) * (1.0 / 3.0));
         }
         ringGB *= 0.25;
         ringLum *= 0.25 / 3.0;
-        // v6.25.1 SHAPE GATE (the #321 halo read): the net's mirror arm
-        // fired on EVERY dark-vs-bright structure, not only on dots — the
-        // march/vanilla silhouettes are neutral dark against sky too, so
-        // the eraser pulled sky into the silhouette edges (the ->light
-        // halos: 01 20314 / 09 17061 / 03 13512 / 11 28562 px per frame,
-        // the 01/02/03/09/10/11 regressions) and repainted terrain shading
-        // from above (11 near% 86.6 -> 67.7). The discriminator is the
-        // dot's SIZE, for free: a live dot is a 2-4 px disc — ALL FOUR
-        // diagonal ring taps (3 px out) land on the bright backdrop; a
-        // silhouette edge or a shaded slope has at least one tap inside
-        // the same dark structure. Require every tap brighter than the
-        // center: minT > lum. Zero new constants; the capture arm needs no
-        // shape gate (its depth gate already rejects silhouettes — the
-        // tower writes depth closer than the plane).
-        float lum = (raw.r + raw.g + raw.b) * (1.0 / 3.0);
         bool absolute = raw.g > 0.45 && raw.g > raw.r + 0.08 && raw.g > raw.b + 0.08;
         bool relative = (raw.g - raw.b) - ringGB > 0.06 && raw.g > raw.r + 0.02;
+        // v6.25 MIRROR NET ARM: the canopy-shadowed carrier is NEUTRAL DARK
+        // (measured (35,38,42), 100% inside |g-b| <= 0.08 && |g-r| <= 0.08,
+        // lum 0.15 vs ring 0.41 on the #319 mask8 10m frame) — the hue nets
+        // never saw it and the wall survived every frame. The arm is the
+        // v6.5 ring gate with the sign flipped on LUMINANCE (the same 0.06)
+        // + the measured neutrality window (0.08 = the absolute arm's own
+        // margin). No depth gate here (the net has no depth binding): a
+        // false positive only repaints a texel from its own unmasked
+        // surroundings — self-repairing by the v5.3.2 design, and the
+        // adaptive kernel already survives whole masked neighborhoods.
+        float lum = (raw.r + raw.g + raw.b) * (1.0 / 3.0);
         bool mirror = (ringLum - lum) > 0.06
             && abs(raw.g - raw.b) <= 0.08
-            && abs(raw.g - raw.r) <= 0.08
-            && ringLumMin > lum;
+            && abs(raw.g - raw.r) <= 0.08;
         if (absolute || relative || mirror) {
             marked = 1.0;
             radius = bandOK ? 3.0 : 2.0;

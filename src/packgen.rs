@@ -933,22 +933,21 @@ mod tests {
                 "dust_mask.fsh must carry the v6.25 mirror-net marker {marker}"
             );
         }
-        // v6.25.1 SHAPE GATE (#321 halo read): the net arm fires only on
-        // COMPACT dark discs — every diagonal ring tap brighter than the
-        // center. Silhouette edges and shaded slopes have a dark tap and
-        // must never fire (the eraser pulled sky into the 01/02/03/09/10/11
-        // silhouettes: 01 20314 / 09 17061 / 03 13512 / 11 28562 ->light px
-        // per frame). The capture arm needs no shape gate (the depth gate).
-        for marker in [
-            "v6.25.1 SHAPE GATE",
-            "ringLumMin > lum",
-            "ringLumMin = min(ringLumMin",
-        ] {
-            assert!(
-                mask.contains(marker),
-                "dust_mask.fsh must carry the v6.25.1 shape-gate marker {marker}"
-            );
-        }
+        // v6.25.2 REVERT (#323 read): the shape gate FAILED its goal and was
+        // REGRESSIONAL — the ->light class lived (01 59.3 / 02 49.3 / 03 55.6
+        // / 09 53.4 / 10 71.2 / 11 27.7, flat vs #321) while the gate ate the
+        // #321 wins (06 58.3 -> 35.8, 09 59.6 -> 53.4, 08 64.9 -> 61.6): it
+        // stops the net on dots over DARK terrain (06/09 are ground vantages
+        // — the #321 ->sky win there was the net's own erasing) yet the
+        // silhouette halos passed its min-tap test anyway. The net returns to
+        // the v6.25.0 mirror semantics (the markers above); the ->light class
+        // is handed to the ringLumMin tap forensics on the #323 11_topdown
+        // artifact instead of a constant. The capture arm keeps its depth
+        // gate (no shape gate there — the tower writes depth closer).
+        assert!(
+            !mask.contains("ringLumMin"),
+            "dust_mask.fsh must NOT carry the reverted v6.25.1 shape gate"
+        );
         // The chain templates already bind the depth texture into every
         // capture pass (kept since v5.3 "for the chain schema") — the gate
         // rides the existing binding, no chain change. The count: 5 capture
