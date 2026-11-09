@@ -44,8 +44,8 @@
 //! v6.2 LIVE EDITS: the client's buffers OR-merge decoded words, so a
 //! changed cell word can never LOSE bits on refresh — an edit must be
 //! REPLACED atomically. Every dirty stream therefore carries one extra
-//! RESET electron on a third sky plane (Y = RESET_Y, between the two
-//! data planes): the capture's reset pass flags that cell for the frame,
+//! RESET electron on a third sky plane (the cell's rank midpoint, between
+//! the two data planes): the capture's reset pass flags that cell for the frame,
 //! and the data captures swap OR-merge for a direct write once the fresh
 //! word decodes complete (all four slots strobed). Partial decodes keep
 //! the legacy OR self-heal; a complete decode after a reset is idempotent
@@ -103,20 +103,20 @@ pub fn tier_rank(height: i16) -> usize {
         .unwrap_or(LO_TIERS.len() - 1)
 }
 /// Legacy rank-0 plane constants (kept for packgen templating + tests).
-pub const LAYER_Y: [f64; 2] = [LO_TIERS[0], HI_TIERS[0]];
 pub const PLANE_HI_Y: f64 = HI_TIERS[0];
 pub const PLANE_LO_Y: f64 = LO_TIERS[0];
 /// Water color index in the 6x6x6 lattice.
 pub const COLOR_WATER: u16 = 216;
 
-/// v6.2 edit-reset plane, v6.22 meaning: the RANK-0 reset plane (midway
-/// between the rank-0 data planes — same 3D eye distance as the average
-/// rank-0 data dot, but its dots project away from every data probe
-/// point). Per-cell resets ride RS_TIERS[tier_rank(height)]: higher ranks
-/// keep the same midway slot inside their rank, so a dirty mountain cell's
-/// electron still renders (the fixed 100 sat below the summits — a reset
-/// command a mountain cell could never see).
-pub const RESET_Y: f64 = RS_TIERS[0];
+/// v6.2 edit-reset plane, v6.22 rank-0 meaning: midway between the rank-0
+/// data planes — same 3D eye distance as the average rank-0 data dot, but
+/// its dots project away from every data probe point. Per-cell resets ride
+/// RS_TIERS[tier_rank(height)] in production (higher ranks keep the same
+/// midway slot inside their rank, so a dirty mountain cell's electron still
+/// renders — the fixed 100 sat below the summits, a reset command a
+/// mountain cell could never see); the tests pin the rank-0 electron here.
+#[cfg(test)]
+pub(crate) const RESET_Y: f64 = RS_TIERS[0];
 
 /// v5.3 proximity culling: particles never spawn within this radius (blocks,
 /// 3D, eye-centered) of a player. MUST stay well below the capture's decode
@@ -1594,7 +1594,7 @@ mod tests {
         // Water cell streams its color word on the LOW layer (last 4 spawns).
         let lo: Vec<&Spawn> = b.iter().skip(12).collect();
         assert_eq!(lo.len(), 4);
-        assert!(lo.iter().all(|p| (p.y - LAYER_Y[0]).abs() < 1e-9));
+        assert!(lo.iter().all(|p| (p.y - LO_TIERS[0]).abs() < 1e-9));
         // All spawns of the second cell sit at cell (15,15) center.
         let (wx, wz) = s.cell_origin(15, 15);
         for p in lo {
@@ -1710,10 +1710,10 @@ mod tests {
         }
         // v5.1: first the height word on the HIGH layer, then the color word
         // on the LOW layer (one hue — words are told apart by plane height).
-        assert_eq!(b[0].y, LAYER_Y[1]);
-        assert_eq!(b[3].y, LAYER_Y[1]);
-        assert_eq!(b[4].y, LAYER_Y[0]);
-        assert_eq!(b[7].y, LAYER_Y[0]);
+        assert_eq!(b[0].y, HI_TIERS[0]);
+        assert_eq!(b[3].y, HI_TIERS[0]);
+        assert_eq!(b[4].y, LO_TIERS[0]);
+        assert_eq!(b[7].y, LO_TIERS[0]);
     }
 
     fn vhint(x: f64, z: f64, yaw_deg: f64, pitch_deg: f64, now: u64) -> ViewHint {
