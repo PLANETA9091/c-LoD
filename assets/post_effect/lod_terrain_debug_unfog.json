@@ -47,7 +47,8 @@
                 { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
                 { "sampler_name": "Prev", "target": "clod_h_b" },
                 { "sampler_name": "Rot", "target": "clod_rot_a" },
-                { "sampler_name": "Reset", "target": "minecraft:main" }
+                { "sampler_name": "Reset", "target": "minecraft:main" },
+                { "sampler_name": "HeightRef", "target": "clod_h_b" }
             ],
             "output": "clod_reset",
             "uniforms": {
@@ -72,7 +73,8 @@
                 { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
                 { "sampler_name": "Prev", "target": "clod_h_b" },
                 { "sampler_name": "Rot", "target": "clod_rot_a" },
-                { "sampler_name": "Reset", "target": "clod_reset" }
+                { "sampler_name": "Reset", "target": "clod_reset" },
+                { "sampler_name": "HeightRef", "target": "clod_h_b" }
             ],
             "output": "clod_h_a",
             "uniforms": {
@@ -97,7 +99,8 @@
                 { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
                 { "sampler_name": "Prev", "target": "clod_c_b" },
                 { "sampler_name": "Rot", "target": "clod_rot_a" },
-                { "sampler_name": "Reset", "target": "clod_reset" }
+                { "sampler_name": "Reset", "target": "clod_reset" },
+                { "sampler_name": "HeightRef", "target": "clod_h_a" }
             ],
             "output": "clod_c_a",
             "uniforms": {
@@ -122,7 +125,8 @@
                 { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
                 { "sampler_name": "Prev", "target": "clod_h_a" },
                 { "sampler_name": "Rot", "target": "clod_rot_a" },
-                { "sampler_name": "Reset", "target": "clod_reset" }
+                { "sampler_name": "Reset", "target": "clod_reset" },
+                { "sampler_name": "HeightRef", "target": "clod_h_a" }
             ],
             "output": "clod_h_b",
             "uniforms": {
@@ -147,7 +151,8 @@
                 { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
                 { "sampler_name": "Prev", "target": "clod_c_a" },
                 { "sampler_name": "Rot", "target": "clod_rot_a" },
-                { "sampler_name": "Reset", "target": "clod_reset" }
+                { "sampler_name": "Reset", "target": "clod_reset" },
+                { "sampler_name": "HeightRef", "target": "clod_h_b" }
             ],
             "output": "clod_c_b",
             "uniforms": {

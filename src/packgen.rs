@@ -771,4 +771,78 @@ mod tests {
         assert!(!names.contains(&"assets/clod/shaders/post/scrape.fsh"));
         assert!(names.contains(&"assets/clod/shaders/post/capture.fsh"));
     }
+
+    #[test]
+    fn capture_heightref_rides_the_lo_passes() {
+        // v6.23 TIER-CONSISTENCY (#316 forensics): the color capture
+        // cross-checks its stash rank against the height pair the earlier
+        // captures of the SAME frame wrote (c_a reads h_a, c_b reads h_b —
+        // chain order HI before LO). The shader declares HeightRefSampler
+        // unconditionally, so every capture pass of every chain binds it
+        // (the reset/HI passes never read it on their code paths). The
+        // shader must carry the gate itself (surface_rank mirror of
+        // stream.rs::tier_rank + the merge-honesty blocks).
+        let cfg = Config::parse("");
+        let pack = build(&cfg);
+        let entries = zip_entries(&pack.zip);
+        let shader = String::from_utf8_lossy(
+            &entries
+                .iter()
+                .find(|(n, _)| n == "assets/clod/shaders/post/capture.fsh")
+                .expect("capture.fsh missing")
+                .1,
+        );
+        for marker in [
+            "surface_rank",
+            "v6.23 TIER-CONSISTENCY GATE",
+            "v6.23 MERGE HONESTY (a)",
+            "v6.23 MERGE HONESTY (b)",
+            "HeightRefSampler",
+        ] {
+            assert!(
+                shader.contains(marker),
+                "capture.fsh must carry the v6.23 decode-honesty marker {marker}"
+            );
+        }
+        // The pack ships ONE chain file per build; the four templates are
+        // selected by config, so every variant is built and checked.
+        for (cfg_s, label) in [
+            ("", "plain"),
+            ("debug_lens=true", "debug"),
+            ("unfog=true", "unfog"),
+            ("unfog=true;debug_lens=true", "debug_unfog"),
+        ] {
+            let cfg = Config::parse(cfg_s);
+            let pack = build(&cfg);
+            let entries = zip_entries(&pack.zip);
+            let chain = String::from_utf8_lossy(
+                &entries
+                    .iter()
+                    .find(|(n, _)| n == "assets/clod/post_effect/lod_terrain.json")
+                    .unwrap_or_else(|| panic!("{label}: chain missing from the pack"))
+                    .1,
+            )
+            .to_string();
+            let bound = chain.matches("\"sampler_name\": \"HeightRef\"").count();
+            assert_eq!(
+                bound, 5,
+                "{label}: all five capture passes must bind HeightRef"
+            );
+            for (lo, hi) in [("clod_c_a", "clod_h_a"), ("clod_c_b", "clod_h_b")] {
+                let pass = chain
+                    .split("        {\n")
+                    .find(|p| {
+                        p.contains("clod:post/capture")
+                            && p.contains(&format!("\"output\": \"{lo}\""))
+                    })
+                    .unwrap_or_else(|| panic!("{label}: no capture pass writes {lo}"));
+                assert!(
+                    pass.contains(&format!(
+                        "\"sampler_name\": \"HeightRef\", \"target\": \"{hi}\""
+                    )),
+                    "{label}: the {lo} capture must cross-check {hi}"
+                );
+            }
+        }
+    }
 }

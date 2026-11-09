@@ -46,6 +46,7 @@ uniform sampler2D InDepthSampler; // minecraft:main depth (unused since v5.3, ke
 uniform sampler2D PrevSampler;    // previous plane target (persistent)
 uniform sampler2D RotSampler;     // clod_rot_a (camera + fog channel)
 uniform sampler2D ResetSampler;   // clod_reset (v6.2 edit-reset flags, this frame)
+uniform sampler2D HeightRefSampler; // clod_h pair (v6.23 color-side rank cross-check)
 
 // v5.0.3: SamplerInfo never existed as a client UBO — it stayed zeroed
 // (the whole capture wrote cell (0,0), the march divided by zero).
@@ -83,6 +84,22 @@ layout(std140) uniform ClodTiers {
 // drivers where the scalar path is the safe one).
 float tierY(vec4 ladders, int r) {
     return r == 0 ? ladders.x : r == 1 ? ladders.y : r == 2 ? ladders.z : ladders.w;
+}
+
+// v6.23 TIER-CONSISTENCY: the rank the SERVER would have picked for a
+// surface (stream.rs::tier_rank mirrored EXACTLY — same ladder through the
+// ClodTiers UBO the walk probes, same TIER_MARGIN 2.0, same saturation;
+// the boundary windows are pinned stream-side by tier_rank_climbs_with_terrain).
+// No new constants: the gate is the protocol's own rank rule applied to the
+// stash itself.
+int surface_rank(float surface) {
+    float h = surface + 2.0;
+    for (int r = 0; r < 4; ++r) {
+        if (tierY(TiersLo, r) > h) {
+            return r;
+        }
+    }
+    return 3; // stream.rs unwrap_or(LO_TIERS.len() - 1) saturation
 }
 
 layout(location = 0) in vec2 texCoord;
@@ -323,6 +340,26 @@ void main() {
     // the surface — zero same-cell strobes — so a lower-tier partial can
     // only be cross-cell noise, which the complete word must replace. Rank
     // 0 exits after one probe: the §5b worlds keep the exact v5.1 cost.
+    //
+    // v6.23 TIER-CONSISTENCY GATE (#316 forensics): the walk's "zero
+    // same-cell strobes" reasoning holds for REAL dots but NOT for strobe
+    // noise — the relative arm fires on every terrain hue edge the probes
+    // land near (center on grass, the +-3 px ring on stone: delta > 0.06),
+    // and the §7b real world is built of grass-terrace-on-stone edges.
+    // For a mountain cell the lower tiers' planes sit INSIDE the terrain:
+    // their probe grids land on the terraced slopes and fire on every
+    // grass/stone boundary. The v6.22 stash turned each such fire into an
+    // immediate OR write into the previously-clean word, and the OR
+    // ratchets (it can only set bits): honest summit bytes 249..254
+    // climbed to the 255 ceiling = the 191 m columns the #316 aerials
+    // show as the garbage stripe field (the color words ratcheted onto
+    // partial lattice words = the purple wedge). THE GATE: a stash is
+    // accepted only if the rank it decoded from equals the rank the
+    // protocol itself derives from the word (HI: the byte's own surface;
+    // LO: the height pair the earlier captures of this frame wrote — both
+    // words ride ONE rank by construction, stream.rs push_cell_spawns).
+    // A real word always passes (the server used this very rule to pick
+    // the plane); noise passes only inside its rank's byte window.
     uint word = 0u;
     bool anyHit = false;
     bool allSlots = false;
@@ -330,18 +367,41 @@ void main() {
     bool stashed = false;
     bool stashAll = false;
     vec4 ladders = StreamInfo.w < 0.5 ? TiersHi : TiersLo;
+    bool hiPass = StreamInfo.w < 0.5;
     for (int r = 0; r < 4; ++r) {
         uint w;
         bool hit;
         bool all;
         probe_word(cellWorld, tierY(ladders, r), sub, w, hit, all);
+        if (!hit) {
+            continue;
+        }
+        bool honest;
+        if (hiPass) {
+            // encode_words: height byte = (surface + 64).clamp(0, 255) —
+            // cells above the byte ceiling were never encodable; their
+            // decoded rank reads 2 and their rank-3 spawn is rejected
+            // (they stay void — the honest outcome for unknowable data).
+            honest = surface_rank(float(w >> 8) - 64.0) == r;
+        } else {
+            // The color word carries no surface: cross-check against the
+            // height pair written by the earlier capture passes of this
+            // very frame (chain order: HI before LO). A cell whose height
+            // word is not decoded yet cannot vouch for a color word — the
+            // stream repeats every lap, the color follows the height.
+            vec4 hpx = texelFetch(HeightRefSampler, px, 0);
+            honest = hpx.a >= 0.5 && surface_rank(hpx.r * 255.0 - 64.0) == r;
+        }
+        if (!honest) {
+            continue;
+        }
         if (all) {
             stash = w;
             stashed = true;
             stashAll = true;
             break;
         }
-        if (hit && !stashed) {
+        if (!stashed) {
             stash = w;
             stashed = true;
         }
@@ -354,14 +414,32 @@ void main() {
     uint prevByte = uint(prev.r * 255.0 + 0.5);
     bool reset = texelFetch(ResetSampler, px, 0).r > 0.5;
     uint fresh = word >> 8;
+    bool marked = prev.a > 0.5;
     uint outByte = prevByte;
-    if (anyHit) {
+    if (reset && allSlots) {
         // v6.2 EDIT PROTOCOL: after a reset electron, a COMPLETE fresh
         // decode REPLACES the OR-merged word (an edit must be able to
-        // lose bits — a refresh cannot, that is what OR is for). Partial
-        // decodes keep the legacy OR self-heal.
-        outByte = (reset && allSlots) ? fresh : (prevByte | fresh);
+        // lose bits — a refresh cannot, that is what OR is for).
+        outByte = fresh;
+    } else if (allSlots && !marked) {
+        // v6.23 MERGE HONESTY (a): the first honest completion REPLACES
+        // the accumulated partial bits. The fresh word is complete by
+        // construction (every slot fired this frame) and every honest
+        // partial is a subset of it — replacing loses nothing real and
+        // throws away the noise partials the OR had already ratcheted in.
+        outByte = fresh;
+    } else if (anyHit && !marked) {
+        // v6.2 (legacy, scoped): partial decodes keep the OR self-heal —
+        // on UNMARKED cells only.
+        outByte = prevByte | fresh;
     }
+    // v6.23 MERGE HONESTY (b): a MARKED cell's word is immutable without
+    // the reset electron. Honest same-word traffic is unaffected (OR of a
+    // word with itself is the identity — the §5b lanes stay byte-identical);
+    // what dies is the ratchet: the walk's lower-tier noise partials could
+    // OR bits into a proven word every frame (249 -> 255 = the #316
+    // stripes); with the gate above they are rejected, and this block
+    // makes the refusal permanent for the whole marked lifetime.
     float mark = allSlots ? 1.0 : prev.a;
     // .b = the FRESH word (this frame, not merged) for the eraser mask.
     fragColor = vec4(
