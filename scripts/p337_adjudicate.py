@@ -30,8 +30,8 @@ def parse_table(text):
     """Extract per-view exact% from a parity.md table. Returns dict view->float."""
     out = {}
     for line in text.splitlines():
-        m = re.match(r"\s*\|?\s*(\d{2})\s*\|.*?(\d{1,3}\.\d)\s*%", line)
-        if m:
+        m = re.match(r"\s*\|\s*(\d{2})[a-z_]*\s*\|.*?(\d{1,3}\.\d+)\s*\|", line)
+        if m and m.group(1) in BASE336:
             out[m.group(1)] = float(m.group(2))
     return out
 
