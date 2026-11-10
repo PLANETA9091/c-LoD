@@ -61,6 +61,51 @@ def pair_map(voxy, ours):
     return pairs, v, o
 
 
+DIAG_BINS = [1, 2, 4, 8, 16, 32, 64]  # delta histogram edges (px share, %)
+
+def diagnose(pa, pb, m):
+    """v6.26.1 SHADING DIAGNOSTICS riding the feed (the palette/AO session
+    reads these instead of re-analyzing gallery jpgs by hand):
+    - delta_hist: px share (%) per max-channel-delta bucket — separates the
+      rounding class (1-8) from real content misses (8+);
+    - edge_vs_flat: hot pixels (d>8) split by the VOXY luminance gradient
+      (grad<3 flat vs grad>=8 edge) with the SIGNED ours-voxy luminance
+      delta per class — the #336 triptych forensics showed flat ground
+      near-perfect (delta 0.31) while slopes run +2.46 (ours brighter =
+      missing AO darkening on concave steps); this field pins it per
+      vantage every run;
+    - sky_share_hot: hot-pixel share inside the top 25% of the frame —
+      the sky must stay clean (v6.25 mirror lesson); a rise here means
+      the march leaks above the horizon again.
+    """
+    h, w = m.shape
+    total = h * w
+    hist = {}
+    edges = DIAG_BINS + [1 << 30]
+    for i, lo in enumerate(DIAG_BINS):
+        hi = edges[i + 1]
+        hist[f"{lo}-{hi if hi < (1 << 30) else 'inf'}"] = round(
+            100.0 * float(((m >= lo) & (m < hi)).sum()) / total, 3)
+    lum = (pa[..., 0] * 0.299 + pa[..., 1] * 0.587 + pa[..., 2] * 0.114)
+    lum_o = (pb[..., 0] * 0.299 + pb[..., 1] * 0.587 + pb[..., 2] * 0.114)
+    gy, gx = np.gradient(lum)
+    grad = np.hypot(gx, gy)
+    hot = m > 8
+    flat = (grad < 3.0) & hot
+    edge = (grad >= 8.0) & hot
+    signed = lum_o - lum
+    edge_vs_flat = {
+        "hot_total": int(hot.sum()),
+        "flat_px": int(flat.sum()),
+        "flat_signed": round(float(signed[flat].mean()), 2) if flat.any() else None,
+        "edge_px": int(edge.sum()),
+        "edge_signed": round(float(signed[edge].mean()), 2) if edge.any() else None,
+        "mid_px": int((hot & (grad >= 3.0) & (grad < 8.0)).sum()),
+    }
+    sky = m[: h // 4, :] > 8
+    sky_share_hot = round(100.0 * float(sky.sum()) / max(int(hot.sum()), 1), 3)
+    return {"delta_hist": hist, "edge_vs_flat": edge_vs_flat, "sky_share_hot": sky_share_hot}
+
 def analyze(a_path, b_path):
     a = Image.open(a_path).convert("RGB")
     b = Image.open(b_path).convert("RGB")
@@ -75,7 +120,7 @@ def analyze(a_path, b_path):
     near_pct = 100.0 * float((m <= NEAR).sum()) / n
     mean_d = float(d.mean())
     dmax = int(m.max())
-    return exact_pct, near_pct, mean_d, dmax, m, a, b
+    return exact_pct, near_pct, mean_d, dmax, m, a, b, diagnose(pa, pb, m)
 
 
 def heatmap(m):
@@ -111,7 +156,7 @@ def main():
     for name in sorted(pairs):
         vp, op = pairs[name]
         try:
-            exact_pct, near_pct, mean_d, dmax, m, a, b = analyze(vp, op)
+            exact_pct, near_pct, mean_d, dmax, m, a, b, diag = analyze(vp, op)
         except Exception as e:  # corrupt shot = FAIL, never a skip
             rows.append((name, None, f"ERROR {e}"))
             results[name] = {"error": str(e)}
@@ -126,6 +171,7 @@ def main():
             "max_delta": dmax,
             "px_total": int(m.size),
             "pass": ok,
+            "diag": diag,
         }
         rows.append((name, exact_pct, near_pct, mean_d, dmax, ok))
 
