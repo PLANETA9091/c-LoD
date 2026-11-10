@@ -953,8 +953,13 @@ impl Streamer {
             && Self::fragile_slots(cword) <= SPARSE_REBEAT_MAX_SLOTS
             && self.sparse_rebeat.len() < SPARSE_REBEAT_MAX
         {
-            self.sparse_rebeat
-                .push_back((idx as u32, now + SPARSE_REBEAT_DELAY_TICKS, hword, cword, 0));
+            self.sparse_rebeat.push_back((
+                idx as u32,
+                now + SPARSE_REBEAT_DELAY_TICKS,
+                hword,
+                cword,
+                0,
+            ));
         }
     }
 
@@ -963,9 +968,7 @@ impl Streamer {
     /// default 00); a lost non-zero dot flips its bits to 00, so the word
     /// decodes wrong with probability (1-p)^k.
     fn fragile_slots(word: u16) -> u32 {
-        (0..4)
-            .filter(|&s| (word >> (14 - 2 * s)) & 3 != 0)
-            .count() as u32
+        (0..4).filter(|&s| (word >> (14 - 2 * s)) & 3 != 0).count() as u32
     }
 
     /// v6.29.0: re-spawn one cell's two words WITHOUT the reset electron —
@@ -986,7 +989,7 @@ impl Streamer {
         let (wx, wz) = self.cell_origin(cx, cz);
         let cxw = wx + self.cell_size as f64 * 0.5;
         let czw = wz + self.cell_size as f64 * 0.5;
-        let (hword, cword) = Self::encode_words(cell);
+        let (hword, cword) = Self::encode_words(&cell);
         let rank = tier_rank(cell.height);
         Self::word_spawns(hword, cxw, czw, sub, HI_TIERS[rank], &mut self.batch);
         Self::word_spawns(cword, cxw, czw, sub, LO_TIERS[rank], &mut self.batch);
@@ -1202,9 +1205,8 @@ impl Streamer {
         // per tick so the phases keep the rest.
         if self.sparse_rebeat_on {
             let sparse_budget = budget / SPARSE_REBEAT_BUDGET_FRAC;
-            let mut rotated: std::collections::VecDeque<
-                (u32, u64, u16, u16, u32),
-            > = std::collections::VecDeque::new();
+            let mut rotated: std::collections::VecDeque<(u32, u64, u16, u16, u32)> =
+                std::collections::VecDeque::new();
             let mut examined = 0usize;
             let total = self.sparse_rebeat.len();
             while examined < total {
@@ -1230,12 +1232,11 @@ impl Streamer {
                 if !cell.valid {
                     continue; // dropped
                 }
-                let (hword, cword) = Self::encode_words(cell);
+                let (hword, cword) = Self::encode_words(&cell);
                 if hword != hstamp || cword != cstamp {
                     continue; // the value changed — the edit path owns it
                 }
-                let decodable =
-                    views.is_empty() || self.decodable_by_any(i, views);
+                let decodable = views.is_empty() || self.decodable_by_any(i, views);
                 if !decodable {
                     if retries < SPARSE_REBEAT_RETRIES {
                         rotated.push_back((
@@ -1641,7 +1642,11 @@ mod tests {
     #[test]
     fn fragile_slots_counts_non_zero_pairs() {
         // v6.29.0: the fragile-dot count of a word = its non-zero slot pairs.
-        assert_eq!(Streamer::fragile_slots(0x0000), 0, "all-zero = nothing to lose");
+        assert_eq!(
+            Streamer::fragile_slots(0x0000),
+            0,
+            "all-zero = nothing to lose"
+        );
         assert_eq!(
             Streamer::fragile_slots(0x0200),
             1,
@@ -1653,7 +1658,11 @@ mod tests {
             "color index 12 = one non-zero pair"
         );
         assert_eq!(Streamer::fragile_slots(0x3100), 2, "index 49 = two pairs");
-        assert_eq!(Streamer::fragile_slots(0x5600), 4, "index 86 = all four live");
+        assert_eq!(
+            Streamer::fragile_slots(0x5600),
+            4,
+            "index 86 = all four live"
+        );
     }
 
     #[test]
@@ -1674,7 +1683,11 @@ mod tests {
         let b: Vec<Spawn> = s.tick_batch(64, &[view(10)]).to_vec();
         assert!(!b.is_empty(), "the refresh path streamed the cell");
         assert_eq!(s.sparse_rebeat.len(), 1, "the fragile word scheduled");
-        assert_eq!(s.sparse_rebeat.front().unwrap().2 >> 8, 12, "hword stamp rides");
+        assert_eq!(
+            s.sparse_rebeat.front().unwrap().2 >> 8,
+            12,
+            "hword stamp rides"
+        );
         // Not due yet: nothing re-spawns.
         let b: Vec<Spawn> = s.tick_batch(64, &[view(20)]).to_vec();
         assert!(b.is_empty(), "future-due entry stays queued");
@@ -1693,10 +1706,7 @@ mod tests {
         s.set_cell(3, 3, cell(70, false, [127, 178, 56]), 60);
         s.sparse_rebeat.clear();
         let _ = s.tick_batch(64, &[view(60)]).to_vec();
-        assert!(
-            s.sparse_rebeat.is_empty(),
-            "a 4-slot word is not fragile"
-        );
+        assert!(s.sparse_rebeat.is_empty(), "a 4-slot word is not fragile");
 
         // The value stamp drops the entry when an edit changes the cell.
         // The new rgb = a 4-slot word, so the edit path schedules nothing

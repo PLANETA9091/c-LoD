@@ -619,7 +619,9 @@ mod tests {
         let c = Config::parse("debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false");
         assert!(c.mesh_paint && c.unfog && !c.debug_lens && !c.atmosphere);
         // v6.26.7: the treatment arm's full boot set parses.
-        let t = Config::parse("debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;fog_voxy=true");
+        let t = Config::parse(
+            "debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;fog_voxy=true",
+        );
         assert!(t.fog_voxy && t.unfog && t.mesh_paint && !t.atmosphere);
     }
 
@@ -646,7 +648,10 @@ mod tests {
     #[test]
     fn sparse_rebeat_knob() {
         // v6.29.0: the no-reset fragile-word re-stream knob.
-        assert!(!Config::parse("").sparse_rebeat, "default off (prod byte-stable)");
+        assert!(
+            !Config::parse("").sparse_rebeat,
+            "default off (prod byte-stable)"
+        );
         assert!(Config::parse("sparse_rebeat=true").sparse_rebeat);
         assert!(Config::parse("sparse_rebeat=1").sparse_rebeat);
         assert!(!Config::parse("sparse_rebeat=false").sparse_rebeat);
