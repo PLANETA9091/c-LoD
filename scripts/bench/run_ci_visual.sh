@@ -1449,6 +1449,91 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   PARITY="$BENCH_DIR/parity_vantages.txt"
   PTOT=$(grep -cv -e '^$' -e '^#' "$PARITY" 2>/dev/null || echo 0)
   sum "- parity world tour: $PTOT vantages (production pack, vd 8, shared structures)"
+  # v6.26.0 COVERAGE SWEEPS — the DATA-COVERAGE session lever (#333 scope
+  # record). The decode band is [CULL_RADIUS=28, ZONE_FAR=112] 3D from the
+  # eye (stream.rs:138): raising ZONE_FAR is NOT an option at the current
+  # carrier pixel size (the villager sparkle projects ~1.5 px at 75 m ->
+  # ~1.0 px at 112 m — the empirical ceiling; capture.fsh v6.5 ring gate
+  # itself holds to fog f~0.85 ≈ 286 m, so SIZE, not fog, is the wall).
+  # Coverage therefore comes from EYES, not radius: the 13-vantage tour
+  # only ever stands at the disk center (01-06/08/09/11), the west marker
+  # (00/10, CX-75) and the north rim (07/12, CZ-220) — the east/south
+  # outer disk (rho 112..256) NEVER gets a decode eye, which is exactly
+  # the 04 < 02 < 03 < 01 exact% ordering (43.9/49.1/54.0/57.9 in #336)
+  # and the 06/10 wall. The sweep grid below (36 positions x 2 looks,
+  # y=160) is the fix; the rank-band re-derivation for y=160 reads every
+  # plane inside the band —
+  # plane 80/120/140/180/200/240 -> max decode dxz 75.5/102.4/109.8/109.8/
+  # 102.4/75.5 (all in [28,112]; the y=100 ground eye would starve rank-2
+  # planes at dxz>50, the y=180 eye would starve rank-0 at dxz>50). AZIMUTH
+  # DENSITY + BIDIRECTION: numerically verified (rho 30..256 x dtheta
+  # 0/7.5/15 x all planes): (1) the frustum gate is a 118-deg cone — at 8
+  # azimuths mid-azimuth points rho~175 sit 60-75 deg OFF every outward
+  # look; (2) an outward eye is blind to the points BEHIND itself (the
+  # rho 94..170 band between center and eye needs the INWARD look);
+  # (3) 30-deg azimuths alone leave the p80/p240 sliver [210,246] at 70
+  # deg off the neighbor eyes (dy=+-80 caps dxz at 78.4 — the 3D band
+  # bites). The final grid: 12 base azimuths x r{144,200} PLUS 12
+  # offset-15-deg azimuths x r172, EACH position walked twice (outward
+  # yaw, then yaw+180). Residual gaps after the sweeps: p80/p240
+  # [30,70] (covered by the vantage center eyes at y=140: dxz<=93.9 for
+  # p80) and [254,256] (a 2 m rim), p120/200 [30,40], p140/180 [30,34];
+  # p260+ (rank-3 tops, dy=100+) stay unreadable from y=160 — the known
+  # rank-3 ceiling, empty in the §5b world. Cull-hole cross-check: the
+  # r=144 outward eye is blind over rho 116..172 (28 m cull around
+  # itself) — the r=200 INWARD look covers rho 88..172; together with
+  # the r=172 offset eyes rho 32..256 decodes. The sweep decode itself
+  # is seconds: the full zone lap is 64 ticks ~ 3.2 s at
+  # particles_per_tick=2048 and the persistent OR-merge accumulates
+  # partial decodes across frames, so settle 6 s (~2 zone laps) is a
+  # >=5x margin per direction. The sweeps take NO shots — vantage names
+  # and the voxy-leg pairing are untouched; the persistent buffers just
+  # carry the outer disk into the tour's frames. Cost: 36 x 2 x 6 s =
+  # +7.5 min of the 50-min job budget.
+  PARITY_SWEEP_SETTLE="${PARITY_SWEEP_SETTLE:-6}"
+  # "yaw x z" — the inward pass reuses the position with yaw+180.
+  SWEEPS=(
+    "270 CX+144 CZ"      "270 CX+200 CZ"
+    "300 CX+125 CZ+72"   "300 CX+173 CZ+100"
+    "330 CX+72 CZ+125"   "330 CX+100 CZ+173"
+    "0   CX CZ+144"      "0   CX CZ+200"
+    "30  CX-72 CZ+125"   "30  CX-100 CZ+173"
+    "60  CX-125 CZ+72"   "60  CX-173 CZ+100"
+    "90  CX-144 CZ"      "90  CX-200 CZ"
+    "120 CX-125 CZ-72"   "120 CX-173 CZ-100"
+    "150 CX-72 CZ-125"   "150 CX-100 CZ-173"
+    "180 CX CZ-144"      "180 CX CZ-200"
+    "210 CX+72 CZ-125"   "210 CX+100 CZ-173"
+    "240 CX+125 CZ-72"   "240 CX+173 CZ-100"
+    "285 CX+166 CZ+45"
+    "315 CX+122 CZ+122"
+    "345 CX+45 CZ+166"
+    "15  CX-45 CZ+166"
+    "45  CX-122 CZ+122"
+    "75  CX-166 CZ+45"
+    "105 CX-166 CZ-45"
+    "135 CX-122 CZ-122"
+    "165 CX-45 CZ-166"
+    "195 CX+45 CZ-166"
+    "225 CX+122 CZ-122"
+    "255 CX+166 CZ-45"
+  )
+  SW_N=0
+  for SWEEP in "${SWEEPS[@]}"; do
+    set -- $SWEEP
+    SYAW=$1; SX=$2; SZ=$3
+    SX=$(( ${SX//CX/$CX} )); SZ=$(( ${SZ//CZ/$CZ} ))
+    for SWDIR in 0 1; do
+      SWYAW=$(( (SYAW + SWDIR * 180) % 360 ))
+      srv "gamerule doDaylightCycle false"
+      srv "time set noon"
+      srv "tp Stepan $SX 160 $SZ $SWYAW 0"
+      sleep "$PARITY_SWEEP_SETTLE"
+      SW_N=$((SW_N + 1))
+    done
+    ct "coverage sweep $SW_N/72 done (pos $SX,$SZ both looks)"
+  done
+  sum "- coverage sweeps: $SW_N eye passes = 36 positions (12 az x r144/200 + 12 off-az x r172, y=160) x 2 looks (outward+inward), settle $PARITY_SWEEP_SETTLE s, no shots — the v6.26.0 data-coverage lever; outer disk rho 32..256 decodes before the tour"
   PW_N=0
   PW_NIGHT=0
   while read -r PNAME PYAW PPITCH PX PY PZ <&3; do
