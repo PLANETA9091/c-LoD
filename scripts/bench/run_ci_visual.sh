@@ -1539,13 +1539,14 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   done
   sum "- coverage sweeps: $SW_N eye passes = 36 positions (12 az x r144/200 + 12 off-az x r172, y=160) x 2 looks (outward+inward), settle $PARITY_SWEEP_SETTLE s, no shots — the v6.26.0 data-coverage lever; outer disk rho 32..256 decodes before the tour"
   # v6.26.2 DRAIN-SETTLE (#337/#338): the sweeps leave a decode backlog over the
-  # steady band (session-3 tail q 22047/18375 vs steady ~13013) and the tour
-  # used to start on the undrained queue; 01/05/10 dipped below their historical
-  # ranges in BOTH sweeps runs while 04/02/00 jumped. Wait for the dirty queue
-  # to return to the steady band before the tour. Capped deadline keeps the
-  # 50-min budget honest; a timeout is itself evidence (queue cannot drain
-  # without eye proximity -> priority-lane fix, not a settle fix).
-  PARITY_DRAIN_Q="${PARITY_DRAIN_Q:-14500}"
+  # steady band (session-3 tail q 22047/18375/22066 vs the parity-world steady
+  # 7744..11246 — #336 pre-sweeps tails) and the tour used to start on the
+  # undrained queue; 01/05/10 dipped below their historical ranges in ALL THREE
+  # sweeps runs while 04/02/00 jumped. Wait for the dirty queue to return to the
+  # steady band before the tour. Capped deadline keeps the 50-min budget honest;
+  # a timeout is itself evidence (queue cannot drain without eye proximity ->
+  # priority-lane fix, not a settle fix).
+  PARITY_DRAIN_Q="${PARITY_DRAIN_Q:-11500}"
   PARITY_DRAIN_MAX="${PARITY_DRAIN_MAX:-150}"
   DRAIN_T0=$(date +%s); DRAIN_START_Q=0; DRAIN_END_Q=0
   while true; do
