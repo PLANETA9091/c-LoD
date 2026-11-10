@@ -1,7 +1,7 @@
 # parity feed index (c-LoD vs Voxy, pixel-perfect gate)
 
+- parity-run-352: gate False
 - parity-run-351: gate False
 - parity-run-350: gate False
 - parity-run-349: gate False
 - parity-run-347: gate False
-- parity-run-346: gate False
