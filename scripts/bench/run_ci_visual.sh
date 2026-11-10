@@ -1600,6 +1600,28 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     fi
     sleep 5
   done
+  # v6.28.0 PRE-TOUR PASS (the #354-era transport reading): the tour's own
+  # 30 s settle is the FIRST eye time most vantage bands ever get — the
+  # rim cells (07/12) become decodable only when the tour STANDS there, and
+  # decode+stream+client-merge loses the race against the ~21k sweep
+  # backlog inside one settle (flat_signed +60 stable across 12 runs = the
+  # rim colors NEVER arrive in time). Walk all 13 vantages once with a
+  # short settle BEFORE the tour: the persistent client buffers OR-merge
+  # across teleports, so the tour's shots see the SECOND lap of every
+  # band. Cost ~13 x PARITY_PREPASS_SETTLE s (default 10 s = ~2.5 min).
+  PARITY_PREPASS_SETTLE="${PARITY_PREPASS_SETTLE:-10}"
+  PRE_N=0
+  while read -r PNAME PYAW PPITCH PX PY PZ <&3; do
+    case "$PNAME" in ''|\#*) continue;; esac
+    PX=$(( ${PX//CX/$CX} )); PZ=$(( ${PZ//CZ/$CZ} ))
+    srv "gamerule advance_time false"
+    srv "time set noon"
+    srv "tp Stepan $PX $PY $PZ $PYAW $PPITCH"
+    sleep "$PARITY_PREPASS_SETTLE"
+    PRE_N=$((PRE_N + 1))
+    ct "pre-tour pass $PNAME ($PRE_N)"
+  done 3< "$PARITY"
+  sum "- pre-tour pass done: $PRE_N vantages x ${PARITY_PREPASS_SETTLE}s (the tour now reads the second OR-merge lap; the rim/dip transport race reads from the tour deltas)"
   PW_N=0
   PW_NIGHT=0
   while read -r PNAME PYAW PPITCH PX PY PZ <&3; do
