@@ -1534,6 +1534,33 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     ct "coverage sweep $SW_N/72 done (pos $SX,$SZ both looks)"
   done
   sum "- coverage sweeps: $SW_N eye passes = 36 positions (12 az x r144/200 + 12 off-az x r172, y=160) x 2 looks (outward+inward), settle $PARITY_SWEEP_SETTLE s, no shots — the v6.26.0 data-coverage lever; outer disk rho 32..256 decodes before the tour"
+  # v6.26.2 DRAIN-SETTLE (#337/#338): the sweeps leave a decode backlog over the
+  # steady band (session-3 tail q 22047/18375 vs steady ~13013) and the tour
+  # used to start on the undrained queue; 01/05/10 dipped below their historical
+  # ranges in BOTH sweeps runs while 04/02/00 jumped. Wait for the dirty queue
+  # to return to the steady band before the tour. Capped deadline keeps the
+  # 50-min budget honest; a timeout is itself evidence (queue cannot drain
+  # without eye proximity -> priority-lane fix, not a settle fix).
+  PARITY_DRAIN_Q="${PARITY_DRAIN_Q:-14500}"
+  PARITY_DRAIN_MAX="${PARITY_DRAIN_MAX:-150}"
+  DRAIN_T0=$(date +%s); DRAIN_START_Q=0; DRAIN_END_Q=0
+  while true; do
+    DRAIN_Q=$(grep -oE "dirty [0-9]+ \(q [0-9]+\)" /tmp/server.log 2>/dev/null | tail -1 | grep -oE "[0-9]+" | tail -1)
+    DRAIN_Q="${DRAIN_Q:-999999}"
+    DRAIN_NOW=$(date +%s)
+    if [ "$DRAIN_START_Q" -eq 0 ] && [ "$DRAIN_Q" -ne 999999 ]; then DRAIN_START_Q=$DRAIN_Q; fi
+    if [ "$DRAIN_Q" -le "$PARITY_DRAIN_Q" ]; then
+      DRAIN_END_Q=$DRAIN_Q
+      sum "- parity drain-settle: queue $DRAIN_START_Q -> $DRAIN_Q <= $PARITY_DRAIN_Q in $((DRAIN_NOW - DRAIN_T0))s (sweep backlog drained; tour starts at the steady band)"
+      break
+    fi
+    if [ $((DRAIN_NOW - DRAIN_T0)) -ge "$PARITY_DRAIN_MAX" ]; then
+      DRAIN_END_Q=$DRAIN_Q
+      sum "- parity drain-settle TIMEOUT: queue $DRAIN_START_Q -> $DRAIN_Q > $PARITY_DRAIN_Q after ${PARITY_DRAIN_MAX}s — continuing anyway; the queue did not drain without eye proximity (priority-lane evidence, the 01/05/10 dip attribution reads from the tour deltas)"
+      break
+    fi
+    sleep 5
+  done
   PW_N=0
   PW_NIGHT=0
   while read -r PNAME PYAW PPITCH PX PY PZ <&3; do
