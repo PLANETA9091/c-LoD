@@ -67,7 +67,11 @@ if [ -n "$EVDIR" ] && [ -f "$EVDIR/server.log" ]; then
     echo "- v6.25.5: boot markers, pins, gamerules and joins from the parity session server.log (tail 40). The #332 night-matrix class is self-diagnosing from here on."
     echo
     echo '```'
-    grep -nE "Done \(|pack finalized|doDaylightCycle|[Ss]et the time|time set|gamerule|Stepan joined" "$EVDIR/server.log" | tail -40
+    # v6.25.6: #333's audit proved the time feedback question is OPEN (no
+    # "Set the time" line, while EVERY gamerule attempt died with the Paper
+    # parse-error marker "<--[HERE]") — widen the net: every console parse
+    # error and every time-worded line rides the feed, in any wording.
+    grep -nE "Done \(|pack finalized|doDaylightCycle|[sS]et the time|[tT]he time|time set|gamerule|Stepan joined|<--|Unknown or incomplete|Incorrect argument" "$EVDIR/server.log" | tail -40
     echo '```'
   } > "$RD/time-audit.md" 2>/dev/null || true
 fi
