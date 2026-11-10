@@ -803,6 +803,17 @@ jobs:
           # gate against the PANEL-painted debug frames — pin the path.
           OURS=$(dirname "$(find ours -type f -path '*parity/01_aerial_west.png' | head -1)" 2>/dev/null || true)
           [ -n "${OURS:-}" ] || OURS=$(dirname "$(find ours -name '*01_aerial_west.png' | head -1)" 2>/dev/null || true)
+          # v6.26.5 (#349 soup class): the fallback can resolve a WIDE root
+          # when the parity tour lost its anchor shot — #349 paired 13 voxy
+          # shots against a 226-file mix of debug sessions and published a
+          # binary 100/0 table (7 letterboxed captures, 6 phantom 100%).
+          # The resolved root must hold the anchor itself; otherwise refuse
+          # to pair and let parity_diff run against __none__ (honest RED,
+          # no soup table on the feed).
+          if [ -n "${OURS:-}" ] && [ ! -f "$OURS/01_aerial_west.png" ] && [ ! -f "$OURS/parity_01_aerial_west.png" ]; then
+            echo "FAIL: ours root '$OURS' holds no 01_aerial_west anchor — parity tour lost the shot or the artifact layout changed; refusing a wide-root pairing (#349 class)"
+            OURS=""
+          fi
           echo "voxy dir: ${VOXY:-NONE} / ours dir: ${OURS:-NONE}"
           if [ -z "${VOXY:-}" ]; then
             echo "FAIL: the voxy reference artifact carries no shots"

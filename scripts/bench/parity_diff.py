@@ -50,15 +50,22 @@ def find_shots(root):
 
 def pair_map(voxy, ours):
     """name -> (voxy_path, ours_path). ours side accepts both
-    parity_<name>.png and bare <name>.png (the tour already prefixes)."""
+    parity_<name>.png and bare <name>.png (the tour already prefixes).
+    v6.26.5: also returns srcs (name -> ours path RELATIVE to the ours
+    root). #349 proved why: the ci.yml fallback resolved a wide artifact
+    root, parity_diff paired the 13 voxy shots against a 226-file soup of
+    debug sessions and published a binary 100/0 table nobody could read.
+    Provenance turns that class self-diagnosing from the table alone."""
     v = find_shots(voxy)
     o = find_shots(ours)
     pairs = {}
+    srcs = {}
     for name in sorted(v):
         cand = o.get(f"parity_{name}") or o.get(name)
         if cand:
             pairs[name] = (v[name], cand)
-    return pairs, v, o
+            srcs[name] = os.path.relpath(cand, ours)
+    return pairs, v, o, srcs
 
 
 DIAG_BINS = [1, 2, 4, 8, 16, 32, 64]  # delta histogram edges (px share, %)
@@ -104,7 +111,15 @@ def diagnose(pa, pb, m):
     }
     sky = m[: h // 4, :] > 8
     sky_share_hot = round(100.0 * float(sky.sum()) / max(int(hot.sum()), 1), 3)
-    return {"delta_hist": hist, "edge_vs_flat": edge_vs_flat, "sky_share_hot": sky_share_hot}
+    # v6.26.5 CAPTURE-QUALITY: ours pure-black share. The #349 ours frames
+    # were letterboxed (mini-render inside a black canvas) — a capture
+    # corruption that used to read as an ordinary FAIL with mean d ~110.
+    # Named here, the table itself separates "renderer misses" from
+    # "capture fell apart".
+    ours_black = round(100.0 * float((pb.max(axis=2) < 8).sum())
+                       / (h * w), 2)
+    return {"delta_hist": hist, "edge_vs_flat": edge_vs_flat,
+            "sky_share_hot": sky_share_hot, "ours_black_share": ours_black}
 
 def analyze(a_path, b_path):
     a = Image.open(a_path).convert("RGB")
@@ -146,8 +161,19 @@ def main():
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
-    pairs, vshots, oshots = pair_map(args.voxy, args.ours)
+    pairs, vshots, oshots, srcs = pair_map(args.voxy, args.ours)
     missing = sorted(set(vshots) - set(pairs))
+
+    # v6.26.5 PAIRING PROVENANCE: the soup-table guard. If the ours root
+    # spans several capture dirs (parity/ + parity_dbg/ + ...) or carries
+    # far more shots than voxy vantages, the pairing picked arbitrary
+    # frames and the table is NOT a renderer verdict (#349 class).
+    src_dirs = {}
+    for name, rel in srcs.items():
+        d = os.path.dirname(rel) or "."
+        src_dirs[d] = src_dirs.get(d, 0) + 1
+    src_summary = ", ".join(f"{d or '.'} = {n}" for d, n in sorted(src_dirs.items()))
+    soup = len(oshots) > 2 * len(vshots) or len(src_dirs) > 1
     orphan_ours = sorted(n for n in oshots if not (
         n.startswith("parity_") and n[7:] in vshots or n in vshots))
 
@@ -171,9 +197,14 @@ def main():
             "max_delta": dmax,
             "px_total": int(m.size),
             "pass": ok,
+            "ours_src": srcs.get(name, "?"),
             "diag": diag,
         }
-        rows.append((name, exact_pct, near_pct, mean_d, dmax, ok))
+        # v6.26.5: name the capture-corruption class right in the verdict
+        cap = ""
+        if diag["ours_black_share"] > 25.0:
+            cap = f" (ours capture: black {diag['ours_black_share']:.0f}%)"
+        rows.append((name, exact_pct, near_pct, mean_d, dmax, ok, cap))
 
     # ---- report ------------------------------------------------------------
     lines = [
@@ -182,9 +213,15 @@ def main():
         f"- voxy shots: {len(vshots)}, ours shots: {len(oshots)}, "
         f"paired: {len(pairs)}, missing (voxy shot with no ours pair): "
         f"{len(missing)}",
+        f"- ours pair sources: {src_summary or 'none'}",
         "- gate: 100% pixel-exact per pair; the job exits 1 while anything "
         "is below",
         "",
+        *( [f"**PAIRING SUSPECT: ours root spans {len(src_dirs)} dirs / "
+            f"{len(oshots)} shots for {len(vshots)} voxy vantages — pairs "
+            "came from mixed capture sessions (the #349 soup class); the "
+            "renderer reading of this table is INVALID, fix the ours-root "
+            "resolution before reading percentages**"] if soup else [] ),
         "| vantage | exact % | near % (d<=8) | mean d | max d | verdict |",
         "|---|---|---|---|---|---|",
     ]
@@ -192,10 +229,11 @@ def main():
         if r[1] is None:
             lines.append(f"| {r[0]} | — | — | — | — | ERROR ({r[2]}) |")
             continue
-        name, ex, nr, md, mx, ok = r
+        name, ex, nr, md, mx, ok = r[:6]
+        cap = r[6] if len(r) > 6 else ""
         lines.append(
             f"| {name} | {ex:.3f} | {nr:.3f} | {md:.3f} | {mx} | "
-            f"{'PASS' if ok else 'FAIL'} |")
+            f"{'PASS' if ok else 'FAIL'}{cap} |")
     for mm in missing:
         lines.append(f"| {mm} | — | — | — | — | FAIL (no ours shot) |")
     if orphan_ours:
@@ -203,9 +241,10 @@ def main():
         lines.append("- ours shots with no voxy pair (informational): "
                      + ", ".join(orphan_ours[:12]))
     ok_all = bool(rows) and all(
-        r[5] for r in rows if r[1] is not None) and not missing
+        r[5] for r in rows if r[1] is not None) and not missing and not soup
     lines += ["", "**GATE: "
               + ("GREEN — 100% parity" if ok_all else "RED — parity below 100%")
+              + (" (pairing suspect — see banner)" if soup and not ok_all else "")
               + "**"]
     report = "\n".join(lines) + "\n"
     with open(os.path.join(args.out, "parity.md"), "w") as f:

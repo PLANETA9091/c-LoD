@@ -71,7 +71,15 @@ if [ -n "$EVDIR" ] && [ -f "$EVDIR/server.log" ]; then
     # "Set the time" line, while EVERY gamerule attempt died with the Paper
     # parse-error marker "<--[HERE]") — widen the net: every console parse
     # error and every time-worded line rides the feed, in any wording.
-    grep -nE "Done \(|pack finalized|doDaylightCycle|[sS]et the time|[tT]he time|time set|gamerule|Stepan joined|<--|Unknown or incomplete|Incorrect argument" "$EVDIR/server.log" | tail -40
+    # v6.26.5: the audit went live only from run #344 (EVDIR wiring) and the
+    # 40-line tail was FLOODED by the ~20 parse-error pairs — the bare
+    # 'gamerule' probe reply (pre-registered in v6.25.7 to deliver the 26.3
+    # rule names for the one-line pin fix) never surfaced. Now: case-
+    # insensitive net + tail 100 + a dedicated probe section that carries
+    # every gamerule-worded line EXCEPT the known failure signature.
+    grep -inE "Done \(|pack finalized|doDaylightCycle|[sS]et the time|[tT]he time|time set|gamerule|Stepan joined|<--|Unknown or incomplete|Incorrect argument" "$EVDIR/server.log" | tail -100
+    echo "--- bare-gamerule probe (v6.25.7 pre-registered; reply or new error echo, the known doDaylightCycle failure filtered out) ---"
+    grep -iE "gamerule" "$EVDIR/server.log" | grep -ivE "doDaylightCycle false" | tail -20
     echo '```'
   } > "$RD/time-audit.md" 2>/dev/null || true
 fi
