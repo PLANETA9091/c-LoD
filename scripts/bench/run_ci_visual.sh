@@ -147,6 +147,31 @@ shot() { # name
     && note "shot $1" || { fail "screenshot $1 failed"; return 1; }
 }
 
+# v6.25.5 DAY GUARD instrument: #332 (42712279441) paired voxy DAY frames
+# against an OURS-§7b NIGHT matrix — exact% 0.000 on all 13 rows, mean d
+# 87.7-145.5, parity mesh probe sky @png_y=2 = (42,46,58) — and the table
+# still LOOKED like a renderer verdict. The §7b world time is not
+# trustworthy on this stack: the 26.3 clock runs through doDaylightCycle
+# false (#278), a reused-runner level.dat carries the persisted night over
+# sessions, and the boot pins ride the console channel before "Done (" —
+# while tp demonstrably lands (the vantage framing was right all tour).
+# The guard is mechanism-agnostic: it measures the shot's own zenith sky
+# (top 40 rows; day ≈ 197, dusk ≈ 113, night ≈ 49, threshold 130),
+# re-pins + reshoots once, and if the world still refuses noon the shot is
+# renamed night_<name>.png — the gate pairs BY NAME, so the row becomes
+# FAIL(no ours shot), never a fake renderer diff.
+PARITY_SETTLE="${PARITY_SETTLE:-30}"  # v6.25.5 race guard: settle 30 s — the #325-#328 bimodal flap (06/08/09/10 ∈ two narrow modes) = shots race the paint conveyor; BOTH legs must share the window (the v6.18 sky-gradient lesson)
+day_ok() { # png_rel -> exit 0 = day sky in the top strip
+  python3 - "$SHOTS/$1.png" <<'PYEOF' 2>/dev/null
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert("RGB")
+px = list(im.crop((0, 0, im.width, 40)).getdata())
+mean = sum(p[0] + p[1] + p[2] for p in px) / (3 * len(px))
+sys.exit(0 if mean >= 130 else 1)
+PYEOF
+}
+
 # v6.7 CAPTURE LENS forensics: crop the right strip (the lens panels) from a
 # screenshot and count the CLIENT-DECODED marker colors in it — the client's
 # belief, immune to in-world fog/angle. Signatures (debug_lens.fsh):
@@ -1388,6 +1413,14 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   sleep 5
   accept_pack_prompt parityworld 30 || note "parity world: pack prompt never accepted"
   sleep 10
+  # v6.25.5 POST-JOIN RE-PIN: the boot pins (gamerule+noon, written before
+  # "Done (") are the #332 prime suspect — the console channel can drop
+  # pre-ready commands while the world loads a reused-VM level.dat whose
+  # dayTime persisted at night (the 26.3 clock runs through the gamerule,
+  # #278). Re-issue BOTH now that the server is fully up; the per-shot
+  # DAY GUARD below is the enforcer if even this is lost.
+  srv "gamerule doDaylightCycle false"
+  srv "time set noon"
   srv "gamemode spectator Stepan"
   # v6.17: the fresh server rescans the disk (the level is the same, the
   # Streamer is new) — the march paints from the STREAMED buffers, so give
@@ -1403,23 +1436,43 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   done
   sum "- parity world: scan populated (cells=$PCELLS; the march paints from these buffers)"
   # THE PARITY WORLD TOUR — the same matrix, now from the production-pack
-  # client on the voxy-identical world. settle 10 s like §5b.
+  # client on the voxy-identical world. settle 30 s on BOTH legs (v6.25.5:
+  # the race guard from the #325-#328 census; asymmetric settle windows put
+  # the two legs at different fractional days — the #285 sky-gradient trap).
   mkdir -p "$SHOTS/parity"
   PARITY="$BENCH_DIR/parity_vantages.txt"
   PTOT=$(grep -cv -e '^$' -e '^#' "$PARITY" 2>/dev/null || echo 0)
   sum "- parity world tour: $PTOT vantages (production pack, vd 8, shared structures)"
   PW_N=0
+  PW_NIGHT=0
   while read -r PNAME PYAW PPITCH PX PY PZ <&3; do
     case "$PNAME" in ''|\#*) continue;; esac
     PX=$(( ${PX//CX/$CX} )); PZ=$(( ${PZ//CZ/$CZ} ))
+    srv "gamerule doDaylightCycle false"
     srv "time set noon"
     srv "tp Stepan $PX $PY $PZ $PYAW $PPITCH"
-    sleep 10
+    sleep "$PARITY_SETTLE"
     shot "parity/$PNAME" || true
+    # v6.25.5 DAY GUARD: pitch >= 60 rows (11_topdown) hold no sky — skip.
+    if [ "${PPITCH%%.*}" -lt 60 ] 2>/dev/null && ! day_ok "parity/$PNAME"; then
+      ct "day guard: $PNAME night — re-pin + reshoot"
+      srv "gamerule doDaylightCycle false"
+      srv "time set noon"
+      sleep 10
+      shot "parity/$PNAME" || true
+      if ! day_ok "parity/$PNAME"; then
+        mv "$SHOTS/parity/$PNAME.png" "$SHOTS/parity/night_$PNAME.png" 2>/dev/null || true
+        PW_NIGHT=$((PW_NIGHT + 1))
+        sum "- **DAY GUARD:** $PNAME still night after re-pin+reshoot (zenith < 130) — renamed night_$PNAME.png; the row pairs as missing, NOT as a renderer diff"
+      fi
+    fi
     PW_N=$((PW_N + 1))
     ct "parity world shot $PNAME ($PW_N/$PTOT)"
   done 3< "$PARITY"
-  sum "- parity world tour done: $PW_N shots in parity/ (the gate pairs voxy/<name>.png vs parity/<name>.png)"
+  sum "- parity world tour done: $PW_N shots, $PW_NIGHT night-guard renames in parity/ (the gate pairs voxy/<name>.png vs parity/<name>.png)"
+  if [ "$PW_NIGHT" -gt 0 ]; then
+    fail "parity world time-of-day uncontrollable: $PW_NIGHT vantage(s) night after re-pin+reshoot — the §7b noon-pin class is broken on this runner; the matrix is infrastructure-blocked, not a renderer verdict (DAY GUARD lines + the feed's time-audit.md carry the evidence)"
+  fi
   # v6.19.7: the parity session's OWN stream counters — the leg-1 section
   # greps the shared /tmp/server.log at ITS point, nobody ever dumped the
   # session-3 counters (the wire/cone numbers the starving-capture question

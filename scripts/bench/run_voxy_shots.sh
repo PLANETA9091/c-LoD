@@ -122,13 +122,15 @@ shot() { # name yaw pitch x y z
   # this reason (the v6.4.8 lesson); the reference leg now does too.
   srv "time set noon"
   srv "tp Stepan $4 $5 $6 $2 $3"
-  # v6.18 SKY DETERMINISM: settle 10 s — the SAME time-set->shot window the
-  # c-LoD parity sessions use (§5b/§7b sleep 10). Run #285's 07_far_north
-  # missed the 100% gate by 3 px (+-1 in the sky gradient): the two legs
-  # waited 10 s vs 3 s after the noon pin, and the 26.3 clock drifts through
-  # doDaylightCycle false (v6.16.5), so the fractional day differed. Same
-  # window on both legs = the same fractional day = the same gradient.
-  sleep 10
+  # v6.18 SKY DETERMINISM: the SAME time-set->shot window on both legs —
+  # run #285's 07_far_north missed the 100% gate by 3 px (+-1 in the sky
+  # gradient) when the legs waited 10 s vs 3 s after the noon pin, and the
+  # 26.3 clock drifts through doDaylightCycle false (v6.16.5), so the
+  # fractional day differed. Same window on both legs = the same fractional
+  # day = the same gradient. v6.25.5: the window is now 30 s on BOTH legs —
+  # the race guard from the #325-#328 bimodal-flap census (a 10 s settle
+  # races the paint conveyor: 06/08/09/10 flap between narrow modes).
+  sleep "${PARITY_SETTLE:-30}"
   # -nostdin (v6.16.2): ffmpeg eats stdin — inside the matrix read-loop it
   # swallowed one byte of every next row, mangling the shot names
   # (run #275: 10_marker_ray -> 0_marker_ray).

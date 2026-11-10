@@ -815,7 +815,16 @@ jobs:
         env:
           RUN_ID: ${{ github.run_id }}
           RUN_NO: ${{ github.run_number }}
-        run: bash scripts/bench/publish_parity_feed.sh parity-out "$RUN_ID" "$RUN_NO"
+        run: |
+          # v6.25.5: the parity session's own console (server.log saved by the
+          # visual leg next to its parity/ shots) rides the feed as the time
+          # audit — #332 published a night matrix while every pin "should
+          # have" worked; from now the feed carries the console testimony.
+          PEVID=""
+          CAND=$(find ours -type f -name server.log -path '*parity*' 2>/dev/null | head -1)
+          [ -n "$CAND" ] && PEVID="$(dirname "$CAND")"
+          echo "parity evidence dir: ${PEVID:-NONE}"
+          bash scripts/bench/publish_parity_feed.sh parity-out "$RUN_ID" "$RUN_NO" "$PEVID"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -54,6 +54,24 @@ fi
 RD="/tmp/pfeed/gallery/parity-run-${RUN_NO}"
 mkdir -p "$RD"
 
+# v6.25.5 TIME AUDIT: the parity session's own console (server.log saved by
+# the visual leg next to its parity/ shots) rides the feed — #332 published
+# a NIGHT matrix (ours sky (42,46,58) vs voxy day) while every pin "should
+# have" worked; the feed now carries the console testimony so the next
+# time-of-day incident is self-diagnosing without any API access.
+EVDIR="${4:-}"
+if [ -n "$EVDIR" ] && [ -f "$EVDIR/server.log" ]; then
+  {
+    echo "# parity session time audit (the §7b console channel)"
+    echo
+    echo "- v6.25.5: boot markers, pins, gamerules and joins from the parity session server.log (tail 40). The #332 night-matrix class is self-diagnosing from here on."
+    echo
+    echo '```'
+    grep -nE "Done \(|pack finalized|doDaylightCycle|[Ss]et the time|time set|gamerule|Stepan joined" "$EVDIR/server.log" | tail -40
+    echo '```'
+  } > "$RD/time-audit.md" 2>/dev/null || true
+fi
+
 # Downscale the triptychs (1952x368 -> 1280 wide JPEG q85) and the heatmaps
 # (1280x720 grayscale -> JPEG q80); text reports ride as-is.
 SRC="$SRC" RD="$RD" python3 - <<'PYEOF' 2>/dev/null || cp "$SRC"/*.md "$SRC"/*.json "$RD"/ 2>/dev/null || true
@@ -91,6 +109,7 @@ PASS=$(python3 -c "import json;print(json.load(open('$RD/parity.json'))['pass'])
     b=$(basename "$f")
     echo "- ![${b}](parity-run-${RUN_NO}/${b})"
   done
+  [ -f "$RD/time-audit.md" ] && echo "- time audit: [time-audit.md](parity-run-${RUN_NO}/time-audit.md) — the §7b console channel; the #332 night-matrix class made self-diagnosing (v6.25.5)"
 } > "$RD/latest.md" 2>/dev/null || true
 
 # the index: every parity run, newest first, with its gate state
