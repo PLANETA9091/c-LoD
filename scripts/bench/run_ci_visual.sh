@@ -1421,6 +1421,12 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # DAY GUARD below is the enforcer if even this is lost.
   srv "gamerule doDaylightCycle false"
   srv "time set noon"
+  # v6.25.7: #333/#334's audit proved 'gamerule doDaylightCycle false' dies
+  # with a Paper 26.3 parse error ("Incorrect argument for command") on
+  # every attempt — the rule name likely changed in 26.3. A BARE 'gamerule'
+  # lists the valid rule names; the audit grep carries the reply into
+  # time-audit.md of the next run, so the pin fix becomes a one-liner.
+  srv "gamerule"
   srv "gamemode spectator Stepan"
   # v6.17: the fresh server rescans the disk (the level is the same, the
   # Streamer is new) — the march paints from the STREAMED buffers, so give
