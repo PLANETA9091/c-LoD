@@ -1,6 +1,6 @@
-[15:37:54] [main/INFO]: Loading Minecraft 26.3 with Fabric Loader 0.20.1
-[15:37:54] [main/INFO]: Mappings not present!
-[15:37:54] [main/INFO]: Loading 62 mods:
+[16:13:42] [main/INFO]: Loading Minecraft 26.3 with Fabric Loader 0.20.1
+[16:13:42] [main/INFO]: Mappings not present!
+[16:13:42] [main/INFO]: Loading 62 mods:
 	- fabric-api 0.165.0+26.3
 	   |-- fabric-advancement-api-v1 1.0.1+38c7a2d55d
 	   |-- fabric-api-base 2.0.6+fcdff87f5d
@@ -63,14 +63,14 @@
 	   |-- org_rocksdb_rocksdbjni 10.2.1
 	   |-- org_tukaani_xz 1.10
 	   \-- redis_clients_jedis 5.1.0
-[15:37:54] [main/INFO]: SpongePowered MIXIN Subsystem Version=0.8.7 Source=file:/home/runner/mc-test/client/libraries/net/fabricmc/sponge-mixin/0.17.5+mixin.0.8.7/sponge-mixin-0.17.5+mixin.0.8.7.jar Service=Knot/Fabric Env=CLIENT
-[15:37:54] [main/INFO]: Loaded configuration file for Sodium: 37 options available, 0 override(s) found
-[15:37:55] [main/INFO]: Searching for graphics cards...
-[15:37:55] [main/WARN]: Could not find any graphics adapters! Probably the device is not on a bus we can probe, or there are no devices supporting 3D acceleration.
-[15:37:55] [main/WARN]: Sodium has applied one or more workarounds to prevent crashes or other issues on your system: [NO_ERROR_CONTEXT_UNSUPPORTED]
-[15:37:55] [main/WARN]: This is not necessarily an issue, but it may result in certain features or optimizations being disabled. You can sometimes fix these issues by upgrading your graphics driver.
+[16:13:42] [main/INFO]: SpongePowered MIXIN Subsystem Version=0.8.7 Source=file:/home/runner/mc-test/client/libraries/net/fabricmc/sponge-mixin/0.17.5+mixin.0.8.7/sponge-mixin-0.17.5+mixin.0.8.7.jar Service=Knot/Fabric Env=CLIENT
+[16:13:43] [main/INFO]: Loaded configuration file for Sodium: 37 options available, 0 override(s) found
+[16:13:43] [main/INFO]: Searching for graphics cards...
+[16:13:43] [main/WARN]: Could not find any graphics adapters! Probably the device is not on a bus we can probe, or there are no devices supporting 3D acceleration.
+[16:13:43] [main/WARN]: Sodium has applied one or more workarounds to prevent crashes or other issues on your system: [NO_ERROR_CONTEXT_UNSUPPORTED]
+[16:13:43] [main/WARN]: This is not necessarily an issue, but it may result in certain features or optimizations being disabled. You can sometimes fix these issues by upgrading your graphics driver.
 WARNING: A restricted method in java.lang.System has been called
-WARNING: java.lang.System::load has been called by org.lwjgl.system.Library$$Lambda/0x0000000044295d38 in an unnamed module (file:/home/runner/mc-test/client/libraries/org/lwjgl/lwjgl/3.4.3/lwjgl-3.4.3.jar)
+WARNING: java.lang.System::load has been called by org.lwjgl.system.Library$$Lambda/0x0000000042295d38 in an unnamed module (file:/home/runner/mc-test/client/libraries/org/lwjgl/lwjgl/3.4.3/lwjgl-3.4.3.jar)
 WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
 WARNING: Restricted methods will be blocked in a future release unless native access is enabled
 
@@ -78,28 +78,35 @@ WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
 WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.lwjgl.system.MemoryBackendUnsafeLegacy (file:/home/runner/mc-test/client/libraries/org/lwjgl/lwjgl/3.4.3/lwjgl-3.4.3.jar)
 WARNING: Please consider reporting this to the maintainers of class org.lwjgl.system.MemoryBackendUnsafeLegacy
 WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
-[libclodgl] shim loaded (pid 3804)
-[15:37:55] [main/INFO]: Initializing MixinExtras via com.llamalad7.mixinextras.service.MixinExtrasServiceImpl(version=0.5.5).
-[15:37:56] [Datafixer Bootstrap #0/INFO]: 307 Datafixer optimizations took 599 milliseconds
-[15:38:00] [main/INFO]: Completely ignored arguments: [--userType, legacy]
-[15:38:00] [Render thread/INFO]: Environment: Environment[discoveryUrl=https://discovery.minecraftservices.com/minecraft/client, name=PROD]
-[15:38:00] [Render thread/INFO]: Setting user: Stepan
-[15:38:00] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as RocksDB for config type StorageConfig
-[15:38:00] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as Redis for config type StorageConfig
-[15:38:00] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as ReadonlyCachingLayer for config type StorageConfig
-[15:38:00] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config2 as AutoFragmentationAdaptor for config type StorageConfig
-[15:38:00] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as FragmentationAdaptor for config type StorageConfig
-[15:38:00] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered ConditionalStorageBackendConfig as ConditionalConfig for config type StorageConfig
-[15:38:00] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as CompressionAdaptor for config type StorageConfig
-[15:38:00] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered BasicPathInsertionConfig as BasicPathConfig for config type StorageConfig
-[15:38:00] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as LMDB for config type StorageConfig
-[15:38:00] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as Memory for config type StorageConfig
-[15:38:00] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as Serializer for config type SectionStorageConfig
-[15:38:00] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as ZSTD for config type CompressorConfig
-[15:38:00] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as LZ4 for config type CompressorConfig
-[15:38:00] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered 13 config types
-[15:38:00] [Render thread/INFO]: [Indigo] Different rendering plugin detected; not applying Indigo.
-[15:38:01] [Download-2/ERROR]: Failed to fetch user properties
+[libclodgl] shim loaded (pid 4031)
+[16:13:44] [main/INFO]: Initializing MixinExtras via com.llamalad7.mixinextras.service.MixinExtrasServiceImpl(version=0.5.5).
+[16:13:46] [Datafixer Bootstrap #0/INFO]: 307 Datafixer optimizations took 789 milliseconds
+[16:13:51] [main/INFO]: Completely ignored arguments: [--userType, legacy]
+[16:13:52] [Render thread/INFO]: Environment: Environment[discoveryUrl=https://discovery.minecraftservices.com/minecraft/client, name=PROD]
+[16:13:52] [Render thread/INFO]: Setting user: Stepan
+[16:13:52] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as RocksDB for config type StorageConfig
+[16:13:52] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as Redis for config type StorageConfig
+[16:13:52] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as ReadonlyCachingLayer for config type StorageConfig
+[16:13:52] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config2 as AutoFragmentationAdaptor for config type StorageConfig
+[16:13:52] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as FragmentationAdaptor for config type StorageConfig
+[16:13:52] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered ConditionalStorageBackendConfig as ConditionalConfig for config type StorageConfig
+[16:13:52] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as CompressionAdaptor for config type StorageConfig
+[16:13:52] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered BasicPathInsertionConfig as BasicPathConfig for config type StorageConfig
+[16:13:52] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as LMDB for config type StorageConfig
+[16:13:52] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as Memory for config type StorageConfig
+[16:13:52] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as Serializer for config type SectionStorageConfig
+[16:13:52] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as ZSTD for config type CompressorConfig
+[16:13:52] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered Config as LZ4 for config type CompressorConfig
+[16:13:52] [Render thread/INFO]: [me.cx.vy.cn.cg.Serialization]: Registered 13 config types
+[16:13:52] [Render thread/INFO]: [Indigo] Different rendering plugin detected; not applying Indigo.
+[16:13:52] [Render thread/ERROR]: Error parsing option value 4 for option Simulation Distance: Value 4 outside of range [5:33]
+[16:13:52] [Render thread/INFO]: Setting exclusive fullscreen to true by default, as the user is not on Windows and the language cannot be guessed.
+[16:13:52] [Render thread/INFO]: Backend library: LWJGL version 3.4.3-snapshot
+[16:13:53] [Render thread/INFO]: SDL [SYSTEM]: App name: Minecraft
+[16:13:53] [Render thread/INFO]: SDL [SYSTEM]: App version: 26.3
+[16:13:53] [Render thread/INFO]: SDL [SYSTEM]: App ID: com.mojang.minecraft
+[16:13:53] [Render thread/INFO]: SDL [SYSTEM]: SDL revision: SDL-3.4.14--128-NOTFOUND
+[16:13:54] [Download-2/ERROR]: Failed to fetch user properties
 com.mojang.authlib.exceptions.InvalidCredentialsException: Status: 401
 	at knot//com.mojang.authlib.exceptions.MinecraftClientHttpException.toAuthenticationException(MinecraftClientHttpException.java:70)
 	at knot//com.mojang.authlib.services.MinecraftServicesUserApiService.fetchProperties(MinecraftServicesUserApiService.java:168)
@@ -115,13 +122,6 @@ Caused by: MinecraftClientHttpException[type=HTTP_ERROR, status=401, response=Er
 	at knot//com.mojang.authlib.minecraft.client.MinecraftClient.get(MinecraftClient.java:65)
 	at knot//com.mojang.authlib.services.MinecraftServicesUserApiService.fetchProperties(MinecraftServicesUserApiService.java:118)
 	... 5 more
-[15:38:01] [Render thread/ERROR]: Error parsing option value 4 for option Simulation Distance: Value 4 outside of range [5:33]
-[15:38:01] [Render thread/INFO]: Setting exclusive fullscreen to true by default, as the user is not on Windows and the language cannot be guessed.
-[15:38:01] [Render thread/INFO]: Backend library: LWJGL version 3.4.3-snapshot
-[15:38:01] [Render thread/INFO]: SDL [SYSTEM]: App name: Minecraft
-[15:38:01] [Render thread/INFO]: SDL [SYSTEM]: App version: 26.3
-[15:38:01] [Render thread/INFO]: SDL [SYSTEM]: App ID: com.mojang.minecraft
-[15:38:01] [Render thread/INFO]: SDL [SYSTEM]: SDL revision: SDL-3.4.14--128-NOTFOUND
 [libclodgl] glXChooseVisual called
 [libclodgl] glXChooseVisual -> visual
 [libclodgl] glXChooseFBConfig called (9 attribs)
@@ -131,15 +131,15 @@ Caused by: MinecraftClientHttpException[type=HTTP_ERROR, status=401, response=Er
 [libclodgl] glXChooseFBConfig called (9 attribs)
 [libclodgl] glXChooseFBConfig -> configs
 [libclodgl] missing real symbol: glNamedFramebufferTextureMultiviewOVR
-[15:38:06] [Render thread/WARN]: [me.cx.vy.ct.VoxyClient]: GPU does not support subgroup operations, expect some performance degradation
-[15:38:06] [Render thread/INFO]: Using graphics backend OpenGL, using drivers: 4.6 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.4
-[15:38:06] [Render thread/INFO]: Using graphics device: llvmpipe (LLVM 20.1.2, 256 bits) (Mesa)
-[15:38:06] [Render thread/INFO]: Using graphics device extensions: GL_ARB_multi_draw_indirect, GL_ARB_buffer_storage, GL_ARB_shader_draw_parameters, GL_ARB_base_instance, GL_KHR_debug, GL_ARB_draw_indirect, GL_ARB_clip_control, GL_ARB_vertex_attrib_binding, GL_ARB_direct_state_access, GL_EXT_texture_filter_anisotropic
+[16:13:57] [Render thread/WARN]: [me.cx.vy.ct.VoxyClient]: GPU does not support subgroup operations, expect some performance degradation
+[16:13:57] [Render thread/INFO]: Using graphics backend OpenGL, using drivers: 4.6 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.4
+[16:13:57] [Render thread/INFO]: Using graphics device: llvmpipe (LLVM 20.1.2, 256 bits) (Mesa)
+[16:13:57] [Render thread/INFO]: Using graphics device extensions: GL_ARB_multi_draw_indirect, GL_ARB_buffer_storage, GL_ARB_shader_draw_parameters, GL_ARB_base_instance, GL_KHR_debug, GL_ARB_draw_indirect, GL_ARB_clip_control, GL_ARB_vertex_attrib_binding, GL_ARB_direct_state_access, GL_EXT_texture_filter_anisotropic
 [libclodgl] glXChooseFBConfig called (9 attribs)
 [libclodgl] glXChooseFBConfig -> configs
-[15:38:06] [Render thread/INFO]: Created window using SDL video driver: x11
-[15:38:06] [Download-1/INFO]: Could not authorize you against Realms server: java.lang.RuntimeException: Failed to parse into SignedJWT: 0
-[15:38:06] [Download-1/ERROR]: Failed to fetch Realms feature flags
+[16:13:57] [Render thread/INFO]: Created window using SDL video driver: x11
+[16:13:58] [Download-1/INFO]: Could not authorize you against Realms server: java.lang.RuntimeException: Failed to parse into SignedJWT: 0
+[16:13:58] [Download-1/ERROR]: Failed to fetch Realms feature flags
 com.mojang.realmsclient.exception.RealmsServiceException: Realms authentication error with message 'java.lang.RuntimeException: Failed to parse into SignedJWT: 0'
 	at knot//com.mojang.realmsclient.client.RealmsClient.execute(RealmsClient.java:625)
 	at knot//com.mojang.realmsclient.client.RealmsClient.fetchFeatureFlags(RealmsClient.java:204)
@@ -147,14 +147,14 @@ com.mojang.realmsclient.exception.RealmsServiceException: Realms authentication 
 	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
 	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
 	at java.base/java.lang.Thread.run(Thread.java:1474)
-[15:38:06] [Render thread/INFO]: Reloading ResourceManager: vanilla, vanilla, fabric-advancement-api-v1, fabric-api, fabric-api-base, fabric-api-lookup-api-v1, fabric-biome-api-v1, fabric-block-api-v1, fabric-block-getter-api-v2, fabric-command-api-v2, fabric-content-registries-v0, fabric-convention-tags-v2, fabric-crash-report-info-v1, fabric-creative-tab-api-v1, fabric-data-attachment-api-v1, fabric-data-generation-api-v1, fabric-debug-api-v1, fabric-dimensions-v1, fabric-entity-events-v1, fabric-events-interaction-v0, fabric-game-rule-api-v1, fabric-item-api-v1, fabric-key-mapping-api-v1, fabric-lifecycle-events-v1, fabric-loot-api-v3, fabric-menu-api-v1, fabric-message-api-v1, fabric-model-loading-api-v1, fabric-networking-api-v1, fabric-object-builder-api-v1, fabric-particles-v1, fabric-permission-api-v1, fabric-recipe-api-v1, fabric-registry-sync-v0, fabric-renderer-api-v1, fabric-renderer-indigo, fabric-rendering-fluids-v1, fabric-rendering-v1, fabric-resource-conditions-api-v1, fabric-resource-loader-v0, fabric-resource-loader-v1, fabric-screen-api-v1, fabric-serialization-api-v1, fabric-sound-api-v1, fabric-tag-api-v1, fabric-transfer-api-v1, fabric-transitive-access-wideners-v1, fabricloader, sodium, voxy
-[15:38:07] [Worker-Main-2/INFO]: Found unifont_all_no_pua-17.0.01.hex, loading
-[15:38:07] [Worker-Main-1/INFO]: Found unifont_pua-17.0.01.hex, loading
-[15:38:07] [Worker-Main-2/INFO]: Found unifont_jp_patch-17.0.01.hex, loading
-[15:38:07] [Render thread/INFO]: Thread[#3,Render thread,10,main]
-[15:38:07] [Render thread/INFO]: OpenGL Vendor: Mesa
-[15:38:07] [Render thread/INFO]: OpenGL Renderer: llvmpipe (LLVM 20.1.2, 256 bits)
-[15:38:07] [Render thread/INFO]: OpenGL Version: 4.6 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.4
+[16:13:58] [Render thread/INFO]: Reloading ResourceManager: vanilla, vanilla, fabric-advancement-api-v1, fabric-api, fabric-api-base, fabric-api-lookup-api-v1, fabric-biome-api-v1, fabric-block-api-v1, fabric-block-getter-api-v2, fabric-command-api-v2, fabric-content-registries-v0, fabric-convention-tags-v2, fabric-crash-report-info-v1, fabric-creative-tab-api-v1, fabric-data-attachment-api-v1, fabric-data-generation-api-v1, fabric-debug-api-v1, fabric-dimensions-v1, fabric-entity-events-v1, fabric-events-interaction-v0, fabric-game-rule-api-v1, fabric-item-api-v1, fabric-key-mapping-api-v1, fabric-lifecycle-events-v1, fabric-loot-api-v3, fabric-menu-api-v1, fabric-message-api-v1, fabric-model-loading-api-v1, fabric-networking-api-v1, fabric-object-builder-api-v1, fabric-particles-v1, fabric-permission-api-v1, fabric-recipe-api-v1, fabric-registry-sync-v0, fabric-renderer-api-v1, fabric-renderer-indigo, fabric-rendering-fluids-v1, fabric-rendering-v1, fabric-resource-conditions-api-v1, fabric-resource-loader-v0, fabric-resource-loader-v1, fabric-screen-api-v1, fabric-serialization-api-v1, fabric-sound-api-v1, fabric-tag-api-v1, fabric-transfer-api-v1, fabric-transitive-access-wideners-v1, fabricloader, sodium, voxy
+[16:13:59] [Worker-Main-3/INFO]: Found unifont_all_no_pua-17.0.01.hex, loading
+[16:13:59] [Worker-Main-1/INFO]: Found unifont_pua-17.0.01.hex, loading
+[16:13:59] [Worker-Main-3/INFO]: Found unifont_jp_patch-17.0.01.hex, loading
+[16:14:00] [Render thread/INFO]: Thread[#3,Render thread,10,main]
+[16:14:00] [Render thread/INFO]: OpenGL Vendor: Mesa
+[16:14:00] [Render thread/INFO]: OpenGL Renderer: llvmpipe (LLVM 20.1.2, 256 bits)
+[16:14:00] [Render thread/INFO]: OpenGL Version: 4.6 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.4
 ALSA lib confmisc.c:855:(parse_card) cannot find card '0'
 ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_card_inum returned error: No such file or directory
 ALSA lib confmisc.c:422:(snd_func_concat) error evaluating strings
@@ -171,7 +171,7 @@ ALSA lib confmisc.c:1342:(snd_func_refer) error evaluating name
 ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_refer returned error: No such file or directory
 ALSA lib conf.c:5731:(snd_config_expand) Evaluate error: No such file or directory
 ALSA lib pcm.c:2721:(snd_pcm_open_noupdate) Unknown PCM default
-[15:38:08] [Render thread/ERROR]: Error starting SoundSystem. Turning off sounds & music
+[16:14:02] [Render thread/ERROR]: Error starting SoundSystem. Turning off sounds & music
 java.lang.IllegalStateException: Failed to open OpenAL device
 	at knot//com.mojang.blaze3d.audio.Library.openDeviceOrFallback(Library.java:274)
 	at knot//com.mojang.blaze3d.audio.Library.init(Library.java:149)
@@ -193,25 +193,25 @@ java.lang.IllegalStateException: Failed to open OpenAL device
 	at net.fabricmc.loader.impl.game.minecraft.MinecraftGameProvider.launch(MinecraftGameProvider.java:517)
 	at net.fabricmc.loader.impl.launch.knot.Knot.launch(Knot.java:72)
 	at net.fabricmc.loader.impl.launch.knot.KnotClient.main(KnotClient.java:23)
-[15:38:08] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
-[15:38:09] [Render thread/INFO]: Created: 256x128x0 minecraft:textures/atlas/celestials.png-atlas
-[15:38:09] [Render thread/INFO]: Created: 128x128x0 minecraft:textures/atlas/decorated_pot.png-atlas
-[15:38:09] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
-[15:38:09] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
-[15:38:09] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
-[15:38:09] [Render thread/INFO]: Created: 2048x2048x4 minecraft:textures/atlas/blocks.png-atlas
-[15:38:09] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/items.png-atlas
-[15:38:09] [Render thread/INFO]: Created: 1024x1024x0 minecraft:textures/atlas/gui.png-atlas
-[15:38:09] [Render thread/INFO]: Created: 128x64x0 minecraft:textures/atlas/map_decorations.png-atlas
-[15:38:09] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/chest.png-atlas
-[15:38:09] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/shulker_boxes.png-atlas
-[15:38:09] [Render thread/INFO]: Connecting to 127.0.0.1, 25565
-[15:38:14] [Render thread/INFO]: [me.cx.vy.cl.VoxyInstance]: Initializing voxy instance
-[15:38:14] [Render thread/INFO]: [me.cx.vy.cl.VoxyInstance]: Dedicated voxy thread pool size: 2
-[15:38:14] [Render thread/INFO]: [me.cx.vy.cl.VoxyInstance]: Creating new world engine: -2887393688122177004@1194269777
-[15:38:14] [Render thread/INFO]: [me.cx.vy.ct.ce.VoxyRenderSystem]: Creating Voxy render system
-[15:38:15] [Render thread/INFO]: [me.cx.vy.ct.ce.RenderResourceReuse]: Allocated new geometry buffer: 536870912, isSparse: false, driver stated 31Mb of free memory
-[15:38:15] [Render thread/INFO]: OpenGL debug message: java.lang.Throwable: id=1, source=SHADER COMPILER, type=OTHER, severity=HIGH, message='0:105(42): warning: `size' used uninitialized'
+[16:14:02] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
+[16:14:02] [Render thread/INFO]: Created: 256x128x0 minecraft:textures/atlas/celestials.png-atlas
+[16:14:02] [Render thread/INFO]: Created: 128x128x0 minecraft:textures/atlas/decorated_pot.png-atlas
+[16:14:02] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
+[16:14:02] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
+[16:14:02] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
+[16:14:02] [Render thread/INFO]: Created: 2048x2048x4 minecraft:textures/atlas/blocks.png-atlas
+[16:14:02] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/items.png-atlas
+[16:14:02] [Render thread/INFO]: Created: 1024x1024x0 minecraft:textures/atlas/gui.png-atlas
+[16:14:02] [Render thread/INFO]: Created: 128x64x0 minecraft:textures/atlas/map_decorations.png-atlas
+[16:14:02] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/chest.png-atlas
+[16:14:02] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/shulker_boxes.png-atlas
+[16:14:03] [Render thread/INFO]: Connecting to 127.0.0.1, 25565
+[16:14:10] [Render thread/INFO]: [me.cx.vy.cl.VoxyInstance]: Initializing voxy instance
+[16:14:10] [Render thread/INFO]: [me.cx.vy.cl.VoxyInstance]: Dedicated voxy thread pool size: 2
+[16:14:10] [Render thread/INFO]: [me.cx.vy.cl.VoxyInstance]: Creating new world engine: -2887393688122177004@1049391805
+[16:14:10] [Render thread/INFO]: [me.cx.vy.ct.ce.VoxyRenderSystem]: Creating Voxy render system
+[16:14:11] [Render thread/INFO]: [me.cx.vy.ct.ce.RenderResourceReuse]: Allocated new geometry buffer: 536870912, isSparse: false, driver stated 31Mb of free memory
+[16:14:11] [Render thread/INFO]: OpenGL debug message: java.lang.Throwable: id=1, source=SHADER COMPILER, type=OTHER, severity=HIGH, message='0:105(42): warning: `size' used uninitialized'
 java.lang.Throwable: id=1, source=SHADER COMPILER, type=OTHER, severity=HIGH, message='0:105(42): warning: `size' used uninitialized'
 	at knot//com.mojang.renderpearl.backend.opengl.GlDebug.wrapOperation$bil000$voxy$wrapDebug(GlDebug.java:520)
 	at knot//com.mojang.renderpearl.backend.opengl.GlDebug.printDebugLog(GlDebug.java:83)
@@ -246,7 +246,7 @@ java.lang.Throwable: id=1, source=SHADER COMPILER, type=OTHER, severity=HIGH, me
 	at net.fabricmc.loader.impl.launch.knot.Knot.launch(Knot.java:72)
 	at net.fabricmc.loader.impl.launch.knot.KnotClient.main(KnotClient.java:23)
 
-[15:38:15] [Render thread/INFO]: OpenGL debug message: java.lang.Throwable: id=2, source=SHADER COMPILER, type=OTHER, severity=HIGH, message='0:105(54): warning: `scale' used uninitialized'
+[16:14:11] [Render thread/INFO]: OpenGL debug message: java.lang.Throwable: id=2, source=SHADER COMPILER, type=OTHER, severity=HIGH, message='0:105(54): warning: `scale' used uninitialized'
 java.lang.Throwable: id=2, source=SHADER COMPILER, type=OTHER, severity=HIGH, message='0:105(54): warning: `scale' used uninitialized'
 	at knot//com.mojang.renderpearl.backend.opengl.GlDebug.wrapOperation$bil000$voxy$wrapDebug(GlDebug.java:520)
 	at knot//com.mojang.renderpearl.backend.opengl.GlDebug.printDebugLog(GlDebug.java:83)
@@ -281,7 +281,7 @@ java.lang.Throwable: id=2, source=SHADER COMPILER, type=OTHER, severity=HIGH, me
 	at net.fabricmc.loader.impl.launch.knot.Knot.launch(Knot.java:72)
 	at net.fabricmc.loader.impl.launch.knot.KnotClient.main(KnotClient.java:23)
 
-[15:38:15] [Render thread/INFO]: OpenGL debug message: java.lang.Throwable: id=3, source=SHADER COMPILER, type=OTHER, severity=HIGH, message='0:335(16): warning: some implementations may not support implicit int -> uint conversions for `&' operators; consider casting explicitly for portability'
+[16:14:11] [Render thread/INFO]: OpenGL debug message: java.lang.Throwable: id=3, source=SHADER COMPILER, type=OTHER, severity=HIGH, message='0:335(16): warning: some implementations may not support implicit int -> uint conversions for `&' operators; consider casting explicitly for portability'
 java.lang.Throwable: id=3, source=SHADER COMPILER, type=OTHER, severity=HIGH, message='0:335(16): warning: some implementations may not support implicit int -> uint conversions for `&' operators; consider casting explicitly for portability'
 	at knot//com.mojang.renderpearl.backend.opengl.GlDebug.wrapOperation$bil000$voxy$wrapDebug(GlDebug.java:520)
 	at knot//com.mojang.renderpearl.backend.opengl.GlDebug.printDebugLog(GlDebug.java:83)
@@ -316,11 +316,11 @@ java.lang.Throwable: id=3, source=SHADER COMPILER, type=OTHER, severity=HIGH, me
 	at net.fabricmc.loader.impl.launch.knot.Knot.launch(Knot.java:72)
 	at net.fabricmc.loader.impl.launch.knot.KnotClient.main(KnotClient.java:23)
 
-[15:38:15] [Render thread/WARN]: [me.cx.vy.ct.ce.gl.sr.Shader$Builder]: 0:105(42): warning: `size' used uninitialized
+[16:14:11] [Render thread/WARN]: [me.cx.vy.ct.ce.gl.sr.Shader$Builder]: 0:105(42): warning: `size' used uninitialized
 0:105(54): warning: `scale' used uninitialized
 0:335(16): warning: some implementations may not support implicit int -> uint conversions for `&' operators; consider casting explicitly for portability
 
-[15:38:15] [Render thread/INFO]: OpenGL debug message: java.lang.Throwable: id=4, source=SHADER COMPILER, type=OTHER, severity=HIGH, message='0:455(40): warning: some implementations may not support implicit int -> uint conversions for `&' operators; consider casting explicitly for portability'
+[16:14:11] [Render thread/INFO]: OpenGL debug message: java.lang.Throwable: id=4, source=SHADER COMPILER, type=OTHER, severity=HIGH, message='0:455(40): warning: some implementations may not support implicit int -> uint conversions for `&' operators; consider casting explicitly for portability'
 java.lang.Throwable: id=4, source=SHADER COMPILER, type=OTHER, severity=HIGH, message='0:455(40): warning: some implementations may not support implicit int -> uint conversions for `&' operators; consider casting explicitly for portability'
 	at knot//com.mojang.renderpearl.backend.opengl.GlDebug.wrapOperation$bil000$voxy$wrapDebug(GlDebug.java:520)
 	at knot//com.mojang.renderpearl.backend.opengl.GlDebug.printDebugLog(GlDebug.java:83)
@@ -350,9 +350,9 @@ java.lang.Throwable: id=4, source=SHADER COMPILER, type=OTHER, severity=HIGH, me
 	at net.fabricmc.loader.impl.launch.knot.Knot.launch(Knot.java:72)
 	at net.fabricmc.loader.impl.launch.knot.KnotClient.main(KnotClient.java:23)
 
-[15:38:15] [Render thread/WARN]: [me.cx.vy.ct.ce.gl.sr.Shader$Builder]: 0:455(40): warning: some implementations may not support implicit int -> uint conversions for `&' operators; consider casting explicitly for portability
+[16:14:11] [Render thread/WARN]: [me.cx.vy.ct.ce.gl.sr.Shader$Builder]: 0:455(40): warning: some implementations may not support implicit int -> uint conversions for `&' operators; consider casting explicitly for portability
 
-[15:38:15] [Render thread/INFO]: OpenGL debug message: java.lang.Throwable: id=5, source=SHADER COMPILER, type=OTHER, severity=HIGH, message='0:203(52): warning: some implementations may not support implicit int -> uint conversions for `&' operators; consider casting explicitly for portability'
+[16:14:11] [Render thread/INFO]: OpenGL debug message: java.lang.Throwable: id=5, source=SHADER COMPILER, type=OTHER, severity=HIGH, message='0:203(52): warning: some implementations may not support implicit int -> uint conversions for `&' operators; consider casting explicitly for portability'
 java.lang.Throwable: id=5, source=SHADER COMPILER, type=OTHER, severity=HIGH, message='0:203(52): warning: some implementations may not support implicit int -> uint conversions for `&' operators; consider casting explicitly for portability'
 	at knot//com.mojang.renderpearl.backend.opengl.GlDebug.wrapOperation$bil000$voxy$wrapDebug(GlDebug.java:520)
 	at knot//com.mojang.renderpearl.backend.opengl.GlDebug.printDebugLog(GlDebug.java:83)
@@ -387,18 +387,20 @@ java.lang.Throwable: id=5, source=SHADER COMPILER, type=OTHER, severity=HIGH, me
 	at net.fabricmc.loader.impl.launch.knot.Knot.launch(Knot.java:72)
 	at net.fabricmc.loader.impl.launch.knot.KnotClient.main(KnotClient.java:23)
 
-[15:38:15] [Render thread/WARN]: [me.cx.vy.ct.ce.gl.sr.Shader$Builder]: 0:203(52): warning: some implementations may not support implicit int -> uint conversions for `&' operators; consider casting explicitly for portability
+[16:14:11] [Render thread/WARN]: [me.cx.vy.ct.ce.gl.sr.Shader$Builder]: 0:203(52): warning: some implementations may not support implicit int -> uint conversions for `&' operators; consider casting explicitly for portability
 
-[15:38:15] [Render thread/INFO]: [me.cx.vy.ct.ce.VoxyRenderSystem]: Voxy render system created with 536870912 geometry capacity, using pipeline 'NormalRenderPipeline' with renderer 'MDICSectionRenderer'
-[15:38:15] [Render thread/INFO]: Started 1 worker threads
-[15:38:15] [Render thread/INFO]: [me.cx.vy.cl.VoxyInstance]: Dedicated voxy thread pool size: 1
-[15:38:15] [Render thread/WARN]: [me.cx.vy.cl.is.DHImporter]: Unable to load sqlite JDBC or lzma decompressor, DHImporting wont be available
-[15:38:15] [Render thread/INFO]: [System] [CHAT] Stepan joined the game
-[15:38:15] [Render thread/INFO]: Loaded 2 advancements
-[15:38:15] [Render thread/INFO]: Stopping worker threads
-[15:38:15] [Render thread/INFO]: Started 1 worker threads
-[15:38:16] [Render thread/WARN]: Requested post effect does not exist: minecraft:end_of_frame
-[15:38:16] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 2 reached during a single frame. New capacity will be 4.
-[15:38:17] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 4 reached during a single frame. New capacity will be 8.
-[15:38:17] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 8 reached during a single frame. New capacity will be 16.
-[15:38:20] [Render thread/INFO]: [System] [CHAT] Your game mode has been updated to Spectator Mode
+[16:14:11] [Render thread/INFO]: [me.cx.vy.ct.ce.VoxyRenderSystem]: Voxy render system created with 536870912 geometry capacity, using pipeline 'NormalRenderPipeline' with renderer 'MDICSectionRenderer'
+[16:14:12] [Render thread/INFO]: Started 1 worker threads
+[16:14:12] [Render thread/INFO]: [me.cx.vy.cl.VoxyInstance]: Dedicated voxy thread pool size: 1
+[16:14:12] [Render thread/WARN]: [me.cx.vy.cl.is.DHImporter]: Unable to load sqlite JDBC or lzma decompressor, DHImporting wont be available
+[16:14:12] [Render thread/INFO]: [System] [CHAT] Stepan joined the game
+[16:14:12] [Render thread/INFO]: Loaded 2 advancements
+[16:14:12] [Render thread/INFO]: Stopping worker threads
+[16:14:12] [Render thread/INFO]: Started 1 worker threads
+[16:14:13] [Render thread/WARN]: Requested post effect does not exist: minecraft:end_of_frame
+[16:14:14] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 2 reached during a single frame. New capacity will be 4.
+[16:14:14] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 4 reached during a single frame. New capacity will be 8.
+[16:14:15] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 8 reached during a single frame. New capacity will be 16.
+[16:14:16] [Render thread/INFO]: [System] [CHAT] Your game mode has been updated to Spectator Mode
+[16:18:30] [Async Node Manager/INFO]: [me.cx.vy.ct.ce.rg.hl.AsyncNodeManager$ComputeMemoryCopy]: Resizing scratch data buffer to: 2097152
+[16:18:30] [Async Node Manager/INFO]: [me.cx.vy.ct.ce.rg.hl.AsyncNodeManager$ComputeMemoryCopy]: Resizing scratch data buffer to: 4194304
