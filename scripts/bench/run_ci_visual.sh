@@ -1378,11 +1378,13 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # near rows = the unified march look against the voxy mesh (the G8d
   # representation-gap lever's real number), far rows = the honest band.
   # CLOD_CENTER stays explicit — the v6.19.9 root cause never returns.
-  # v6.26.3 AO A/B (#338 diag GO): quant_ssao=true rides THIS boot only —
-  # the parallel drain-only run (previous sha, flag off) pairs as the
-  # control; comparing the two tables isolates the block-quantized SSAO
-  # probe effect on edge_signed (expected: edges darken toward voxy).
-  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;quant_ssao=true"
+  # v6.26.4: quant_ssao REMOVED from the boot — the #345 A/B read the knob
+  # INERT on the clean test view (11_topdown edge_signed 10.64->11.21,
+  # flat 1.84->4.26 — no AO shift) while aerial flats sat at the era bottom
+  # (diag flat_signed -84/-90/-69 vs #338's -27/-11/-14, confounded by the
+  # sweep lottery). The knob stays shipped (default off) as an instrument;
+  # candidate (b) is dead for the class-3 residual on this evidence.
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false"
   # v6.19.9 THE ROOT CAUSE (#302's maxima nailed it): parity stream max
   # cone 0, max zone 0 — the scheduler never sent ONE cell the whole
   # session — and the reason is the v6.4.2 regression class verbatim: THIS
