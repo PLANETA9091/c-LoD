@@ -73,13 +73,15 @@ if [ -n "$EVDIR" ] && [ -f "$EVDIR/server.log" ]; then
     # error and every time-worded line rides the feed, in any wording.
     # v6.26.5: the audit went live only from run #344 (EVDIR wiring) and the
     # 40-line tail was FLOODED by the ~20 parse-error pairs — the bare
-    # 'gamerule' probe reply (pre-registered in v6.25.7 to deliver the 26.3
-    # rule names for the one-line pin fix) never surfaced. Now: case-
-    # insensitive net + tail 100 + a dedicated probe section that carries
-    # every gamerule-worded line EXCEPT the known failure signature.
-    grep -inE "Done \(|pack finalized|doDaylightCycle|[sS]et the time|[tT]he time|time set|gamerule|Stepan joined|<--|Unknown or incomplete|Incorrect argument" "$EVDIR/server.log" | tail -100
-    echo "--- bare-gamerule probe (v6.25.7 pre-registered; reply or new error echo, the known doDaylightCycle failure filtered out) ---"
-    grep -iE "gamerule" "$EVDIR/server.log" | grep -ivE "doDaylightCycle false" | tail -20
+    # v6.27.0: the 26.3 rule name is SOLVED from the client jar (GameRules
+    # class strings): doDaylightCycle was renamed advance_time — the pin is
+    # 'gamerule advance_time false' and its SUCCESS reply ("Gamerule
+    # advance_time is now set to: false") is the day-freeze evidence. The
+    # audit net keeps both spellings + the probe section carries every
+    # gamerule-worded line EXCEPT the two known signatures.
+    grep -inE "Done \(|pack finalized|advance_time|doDaylightCycle|[sS]et the time|[tT]he time|time set|gamerule|Stepan joined|<--|Unknown or incomplete|Incorrect argument" "$EVDIR/server.log" | tail -100
+    echo "--- gamerule probe (the advance_time success/error echo, known signatures filtered) ---"
+    grep -iE "gamerule" "$EVDIR/server.log" | grep -ivE "doDaylightCycle false|advance_time false<--\[HERE\]|gamerule<--\[HERE\]" | tail -20
     echo '```'
   } > "$RD/time-audit.md" 2>/dev/null || true
 fi

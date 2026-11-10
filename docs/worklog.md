@@ -1032,3 +1032,39 @@ Stage Summary:
 - **РЕАЛИЗАЦИЯ fog_voxy** (env-gated, паттерн quant_ssao, prod дефолт байт-стабилен): config.rs — knob fog_voxy (default false; parse + тесты, вкл. полный treatment-boot set); assets/glsl/lod_terrain.fsh:843 — маркер `// __FOG_VOXY__` (комментарий инертен для glslang); packgen.rs — build_zip(+fog_voxy), при флаге строка фога заменяется на voxy-точную (invEndFogDelta/startDelta/endDistance/fogCap/lerp; env-пара из FogParams — 0..1024 static = live-идентична в noon-парити; vanRD из fogRng.b = RD блоков); тест fog_voxy_swaps_the_fog_cap (дефолт без fogCap + маркер на месте; флаг → fogCap + lerp + SHA меняется; детерминизм; композиция с unfog/mesh_paint/quant_ssao).
 - **TREATMENT-АРМ**: CLOD_EXTRA_OPTS парити-мира += fog_voxy=true (run_ci_visual.sh §7b) — следующий ран = лечение, не контроль. ЧТЕНИЕ (pre-registered): 07/12 flat_signed +61 → ~0 = ВЫИГРЫШ (rim закрыт — первые вьюхи к 100%); aerial far-band mean d вниз; хуже → rollback одним флагом (knob остаётся инструментом). СЛОЖЕНИЕ С v6.26.6: near-band подпись того же фида назовёт механизм 11; settle-by-laps + view_probe дадут транспортную картину дипов.
 - БЮДЖЕТ/РИСКИ: локального cargo в песочнице нет — fmt/clippy/test арбитражит CI; правки механически повторяют компилирующийся паттерн quant_ssao (call-site'ы, сигнатура, replace-блок, тесты — сверен построчно).
+
+## v6.27.0 — РАУНД ПРОЧИТАН ПОЛНОСТЬЮ: #352/#353/#354 вердикты, правило дня НАЙДЕНО в jar, палитра = бин-паритет voxy-bake (2026-11-11 02:30Z+8)
+
+### ТРИ ДОВЕРЕННЫЕ ТАБЛИЦЫ (v6.26.5 суп-защита сработала: sources ".", пары 13/13/12)
+- **#352 (5b8ace7)**: 00 67.9 | 01 45.0 | 02 39.7 | 03 36.4 | 04 30.7 | 05 79.0 | 06 46.9 | 07 85.4 | 08 60.4 | 09 53.1 | 10 53.0 | **11 = 0.079 (НОЧНОЙ кадр!)** | 12 = кадра нет. День не был заморожен (gamerule мёртв), DAY GUARD слеп для pitch>=90 (11_topdown не имеет неба в кадре) — ночной кадр прошёл пин-сеть.
+- **#353 (4549ef2, settle-by-laps + near_band подпись)**: mean 56.3; 08 64.4 / 09 58.5 = эра-хай; 02 39.8 = эра-лоу; dips живы.
+- **#354 (8c80077, fog_voxy treatment)**: 07/12 = **85.56/85.56** — внутри инвариантного бэнда 85.3-86.1. flat_signed +67.3/+67.1 против #353 +60.6/+60.8 — НЕ ДВИНУЛСЯ. **ВЕРДИКТ FOG_VOXY: ИНЕРТЕН на rim-классе** (без регрессии; pre-registered альтернатива побеждает: rim = НЕдекодированные color words, fallback красит светлым — DATA-класс, не туман). Флаг СНЯТ с boot-строки, knob остаётся инструментом (default off, prod байт-стабилен).
+- **#354 06 = 36.6 (эра-лоу)** — дип-класс жив, view_probe читает транспорт.
+
+### NEAR_BAND ПОДПИСЬ (pre-registered дискриминатор v6.26.6) — МЕХАНИЗМ НАЗВАН
+- 07/12: near_px 44766, **nb_flat −0.42 / nb_edge −0.17** — near-band на rim ≈ НУЛЕВОЙ signed (симметричный шум) — rim весь состоит из БОЛЬШИХ дельт (fallback).
+- 11_topdown: near_px 481157 (52% кадра!), **nb_flat −0.09 / nb_edge −0.09** — крупнейший класс = СИММЕТРИЧНЫЙ ±1-8 шум БЕЗ направления. Из pre-registered словаря: ни fog-скейл (нет дистанционного дрейфа знака), ни albedo-edge-only (нет edge-перевеса), ни глобальный сдвиг (flat не ноль-пиксельный, но signed ≈ 0). = ГЕОМЕТРИЯ ПРЕДСТАВЛЕНИЯ: наш 2x2-усреднённый квантованный cell-цвет против voxy mip-текстурного семпла — spatial noise, не смещение.
+- 02: nb_flat −1.82 (наш чуть темнее в near-band), 01: nb_flat −1.4.
+
+### ЦВЕТ-ПУТЬ ПОЛНОСТЬЮ ПРОЧИТАН (из исходников вендора + клиента 26.3)
+- **voxy**: SoftwareModelTextureBakery растеризует модель НЕAREST-семплом → MipGen усредняет 2x2 в ЛИНЕЙНОМ пространстве (TextureUtils.mipColours: srgbToLinear → /4 → linearToSrgb; DARK_CUTOUT для листвы включает дырки) → atlas; рендер: textureGrad (аппаратный mip) × tint в шейдере.
+- **наш march**: цвет ячейки = 6x6x6 решётка (stream.rs color_index = floor(v/51)), декод в шейдере = bin*51 — **КВАНТОВАНИЕ ШАГОМ 51 на march-owned пикселях** (>64 м — сервер view-distance 4); <64 м = ванильные чанки = точные текстуры (потому 05 = 84-90%: красная платформа близко, (142.4,33.1,32.3) у ОБОИХ).
+- **наша палитра несла MAP-цвета** («16 dye MapColors с 1.12») — против voxy TEXTURE-bake: LIGHT_BLUE_CONCRETE (105,161,220) vs voxy (36,137,199) — РАЗНЫЕ БИНЫ (2,3,4) vs (1,3,4); TUFF (76,76,80) vs (111,111,105) — бины (1,1,1) vs (2,2,2); OAK_LEAVES mul → (40,134,8) → бины (0,2,0) → декод **(0,102,0) — R и B ОБНУЛЕНЫ** на самом большом march-owned поверхности (лес!); SNOW (240,250,250) → бин 4 = (204,204,204) vs voxy (249,254,254).
+- Гистограмма 11 (18/18/15/6/5/3/0.6) — плавное затухание = представление+шум; бин-ошибки палитры дают массу 16-64 (наблюдается 8.7%).
+
+### ФИКСЫ v6.27.0 (все с локальной верификацией, тесты дописаны)
+1. **GAMERULE РАЗГАДАН**: в 26.3 правила переименованы в snake_case — `doDaylightCycle` → **`advance_time`** (прочитано ИЗ КЛИЕНТСКОГО JAR: net/minecraft/world/level/gamerules/GameRules.class строки: advance_time, advance_weather, random_tick_speed...; bare `gamerule` список тоже не даёт — #354 audit: "gamerule<--[HERE]"). Заменено во ВСЕХ bench-скриптах (20 мест → advance_time false), audit-сеть дополнена (успешный реплай "Gamerule advance_time is now set to: false" = свидетельство заморозки). День ЗАМРОЗЕТ — ночные кадры (#352/11), дрейф-класс #285/#332 умирают.
+2. **ПАЛИТРА = БИН-ПАРИТЕТ voxy-bake**: пересчитаны ВСЕ материалы по алгоритму voxy (scripts/voxy_bake_table.py из 26.3 client.jar); заменены только БИН-МЕНЯЮЩИЕ значения (30 материалов): dirt/podzol/mycelium/rooted/terracotta/granite/diorite/gravel/red_sand/andesite/cobble/cobbled_deepslate/deepslate/tuff/dripstone/obsidian/bedrock/snow/ice/oak_leaves (прямой voxy-снап, mul снят — двойной тинт)/moss (mul снят — moss НЕ тинтуется)/oak_log/spruce_log/birch_log/pumpkin/melon/glowstone/orange/light_blue/purple/green concrete. БИН-нейтральные строки НЕ тронуты (минимальный дифф). RED_CONCRETE НЕ ТРОНУТ (транспорт-пин cword 0x0200, маркер слоя 8).
+3. **ТЕСТ march_lattice_bins_match_voxy_bakes** (6-й тест palette.rs): пиннит бины 30 материалов + RED индекс 2 — регрессия бина = падение CI.
+4. fog_voxy флаг снят с CLOD_EXTRA_OPTS (вердикт выше), knob в коде.
+5. TESTS.md: строка palette 5→6 тестов; new row `gamerule advance_time false`.
+
+### ЧТЕНИЕ СЛЕДУЮЩЕГО РАНА (pre-registration)
+- (i) advance_time работает: в time-audit "Gamerule advance_time is now set to: false", ночных кадров нет, дисперсия джампов/дипов ПАДАЕТ (часы стояли и в voxy-ноге и в нашей — асимметрия уходила в небо/свет).
+- (ii) Палитра: бин-фиксы двигают hot-класс на структурах/лесу — LIGHT_BLUE/TUFF/OAK_LEAVES/DEEPSLATE виды; метрика = 64+ пп на 00-04/10 вниз, mean d на 01/06 вниз; exact 05 НЕ МЕНЯЕТСЯ (ваниль-владение).
+- (iii) rim 07/12: БЕЗ изменений ожидается (fallback = data-класс) — НО если advance_time уменьшит ночной вклад в недекодированность, flat_signed может чуть вниз; главный рычаг rim = доставка color words (следующий рендер-рычаг: приоритет color-плоскости к rim-ячейкам /color-word priority lanes).
+- (iv) near-band 1-8 (52% кадра 11) = representation — НЕ двигается этими фиксами; следующий большой рычаг = тонкий цвет-транспорт (8-бит RGB на ячейку вместо 6x6x6 бинов — транспорт-редизайн, большой).
+
+### СТАТУС/ОЧЕРЕДЬ
+- Матрица эры: 12 валидных точек; инварианты держатся (07/12 85.4±0.3, 11 31.3-32.3 при дне, 08 59.4-64.4).
+- Очередь: (1) чтение рана с advance_time+палитрой; (2) rim = color-word delivery (data); (3) тонкий цвет-транспорт (representation) — большой рычаг к 100%; (4) leg-2 relog флак; (5) dip-транспорт по view_probe (q растёт сквозь свипы 10312→21292 — свипы САМИ создают бэклог, тур стартует против 21k).

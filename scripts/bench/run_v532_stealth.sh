@@ -59,7 +59,7 @@ echo "pack prompt visible=$PROMPT"
 shot "$SHOTS/v00_prompt.png"
 python3 "$S/click.py" 561 385   # Proceed
 sleep 15
-srv "gamerule doDaylightCycle false"
+srv "gamerule advance_time false"
 srv "time set 6000"
 srv "weather clear"
 srv "gamemode spectator Stepan"

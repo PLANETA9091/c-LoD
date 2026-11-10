@@ -151,7 +151,8 @@ shot() { # name
 # against an OURS-§7b NIGHT matrix — exact% 0.000 on all 13 rows, mean d
 # 87.7-145.5, parity mesh probe sky @png_y=2 = (42,46,58) — and the table
 # still LOOKED like a renderer verdict. The §7b world time is not
-# trustworthy on this stack: the 26.3 clock runs through doDaylightCycle
+# trustworthy on this stack: the 26.3 clock ran through doDaylightCycle
+# (RENAMED advance_time in 26.3 — the jar-derived name, v6.27.0)
 # false (#278), a reused-runner level.dat carries the persisted night over
 # sessions, and the boot pins ride the console channel before "Done (" —
 # while tp demonstrably lands (the vantage framing was right all tour).
@@ -573,7 +574,7 @@ JOIN1=$(join_count)
 if [ "${CLOD_CONTROL:-0}" = "1" ]; then
   sum "- mode: CONTROL (vanilla server, no pack — differential arm)"
   ct "control branch entered"
-  srv "gamerule doDaylightCycle false"
+  srv "gamerule advance_time false"
   srv "time set noon"
   srv "gamemode spectator Stepan"
   srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"
@@ -623,7 +624,7 @@ sleep 15
 # capture strobe (pc.g > 0.40) and the decode goes blind. 'noon' is the
 # vanilla literal — daytime in ANY version. Re-issued before every shot
 # batch below; 20-min days drift slowly enough that a batch stays bright.
-srv "gamerule doDaylightCycle false"
+srv "gamerule advance_time false"
 srv "time set noon"
 srv "weather clear"
 srv "gamemode spectator Stepan"
@@ -1384,13 +1385,15 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # (diag flat_signed -84/-90/-69 vs #338's -27/-11/-14, confounded by the
   # sweep lottery). The knob stays shipped (default off) as an instrument;
   # candidate (b) is dead for the class-3 residual on this evidence.
-  # v6.26.7 TREATMENT ARM: fog_voxy=true — the march fog ports the voxy blit
-  # fog (NormalRenderPipeline FOG_AND_FADE default: the endDistance cap at
-  # RD 8 = 0.541 of the 0..1024 pair; ours ran to 1.0 — the rim class reads
-  # ours LIGHTER, 07/12 flat_signed +61). A/B read vs the era band: 07/12
-  # flat_signed -> ~0 = win; aerial far-band mean d down. Rollback = drop the
-  # flag here (the knob stays in the pack as an instrument).
-  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;fog_voxy=true"
+  # v6.27.0 FOG_VOXY VERDICT (run #354, sha 8c80077): INERT on the rim —
+  # 07/12 exact 85.56 (inside the 85.3-86.1 invariant band), flat_signed
+  # +67.3/+67.1 vs #353's +60.6/+60.8 (unchanged within variance). The rim
+  # class is NOT fog overshoot: the pre-registered alternative wins — the
+  # rim cells carry UNDECODED color words, the height-fallback paints them
+  # lighter than the voxy forest (data class, not render). The flag is
+  # DROPPED from the boot; the knob stays shipped (default off, prod
+  # byte-stable) as an instrument.
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false"
   # v6.19.9 THE ROOT CAUSE (#302's maxima nailed it): parity stream max
   # cone 0, max zone 0 — the scheduler never sent ONE cell the whole
   # session — and the reason is the v6.4.2 regression class verbatim: THIS
@@ -1407,7 +1410,7 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" \
     || note "parity world: boot_server.sh rc=$? (continuing — the gate degrades to FAIL pairs)"
   mkdir -p "$SHOTS/lens_parity"
-  srv "gamerule doDaylightCycle false"
+  srv "gamerule advance_time false"
   srv "time set noon"
   # Fresh client: the session-1/leg-2 processes hold the X display — kill
   # them first (their sessions died with the old server anyway).
@@ -1431,9 +1434,9 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # dayTime persisted at night (the 26.3 clock runs through the gamerule,
   # #278). Re-issue BOTH now that the server is fully up; the per-shot
   # DAY GUARD below is the enforcer if even this is lost.
-  srv "gamerule doDaylightCycle false"
+  srv "gamerule advance_time false"
   srv "time set noon"
-  # v6.25.7: #333/#334's audit proved 'gamerule doDaylightCycle false' dies
+  # v6.25.7: #333/#334's audit proved 'gamerule advance_time false' dies
   # with a Paper 26.3 parse error ("Incorrect argument for command") on
   # every attempt — the rule name likely changed in 26.3. A BARE 'gamerule'
   # lists the valid rule names; the audit grep carries the reply into
@@ -1540,7 +1543,7 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     SX=$(( ${SX//CX/$CX} )); SZ=$(( ${SZ//CZ/$CZ} ))
     for SWDIR in 0 1; do
       SWYAW=$(( (SYAW + SWDIR * 180) % 360 ))
-      srv "gamerule doDaylightCycle false"
+      srv "gamerule advance_time false"
       srv "time set noon"
       srv "tp Stepan $SX 160 $SZ $SWYAW 0"
       # v6.26.6 SETTLE-BY-LAPS (pre-registered post-#340 queue item 2): the
@@ -1602,7 +1605,7 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   while read -r PNAME PYAW PPITCH PX PY PZ <&3; do
     case "$PNAME" in ''|\#*) continue;; esac
     PX=$(( ${PX//CX/$CX} )); PZ=$(( ${PZ//CZ/$CZ} ))
-    srv "gamerule doDaylightCycle false"
+    srv "gamerule advance_time false"
     srv "time set noon"
     srv "tp Stepan $PX $PY $PZ $PYAW $PPITCH"
     # v6.26.6 DIP-PROBE (queue item 1): the tour settles a FIXED 30 s (the
@@ -1620,7 +1623,7 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     # v6.25.5 DAY GUARD: pitch >= 60 rows (11_topdown) hold no sky — skip.
     if [ "${PPITCH%%.*}" -lt 60 ] 2>/dev/null && ! day_ok "parity/$PNAME"; then
       ct "day guard: $PNAME night — re-pin + reshoot"
-      srv "gamerule doDaylightCycle false"
+      srv "gamerule advance_time false"
       srv "time set noon"
       sleep 10
       shot "parity/$PNAME" || true

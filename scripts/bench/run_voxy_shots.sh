@@ -54,7 +54,7 @@ echo "voxy client joined"
 sleep 5
 
 # 3. world state: lock NOON + clear weather + spectator (same as the c-LoD leg)
-srv "gamerule doDaylightCycle false"
+srv "gamerule advance_time false"
 srv "time set noon"  # v6.16.3: was 'time set 6000' — NIGHT in the 26.3 tick
 # scale (the v6.4.8 strobe lesson, un-applied on the reference leg): the
 # parity gate was comparing voxy NIGHT frames against c-LoD NOON frames
@@ -115,7 +115,7 @@ grep -iE "voxy" /tmp/voxy_client.log | tail -6 || true
 SHOT_N=0
 shot() { # name yaw pitch x y z
   # v6.16.5: pin the light before EVERY shot — run #278 proved the 26.3
-  # clock drifts through doDaylightCycle false (the leg set noon once at
+  # clock drifted through the DEAD pre-26.3 rule name (the leg set noon once at
   # 18:40:15 and by shot 09, 6.6 min later, the world was at night: the
   # parity matrix compared voxy night against our noon on the LATE rows).
   # Our own leg re-issues 'time set noon' before every phase for exactly
@@ -125,7 +125,7 @@ shot() { # name yaw pitch x y z
   # v6.18 SKY DETERMINISM: the SAME time-set->shot window on both legs —
   # run #285's 07_far_north missed the 100% gate by 3 px (+-1 in the sky
   # gradient) when the legs waited 10 s vs 3 s after the noon pin, and the
-  # 26.3 clock drifts through doDaylightCycle false (v6.16.5), so the
+  # 26.3 clock drifted through the dead doDaylightCycle name (v6.16.5), so the
   # fractional day differed. Same window on both legs = the same fractional
   # day = the same gradient. v6.25.5: the window is now 30 s on BOTH legs —
   # the race guard from the #325-#328 bimodal-flap census (a 10 s settle

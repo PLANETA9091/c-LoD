@@ -60,7 +60,7 @@ echo "pack-accept clicked"
 rg -N "Reloading ResourceManager" /tmp/client.log | tail -3 || true
 
 # 3. world state: lock NOON (the v4.0-killer scenario) + clear weather
-srv "gamerule doDaylightCycle false"
+srv "gamerule advance_time false"
 srv "time set 6000"
 srv "weather clear"
 srv "gamemode spectator Stepan"

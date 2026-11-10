@@ -50,7 +50,7 @@ grep -ci "resource pack" /tmp/client.log || true
 # 3. world state + BASE shot from the disk center (corner still void).
 # Wait out the spawn-region revisions first: the player keeps chunks loaded
 # around spawn, so rev 1..N fire here — the corner revision must be NEW.
-srv "gamerule doDaylightCycle false"
+srv "gamerule advance_time false"
 srv "time set 6000"
 srv "weather clear"
 srv "gamemode spectator Stepan"

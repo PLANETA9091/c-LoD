@@ -16,7 +16,7 @@ Layers 6–7 remain the richer local real-client harness.
 | `src/seedgen.rs` | 12 | SeedQueue dedup/order/close + v5.9 `pop_batch` drain; bit-contract vs `ClodSeedgen.pack()` (height/liquid/ordinals/valid bit, bit budget); v5.9 `chunkBatch` payload parsing (header, statuses, zero-filled failed segments, corruption rejects) |
 | `src/config.rs` | 14 | `CLOD_OPTS` parsing + clamps (gen_budget 1..256, gen_wish 32..4096, particles_per_tick, disk geometry, native_threads/seedgen_batch, native_dust/native_trees/native_edits, rescan_ticks 0/off + 5..2400); v6.7 debug_lens bool (production false); v6.7.1 edit_beats 0..8, default 2 (0 = v6.6.1 single shot, 1 = v6.6.2 rebeat, garbage falls back) |
 | `src/packgen.rs` | 6 | the pack builds byte-deterministically, 13 entries, ZERO textures/PNGs, capture chain present; v6.2: reset pass precedes the data captures, ClodAtlas/AtlasInfo stay renamed to ClodRegion/RegionInfo; v6.7: the debug lens ships ONLY under debug_lens=true (production 13 entries unchanged SHA, debug 14 with the lens window tokens, both deterministic, SHAs diverge) |
-| `src/palette.rs` | 5 | surface → RGB mapping incl. water/foliage tints; v6.4 concrete family carries the 16 dye MapColors (the CI visual marker RED_CONCRETE = 142,33,33 is pinned here) |
+| `src/palette.rs` | 6 | surface → RGB mapping incl. water/foliage tints; v6.4 concrete family carries the 16 dye MapColors (the CI visual marker RED_CONCRETE = 142,33,33 is pinned here); v6.27.0 march_lattice_bins_match_voxy_bakes pins the 6x6x6 lattice BINS of the bake-corrected family (voxy linear-mip texture averages, scripts/voxy_bake_table.py) + the RED transport index 2 |
 | `src/sha1.rs` | 4 | SHA-1 correctness (RFC vectors + pack-sized inputs) |
 | `src/http.rs` | 2 | embedded pack server routes/metadata |
 | `src/edits.rs` | 2 | v6.3 event push: ring unpack mirrors `ClodEdits.push` bit-for-bit (26-bit two's complement x/z, negatives, edges); ring drain segments (wrap, exact-capacity, masked tail) |
@@ -197,7 +197,7 @@ The job's hard-earned guardrails, each proven by a failed run:
 | `assert_online` around every shot — a menu screenshot is never evidence (v6.4.6) | 41241839232 — both green legs were the autumn-PANORAMA: the client disconnected 2-19 s after the pack push and the red detector fed on the foliage |
 | renderpearl rule: every declared sampler must be in the pass inputs — `ResetSampler` on the mode-2 capture pass; static gate in check_glsl.sh (v6.4.7) | 41248401337 — `ShaderCompileException: Unable to find shader defined uniform (ResetSampler)`, client died mid-reload |
 | client renderer/network loggers on DEBUG via log4j2-ci.xml (v6.4.6) | every INFO-only run named nothing |
-| `time set noon` (26.3 tick scale makes 6000 night; `doDaylightCycle` is not a 26.3 gamerule) (v6.4.8) | 41253590698 — starfield shots |
+| `gamerule advance_time false` (26.3 RENAMED doDaylightCycle → advance_time — read from the client jar GameRules class strings; the old name parse-dies with "Incorrect argument" on EVERY attempt, the clock never froze) (v6.27.0) | #344-#352 time-audits: 20 parse failures/run |
 | console `particle` bursts close/at-marker in the artifact (v6.4.9) | 41256576023 — 446k packets accepted, 2 greenish px |
 
 **Proven ON the CI client (run 41260665463):** the client lives 11 minutes

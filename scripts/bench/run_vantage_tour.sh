@@ -58,7 +58,7 @@ for leg in "${PLAN[@]}"; do
   echo "=== LEG $leg @ ($X,$Z) dwell ${DWELL}s ==="
   srv "tp Stepan $X 280 $Z 0 90"
   sleep 10
-  # DWELL in chunks so the day clock stays locked (doDaylightCycle drifts)
+  # DWELL in chunks so the day clock stays locked (advance_time pins it)
   ELAPSED=0
   while [ "$ELAPSED" -lt "$DWELL" ]; do
     sleep 30; ELAPSED=$((ELAPSED+30))

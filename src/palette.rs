@@ -90,64 +90,92 @@ pub fn surface_color(material: &str, biome: &str, liquid: bool) -> [u8; 3] {
 
     match material {
         // Snow world: the bench biome look — white tops everywhere.
-        "SNOW" | "SNOW_BLOCK" | "POWDER_SNOW" => [0xF0, 0xFA, 0xFA],
-        "ICE" | "PACKED_ICE" => [0x7D, 0xAD, 0xFF],
-        "FROSTED_ICE" => [0x7D, 0xAD, 0xFF],
+        // v6.27.0: voxy snow bake (249,254,254) -> bin (5,5,5); the old
+        // (240,250,250) landed in bin 4 = march decode (204,204,204), a
+        // -50/channel miss on every snowfield.
+        "SNOW" | "SNOW_BLOCK" | "POWDER_SNOW" => [0xFF, 0xFF, 0xFF],
+        "ICE" | "PACKED_ICE" => [0x99, 0xCC, 0xFF],
+        "FROSTED_ICE" => [0x99, 0xCC, 0xFF],
         "BLUE_ICE" => [0x74, 0xA8, 0xFD],
 
-        // Soft ground.
-        "DIRT" | "COARSE_DIRT" | "ROOTED_DIRT" | "FARMLAND" | "DIRT_PATH" => [0x86, 0x66, 0x4A],
-        "PODZOL" => [0x5C, 0x3F, 0x24],
-        "MYCELIUM" => [0x6F, 0x62, 0x6B],
+        // Soft ground. v6.27.0: voxy bakes dirt (138,99,70) -> bin (3,2,1);
+        // coarse_dirt (125,90,63) and rooted_dirt (148,107,82) differ.
+        "DIRT" | "FARMLAND" | "DIRT_PATH" => [0x99, 0x66, 0x33],
+        "COARSE_DIRT" => [0x86, 0x66, 0x4A],
+        "ROOTED_DIRT" => [0x99, 0x66, 0x66],
+        // v6.27.0 PALETTE BAKE PARITY: voxy bakes block colors by 2x2
+        // mip-averaging the REAL textures in LINEAR space (MipGen/TextureUtils
+        // .mipColours — srgbToLinear -> mean -> linearToSrgb, vendored source
+        // verified); our table carried vanilla MapColors, which differ by up
+        // to 70 per channel. The march paints cell colors through the 6x6x6
+        // lattice (decode = bin*51), so ONLY THE BIN of each value reaches
+        // march-owned pixels (>64 m — server view-distance 4): every value
+        // below is chosen so floor(v/51) lands in the bin nearest the voxy
+        // baked color (values computed by scripts/voxy_bake_table.py from
+        // the 26.3 client.jar textures). Bin-neutral rows are left untouched.
+        "PODZOL" => [0x66, 0x33, 0x00],
+        "MYCELIUM" => [0x66, 0x66, 0x66],
         "MUD" => [0x3C, 0x3A, 0x3F],
         "CLAY" => [0xA4, 0xA8, 0xB8],
-        "GRAVEL" => [0x7F, 0x7D, 0x7B],
+        "GRAVEL" => [0x99, 0x99, 0x99],
         "SAND" | "SUSPICIOUS_SAND" => [0xDB, 0xD3, 0xA0],
-        "RED_SAND" | "SUSPICIOUS_RED_SAND" => [0xC4, 0x67, 0x3B],
-        "MOSS_BLOCK" => mul([0x5A, 0x73, 0x35], grass),
+        "RED_SAND" | "SUSPICIOUS_RED_SAND" => [0xCC, 0x66, 0x33],
+        // moss is NOT biome-tinted in vanilla (the mul was double-tinting);
+        // voxy bake (91,111,46) -> bin (2,2,1).
+        "MOSS_BLOCK" => [0x66, 0x66, 0x33],
 
-        // Stone family.
-        "STONE" | "ANDESITE" | "COBBLESTONE" | "COBBLED_DEEPSLATE" | "INFESTED_STONE" => {
-            [0x7A, 0x7A, 0x7A]
-        }
-        "DEEPSLATE" | "TUFF" => [0x4C, 0x4C, 0x50],
-        "GRANITE" => [0x95, 0x79, 0x6B],
-        "DIORITE" => [0xBC, 0xBC, 0xBE],
+        // Stone family (voxy bakes: stone 126, andesite/cobble 132-137,
+        // cobbled_deepslate 81, deepslate 83, tuff 111, granite (152,106,89),
+        // diorite 193).
+        "STONE" | "INFESTED_STONE" => [0x7A, 0x7A, 0x7A],
+        "ANDESITE" | "COBBLESTONE" => [0x99, 0x99, 0x99],
+        "COBBLED_DEEPSLATE" => [0x66, 0x66, 0x66],
+        "DEEPSLATE" | "TUFF" => [0x66, 0x66, 0x66],
+        "GRANITE" => [0x99, 0x66, 0x66],
+        "DIORITE" => [0xCC, 0xCC, 0xCC],
         "CALCITE" => [0xDF, 0xE2, 0xDF],
         "BASALT" | "BLACKSTONE" => [0x4A, 0x4A, 0x52],
-        "DRIPSTONE_BLOCK" => [0x86, 0x67, 0x55],
-        "OBSIDIAN" => [0x14, 0x0C, 0x1C],
-        "BEDROCK" => [0x55, 0x55, 0x55],
-        "TERRACOTTA" => [0x98, 0x5E, 0x43],
+        "DRIPSTONE_BLOCK" => [0x99, 0x66, 0x66],
+        "OBSIDIAN" => [0x00, 0x00, 0x33],
+        "BEDROCK" => [0x66, 0x66, 0x66],
+        "TERRACOTTA" => [0x99, 0x66, 0x33],
         "PACKED_MUD" => [0x8E, 0x67, 0x51],
         "NETHER_BRICKS" | "NETHERRACK" | "MAGMA_BLOCK" => [0x6E, 0x36, 0x3A],
         "END_STONE" => [0xDB, 0xDF, 0xA7],
 
-        // Concrete family — the 16 vanilla dye MapColors, unchanged since
-        // 1.12. Before v6.4 every concrete fell through to the neutral stone
-        // gray, which made placed builds invisible against stone terrain;
-        // RED_CONCRETE is also the marker block of the CI visual test
-        // (`run_ci_visual.sh` paints a column and asserts its color on
-        // screen), so this table is load-bearing for layer 8.
+        // Concrete family — v6.27.0: values whose LATTICE BIN differed from
+        // the voxy texture-bake are re-snapped (the bin is what march-owned
+        // pixels decode to): light_blue R bin 2->1 (voxy (36,137,199)!),
+        // orange G bin 1->2, purple G 0->1, green B 0->1. The MapColors that
+        // already land in the right bin stay (red/white/cyan/black/orange
+        // map colors coincided with the texture means for those colors).
+        // RED_CONCRETE keeps its exact transport-pinned value (color index 2
+        // = cword 0x0200, the layer-8 marker; its bin is already optimal).
         "WHITE_CONCRETE" => [0xCF, 0xD5, 0xD6],
-        "ORANGE_CONCRETE" => [0xE0, 0x61, 0x01],
+        "ORANGE_CONCRETE" => [0xCC, 0x66, 0x00],
         "MAGENTA_CONCRETE" => [0xBE, 0x45, 0xB4],
-        "LIGHT_BLUE_CONCRETE" => [0x69, 0xA1, 0xDC],
+        "LIGHT_BLUE_CONCRETE" => [0x33, 0x99, 0xCC],
         "YELLOW_CONCRETE" => [0xF0, 0xC4, 0x13],
         "LIME_CONCRETE" => [0x5D, 0xB7, 0x28],
         "PINK_CONCRETE" => [0xED, 0x8D, 0xAD],
         "GRAY_CONCRETE" => [0x3D, 0x43, 0x4A],
         "LIGHT_GRAY_CONCRETE" => [0x8E, 0x8E, 0x87],
         "CYAN_CONCRETE" => [0x15, 0x77, 0x88],
-        "PURPLE_CONCRETE" => [0x79, 0x2A, 0xAC],
+        "PURPLE_CONCRETE" => [0x66, 0x33, 0x99],
         "BLUE_CONCRETE" => [0x35, 0x39, 0x9D],
         "BROWN_CONCRETE" => [0x72, 0x47, 0x28],
-        "GREEN_CONCRETE" => [0x54, 0x6D, 0x1B],
+        "GREEN_CONCRETE" => [0x33, 0x66, 0x33],
         "RED_CONCRETE" => [0x8E, 0x21, 0x21],
         "BLACK_CONCRETE" => [0x08, 0x0A, 0x0F],
 
         // Vegetation blocks that carry the biome tint.
-        "OAK_LEAVES" => mul([0x48, 0xB5, 0x18], grass),
+        // v6.27.0: OAK_LEAVES was mul([0x48,0xB5,0x18], tint) = (40,134,8)
+        // on plains -> lattice bins (0,2,0) -> march decodes (0,102,0) — R
+        // AND B zeroed (the forest canopy = the biggest march-owned surface;
+        // voxy bakes the tinted leaves texture to ~(70,92,43) at the relevant
+        // mips). Direct voxy-snapped value, bin (1,2,1). The other mul'd
+        // leaves keep their tints pending per-biome bake data.
+        "OAK_LEAVES" => [0x33, 0x66, 0x33],
         "SPRUCE_LEAVES" => [0x61, 0x77, 0x61],
         "BIRCH_LEAVES" => [0x80, 0xA7, 0x55],
         "JUNGLE_LEAVES" => mul([0x30, 0xA0, 0x24], grass),
@@ -157,14 +185,16 @@ pub fn surface_color(material: &str, biome: &str, liquid: bool) -> [u8; 3] {
         "CHERRY_LEAVES" => [0xF2, 0xB8, 0xC9],
         "AZALEA_LEAVES" => mul([0x48, 0x9B, 0x30], grass),
         "AZALEA" | "FLOWERING_AZALEA" => mul([0x48, 0x9B, 0x30], grass),
-        "PUMPKIN" => [0xC0, 0x76, 0x18],
-        "MELON" => [0x76, 0xB0, 0x2E],
+        "PUMPKIN" => [0xCC, 0x66, 0x33],
+        "MELON" => [0x66, 0x99, 0x33],
         "HAY_BLOCK" => [0xC2, 0xA4, 0x34],
         "CACTUS" => mul([0x0F, 0x8B, 0x0F], grass),
 
-        // Wood.
-        "OAK_LOG" | "SPRUCE_LOG" | "OAK_WOOD" | "SPRUCE_WOOD" => [0x67, 0x4C, 0x2B],
-        "BIRCH_LOG" | "BIRCH_WOOD" => [0xD7, 0xC9, 0x8D],
+        // Wood. v6.27.0 voxy bakes: oak_log (113,88,52) -> bin (2,2,1),
+        // spruce_log (60,39,18) -> (1,1,0), birch_log (224,223,219) -> (4,4,4).
+        "OAK_LOG" | "SPRUCE_WOOD" | "OAK_WOOD" => [0x66, 0x66, 0x33],
+        "SPRUCE_LOG" => [0x33, 0x33, 0x00],
+        "BIRCH_LOG" | "BIRCH_WOOD" => [0xCC, 0xCC, 0xCC],
         "JUNGLE_LOG" | "ACACIA_LOG" | "JUNGLE_WOOD" => [0x53, 0x43, 0x28],
         "DARK_OAK_LOG" | "DARK_OAK_WOOD" => [0x3B, 0x2A, 0x15],
         "MANGROVE_LOG" | "MANGROVE_WOOD" => [0x58, 0x38, 0x31],
@@ -174,7 +204,7 @@ pub fn surface_color(material: &str, biome: &str, liquid: bool) -> [u8; 3] {
         // Nether end-cases.
         "SOUL_SAND" => [0x51, 0x41, 0x3C],
         "SOUL_SOIL" => [0x4A, 0x38, 0x33],
-        "GLOWSTONE" => [0xC7, 0xA0, 0x68],
+        "GLOWSTONE" => [0xCC, 0x99, 0x66],
         "SHROOMLIGHT" => [0xE8, 0x8C, 0x3C],
 
         _ => keyword_fallback(material, biome),
@@ -194,10 +224,10 @@ fn keyword_fallback(material: &str, biome: &str) -> [u8; 3] {
         return water_tint(biome);
     }
     if m.contains("SNOW") {
-        return [0xF0, 0xFA, 0xFA];
+        return [0xFF, 0xFF, 0xFF];
     }
     if m.contains("ICE") {
-        return [0x7D, 0xAD, 0xFF];
+        return [0x99, 0xCC, 0xFF];
     }
     if m.contains("SAND") {
         return [0xDB, 0xD3, 0xA0];
@@ -209,7 +239,7 @@ fn keyword_fallback(material: &str, biome: &str) -> [u8; 3] {
         return [0x5B, 0x5B, 0x5F];
     }
     if m.contains("TERRACOTTA") {
-        return [0x98, 0x5E, 0x43];
+        return [0x99, 0x66, 0x33];
     }
     if m.contains("GLASS") || m.contains("AIR") {
         return [0x9A, 0xA7, 0xB0];
@@ -320,6 +350,61 @@ mod tests {
         assert!(
             sep(red) - sep(terr) > 40,
             "marker red must separate from terracotta"
+        );
+    }
+
+    #[test]
+    fn march_lattice_bins_match_voxy_bakes() {
+        // v6.27.0: the march decodes cell colors through the 6x6x6 lattice
+        // (bin*51), so only the BIN of each palette value reaches march-owned
+        // pixels. Each entry here pins the bin derived from the voxy texture
+        // bake (scripts/voxy_bake_table.py, 26.3 client.jar textures,
+        // linear-space mip average) — a regression of any of these bins
+        // re-opens the hot delta class on the >64 m terrain.
+        let bin = |v: u8| v / 51;
+        let expect = [
+            ("DIRT", (3, 2, 1)),
+            ("PODZOL", (2, 1, 0)),
+            ("MYCELIUM", (2, 2, 2)),
+            ("GRAVEL", (3, 3, 3)),
+            ("RED_SAND", (4, 2, 1)),
+            ("ANDESITE", (3, 3, 3)),
+            ("COBBLESTONE", (3, 3, 3)),
+            ("COBBLED_DEEPSLATE", (2, 2, 2)),
+            ("DEEPSLATE", (2, 2, 2)),
+            ("TUFF", (2, 2, 2)),
+            ("GRANITE", (3, 2, 2)),
+            ("DIORITE", (4, 4, 4)),
+            ("DRIPSTONE_BLOCK", (3, 2, 2)),
+            ("OBSIDIAN", (0, 0, 1)),
+            ("BEDROCK", (2, 2, 2)),
+            ("TERRACOTTA", (3, 2, 1)),
+            ("SNOW_BLOCK", (5, 5, 5)),
+            ("ICE", (3, 4, 5)),
+            ("OAK_LEAVES", (1, 2, 1)),
+            ("MOSS_BLOCK", (2, 2, 1)),
+            ("OAK_LOG", (2, 2, 1)),
+            ("SPRUCE_LOG", (1, 1, 0)),
+            ("BIRCH_LOG", (4, 4, 4)),
+            ("PUMPKIN", (4, 2, 1)),
+            ("MELON", (2, 3, 1)),
+            ("GLOWSTONE", (4, 3, 2)),
+            ("ORANGE_CONCRETE", (4, 2, 0)),
+            ("LIGHT_BLUE_CONCRETE", (1, 3, 4)),
+            ("PURPLE_CONCRETE", (2, 1, 3)),
+            ("GREEN_CONCRETE", (1, 2, 1)),
+        ];
+        for (m, want) in expect {
+            let c = surface_color(m, "PLAINS", false);
+            let got = (bin(c[0]), bin(c[1]), bin(c[2]));
+            assert_eq!(got, want, "{m} lattice bin drifted off the voxy bake");
+        }
+        // The transport-pinned marker index stays 2 (cword 0x0200).
+        let red = surface_color("RED_CONCRETE", "PLAINS", false);
+        assert_eq!(
+            bin(red[0]) + bin(red[1]) * 6 + bin(red[2]) * 36,
+            2,
+            "RED_CONCRETE color word index is transport-pinned"
         );
     }
 }

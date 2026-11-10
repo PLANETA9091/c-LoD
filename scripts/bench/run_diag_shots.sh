@@ -61,7 +61,7 @@ echo "pack reload settled"
 
 # Lock noon + clear weather (retry console until it echoes back).
 for i in 1 2 3; do
-  srv "gamerule doDaylightCycle false"
+  srv "gamerule advance_time false"
   srv "time set 6000"
   sleep 1
 done
