@@ -976,6 +976,9 @@ fn arm_stream(state: &Arc<State>, ox: f64, oz: f64) {
         // v6.7.1 MULTI-BEAT: the retry-beat count rides the config like the
         // rest of the edit protocol knobs (default EDIT_BEATS_DEFAULT).
         s.edit_beats = state.cfg.edit_beats;
+        // v6.29.0 SPARSE-WORD RE-BEAT: the no-reset fragile-word re-stream
+        // knob (default off; the parity world boots it on).
+        s.sparse_rebeat_on = state.cfg.sparse_rebeat;
         (s.side, s.cells())
     };
     let lap_ticks = cells / ((state.cfg.particles_per_tick as u64) / 8).max(1);

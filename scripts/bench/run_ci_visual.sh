@@ -1393,7 +1393,15 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # lighter than the voxy forest (data class, not render). The flag is
   # DROPPED from the boot; the knob stays shipped (default off, prod
   # byte-stable) as an instrument.
-  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false"
+  # v6.29.0 TREATMENT ARM: sparse_rebeat=true — the no-reset re-stream of
+  # fragile color words (<= 2 non-zero slot pairs) 40 ticks after their
+  # first stream; the client's OR-merge unions identical words and fills
+  # the fog-marginal dot losses that keep the rim (07/12) in the
+  # height-fallback paint (#356: the rim words SHIP and still paint
+  # fallback, q dead-flat through the tour — no feedback channel exists).
+  # READ (pre-registered): 07/12 flat_signed +60 -> ~0, exact above 90 =
+  # the first views toward 100%; worse -> rollback = drop the flag here.
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;sparse_rebeat=true"
   # v6.19.9 THE ROOT CAUSE (#302's maxima nailed it): parity stream max
   # cone 0, max zone 0 — the scheduler never sent ONE cell the whole
   # session — and the reason is the v6.4.2 regression class verbatim: THIS

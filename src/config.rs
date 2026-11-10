@@ -184,6 +184,14 @@ pub struct Config {
     /// chance while the miss probability falls as (1-p)^K. 0 = the v6.6.1
     /// single-shot edit; the cap keeps an episode bounded.
     pub edit_beats: u32,
+    /// v6.29.0 SPARSE-WORD RE-BEAT: one no-reset re-stream of fragile color
+    /// words (<= 2 non-zero slot pairs) SPARSE_REBEAT_DELAY_TICKS after
+    /// their first stream — the client's OR-merge unions identical words,
+    /// so the second stream's dots fill the first stream's losses (the rim
+    /// fog-marginal dot-loss class, #356 verdict). Pack SHA changes;
+    /// production stays sparse_rebeat=false until the CI A/B reads the rim
+    /// (flat_signed +60 -> ~0 = win).
+    pub sparse_rebeat: bool,
 }
 
 impl Default for Config {
@@ -233,6 +241,7 @@ impl Default for Config {
             fog_voxy: false,
             atmosphere: true,
             edit_beats: crate::stream::EDIT_BEATS_DEFAULT,
+            sparse_rebeat: false,
         }
     }
 }
@@ -414,6 +423,10 @@ impl Config {
         // v6.7.1: edit_beats — bounded retry beats per genuine edit.
         if let Some(v) = get("edit_beats").and_then(|v| v.parse::<u32>().ok()) {
             cfg.edit_beats = v.clamp(0, crate::stream::EDIT_BEATS_MAX);
+        }
+        // v6.29.0: sparse_rebeat — the no-reset fragile-word re-stream.
+        if let Some(v) = get("sparse_rebeat") {
+            cfg.sparse_rebeat = matches!(v.trim(), "1" | "true" | "yes" | "on");
         }
         cfg
     }
@@ -628,6 +641,19 @@ mod tests {
         assert_eq!(c.rescan_ticks, 5, "clamp to a sane minimum");
         let c = Config::parse("rescan_ticks=99999");
         assert_eq!(c.rescan_ticks, 2400);
+    }
+
+    #[test]
+    fn sparse_rebeat_knob() {
+        // v6.29.0: the no-reset fragile-word re-stream knob.
+        assert!(!Config::parse("").sparse_rebeat, "default off (prod byte-stable)");
+        assert!(Config::parse("sparse_rebeat=true").sparse_rebeat);
+        assert!(Config::parse("sparse_rebeat=1").sparse_rebeat);
+        assert!(!Config::parse("sparse_rebeat=false").sparse_rebeat);
+        let t = Config::parse(
+            "debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;sparse_rebeat=true",
+        );
+        assert!(t.sparse_rebeat && t.unfog && t.mesh_paint && !t.atmosphere);
     }
 
     #[test]
