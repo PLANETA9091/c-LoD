@@ -84,6 +84,13 @@ if [ -n "$EVDIR" ] && [ -f "$EVDIR/server.log" ]; then
   } > "$RD/time-audit.md" 2>/dev/null || true
 fi
 
+# v6.26.6: the per-position decode probe (settle-by-laps + tour dip-probe)
+# rides the feed — the dips/lottery read from transport state per view,
+# not from the table alone.
+if [ -n "$EVDIR" ] && [ -f "$EVDIR/view_probe.md" ]; then
+  cp "$EVDIR/view_probe.md" "$RD/view_probe.md" 2>/dev/null || true
+fi
+
 # Downscale the triptychs (1952x368 -> 1280 wide JPEG q85) and the heatmaps
 # (1280x720 grayscale -> JPEG q80); text reports ride as-is.
 SRC="$SRC" RD="$RD" python3 - <<'PYEOF' 2>/dev/null || cp "$SRC"/*.md "$SRC"/*.json "$RD"/ 2>/dev/null || true
@@ -122,6 +129,7 @@ PASS=$(python3 -c "import json;print(json.load(open('$RD/parity.json'))['pass'])
     echo "- ![${b}](parity-run-${RUN_NO}/${b})"
   done
   [ -f "$RD/time-audit.md" ] && echo "- time audit: [time-audit.md](parity-run-${RUN_NO}/time-audit.md) — the §7b console channel; the #332 night-matrix class made self-diagnosing (v6.25.5)"
+  [ -f "$RD/view_probe.md" ] && echo "- view probe: [view_probe.md](parity-run-${RUN_NO}/view_probe.md) — per-position q/settle state, the v6.26.6 settle-by-laps + dip-probe channel"
 } > "$RD/latest.md" 2>/dev/null || true
 
 # the index: every parity run, newest first, with its gate state

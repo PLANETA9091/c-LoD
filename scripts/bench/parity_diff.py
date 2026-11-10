@@ -116,10 +116,27 @@ def diagnose(pa, pb, m):
     # corruption that used to read as an ordinary FAIL with mean d ~110.
     # Named here, the table itself separates "renderer misses" from
     # "capture fell apart".
+    # v6.26.6 NEAR-BAND SIGNATURE: the d in [1,8] mass is the single
+    # biggest class on the 2026-11-10 tables (11_topdown carries 51.8 pp
+    # of near-band = exact 32 vs near 85.5) — content is RIGHT, values
+    # differ by 1-8 per channel. The SIGNED luminance delta of that band
+    # per gradient class (flat/edge) discriminates the mechanism from the
+    # feed alone: fog-mix tint rounding drifts flat+edge together with a
+    # distance-scaled bias; albedo/level-blend rounding shows on edges
+    # only; a global +1 quantization shows flat near zero.
+    nb = (m > 0) & (m <= 8)
+    nb_flat = nb & (grad < 3.0)
+    nb_edge = nb & (grad >= 8.0)
+    near_band = {
+        "near_px": int(nb.sum()),
+        "near_flat_signed": round(float(signed[nb_flat].mean()), 2) if nb_flat.any() else None,
+        "near_edge_signed": round(float(signed[nb_edge].mean()), 2) if nb_edge.any() else None,
+    }
     ours_black = round(100.0 * float((pb.max(axis=2) < 8).sum())
                        / (h * w), 2)
     return {"delta_hist": hist, "edge_vs_flat": edge_vs_flat,
-            "sky_share_hot": sky_share_hot, "ours_black_share": ours_black}
+            "sky_share_hot": sky_share_hot, "near_band": near_band,
+            "ours_black_share": ours_black}
 
 def analyze(a_path, b_path):
     a = Image.open(a_path).convert("RGB")

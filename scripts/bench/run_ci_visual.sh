@@ -1497,6 +1497,9 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # carry the outer disk into the tour's frames. Cost: 36 x 2 x 6 s =
   # +7.5 min of the 50-min job budget.
   PARITY_SWEEP_SETTLE="${PARITY_SWEEP_SETTLE:-6}"
+  PARITY_SWEEP_LAPS_MAX="${PARITY_SWEEP_LAPS_MAX:-12}"
+  SWEEP_PROBE="$SHOTS/parity/view_probe.md"
+  : > "$SWEEP_PROBE"
   # "yaw x z" — the inward pass reuses the position with yaw+180.
   SWEEPS=(
     "270 CX+144 CZ"      "270 CX+200 CZ"
@@ -1534,12 +1537,32 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
       srv "gamerule doDaylightCycle false"
       srv "time set noon"
       srv "tp Stepan $SX 160 $SZ $SWYAW 0"
-      sleep "$PARITY_SWEEP_SETTLE"
+      # v6.26.6 SETTLE-BY-LAPS (pre-registered post-#340 queue item 2): the
+      # fixed 6 s per position IS the sweeps-era lottery — the laps a VM
+      # decodes in 6 s varies with llvmpipe throughput (jump spread
+      # 04 +5.8..+24.2, dip spread 10 -6.0..-11.1 across same-code runs).
+      # Wait until the server's dirty queue STOPS MOVING for 3 consecutive
+      # 1 s polls (the eye-anchored decode for THIS position is done) —
+      # window >= PARITY_SWEEP_SETTLE, deadline PARITY_SWEEP_LAPS_MAX s per
+      # position (only unstable positions cost more; stable exit at 6 s).
+      SWQ_PRE=$(grep -oE "dirty [0-9]+ \(q [0-9]+\)" /tmp/server.log 2>/dev/null | tail -1 | grep -oE "[0-9]+" | tail -1); SWQ_PRE=${SWQ_PRE:-?}
+      SW_T0=$(date +%s); SW_STABLE=0; SWQ_PREV="$SWQ_PRE"; SWQ_NOW="$SWQ_PRE"
+      while true; do
+        sleep 1
+        SWQ_NOW=$(grep -oE "dirty [0-9]+ \(q [0-9]+\)" /tmp/server.log 2>/dev/null | tail -1 | grep -oE "[0-9]+" | tail -1); SWQ_NOW=${SWQ_NOW:-999999}
+        if [ "$SWQ_NOW" = "$SWQ_PREV" ]; then SW_STABLE=$((SW_STABLE + 1)); else SW_STABLE=0; fi
+        SWQ_PREV="$SWQ_NOW"
+        SW_EL=$(( $(date +%s) - SW_T0 ))
+        if [ "$SW_STABLE" -ge 3 ] && [ "$SW_EL" -ge "$PARITY_SWEEP_SETTLE" ]; then break; fi
+        if [ "$SW_EL" -ge "$PARITY_SWEEP_LAPS_MAX" ]; then break; fi
+      done
+      SWQ_END="$SWQ_NOW"; [ "$SWQ_END" = "999999" ] && SWQ_END="?"
+      echo "PROBE sweep pos $SX,$SZ yaw $SWYAW q $SWQ_PRE -> $SWQ_END settle ${SW_EL}s" >> "$SWEEP_PROBE"
       SW_N=$((SW_N + 1))
     done
     ct "coverage sweep $SW_N/72 done (pos $SX,$SZ both looks)"
   done
-  sum "- coverage sweeps: $SW_N eye passes = 36 positions (12 az x r144/200 + 12 off-az x r172, y=160) x 2 looks (outward+inward), settle $PARITY_SWEEP_SETTLE s, no shots — the v6.26.0 data-coverage lever; outer disk rho 32..256 decodes before the tour"
+  sum "- coverage sweeps: $SW_N eye passes = 36 positions (12 az x r144/200 + 12 off-az x r172, y=160) x 2 looks (outward+inward), settle-by-laps >= $PARITY_SWEEP_SETTLE s (q stable 3x1s), deadline $PARITY_SWEEP_LAPS_MAX s/pos, no shots — the v6.26.0 data-coverage lever + v6.26.6 lottery kill; probe rides parity/view_probe.md"
   # v6.26.2 DRAIN-SETTLE (#337/#338): the sweeps leave a decode backlog over the
   # steady band (session-3 tail q 22047/18375/22066 vs the parity-world steady
   # 7744..11246 — #336 pre-sweeps tails) and the tour used to start on the
@@ -1576,7 +1599,17 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     srv "gamerule doDaylightCycle false"
     srv "time set noon"
     srv "tp Stepan $PX $PY $PZ $PYAW $PPITCH"
+    # v6.26.6 DIP-PROBE (queue item 1): the tour settles a FIXED 30 s (the
+    # race guard) while the near-ring refresh competes with the sweep
+    # backlog — the dips read from the table, never from the transport
+    # state at the shot instant. Record the queue level around the settle:
+    # q still FALLING at shot time = the paint conveyor was mid-flight
+    # (FIFO/near-ring starvation class); q flat high = decode dead for
+    # this position (transport/erase class). Rides parity/view_probe.md.
+    TVQ_PRE=$(grep -oE "dirty [0-9]+ \(q [0-9]+\)" /tmp/server.log 2>/dev/null | tail -1 | grep -oE "[0-9]+" | tail -1); TVQ_PRE=${TVQ_PRE:-?}
     sleep "$PARITY_SETTLE"
+    TVQ_POST=$(grep -oE "dirty [0-9]+ \(q [0-9]+\)" /tmp/server.log 2>/dev/null | tail -1 | grep -oE "[0-9]+" | tail -1); TVQ_POST=${TVQ_POST:-?}
+    echo "PROBE tour $PNAME q $TVQ_PRE -> $TVQ_POST settle ${PARITY_SETTLE}s" >> "$SWEEP_PROBE"
     shot "parity/$PNAME" || true
     # v6.25.5 DAY GUARD: pitch >= 60 rows (11_topdown) hold no sky — skip.
     if [ "${PPITCH%%.*}" -lt 60 ] 2>/dev/null && ! day_ok "parity/$PNAME"; then
