@@ -199,6 +199,7 @@ pub fn build(cfg: &Config) -> Pack {
             unfog,
             cfg.unfog_debug,
             cfg.mesh_debug,
+            cfg.quant_ssao,
         );
     }
     build_zip(
@@ -209,6 +210,7 @@ pub fn build(cfg: &Config) -> Pack {
         unfog,
         cfg.unfog_debug,
         cfg.mesh_debug,
+        cfg.quant_ssao,
     )
 }
 
@@ -220,6 +222,7 @@ fn build_zip(
     unfog: bool,
     unfog_debug: bool,
     mesh_debug: bool,
+    quant_ssao: bool,
 ) -> Pack {
     let lod_terrain_json = substitute(lod_terrain_tpl, &map);
     let atmosphere_json = substitute(atmosphere_tpl, &map);
@@ -245,6 +248,19 @@ fn build_zip(
             .replace("// __MESH_DEBUG__", "#define MESH_DEBUG 1")
     } else {
         include_str!("../assets/glsl/lod_terrain.fsh").to_string()
+    };
+    // v6.26.3 QUANT SSAO (candidate (b)): floor()-quantize the march_ssao
+    // occluder probe height — the AO field becomes block-stepped like the
+    // voxy depth buffer. The swap target is the exact probe statement
+    // carrying the __QUANT_SSAO__ marker comment; the default build keeps
+    // the line byte-identical to the template (marker stays a comment).
+    let lod_terrain = if quant_ssao {
+        lod_terrain.replace(
+            "float hq = ground_at(q, 0.0, 0.0, sw, sok); // __QUANT_SSAO__",
+            "float hq = floor(ground_at(q, 0.0, 0.0, sw, sok)); // __QUANT_SSAO__",
+        )
+    } else {
+        lod_terrain
     };
     let clod_blit = include_str!("../assets/glsl/clod_blit.fsh");
     let atmosphere = include_str!("../assets/glsl/atmosphere.fsh");
@@ -650,6 +666,47 @@ mod tests {
             "marker must be replaced"
         );
         assert_ne!(dbg.sha1_hex, raw.sha1_hex);
+    }
+
+    #[test]
+    fn quant_ssao_swaps_the_probe_floor() {
+        // v6.26.3 candidate (b): quant_ssao=true floor()-quantizes the
+        // march_ssao occluder probe (block-stepped field like the voxy depth
+        // buffer). Default build keeps the probe line byte-identical to the
+        // template — the marker stays a comment, no floor() appears.
+        let fsh_of = |cfg: &Config| {
+            let p = build(cfg);
+            let fsh = String::from_utf8_lossy(
+                &zip_entries(&p.zip)
+                    .iter()
+                    .find(|(n, _)| n == "assets/clod/shaders/post/lod_terrain.fsh")
+                    .unwrap()
+                    .1,
+            )
+            .to_string();
+            (fsh, p.sha1_hex)
+        };
+        let (raw_fsh, raw_sha) = fsh_of(&Config::parse(""));
+        assert!(
+            !raw_fsh.contains("floor(ground_at(q"),
+            "quant probe leaked to prod"
+        );
+        assert!(
+            raw_fsh.contains("// __QUANT_SSAO__"),
+            "marker must stay in the default build"
+        );
+        let (q_fsh, q_sha) = fsh_of(&Config::parse("quant_ssao=true"));
+        assert!(
+            q_fsh.contains("float hq = floor(ground_at(q, 0.0, 0.0, sw, sok));"),
+            "quant probe must ship"
+        );
+        assert_ne!(q_sha, raw_sha, "pack SHA must change");
+        // Determinism on the new knob.
+        let (_, q_sha2) = fsh_of(&Config::parse("quant_ssao=true"));
+        assert_eq!(q_sha, q_sha2);
+        // The knob composes with the parity-world lanes (unfog + mesh_paint).
+        let (q2_fsh, _) = fsh_of(&Config::parse("unfog=true;mesh_paint=true;quant_ssao=true"));
+        assert!(q2_fsh.contains("float hq = floor(ground_at(q, 0.0, 0.0, sw, sok));"));
     }
 
     #[test]

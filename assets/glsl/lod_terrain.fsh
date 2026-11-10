@@ -408,7 +408,7 @@ float march_ssao(vec3 pos, vec3 n) {
         vec2 off = r * vec2(cos(theta), sin(theta));       // ssao.comp:118
         vec2 q = pos.xz + (t0.xz * off.x + t1.xz * off.y) * SSAO_RADIUS;
         bool sw; bool sok;
-        float hq = ground_at(q, 0.0, 0.0, sw, sok);
+        float hq = ground_at(q, 0.0, 0.0, sw, sok); // __QUANT_SSAO__ candidate (b): quant_ssao=true swaps this probe to floor(ground_at(...)) — a block-stepped occluder field like the voxy depth buffer (#338 diag: edge_signed > flat_signed on 11/13 vantages)
         if (!sok) {
             // no occluder data = voxy's depth==FAR skip (ssao.comp:193)
             continue;

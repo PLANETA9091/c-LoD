@@ -157,6 +157,14 @@ pub struct Config {
     /// 35% magenta engagement map on every vanilla-path pixel. CI evidence
     /// lane only (the mask8 boot); production stays mesh_debug=false.
     pub mesh_debug: bool,
+    /// v6.26.3 QUANT SSAO (parity candidate (b), diag-driven): floor()-quantize
+    /// the march_ssao occluder probe height so the AO field is block-stepped
+    /// like the voxy depth buffer it ports (lod_terrain.fsh __QUANT_SSAO__).
+    /// Evidence: #338 edge_signed > flat_signed on 11/13 vantages = voxy
+    /// darkens concave block steps, the smooth-heightfield march does not.
+    /// Pack SHA changes; production stays quant_ssao=false until the CI
+    /// pair verdict reads.
+    pub quant_ssao: bool,
     /// v6.7.1 MULTI-BEAT: retry beats a genuine edit gets after its release
     /// (total decode chances = edit_beats + 1). Each retry re-runs the
     /// hold→release sequence with a fresh reset electron, so a beat whose
@@ -210,6 +218,7 @@ impl Default for Config {
             unfog_debug: false,
             mesh_paint: false,
             mesh_debug: false,
+            quant_ssao: false,
             atmosphere: true,
             edit_beats: crate::stream::EDIT_BEATS_DEFAULT,
         }
@@ -376,6 +385,11 @@ impl Config {
         // march; evidence lane only.
         if let Some(v) = get("mesh_debug") {
             cfg.mesh_debug = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
+        // v6.26.3: quant_ssao=true — the block-stepped AO occluder probe
+        // (parity candidate (b), #338 diag edge>flat signature).
+        if let Some(v) = get("quant_ssao") {
+            cfg.quant_ssao = matches!(v.trim(), "1" | "true" | "yes" | "on");
         }
         // v6.18: atmosphere=false — never attach the veil effect.
         if let Some(v) = get("atmosphere") {
@@ -562,6 +576,11 @@ mod tests {
         assert!(!Config::parse("").mesh_debug);
         assert!(Config::parse("mesh_debug=true").mesh_debug);
         assert!(!Config::parse("mesh_debug=true").mesh_paint);
+        // v6.26.3: quant_ssao parses off-by-default and independently.
+        assert!(!Config::parse("").quant_ssao);
+        assert!(Config::parse("quant_ssao=true").quant_ssao);
+        assert!(Config::parse("quant_ssao=1").quant_ssao);
+        assert!(!Config::parse("quant_ssao=false").quant_ssao);
         // Combines with the unfog chain flag (the parity boot's full set).
         let c = Config::parse("debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false");
         assert!(c.mesh_paint && c.unfog && !c.debug_lens && !c.atmosphere);
