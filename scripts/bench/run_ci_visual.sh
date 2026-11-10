@@ -1384,7 +1384,13 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # (diag flat_signed -84/-90/-69 vs #338's -27/-11/-14, confounded by the
   # sweep lottery). The knob stays shipped (default off) as an instrument;
   # candidate (b) is dead for the class-3 residual on this evidence.
-  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false"
+  # v6.26.7 TREATMENT ARM: fog_voxy=true — the march fog ports the voxy blit
+  # fog (NormalRenderPipeline FOG_AND_FADE default: the endDistance cap at
+  # RD 8 = 0.541 of the 0..1024 pair; ours ran to 1.0 — the rim class reads
+  # ours LIGHTER, 07/12 flat_signed +61). A/B read vs the era band: 07/12
+  # flat_signed -> ~0 = win; aerial far-band mean d down. Rollback = drop the
+  # flag here (the knob stays in the pack as an instrument).
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;fog_voxy=true"
   # v6.19.9 THE ROOT CAUSE (#302's maxima nailed it): parity stream max
   # cone 0, max zone 0 — the scheduler never sent ONE cell the whole
   # session — and the reason is the v6.4.2 regression class verbatim: THIS

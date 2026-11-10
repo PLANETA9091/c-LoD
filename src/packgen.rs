@@ -200,6 +200,7 @@ pub fn build(cfg: &Config) -> Pack {
             cfg.unfog_debug,
             cfg.mesh_debug,
             cfg.quant_ssao,
+            cfg.fog_voxy,
         );
     }
     build_zip(
@@ -211,6 +212,7 @@ pub fn build(cfg: &Config) -> Pack {
         cfg.unfog_debug,
         cfg.mesh_debug,
         cfg.quant_ssao,
+        cfg.fog_voxy,
     )
 }
 
@@ -223,6 +225,7 @@ fn build_zip(
     unfog_debug: bool,
     mesh_debug: bool,
     quant_ssao: bool,
+    fog_voxy: bool,
 ) -> Pack {
     let lod_terrain_json = substitute(lod_terrain_tpl, &map);
     let atmosphere_json = substitute(atmosphere_tpl, &map);
@@ -258,6 +261,28 @@ fn build_zip(
         lod_terrain.replace(
             "float hq = ground_at(q, 0.0, 0.0, sw, sok); // __QUANT_SSAO__",
             "float hq = floor(ground_at(q, 0.0, 0.0, sw, sok)); // __QUANT_SSAO__",
+        )
+    } else {
+        lod_terrain
+    };
+    // v6.26.7 FOG VOXY EXACT (rim-class candidate: 07/12 flat_signed +61 = ours
+    // lighter — our far fog overshoots): the march fog mix ports voxy's blit
+    // fog — post/blit_texture_depth_cutout.frag (HAS_FOG block) +
+    // NormalRenderPipeline.java:99-107; FogMode default FOG_AND_FADE
+    // (VoxyConfig.getFogMode(): null -> FOG_AND_FADE; the CI voxy-config.json
+    // pins no fogMode) and getVanillaRenderDistance() = options RD * 16 (blocks,
+    // VoxyRenderSystem.java:441-443). The voxy lerp CLAMPS at a cap computed
+    // from endDistance = max(vanillaRD_blocks, 20*16) * sqrt(3) — at RD 8 the
+    // cap is 0.541 of the 0..1024 pair, our current line runs to 1.0. The env
+    // pair rides FogParams (the 26.3 overworld defaults 0..1024 — the static
+    // fallback, live-identical at noon parity); vanRD (fogRng.b) = RD blocks.
+    // d = length(point.xyz) (full 3D, rev3d) == our tHit basis. The default
+    // build keeps the fog line byte-identical to the template (the marker
+    // stays a comment; glslang sees the raw file).
+    let lod_terrain = if fog_voxy {
+        lod_terrain.replace(
+            "float fog = fogLive ? clamp(tHit * (1.0 / 1024.0), 0.0, 1.0) * fogOpacity : 0.0; // __FOG_VOXY__",
+            "// v6.26.7 FOG VOXY EXACT: voxy post/blit_texture_depth_cutout.frag (HAS_FOG)\n    // + NormalRenderPipeline.java:99-107, FogMode default FOG_AND_FADE.\n    float invEndFogDelta = 1.0 / (FogParams.y - FogParams.x);\n    float startDelta = -FogParams.x * invEndFogDelta;\n    float endDistance = max(vanRD, 320.0) * 1.7320508; // sqrt(3)\n    float fogCap = clamp(endDistance * invEndFogDelta + startDelta, 0.0, 1.0);\n    float fog = fogLive ? clamp(tHit * invEndFogDelta + startDelta, 0.0, fogCap) * fogOpacity : 0.0; // __FOG_VOXY__",
         )
     } else {
         lod_terrain
@@ -707,6 +732,56 @@ mod tests {
         // The knob composes with the parity-world lanes (unfog + mesh_paint).
         let (q2_fsh, _) = fsh_of(&Config::parse("unfog=true;mesh_paint=true;quant_ssao=true"));
         assert!(q2_fsh.contains("float hq = floor(ground_at(q, 0.0, 0.0, sw, sok));"));
+    }
+
+    #[test]
+    fn fog_voxy_swaps_the_fog_cap() {
+        // v6.26.7: fog_voxy=true ports the voxy blit fog — the env-pair lerp
+        // with the endDistance cap (max(vanRD,320)*sqrt(3); NormalRenderPipeline
+        // FOG_AND_FADE default, blit HAS_FOG block). Default build keeps the
+        // fog line byte-identical to the template (marker stays a comment).
+        let fsh_of = |cfg: &Config| {
+            let p = build(cfg);
+            let fsh = String::from_utf8_lossy(
+                &zip_entries(&p.zip)
+                    .iter()
+                    .find(|(n, _)| n == "assets/clod/shaders/post/lod_terrain.fsh")
+                    .unwrap()
+                    .1,
+            )
+            .to_string();
+            (fsh, p.sha1_hex)
+        };
+        let (raw_fsh, raw_sha) = fsh_of(&Config::parse(""));
+        assert!(!raw_fsh.contains("fogCap"), "voxy fog leaked to prod");
+        assert!(
+            raw_fsh.contains("// __FOG_VOXY__"),
+            "marker must stay in the default build"
+        );
+        let (fv_fsh, fv_sha) = fsh_of(&Config::parse("fog_voxy=true"));
+        assert!(
+            fv_fsh.contains(
+                "float fogCap = clamp(endDistance * invEndFogDelta + startDelta, 0.0, 1.0);"
+            ),
+            "voxy fog cap must ship"
+        );
+        assert!(
+            fv_fsh.contains(
+                "float fog = fogLive ? clamp(tHit * invEndFogDelta + startDelta, 0.0, fogCap) * fogOpacity : 0.0;"
+            ),
+            "the voxy lerp must replace the linear pair"
+        );
+        assert_ne!(fv_sha, raw_sha, "pack SHA must change");
+        // Determinism on the new knob.
+        let (_, fv_sha2) = fsh_of(&Config::parse("fog_voxy=true"));
+        assert_eq!(fv_sha, fv_sha2);
+        // The knob composes with the parity-world lanes.
+        let (fv2_fsh, _) = fsh_of(&Config::parse("unfog=true;mesh_paint=true;fog_voxy=true"));
+        assert!(fv2_fsh.contains("float fogCap"));
+        // And with the other shader knob: both patches land in one pack.
+        let (both_fsh, _) = fsh_of(&Config::parse("fog_voxy=true;quant_ssao=true"));
+        assert!(both_fsh.contains("float fogCap"));
+        assert!(both_fsh.contains("float hq = floor(ground_at(q"));
     }
 
     #[test]

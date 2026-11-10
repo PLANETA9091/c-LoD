@@ -165,6 +165,17 @@ pub struct Config {
     /// Pack SHA changes; production stays quant_ssao=false until the CI
     /// pair verdict reads.
     pub quant_ssao: bool,
+    /// v6.26.7 FOG VOXY EXACT (rim-class candidate): the march fog mix ports
+    /// voxy's blit fog — post/blit_texture_depth_cutout.frag (HAS_FOG block)
+    /// + NormalRenderPipeline.java:99-107, FogMode default FOG_AND_FADE
+    /// (VoxyConfig.getFogMode(): null -> FOG_AND_FADE; the CI voxy-config.json
+    /// pins no fogMode). The linear 0..1024 mix gains the voxy CAP:
+    /// endDistance = max(vanillaRD_blocks, 20*16) * sqrt(3) — at RD 8 the cap
+    /// is 0.541, ours today runs to 1.0 — the rim reads ours LIGHTER (07/12
+    /// flat_signed +61) because our far mix overshoots the reference.
+    /// Pack SHA changes; production stays fog_voxy=false until the CI A/B
+    /// reads the rim views (flat_signed +61 -> ~0 = win).
+    pub fog_voxy: bool,
     /// v6.7.1 MULTI-BEAT: retry beats a genuine edit gets after its release
     /// (total decode chances = edit_beats + 1). Each retry re-runs the
     /// hold→release sequence with a fresh reset electron, so a beat whose
@@ -219,6 +230,7 @@ impl Default for Config {
             mesh_paint: false,
             mesh_debug: false,
             quant_ssao: false,
+            fog_voxy: false,
             atmosphere: true,
             edit_beats: crate::stream::EDIT_BEATS_DEFAULT,
         }
@@ -390,6 +402,10 @@ impl Config {
         // (parity candidate (b), #338 diag edge>flat signature).
         if let Some(v) = get("quant_ssao") {
             cfg.quant_ssao = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
+        // v6.26.7: fog_voxy=true — the voxy-exact blit fog (the endDistance cap).
+        if let Some(v) = get("fog_voxy") {
+            cfg.fog_voxy = matches!(v.trim(), "1" | "true" | "yes" | "on");
         }
         // v6.18: atmosphere=false — never attach the veil effect.
         if let Some(v) = get("atmosphere") {
@@ -581,9 +597,17 @@ mod tests {
         assert!(Config::parse("quant_ssao=true").quant_ssao);
         assert!(Config::parse("quant_ssao=1").quant_ssao);
         assert!(!Config::parse("quant_ssao=false").quant_ssao);
+        // v6.26.7: fog_voxy parses off-by-default and independently.
+        assert!(!Config::parse("").fog_voxy);
+        assert!(Config::parse("fog_voxy=true").fog_voxy);
+        assert!(Config::parse("fog_voxy=1").fog_voxy);
+        assert!(!Config::parse("fog_voxy=false").fog_voxy);
         // Combines with the unfog chain flag (the parity boot's full set).
         let c = Config::parse("debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false");
         assert!(c.mesh_paint && c.unfog && !c.debug_lens && !c.atmosphere);
+        // v6.26.7: the treatment arm's full boot set parses.
+        let t = Config::parse("debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;fog_voxy=true");
+        assert!(t.fog_voxy && t.unfog && t.mesh_paint && !t.atmosphere);
     }
 
     #[test]

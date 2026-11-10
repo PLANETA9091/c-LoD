@@ -840,7 +840,7 @@ void main() {
     // opacity. Voxy's own finish() applies the same dimension fog on top
     // of its march — 150 m forest: mix 0.15 (dark, matches), far summits:
     // 0.3-0.7 (fogged, matches).
-    float fog = fogLive ? clamp(tHit * (1.0 / 1024.0), 0.0, 1.0) * fogOpacity : 0.0;
+    float fog = fogLive ? clamp(tHit * (1.0 / 1024.0), 0.0, 1.0) * fogOpacity : 0.0; // __FOG_VOXY__
     lit = mix(lit, fogTint, fog);
 
     // ---- FADE: Voxy FogMode.FADE, MODE=1 (xz only), last 10% ------------
