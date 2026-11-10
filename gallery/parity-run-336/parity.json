@@ -1,0 +1,110 @@
+{
+ "pairs": {
+  "00_summit_rise": {
+   "exact_pct": 75.3618,
+   "near_pct": 78.779,
+   "mean_delta": 23.128,
+   "max_delta": 210,
+   "px_total": 921600,
+   "pass": false
+  },
+  "01_aerial_west": {
+   "exact_pct": 57.853,
+   "near_pct": 68.0285,
+   "mean_delta": 23.104,
+   "max_delta": 248,
+   "px_total": 921600,
+   "pass": false
+  },
+  "02_aerial_south": {
+   "exact_pct": 49.075,
+   "near_pct": 66.1893,
+   "mean_delta": 31.78,
+   "max_delta": 253,
+   "px_total": 921600,
+   "pass": false
+  },
+  "03_aerial_north": {
+   "exact_pct": 53.9698,
+   "near_pct": 71.3617,
+   "mean_delta": 18.457,
+   "max_delta": 253,
+   "px_total": 921600,
+   "pass": false
+  },
+  "04_aerial_east": {
+   "exact_pct": 43.8724,
+   "near_pct": 52.5969,
+   "mean_delta": 48.426,
+   "max_delta": 254,
+   "px_total": 921600,
+   "pass": false
+  },
+  "05_oblique": {
+   "exact_pct": 91.7123,
+   "near_pct": 96.7542,
+   "mean_delta": 1.905,
+   "max_delta": 169,
+   "px_total": 921600,
+   "pass": false
+  },
+  "06_ground_west": {
+   "exact_pct": 42.5409,
+   "near_pct": 62.4524,
+   "mean_delta": 26.457,
+   "max_delta": 249,
+   "px_total": 921600,
+   "pass": false
+  },
+  "07_far_north": {
+   "exact_pct": 85.5567,
+   "near_pct": 91.5943,
+   "mean_delta": 7.971,
+   "max_delta": 249,
+   "px_total": 921600,
+   "pass": false
+  },
+  "08_back_inside": {
+   "exact_pct": 59.2651,
+   "near_pct": 74.8403,
+   "mean_delta": 22.113,
+   "max_delta": 238,
+   "px_total": 921600,
+   "pass": false
+  },
+  "09_after_mesh": {
+   "exact_pct": 53.1272,
+   "near_pct": 63.6633,
+   "mean_delta": 28.353,
+   "max_delta": 237,
+   "px_total": 921600,
+   "pass": false
+  },
+  "10_marker_ray": {
+   "exact_pct": 58.2462,
+   "near_pct": 70.2447,
+   "mean_delta": 26.639,
+   "max_delta": 238,
+   "px_total": 921600,
+   "pass": false
+  },
+  "11_topdown": {
+   "exact_pct": 31.4495,
+   "near_pct": 82.9514,
+   "mean_delta": 4.964,
+   "max_delta": 216,
+   "px_total": 921600,
+   "pass": false
+  },
+  "12_far_north_re": {
+   "exact_pct": 85.5233,
+   "near_pct": 91.5829,
+   "mean_delta": 8.057,
+   "max_delta": 246,
+   "px_total": 921600,
+   "pass": false
+  }
+ },
+ "missing": [],
+ "pass": false
+}
