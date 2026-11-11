@@ -1,17 +1,24 @@
-# voxy reference shots — run 43030665084 (#374) 2026-11-11T13:56:03Z
+# voxy reference run 43034482652 (#375) — FAILURE (no shots) 2026-11-11T15:05:01Z
 
-13 shots in run-43030665084/ (1280 px JPEG).
+The job produced zero screenshots (shots dir exists: NO, sha 9a230ff).
+See run-43034482652/ for client.log, server.log, steps.log and leg.log (tails below).
 
-- ![00_summit_rise.jpg](run-43030665084/00_summit_rise.jpg)
-- ![01_aerial_west.jpg](run-43030665084/01_aerial_west.jpg)
-- ![02_aerial_south.jpg](run-43030665084/02_aerial_south.jpg)
-- ![03_aerial_north.jpg](run-43030665084/03_aerial_north.jpg)
-- ![04_aerial_east.jpg](run-43030665084/04_aerial_east.jpg)
-- ![05_oblique.jpg](run-43030665084/05_oblique.jpg)
-- ![06_ground_west.jpg](run-43030665084/06_ground_west.jpg)
-- ![07_far_north.jpg](run-43030665084/07_far_north.jpg)
-- ![08_back_inside.jpg](run-43030665084/08_back_inside.jpg)
-- ![09_after_mesh.jpg](run-43030665084/09_after_mesh.jpg)
-- ![10_marker_ray.jpg](run-43030665084/10_marker_ray.jpg)
-- ![11_topdown.jpg](run-43030665084/11_topdown.jpg)
-- ![12_far_north_re.jpg](run-43030665084/12_far_north_re.jpg)
+## steps.log tail (per-step trace written by the job steps)
+```
+2026-11-11T14:01:32Z X11+GL+pip start
+```
+
+## client.log tail
+```
+(no client log)
+```
+
+## server.log tail
+```
+(no server log)
+```
+
+## voxy-leg.log tail (the leg's own stdout/stderr)
+```
+(no leg log — the death predates the v6.8.6 tee)
+```
