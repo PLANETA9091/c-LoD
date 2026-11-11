@@ -1,0 +1,461 @@
+{
+ "pairs": {
+  "00_summit_rise": {
+   "exact_pct": 90.3018,
+   "near_pct": 93.6515,
+   "mean_delta": 5.162,
+   "max_delta": 210,
+   "px_total": 921600,
+   "pass": false,
+   "ours_src": "00_summit_rise.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 1.966,
+     "2-4": 0.975,
+     "4-8": 0.381,
+     "8-16": 0.154,
+     "16-32": 0.357,
+     "32-64": 1.052,
+     "64-inf": 4.813
+    },
+    "edge_vs_flat": {
+     "hot_total": 58508,
+     "flat_px": 43890,
+     "flat_signed": -44.41,
+     "edge_px": 8671,
+     "edge_signed": 23.16,
+     "mid_px": 5947
+    },
+    "sky_share_hot": 0.0,
+    "near_band": {
+     "near_px": 30871,
+     "near_flat_signed": 0.01,
+     "near_edge_signed": 0.16
+    },
+    "ours_black_share": 0.0
+   }
+  },
+  "01_aerial_west": {
+   "exact_pct": 59.3832,
+   "near_pct": 70.4185,
+   "mean_delta": 21.716,
+   "max_delta": 248,
+   "px_total": 921600,
+   "pass": false,
+   "ours_src": "01_aerial_west.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 2.867,
+     "2-4": 3.629,
+     "4-8": 3.944,
+     "8-16": 4.077,
+     "16-32": 5.899,
+     "32-64": 5.072,
+     "64-inf": 15.129
+    },
+    "edge_vs_flat": {
+     "hot_total": 272623,
+     "flat_px": 67528,
+     "flat_signed": 50.03,
+     "edge_px": 104902,
+     "edge_signed": 57.07,
+     "mid_px": 100193
+    },
+    "sky_share_hot": 0.971,
+    "near_band": {
+     "near_px": 101701,
+     "near_flat_signed": 0.11,
+     "near_edge_signed": -0.01
+    },
+    "ours_black_share": 0.21
+   }
+  },
+  "02_aerial_south": {
+   "exact_pct": 65.742,
+   "near_pct": 83.0649,
+   "mean_delta": 10.222,
+   "max_delta": 253,
+   "px_total": 921600,
+   "pass": false,
+   "ours_src": "02_aerial_south.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 3.777,
+     "2-4": 6.699,
+     "4-8": 6.269,
+     "8-16": 3.688,
+     "16-32": 4.007,
+     "32-64": 2.682,
+     "64-inf": 7.136
+    },
+    "edge_vs_flat": {
+     "hot_total": 156074,
+     "flat_px": 51136,
+     "flat_signed": 42.51,
+     "edge_px": 51819,
+     "edge_signed": 37.48,
+     "mid_px": 53119
+    },
+    "sky_share_hot": 7.02,
+    "near_band": {
+     "near_px": 159648,
+     "near_flat_signed": -0.05,
+     "near_edge_signed": -0.28
+    },
+    "ours_black_share": 0.18
+   }
+  },
+  "03_aerial_north": {
+   "exact_pct": 54.2156,
+   "near_pct": 72.5609,
+   "mean_delta": 15.874,
+   "max_delta": 253,
+   "px_total": 921600,
+   "pass": false,
+   "ours_src": "03_aerial_north.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 4.223,
+     "2-4": 6.738,
+     "4-8": 6.634,
+     "8-16": 4.662,
+     "16-32": 5.77,
+     "32-64": 6.058,
+     "64-inf": 11.7
+    },
+    "edge_vs_flat": {
+     "hot_total": 252879,
+     "flat_px": 91523,
+     "flat_signed": 23.04,
+     "edge_px": 77574,
+     "edge_signed": 33.29,
+     "mid_px": 83782
+    },
+    "sky_share_hot": 4.347,
+    "near_band": {
+     "near_px": 169070,
+     "near_flat_signed": -0.45,
+     "near_edge_signed": -0.21
+    },
+    "ours_black_share": 0.32
+   }
+  },
+  "04_aerial_east": {
+   "exact_pct": 60.0583,
+   "near_pct": 68.1867,
+   "mean_delta": 28.78,
+   "max_delta": 254,
+   "px_total": 921600,
+   "pass": false,
+   "ours_src": "04_aerial_east.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 2.22,
+     "2-4": 2.576,
+     "4-8": 2.795,
+     "8-16": 2.976,
+     "16-32": 2.853,
+     "32-64": 3.75,
+     "64-inf": 22.771
+    },
+    "edge_vs_flat": {
+     "hot_total": 293191,
+     "flat_px": 211524,
+     "flat_signed": -59.53,
+     "edge_px": 32723,
+     "edge_signed": 31.05,
+     "mid_px": 48944
+    },
+    "sky_share_hot": 4.893,
+    "near_band": {
+     "near_px": 74912,
+     "near_flat_signed": 0.5,
+     "near_edge_signed": -0.06
+    },
+    "ours_black_share": 0.38
+   }
+  },
+  "05_oblique": {
+   "exact_pct": 93.8559,
+   "near_pct": 98.6363,
+   "mean_delta": 0.431,
+   "max_delta": 169,
+   "px_total": 921600,
+   "pass": false,
+   "ours_src": "05_oblique.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 1.961,
+     "2-4": 1.433,
+     "4-8": 1.276,
+     "8-16": 0.537,
+     "16-32": 0.631,
+     "32-64": 0.182,
+     "64-inf": 0.123
+    },
+    "edge_vs_flat": {
+     "hot_total": 12568,
+     "flat_px": 4836,
+     "flat_signed": -4.68,
+     "edge_px": 5396,
+     "edge_signed": 16.22,
+     "mid_px": 2336
+    },
+    "sky_share_hot": 55.649,
+    "near_band": {
+     "near_px": 44056,
+     "near_flat_signed": 0.0,
+     "near_edge_signed": -0.29
+    },
+    "ours_black_share": 0.0
+   }
+  },
+  "06_ground_west": {
+   "exact_pct": 32.2561,
+   "near_pct": 64.0636,
+   "mean_delta": 26.126,
+   "max_delta": 249,
+   "px_total": 921600,
+   "pass": false,
+   "ours_src": "06_ground_west.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 11.736,
+     "2-4": 9.053,
+     "4-8": 9.506,
+     "8-16": 7.951,
+     "16-32": 6.726,
+     "32-64": 4.803,
+     "64-inf": 17.969
+    },
+    "edge_vs_flat": {
+     "hot_total": 331190,
+     "flat_px": 177806,
+     "flat_signed": -58.15,
+     "edge_px": 72924,
+     "edge_signed": 21.0,
+     "mid_px": 80460
+    },
+    "sky_share_hot": 7.955,
+    "near_band": {
+     "near_px": 293138,
+     "near_flat_signed": 1.27,
+     "near_edge_signed": -0.1
+    },
+    "ours_black_share": 0.67
+   }
+  },
+  "07_far_north": {
+   "exact_pct": 85.4064,
+   "near_pct": 90.2542,
+   "mean_delta": 8.119,
+   "max_delta": 248,
+   "px_total": 921600,
+   "pass": false,
+   "ours_src": "07_far_north.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 1.912,
+     "2-4": 1.548,
+     "4-8": 1.188,
+     "8-16": 0.922,
+     "16-32": 0.931,
+     "32-64": 1.41,
+     "64-inf": 6.682
+    },
+    "edge_vs_flat": {
+     "hot_total": 89817,
+     "flat_px": 22607,
+     "flat_signed": 60.61,
+     "edge_px": 42121,
+     "edge_signed": 66.4,
+     "mid_px": 25089
+    },
+    "sky_share_hot": 0.0,
+    "near_band": {
+     "near_px": 44678,
+     "near_flat_signed": -0.44,
+     "near_edge_signed": -0.18
+    },
+    "ours_black_share": 0.0
+   }
+  },
+  "08_back_inside": {
+   "exact_pct": 58.9306,
+   "near_pct": 75.7258,
+   "mean_delta": 22.359,
+   "max_delta": 237,
+   "px_total": 921600,
+   "pass": false,
+   "ours_src": "08_back_inside.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 7.505,
+     "2-4": 5.537,
+     "4-8": 3.427,
+     "8-16": 1.947,
+     "16-32": 3.335,
+     "32-64": 3.231,
+     "64-inf": 16.087
+    },
+    "edge_vs_flat": {
+     "hot_total": 223711,
+     "flat_px": 99160,
+     "flat_signed": -30.16,
+     "edge_px": 63052,
+     "edge_signed": 54.61,
+     "mid_px": 61499
+    },
+    "sky_share_hot": 2.468,
+    "near_band": {
+     "near_px": 154785,
+     "near_flat_signed": -0.33,
+     "near_edge_signed": -0.11
+    },
+    "ours_black_share": 1.31
+   }
+  },
+  "09_after_mesh": {
+   "exact_pct": 49.5968,
+   "near_pct": 60.2936,
+   "mean_delta": 30.485,
+   "max_delta": 233,
+   "px_total": 921600,
+   "pass": false,
+   "ours_src": "09_after_mesh.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 2.663,
+     "2-4": 3.465,
+     "4-8": 3.942,
+     "8-16": 4.363,
+     "16-32": 6.539,
+     "32-64": 6.399,
+     "64-inf": 23.032
+    },
+    "edge_vs_flat": {
+     "hot_total": 365934,
+     "flat_px": 156525,
+     "flat_signed": -39.08,
+     "edge_px": 107151,
+     "edge_signed": 46.75,
+     "mid_px": 102258
+    },
+    "sky_share_hot": 3.582,
+    "near_band": {
+     "near_px": 98582,
+     "near_flat_signed": 0.08,
+     "near_edge_signed": 0.0
+    },
+    "ours_black_share": 0.21
+   }
+  },
+  "10_marker_ray": {
+   "exact_pct": 47.0054,
+   "near_pct": 63.0781,
+   "mean_delta": 34.191,
+   "max_delta": 236,
+   "px_total": 921600,
+   "pass": false,
+   "ours_src": "10_marker_ray.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 10.078,
+     "2-4": 4.293,
+     "4-8": 1.542,
+     "8-16": 1.25,
+     "16-32": 2.9,
+     "32-64": 4.624,
+     "64-inf": 28.308
+    },
+    "edge_vs_flat": {
+     "hot_total": 340272,
+     "flat_px": 235627,
+     "flat_signed": -56.77,
+     "edge_px": 53366,
+     "edge_signed": 53.85,
+     "mid_px": 51279
+    },
+    "sky_share_hot": 5.328,
+    "near_band": {
+     "near_px": 148126,
+     "near_flat_signed": 0.32,
+     "near_edge_signed": -0.17
+    },
+    "ours_black_share": 0.3
+   }
+  },
+  "11_topdown": {
+   "exact_pct": 32.1609,
+   "near_pct": 85.6291,
+   "mean_delta": 4.296,
+   "max_delta": 223,
+   "px_total": 921600,
+   "pass": false,
+   "ours_src": "11_topdown.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 17.942,
+     "2-4": 17.996,
+     "4-8": 15.958,
+     "8-16": 6.598,
+     "16-32": 5.521,
+     "32-64": 3.217,
+     "64-inf": 0.607
+    },
+    "edge_vs_flat": {
+     "hot_total": 132442,
+     "flat_px": 29014,
+     "flat_signed": 4.82,
+     "edge_px": 56640,
+     "edge_signed": 11.89,
+     "mid_px": 46788
+    },
+    "sky_share_hot": 22.838,
+    "near_band": {
+     "near_px": 492763,
+     "near_flat_signed": -0.12,
+     "near_edge_signed": -0.09
+    },
+    "ours_black_share": 0.0
+   }
+  },
+  "12_far_north_re": {
+   "exact_pct": 85.4058,
+   "near_pct": 90.2483,
+   "mean_delta": 8.128,
+   "max_delta": 245,
+   "px_total": 921600,
+   "pass": false,
+   "ours_src": "12_far_north_re.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 1.907,
+     "2-4": 1.548,
+     "4-8": 1.188,
+     "8-16": 0.923,
+     "16-32": 0.93,
+     "32-64": 1.401,
+     "64-inf": 6.698
+    },
+    "edge_vs_flat": {
+     "hot_total": 89872,
+     "flat_px": 22955,
+     "flat_signed": 60.8,
+     "edge_px": 42047,
+     "edge_signed": 66.41,
+     "mid_px": 24870
+    },
+    "sky_share_hot": 0.0,
+    "near_band": {
+     "near_px": 44628,
+     "near_flat_signed": -0.45,
+     "near_edge_signed": -0.18
+    },
+    "ours_black_share": 0.0
+   }
+  }
+ },
+ "missing": [],
+ "pass": false
+}
