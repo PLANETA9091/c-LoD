@@ -1086,6 +1086,13 @@ NOW_JOIN=$(join_count)
 [ "$FOUND1" = "1" ] && [ "$NOW_JOIN" = "$JOIN1" ] \
   && echo "LEG 1 PASS: the edit reached the LOD paint with zero relogs" \
   && sum "- **LEG 1 PASS** (zero relogs)"
+# v6.31.1 VERDICT LEGIBILITY: a 24-probe sweep with red=0 everywhere used to
+# end SILENTLY (no LEG 1 PASS line, no fail) — #256..#368 (~110 runs) carried
+# a dead leg-1 that only the final conjunction revealed, and the feed could
+# not say WHERE the gate died. Name it.
+if [ "$FOUND1" = "0" ]; then
+  fail "leg-1 never saw the marker in 24 probes (red < $MIN_PROBE everywhere) — the edit never reached the LOD paint; this failure was SILENT before v6.31.1"
+fi
 # v6.6.1 forensics (second beat): the scheduler state after the probe loop —
 # did the hold/release window run during the probes (ewin, dirty_streams).
 echo "### stream diag after probes:" >> "$SUMMARY"

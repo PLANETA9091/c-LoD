@@ -82,9 +82,25 @@ pub const SUB_PER_CELL: f64 = 4.0;
 /// reset electron keeps its midway slot inside the rank (data captures
 /// probe only the rank planes, the reset pass only the midway — they can
 /// never see each other's dots).
-pub const LO_TIERS: [f64; 4] = [80.0, 140.0, 200.0, 260.0];
-pub const HI_TIERS: [f64; 4] = [120.0, 180.0, 240.0, 300.0];
-pub const RS_TIERS: [f64; 4] = [100.0, 160.0, 220.0, 280.0];
+///
+/// v6.31.0 RANK-2 REPACK (200/240/220 -> 180/220/200, surfaces 139..178):
+/// the CI leg-1 marker (5x111x5 red_concrete, surface 170, FILL_Y1) stands
+/// 74-76 m from the y=151.6 tower eye; the old rank-2 height plane y=240
+/// measured 115-116 m 3D — past ZONE_FAR 112 — so spawn_visible refused
+/// every marker height dot and the tower never decoded (red=0 in every
+/// leg-1 probe since the tiers landed; the last LEG 1 PASS predates
+/// v6.22). 180/220/200 keeps all three words inside the decode band from
+/// that eye (80.7 / 101.9 / 89.7 m worst-cell; the #365-#368 rim-mask
+/// verdicts prove color words decode out to ~108 m from a ground eye).
+/// The 179+ class — the §7b summits 185/190 — moves to rank 3 with the
+/// EXACT old rank-2 planes (200/240/220): byte-identical summit spawns.
+/// Rank 0 (the §5b worlds) and rank 1 are untouched; surfaces above 198
+/// saturate at rank 3 whose planes now sit below their surface — hidden
+/// dots, the same never-decodes outcome the old 260/300 saturation had
+/// (spawn-gated to invisibility), with zero visible garbage either way.
+pub const LO_TIERS: [f64; 4] = [80.0, 140.0, 180.0, 200.0];
+pub const HI_TIERS: [f64; 4] = [120.0, 180.0, 220.0, 240.0];
+pub const RS_TIERS: [f64; 4] = [100.0, 160.0, 200.0, 220.0];
 /// The intra-cell step guard: a word's 4 dots spread +-0.75 blocks around
 /// the sampled surface point (sub = cell/4, cell = 2) while ONE sampled
 /// height stands for the whole cell — a dot at or below ANY nearby column
@@ -1942,10 +1958,61 @@ mod tests {
         assert_eq!(tier_rank(80), 1);
         assert_eq!(tier_rank(137), 1); // 139 < 140
         assert_eq!(tier_rank(138), 2); // 140 is NOT strictly above the plane
-        assert_eq!(tier_rank(190), 2); // the §7b summits (185..190)
-        assert_eq!(tier_rank(197), 2); // 199 < 200
+                                       // v6.31.0: rank 2 = 180/220/200 (the marker class, surfaces 139..178);
+                                       // rank 3 = the OLD rank-2 planes 200/240/220 (surfaces 179..198 —
+                                       // the §7b summits keep byte-identical spawns under a new index).
+        assert_eq!(tier_rank(177), 2); // 179 < 180
+        assert_eq!(tier_rank(178), 3); // 180 is NOT strictly above the plane
+        assert_eq!(tier_rank(190), 3); // the §7b summits (185..190)
+        assert_eq!(tier_rank(197), 3); // 199 < 200
         assert_eq!(tier_rank(198), 3);
-        assert_eq!(tier_rank(1000), 3); // saturated: dead dots at most
+        assert_eq!(tier_rank(1000), 3); // saturated: hidden dots at most
+    }
+
+    /// v6.31.0: the CI leg-1 marker class must be DELIVERABLE. Surface 170
+    /// (the 5x111x5 red_concrete fill, FILL_Y1=170) seen from the y=151.6
+    /// tower eye at 74-76 m horizontal: every word plane of the cell's rank
+    /// must sit inside the decode band [CULL_RADIUS, ZONE_FAR] (3D) for the
+    /// worst cell center — the v6.22 ladder put the height word at y=240
+    /// (115-116 m) and spawn_visible refused it, so the tower never decoded
+    /// (red=0 in every leg-1 probe since the tiers landed).
+    #[test]
+    fn marker_rank_keeps_all_three_words_inside_the_decode_band() {
+        assert_eq!(tier_rank(170), 2, "the marker surface must ride rank 2");
+        let rank = tier_rank(170);
+        let (ex, ey, ez) = (-1004.5, 151.62, 796.5);
+        let cells = [
+            (-931.0, 795.0),
+            (-929.0, 795.0),
+            (-931.0, 797.0),
+            (-929.0, 797.0),
+        ];
+        for (name, plane) in [
+            ("LO", LO_TIERS[rank]),
+            ("HI", HI_TIERS[rank]),
+            ("RS", RS_TIERS[rank]),
+        ] {
+            // a dot at or below the surface never renders: strictly above.
+            assert!(
+                plane > 170.0 + TIER_MARGIN,
+                "{name} plane {plane} must clear the surface"
+            );
+            let worst = cells
+                .iter()
+                .map(|&(cx, cz)| {
+                    ((cx - ex) * (cx - ex) + (plane - ey) * (plane - ey) + (cz - ez) * (cz - ez))
+                        .sqrt()
+                })
+                .fold(0.0_f64, f64::max);
+            assert!(
+                worst <= ZONE_FAR - 2.0,
+                "{name} plane {plane} at {worst} m exceeds the rank-probe band"
+            );
+            assert!(
+                worst >= CULL_RADIUS,
+                "{name} plane {plane} at {worst} m sits inside the cull bubble"
+            );
+        }
     }
 
     #[test]

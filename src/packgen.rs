@@ -456,7 +456,7 @@ mod tests {
             "tier tokens must be substituted"
         );
         assert!(
-            blob.contains("80.0, 140.0, 200.0, 260.0"),
+            blob.contains("80.0, 140.0, 180.0, 200.0"),
             "the tier ladder must ride the pack (ClodTiers UBO)"
         );
         assert!(blob.contains("clod_h_b"), "stream targets must be present");
