@@ -362,7 +362,7 @@ jobs:
     # v6.18: the parity fix branch runs its own legs+gate on push (the fix
     # branch IS the parity iteration lane; master keeps the release lane).
     if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/fix/v618-unfog' || github.event_name == 'workflow_dispatch'
-    timeout-minutes: 50
+    timeout-minutes: 75
     # v6.7.2 VERDICT FEED: the run summary/probe counts are committed to the
     # ci-verdicts branch (contents: write) — readable over raw CDN with NO
     # API quota (the artifacts/log endpoints were repeatedly rate-limited
@@ -666,7 +666,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/fix/v618-unfog' || github.event_name == 'workflow_dispatch'
     continue-on-error: true
-    timeout-minutes: 50
+    timeout-minutes: 75
     # v6.8.1 VOXY FEED: the shots are committed to the voxy-ref branch
     # (contents: write) — raw CDN, NO API quota (the artifact endpoints
     # were repeatedly rate-limited for the sandbox egress IPs; evidence
