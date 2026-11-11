@@ -81,7 +81,12 @@ LENS_ZERO_NOTED=0   # v6.7.3: say "dead pipeline" ONCE, not 24 times
 # publicly — dump the whole decision timeline there, always.
 SUMMARY="${GITHUB_STEP_SUMMARY:-/tmp/step_summary.md}"
 touch "$SUMMARY"
-sum() { echo "$*" >> "$SUMMARY"; }
+# v6.30.4 THE LIVE SUMMARY FLUSH: the verdict bot reads $SHOTS/summary.md
+# and used to see NOTHING from a run that died anywhere before its final cp
+# — six silent runs (#362-#367) left the feed blind to every death point.
+# The flush makes the feed's summary a LIVE snapshot: whatever kills the
+# run, the lines appended so far are already on disk for the always() bot.
+sum() { echo "$*" >> "$SUMMARY"; cp -f "$SUMMARY" "$SHOTS/summary.md" 2>/dev/null || true; }
 
 fail() { echo "FAIL: $*"; FAILURES=$((FAILURES + 1)); sum "- **FAIL:** $*"; }
 note() { echo "--- $*"; }
