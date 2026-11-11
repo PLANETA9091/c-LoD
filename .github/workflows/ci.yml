@@ -483,8 +483,44 @@ jobs:
             /tmp/client.log
             /tmp/server.log
           if-no-files-found: warn
-      - name: Publish verdict feed (ci-verdicts branch)
+      - name: Upload verdict bundle (summary + evidence, for the verdict job)
         if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          # v6.31.2 THE VERDICT OUTLIVES THE TIMEOUT: the whole shots dir
+          # rides an artifact (a few MB, retention 3 days) and the separate
+          # `verdict` job publishes from it. The inline publish ran with
+          # if: always() INSIDE this job — the job-level timeout-minutes
+          # killed it all the same (#362/#363: two runs, zero verdicts, the
+          # bot died with the 50-minute ceiling). The live summary flush
+          # (v6.30.4) guarantees whatever was appended before the kill is
+          # on disk here.
+          name: ci-visual-verdict-${{ github.run_id }}
+          path: /home/runner/mc-test/shots/ci-visual/
+          if-no-files-found: ignore
+          retention-days: 3
+
+  verdict:
+    name: verdict feed (publishes even a timed-out visual run)
+    # v6.31.2: needs + always — the publish survives ANY visual death
+    # (failure, timeout, cancel). Its own timeout is 10 minutes: the
+    # assemble+commit+push retry (5 attempts) fits with room to spare.
+    needs: visual
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download the visual verdict bundle
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-visual-verdict-${{ github.run_id }}
+          path: /home/runner/mc-test/shots/ci-visual
+      - name: Publish verdict feed (ci-verdicts branch)
         env:
           RUN_ID: ${{ github.run_id }}
           RUN_NO: ${{ github.run_number }}
@@ -492,6 +528,8 @@ jobs:
           # Best-effort by design: the feed must never flip the job's real
           # verdict. summary.md + probe_counts.txt are small text files; the
           # branch serves them via raw.githubusercontent.com (no API quota).
+          # (Moved verbatim from the visual job in v6.31.2 — same $SRC path,
+          # the download step restores the bundle there.)
           SRC=/home/runner/mc-test/shots/ci-visual
           if [ ! -f "$SRC/summary.md" ]; then
             echo "no summary.md — nothing to publish"
