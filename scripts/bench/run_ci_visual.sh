@@ -1049,6 +1049,7 @@ sleep 4
 echo "### stream diag after fill:" >> "$SUMMARY"
 grep "stream: tick" /tmp/server.log | tail -2 >> "$SUMMARY" || true
 srv "time set noon"  # v6.4.8: the probe loop must run in daylight
+srv "weather clear"  # v6.32.1: a leg-1 storm tints the marker red below the probe
 PROBE_LOG="$SHOTS/probe_counts.txt"; : > "$PROBE_LOG"
 for k in $(seq 0 23); do
   assert_online "edit probe $k" || exit 1
@@ -1056,6 +1057,7 @@ for k in $(seq 0 23); do
   # mid-loop (~5 min at 26.3's day length) and the marker's rendered hue
   # swings with the lightmap (run #238 measured dusk purple).
   srv "time set noon"
+  srv "weather clear"  # v6.32.1: per-probe storm guard
   shot "12_after_edit_probe$k" || exit 1
   LM=$(lens_metrics "12_after_edit_probe$k")
   case "$LM" in *lens_zero=1*)
@@ -1232,6 +1234,7 @@ L2_SCENE_ALIVE=0
 for k in $(seq 0 11); do
   assert_online "relog probe $k" || exit 1
   srv "time set noon"  # v6.9.8: keep the light flat across the window
+  srv "weather clear"  # v6.32.1: the relog window must stay storm-free too
   shot "13_after_relog_probe$k" || exit 1
   SC=$(scene_count "13_after_relog_probe$k")
   if [ "${SC:-0}" -gt 0 ] 2>/dev/null; then L2_SCENE_ALIVE=1; fi
@@ -1642,6 +1645,15 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     PX=$(( ${PX//CX/$CX} )); PZ=$(( ${PZ//CZ/$CZ} ))
     srv "gamerule advance_time false"
     srv "time set noon"
+    # v6.32.1 WEATHER GUARD: the parity session reboots the SAME dist world —
+    # level.dat carries the leg-1 session's weather over, and #365/#369 show
+    # the bimodal outcome: a storm rolled in during leg 1 (or the reboot gap)
+    # and the tour read a storm-dark zenith (~113 < the 130 threshold) at 7-9
+    # CONSECUTIVE vantages while 'time set noon' demonstrably landed — thunder
+    # at noon is indistinguishable from night for the zenith strip. The pin
+    # now clears the sky per vantage (the command is version-stable, unlike
+    # the 26.3-renamed gamerules).
+    srv "weather clear"
     srv "tp Stepan $PX $PY $PZ $PYAW $PPITCH"
     sleep "$PARITY_PREPASS_SETTLE"
     PRE_N=$((PRE_N + 1))
@@ -1655,6 +1667,15 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     PX=$(( ${PX//CX/$CX} )); PZ=$(( ${PZ//CZ/$CZ} ))
     srv "gamerule advance_time false"
     srv "time set noon"
+    # v6.32.1 WEATHER GUARD: the parity session reboots the SAME dist world —
+    # level.dat carries the leg-1 session's weather over, and #365/#369 show
+    # the bimodal outcome: a storm rolled in during leg 1 (or the reboot gap)
+    # and the tour read a storm-dark zenith (~113 < the 130 threshold) at 7-9
+    # CONSECUTIVE vantages while 'time set noon' demonstrably landed — thunder
+    # at noon is indistinguishable from night for the zenith strip. The pin
+    # now clears the sky per vantage (the command is version-stable, unlike
+    # the 26.3-renamed gamerules).
+    srv "weather clear"
     srv "tp Stepan $PX $PY $PZ $PYAW $PPITCH"
     # v6.26.6 DIP-PROBE (queue item 1): the tour settles a FIXED 30 s (the
     # race guard) while the near-ring refresh competes with the sweep
@@ -1673,6 +1694,7 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
       ct "day guard: $PNAME night — re-pin + reshoot"
       srv "gamerule advance_time false"
       srv "time set noon"
+      srv "weather clear"  # v6.32.1: noon under thunder still reads < 130
       sleep 10
       shot "parity/$PNAME" || true
       if ! day_ok "parity/$PNAME"; then
