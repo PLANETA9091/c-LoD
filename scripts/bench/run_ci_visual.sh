@@ -1444,12 +1444,12 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # DAY GUARD below is the enforcer if even this is lost.
   srv "gamerule advance_time false"
   srv "time set noon"
-  # v6.25.7: #333/#334's audit proved 'gamerule advance_time false' dies
-  # with a Paper 26.3 parse error ("Incorrect argument for command") on
-  # every attempt — the rule name likely changed in 26.3. A BARE 'gamerule'
-  # lists the valid rule names; the audit grep carries the reply into
-  # time-audit.md of the next run, so the pin fix becomes a one-liner.
-  srv "gamerule"
+  # v6.27.0: the rule name is SOLVED — 'advance_time' (doDaylightCycle's
+  # 26.3 rename, read from the client jar GameRules.class strings) and its
+  # SUCCESS reply is day-freeze evidence in the #355 audit. The v6.25.7
+  # bare-'gamerule' discovery probe is RETIRED: in 26.3 the bare listing
+  # itself parse-dies (#354 audit 'gamerule<--[HERE]'), so every run paid
+  # one guaranteed parse-error pair for information already in hand.
   srv "gamemode spectator Stepan"
   # v6.17: the fresh server rescans the disk (the level is the same, the
   # Streamer is new) — the march paints from the STREAMED buffers, so give
