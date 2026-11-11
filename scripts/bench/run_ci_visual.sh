@@ -1895,6 +1895,98 @@ for name in ("10m", "01m"):
 PYEOF
   while IFS= read -r l; do sum "$l"; done < "$M8FORENSICS"
   rm -f "$M8FORENSICS"
+  # v6.30.1 THE RIM MASK SESSION (#360 pre-registered item (2), the boot
+  # lane): the rim_mask pack — every march-owned pixel paints its client
+  # DECODE STATE (GREEN height+color decoded / RED colorless: the color word
+  # absent — pool competition, fog strobe margin, or the v6.23 HeightRef
+  # capture gate / BLUE height absent at a march hit). One frame from the
+  # rim vantage (07/12, the dead-flat +61 pair) names the rim fallback
+  # class EXACTLY — the question six verdicts could not answer. The 01
+  # frame is the contrast class (near-band data decodes fully — GREEN).
+  # Non-fatal by design (evidence, never the gate's input); runs AFTER the
+  # mask8 lane so its own boot/log/forensics stay untouched.
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;sparse_rebeat=true;sparse_rebeat_frac=8;rim_mask=true"
+  CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" \
+    || note "rimmask: boot_server.sh rc=$? (the rim evidence degrades, the gate unaffected)"
+  pkill -f "net.minecraft.client.main.Main" 2>/dev/null || true
+  sleep 3
+  bash "$BENCH_DIR/run_client.sh" || note "rimmask: run_client.sh rc=$?"
+  RW=$(join_count)
+  for _ in $(seq 1 120); do
+    [ "$(join_count)" -gt "$RW" ] 2>/dev/null && break
+    sleep 2
+  done
+  sleep 5
+  accept_pack_prompt rimmask 30 || note "rimmask: pack prompt never accepted"
+  sleep 5
+  srv "gamerule advance_time false"
+  srv "time set noon"
+  srv "gamemode spectator Stepan"
+  # The rim paint needs the RIM heights decoded — the fresh server rescans
+  # the shared level; wait for the scan like the parity session does.
+  RCELLS=0
+  for _ in $(seq 1 150); do
+    RCELLS=$(curl -s http://127.0.0.1:8199/clod-pack.info \
+             | grep -o 'cells=[0-9]*' | head -1 | cut -d= -f2)
+    RCELLS="${RCELLS:-0}"
+    [ "$RCELLS" -ge 65000 ] 2>/dev/null && break
+    sleep 2
+  done
+  sum "- rim mask: scan populated (cells=$RCELLS; the state paint reads the same buffers the march reads)"
+  mkdir -p "$SHOTS/rim_mask"
+  # 07 = the rim vantage FIRST (the verdict's dead-flat pair), 01 = the
+  # center band (the contrast class), 12 = the rim AGAIN after the 01
+  # dwell (the persistent buffers OR-merge across the whole session — the
+  # second rim read separates 'words never arrived' from 'arrived late').
+  for row in "07 180 5 CX 160 -220" "01 90 15 CX 140 CZ" "12 180 5 CX 160 -220"; do
+    set -- $row
+    RN="$1"; RYAW="$2"; RPITCH="$3"; RX="$4"; RY="$5"; RZ="$6"
+    RX=$(( ${RX//CX/$CX} )); RZ=$(( ${RZ//CZ/$CZ} ))
+    srv "time set noon"
+    srv "tp Stepan $RX $RY $RZ $RYAW $RPITCH"
+    sleep 12
+    shot "rim_mask/$RN" || true
+  done
+  sum "- rim mask: decode-state frames shot (rim_mask/07|01|12 — GREEN full decode / RED colorless / BLUE heightless)"
+  cp /tmp/client.log "$SHOTS/rim_mask/client.log" 2>/dev/null || true
+  RMFORENSICS=$(mktemp)
+  python3 - "$SHOTS/rim_mask" > "$RMFORENSICS" 2>/dev/null <<'PYEOF' || true
+import sys, os
+from PIL import Image
+def classify(c):
+    r, g, b = c[:3]
+    if g > 140 and r < 110 and b < 110: return "green"
+    if r > 140 and g < 110 and b < 110: return "red"
+    if b > 140 and r < 110 and g < 110: return "blue"
+    return None
+VERDICT = {
+    "red": "rim = COLORLESS class — the color words die client-side (pool competition / fog strobe margin / the v6.23 HeightRef capture gate); heights ARE decoded",
+    "blue": "rim = HEIGHTS NEVER DECODED — a data-coverage class: the state paint cannot even see the cells",
+    "green": "rim fully decoded — the fallback is the PAINT path (shade/fog/composite), not data",
+}
+for name in ("07", "01", "12"):
+    p = os.path.join(sys.argv[1], f"{name}.png")
+    if not os.path.exists(p):
+        continue
+    im = Image.open(p).convert("RGB"); px = im.load(); w, h = im.size
+    g = r = b = 0
+    for y in range(0, h, 4):
+        for x in range(0, w, 4):
+            k = classify(px[x, y])
+            if k == "green": g += 1
+            elif k == "red": r += 1
+            elif k == "blue": b += 1
+    tot = g + r + b
+    dom = max((("green", g), ("red", r), ("blue", b)), key=lambda t: t[1])
+    line = f"- rim mask {name}: green={g*16} red={r*16} blue={b*16} (px, sampled /16)"
+    if tot >= 40:
+        line += f" -> DOMINANT {dom[0].upper()}: {VERDICT[dom[0]]}"
+    else:
+        line += " -> no state paint (the march owns too few pixels — check the vantage/scan)"
+    print(line)
+PYEOF
+  while IFS= read -r l; do sum "$l"; done < "$RMFORENSICS"
+  rm -f "$RMFORENSICS"
 fi
 
 if [ "$FAILURES" = "0" ] && [ "$FOUND1" = "1" ] && [ "$FOUND2" = "1" ]; then
