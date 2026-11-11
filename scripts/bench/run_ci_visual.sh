@@ -1986,7 +1986,7 @@ PYEOF
   sum "- rim mask: scan populated (cells=$RCELLS; the state paint reads the same buffers the march reads)"
   phase "10 rim mask lane"
   mkdir -p "$SHOTS/rim_mask"
-  # 00 = THE TOWER VANTAGE ITSELF (the leg-1 eye: CX-75, y=150, yaw 270,
+  # 00 = THE TOWER VANTAGE ITSELF (the leg-1 eye: CX-75, y=151.6, yaw 270,
   # pitch 5) — the decode-state paint AT THE GATE'S OWN EYE. #369/#372 pass
   # every server-side gate (ewin armed, words spawned, band+frustum math
   # green) yet red=0 holds and the cut walk measures the paint reach at
@@ -1994,11 +1994,31 @@ PYEOF
   # remainder in one frame: BLUE at the marker zone = the words never LAND
   # (capture/probe side), RED = heights landed, colors lost (LO plane /
   # HeightRef gate), GREEN = everything landed and the march/paint is the
-  # suspect. 07 = the rim vantage (the verdict's dead-flat pair), 01 = the
-  # center band (the contrast class), 12 = the rim AGAIN after the 01
-  # dwell (the persistent buffers OR-merge across the whole session — the
-  # second rim read separates 'words never arrived' from 'arrived late').
-  for row in "00 270 5 CX -75 CZ" "07 180 5 CX 160 -220" "01 90 15 CX 140 CZ" "12 180 5 CX 160 -220"; do
+  # suspect. 01 = the near-tower contrast (CX-40, y=175 — 35 m west, 5 m
+  # above the column top: if the tower band decodes from a NEAR eye but
+  # not from the tower, the tower geometry is the killer; if neither, the
+  # transport is). 12 = the tower AGAIN after the 01 dwell (the persistent
+  # buffers OR-merge across the whole session — the second tower read
+  # separates 'words never arrived' from 'arrived late').
+  # v6.33.1 ROW-FORMAT FIX + THE BOGUS-VANTAGE PURGE: the tokens are
+  # NAME YAW PITCH X Y Z with X/Z as CX/CZ-COMPOUND tokens (the mask8
+  # lane's tower row reads "10m 270 5 CX-75 151.6 CZ" — the offset rides
+  # INSIDE the token). TWO v6.30.1 landmines surfaced while adding 00:
+  # (a) my "00 270 5 CX -75 CZ" split into Y=-75 — THE VOID, no frame
+  # (#377: no 00 line at all); (b) WORSE — the inherited 07/12 rows
+  # ("CX 160 -220") substitute to z=-220 RAW: 760 blocks NORTH of the
+  # streamed disk (z 540..1044) — every rim07/rim12 frame ever shot is
+  # PURE VANILLA TERRAIN misclassified by the state-color classifier
+  # (vanilla grass reads as the green class: the steady 1200 'green' was
+  # grass, the 'DOMINANT GREEN: rim fully decoded' verdicts were noise,
+  # and the parity matrix's 07/12 pairs are two vanilla frames with no
+  # LOD in them at all); (c) the 01 row's eye (CX, 140, CZ) sits INSIDE
+  # the 5x111x5 marker column in the leg-1 world — no sky in view, the
+  # camera channel goes blind, the decode passes nothing (its BLUE/RED
+  # read = the empty fresh buffers, not a rim verdict). The lane now
+  # shoots only OPEN-AIR vantages: 00 the tower, 01 the near-tower
+  # contrast, 12 the tower re-read.
+  for row in "00 270 5 CX-75 151.6 CZ" "01 270 15 CX-40 175 CZ" "12 270 5 CX-75 151.6 CZ"; do
     set -- $row
     RN="$1"; RYAW="$2"; RPITCH="$3"; RX="$4"; RY="$5"; RZ="$6"
     RX=$(( ${RX//CX/$CX} )); RZ=$(( ${RZ//CZ/$CZ} ))
@@ -2007,7 +2027,7 @@ PYEOF
     sleep 12
     shot "rim_mask/$RN" || true
   done
-  sum "- rim mask: decode-state frames shot (rim_mask/00|07|01|12 — GREEN full decode / RED colorless / BLUE heightless; 00 = the leg-1 tower eye)"
+  sum "- rim mask: decode-state frames shot (rim_mask/00|01|12 — GREEN full decode / RED colorless / BLUE heightless; 00 = the leg-1 tower eye, 01 = the near-tower contrast, 12 = the tower re-read; the inherited 07/12 vantages sat 760 blocks outside the streamed disk and 01 sat INSIDE the marker column — their earlier verdicts were classifier noise, purged in v6.33.1)"
   cp /tmp/client.log "$SHOTS/rim_mask/client.log" 2>/dev/null || true
   RMFORENSICS=$(mktemp)
   python3 - "$SHOTS/rim_mask" > "$RMFORENSICS" 2>/dev/null <<'PYEOF' || true
