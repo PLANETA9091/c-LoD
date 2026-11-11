@@ -98,9 +98,29 @@ pub const SUB_PER_CELL: f64 = 4.0;
 /// saturate at rank 3 whose planes now sit below their surface — hidden
 /// dots, the same never-decodes outcome the old 260/300 saturation had
 /// (spawn-gated to invisibility), with zero visible garbage either way.
+///
+/// v6.32.0 THE SCREEN EDGE (rank 2 = 180/190/185): #369 proved the band
+/// fix half-works — ewin 233 (the edit window FINALLY armed: the server
+/// side considers the marker deliverable) — but red=0 held, and the frame
+/// shows why: the decode window is the band AND THE FRUSTUM. The runner's
+/// client renders at FOV 70 (vertical half 35 deg, axis pitch 5 down):
+/// from the tower eye the screen covers elevations -40..+30 deg, i.e. at
+/// 75 m horizontal y in [88.7, 194.9] — every word plane OUTSIDE that
+/// spawns (the frustum gate assumes FOV 110 + 8 margin = 63 deg) but its
+/// probe re-projects OFF-FRAME and never strobes: 220 sits at +42.4 deg
+/// (63 px above the top edge), and even the v6.31.0 reset plane 200 is
+/// 14 px off (+32.8 deg). The ground's color plane 80 is 38.6 deg BELOW
+/// the axis — the same death (the tower frame's colorless, fog-washed
+/// ground). HI_2 -> 190 (+27.1 deg, 14.9 px inside the top edge, 84.2 m),
+/// RS_2 -> its true midway 185 (+24.0 deg, 30.9 px, 82.1 m); LO_2 = 180
+/// stays (47.7 px margin). The (LO+40)/(LO+20) convention holds for ranks
+/// 0/1/3; rank 2 now pins the PAIR to the screen window instead — the
+/// capture walks the three ladders independently and the words still
+/// never share a plane. §5b/§7b spawn bytes: rank 0/1/3 untouched, and
+/// those worlds hold NO rank-2 cells — only the marker class changes.
 pub const LO_TIERS: [f64; 4] = [80.0, 140.0, 180.0, 200.0];
-pub const HI_TIERS: [f64; 4] = [120.0, 180.0, 220.0, 240.0];
-pub const RS_TIERS: [f64; 4] = [100.0, 160.0, 200.0, 220.0];
+pub const HI_TIERS: [f64; 4] = [120.0, 180.0, 190.0, 240.0];
+pub const RS_TIERS: [f64; 4] = [100.0, 160.0, 185.0, 220.0];
 /// The intra-cell step guard: a word's 4 dots spread +-0.75 blocks around
 /// the sampled surface point (sub = cell/4, cell = 2) while ONE sampled
 /// height stands for the whole cell — a dot at or below ANY nearby column
@@ -1997,6 +2017,18 @@ mod tests {
                 plane > 170.0 + TIER_MARGIN,
                 "{name} plane {plane} must clear the surface"
             );
+            // v6.32.0: on-screen from the tower vantage. The runner's client
+            // renders at FOV 70 (vertical half 35 deg) with the harness pitch
+            // 5 down — the screen top edge sits at +30 deg elevation = y
+            // 194.9 at 75 m horizontal. A plane above it still SPAWNS (the
+            // frustum gate assumes FOV 110 + 8 margin), but the capture's
+            // probe re-projects OFF-FRAME and never strobes (#369: HI_2=220
+            // was 63 px off the top edge, RS_2=200 14 px off — red=0 with
+            // ewin armed).
+            assert!(
+                plane <= ey + 75.0 * (30.0_f64).to_radians().tan(),
+                "{name} plane {plane} is above the FOV-70 screen top — spawned but never decodable"
+            );
             let worst = cells
                 .iter()
                 .map(|&(cx, cz)| {
@@ -2013,6 +2045,11 @@ mod tests {
                 "{name} plane {plane} at {worst} m sits inside the cull bubble"
             );
         }
+        // the words never share a plane (one cell's words are told apart by
+        // plane height).
+        assert_ne!(LO_TIERS[rank], HI_TIERS[rank]);
+        assert_ne!(LO_TIERS[rank], RS_TIERS[rank]);
+        assert_ne!(HI_TIERS[rank], RS_TIERS[rank]);
     }
 
     #[test]
