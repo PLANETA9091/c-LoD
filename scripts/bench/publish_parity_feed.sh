@@ -148,7 +148,23 @@ PASS=$(python3 -c "import json;print(json.load(open('$RD/parity.json'))['pass'])
 cd /tmp/pfeed
 git add -A
 git commit -m "parity feed: run ${RUN_ID} (#${RUN_NO}, sha ${SHA7}) — gate ${PASS}" || echo "no changes"
-git push origin ci-verdicts \
-  && echo "parity feed updated" \
-  || echo "WARN: parity feed push failed (non-fatal)"
+# v6.30.3 THE PUSH RACE: the verdict bot and the parity bot of the same run
+# (and of parallel runs) push the SAME ci-verdicts branch — a non-fast-
+# forward push loses the feed SILENTLY. The whole commit+push retries on a
+# fresh checkout up to 5 attempts (10 s apart).
+ok=0
+for attempt in 1 2 3 4 5; do
+  if git push origin ci-verdicts; then
+    ok=1
+    echo "parity feed updated (attempt $attempt)"
+    break
+  fi
+  echo "WARN: push attempt $attempt failed (branch moved) — re-assembling"
+  git fetch origin ci-verdicts 2>/dev/null || true
+  git checkout -B ci-verdicts origin/ci-verdicts || break
+  git add -A
+  git commit -m "parity feed: run ${RUN_ID} (#${RUN_NO}, sha ${SHA7}) — gate ${PASS}" || true
+  sleep 10
+done
+[ "$ok" = "1" ] || echo "WARN: parity feed push failed after 5 attempts (non-fatal)"
 exit 0

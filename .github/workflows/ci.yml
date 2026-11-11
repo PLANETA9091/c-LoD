@@ -499,49 +499,63 @@ jobs:
           fi
           git config user.name "ci-verdict-bot"
           git config user.email "actions@users.noreply.github.com"
-          git fetch origin ci-verdicts 2>/dev/null || true
-          rm -rf /tmp/vfeed
-          git worktree add --detach /tmp/vfeed HEAD
-          ( cd /tmp/vfeed && git checkout --orphan ci-verdicts && git rm -rf --quiet . 2>/dev/null || true )
-          if git show-ref --verify --quiet refs/remotes/origin/ci-verdicts; then
-            ( cd /tmp/vfeed \
-              && git rm -rf --quiet . 2>/dev/null || true \
-              && git checkout -B ci-verdicts origin/ci-verdicts )
-          fi
-          cp "$SRC/summary.md" /tmp/vfeed/run-${RUN_ID}.md
-          cp "$SRC/summary.md" /tmp/vfeed/latest.md
-          [ -f "$SRC/probe_counts.txt" ] && cp "$SRC/probe_counts.txt" /tmp/vfeed/run-${RUN_ID}-probes.txt || true
-          # v6.8.3 EYES IN THE FEED: four downscaled JPEGs ride the verdict —
-          # the close burst (the renderer pulse), its far twin, the pre-edit
-          # baseline and the last probe. Three RENDERER DEAD verdicts in a
-          # row (41449086366/41454021639/41454056043) were judged on white-px
-          # counters alone; a picture separates a black frame (dead GL) from
-          # a live scene with no particles (dead particle render) instantly.
-          for pair in "09_burst_close:burst" "09b_burst_far:far" "10_before_edit:baseline" "12_after_edit_probe23:last" "parity_dbg/01_aerial_west:mask01" "parity_dbg/07_far_north:mask07" "parity_dbg/10_marker_ray:mask10" "parity_dbg8/01m:mask8_01" "parity_dbg8/10m:mask8_10"; do
-            IMG="${pair%%:*}"; TAG="${pair##*:}"
-            [ -f "$SRC/$IMG.png" ] || continue
-            # the converter lives in a repo file — a heredoc on column 1
-            # would break the YAML block scalar (found by the local gate)
-            python3 scripts/bench/jpg_to_feed.py "$SRC/$IMG.png" "/tmp/vfeed/run-${RUN_ID}-${TAG}.jpg" 2>/dev/null || true
+          # v6.30.3 THE PUSH RACE: parallel visual runs' bots finish within
+          # minutes of each other and push the SAME branch — a non-fast-
+          # forward push loses the verdict SILENTLY ("WARN ... non-fatal").
+          # #362-#366 landed five runs in one queue; the losers' verdicts
+          # never reached ci-verdicts. The whole assemble+commit+push is
+          # retried on a fresh checkout up to 5 attempts (10 s apart).
+          ok=0
+          for attempt in 1 2 3 4 5; do
+            git fetch origin ci-verdicts 2>/dev/null || true
+            rm -rf /tmp/vfeed
+            git worktree prune
+            git worktree add --detach /tmp/vfeed HEAD
+            ( cd /tmp/vfeed && git checkout --orphan ci-verdicts && git rm -rf --quiet . 2>/dev/null || true )
+            if git show-ref --verify --quiet refs/remotes/origin/ci-verdicts; then
+              ( cd /tmp/vfeed \
+                && git rm -rf --quiet . 2>/dev/null || true \
+                && git checkout -B ci-verdicts origin/ci-verdicts )
+            fi
+            cp "$SRC/summary.md" /tmp/vfeed/run-${RUN_ID}.md
+            cp "$SRC/summary.md" /tmp/vfeed/latest.md
+            [ -f "$SRC/probe_counts.txt" ] && cp "$SRC/probe_counts.txt" /tmp/vfeed/run-${RUN_ID}-probes.txt || true
+            # v6.8.3 EYES IN THE FEED: four downscaled JPEGs ride the verdict —
+            # the close burst (the renderer pulse), its far twin, the pre-edit
+            # baseline and the last probe. Three RENDERER DEAD verdicts in a
+            # row (41449086366/41454021639/41454056043) were judged on white-px
+            # counters alone; a picture separates a black frame (dead GL) from
+            # a live scene with no particles (dead particle render) instantly.
+            for pair in "09_burst_close:burst" "09b_burst_far:far" "10_before_edit:baseline" "12_after_edit_probe23:last" "parity_dbg/01_aerial_west:mask01" "parity_dbg/07_far_north:mask07" "parity_dbg/10_marker_ray:mask10" "parity_dbg8/01m:mask8_01" "parity_dbg8/10m:mask8_10" "rim_mask/07:rim07" "rim_mask/01:rim01" "rim_mask/12:rim12"; do
+              IMG="${pair%%:*}"; TAG="${pair##*:}"
+              [ -f "$SRC/$IMG.png" ] || continue
+              # the converter lives in a repo file — a heredoc on column 1
+              # would break the YAML block scalar (found by the local gate)
+              python3 scripts/bench/jpg_to_feed.py "$SRC/$IMG.png" "/tmp/vfeed/run-${RUN_ID}-${TAG}.jpg" 2>/dev/null || true
+            done
+            # keep the feed light: drop everything beyond the newest 3 runs
+            ls /tmp/vfeed/run-*.md 2>/dev/null | sort | head -n -3 | while read -r old; do
+              R=$(basename "$old" .md)
+              rm -f /tmp/vfeed/"$R".md /tmp/vfeed/"$R"-probes.txt \
+                    /tmp/vfeed/"$R"-burst.jpg /tmp/vfeed/"$R"-far.jpg \
+                    /tmp/vfeed/"$R"-baseline.jpg /tmp/vfeed/"$R"-last.jpg
+            done
+            {
+              echo "# c-LoD visual verdicts"
+              echo
+              echo "- run ${RUN_ID} (#${RUN_NO}) ${GITHUB_SHA::7} $(date -u +%FT%TZ): $(grep -c FAIL "$SRC/summary.md" || true) FAIL lines in summary"
+            } > /tmp/vfeed/index.md
+            git -C /tmp/vfeed add -A
+            git -C /tmp/vfeed commit -m "verdict: run ${RUN_ID} (${GITHUB_SHA::7})" || echo "no changes"
+            if git -C /tmp/vfeed push origin ci-verdicts; then
+              ok=1
+              echo "verdict feed updated (attempt $attempt)"
+              break
+            fi
+            echo "WARN: push attempt $attempt failed (branch moved) — retrying on a fresh checkout"
+            sleep 10
           done
-          # keep the feed light: drop everything beyond the newest 3 runs
-          ls /tmp/vfeed/run-*.md 2>/dev/null | sort | head -n -3 | while read -r old; do
-            R=$(basename "$old" .md)
-            rm -f /tmp/vfeed/"$R".md /tmp/vfeed/"$R"-probes.txt \
-                  /tmp/vfeed/"$R"-burst.jpg /tmp/vfeed/"$R"-far.jpg \
-                  /tmp/vfeed/"$R"-baseline.jpg /tmp/vfeed/"$R"-last.jpg
-          done
-          {
-            echo "# c-LoD visual verdicts"
-            echo
-            echo "- run ${RUN_ID} (#${RUN_NO}) ${GITHUB_SHA::7} $(date -u +%FT%TZ): $(grep -c FAIL "$SRC/summary.md" || true) FAIL lines in summary"
-          } > /tmp/vfeed/index.md
-          cd /tmp/vfeed
-          git add -A
-          git commit -m "verdict: run ${RUN_ID} (${GITHUB_SHA::7})" || echo "no changes"
-          git push origin ci-verdicts \
-            && echo "verdict feed updated" \
-            || echo "WARN: verdict feed push failed (non-fatal)"
+          [ "$ok" = "1" ] || echo "WARN: verdict feed push failed after 5 attempts (non-fatal)"
           exit 0
 
   visual-control:
