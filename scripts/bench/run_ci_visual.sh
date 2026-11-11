@@ -1968,11 +1968,19 @@ PYEOF
   done
   sum "- rim mask: scan populated (cells=$RCELLS; the state paint reads the same buffers the march reads)"
   mkdir -p "$SHOTS/rim_mask"
-  # 07 = the rim vantage FIRST (the verdict's dead-flat pair), 01 = the
+  # 00 = THE TOWER VANTAGE ITSELF (the leg-1 eye: CX-75, y=150, yaw 270,
+  # pitch 5) — the decode-state paint AT THE GATE'S OWN EYE. #369/#372 pass
+  # every server-side gate (ewin armed, words spawned, band+frustum math
+  # green) yet red=0 holds and the cut walk measures the paint reach at
+  # ~40-60 m from the tower; the state paint at the tower splits the
+  # remainder in one frame: BLUE at the marker zone = the words never LAND
+  # (capture/probe side), RED = heights landed, colors lost (LO plane /
+  # HeightRef gate), GREEN = everything landed and the march/paint is the
+  # suspect. 07 = the rim vantage (the verdict's dead-flat pair), 01 = the
   # center band (the contrast class), 12 = the rim AGAIN after the 01
   # dwell (the persistent buffers OR-merge across the whole session — the
   # second rim read separates 'words never arrived' from 'arrived late').
-  for row in "07 180 5 CX 160 -220" "01 90 15 CX 140 CZ" "12 180 5 CX 160 -220"; do
+  for row in "00 270 5 CX -75 CZ" "07 180 5 CX 160 -220" "01 90 15 CX 140 CZ" "12 180 5 CX 160 -220"; do
     set -- $row
     RN="$1"; RYAW="$2"; RPITCH="$3"; RX="$4"; RY="$5"; RZ="$6"
     RX=$(( ${RX//CX/$CX} )); RZ=$(( ${RZ//CZ/$CZ} ))
@@ -1981,7 +1989,7 @@ PYEOF
     sleep 12
     shot "rim_mask/$RN" || true
   done
-  sum "- rim mask: decode-state frames shot (rim_mask/07|01|12 — GREEN full decode / RED colorless / BLUE heightless)"
+  sum "- rim mask: decode-state frames shot (rim_mask/00|07|01|12 — GREEN full decode / RED colorless / BLUE heightless; 00 = the leg-1 tower eye)"
   cp /tmp/client.log "$SHOTS/rim_mask/client.log" 2>/dev/null || true
   RMFORENSICS=$(mktemp)
   python3 - "$SHOTS/rim_mask" > "$RMFORENSICS" 2>/dev/null <<'PYEOF' || true

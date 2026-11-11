@@ -564,7 +564,7 @@ jobs:
             # row (41449086366/41454021639/41454056043) were judged on white-px
             # counters alone; a picture separates a black frame (dead GL) from
             # a live scene with no particles (dead particle render) instantly.
-            for pair in "09_burst_close:burst" "09b_burst_far:far" "10_before_edit:baseline" "12_after_edit_probe23:last" "parity_dbg/01_aerial_west:mask01" "parity_dbg/07_far_north:mask07" "parity_dbg/10_marker_ray:mask10" "parity_dbg8/01m:mask8_01" "parity_dbg8/10m:mask8_10" "rim_mask/07:rim07" "rim_mask/01:rim01" "rim_mask/12:rim12"; do
+            for pair in "09_burst_close:burst" "09b_burst_far:far" "10_before_edit:baseline" "12_after_edit_probe23:last" "parity_dbg/01_aerial_west:mask01" "parity_dbg/07_far_north:mask07" "parity_dbg/10_marker_ray:mask10" "parity_dbg8/01m:mask8_01" "parity_dbg8/10m:mask8_10" "rim_mask/00:rim00" "rim_mask/07:rim07" "rim_mask/01:rim01" "rim_mask/12:rim12"; do
               IMG="${pair%%:*}"; TAG="${pair##*:}"
               [ -f "$SRC/$IMG.png" ] || continue
               # the converter lives in a repo file — a heredoc on column 1
