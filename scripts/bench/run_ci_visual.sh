@@ -88,6 +88,13 @@ touch "$SUMMARY"
 # run, the lines appended so far are already on disk for the always() bot.
 sum() { echo "$*" >> "$SUMMARY"; cp -f "$SUMMARY" "$SHOTS/summary.md" 2>/dev/null || true; }
 
+# v6.33.0 THE PHASE LADDER: #375/#376 died inside the first ~25 min — before
+# the FIRST sum() — and the feed read silence (the artifact carried no
+# summary, the verdict job exits on 'no summary.md', the pre-boot death
+# class stays invisible). Every phase boundary stamps itself now: the
+# feed's summary carries the LAST PHASE for any death, early ones included.
+phase() { sum "- phase: $1 ($(date -u +%H:%M:%S))"; }
+
 fail() { echo "FAIL: $*"; FAILURES=$((FAILURES + 1)); sum "- **FAIL:** $*"; }
 note() { echo "--- $*"; }
 
@@ -512,6 +519,7 @@ dump_summary() {
 trap 'rc=$?; stop_stack; dump_summary' EXIT
 
 # ---- 0. sanity -------------------------------------------------------------
+phase "0 sanity"
 for f in "$D/launcher.jar" "$HOME/mc-test/shim/libGL.so.1" \
          "$HOME/mc-test/client/cp.txt" "$JAVA"; do
   # v6.8.4: the control arm boots plain Paper — the CRUSSTY launcher is not
@@ -545,6 +553,7 @@ export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=true"
 CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" || {
   echo "FAIL: boot/gates"; tail -40 /tmp/server.log; exit 1; }
 sum "- boot + gates OK ($(date -u +%H:%M:%S))"
+phase "1 server booted"
 ct "boot ok"
 # v6.8.4: the control server has no c-LoD module — no sky-grid line exists;
 # boot_server.sh already gated the vanilla boot on Paper's own 'Done ('
@@ -562,6 +571,7 @@ ct "run_client launch issued"
 wait_log "Stepan joined the game" /tmp/server.log 240 || {
   echo "FAIL: client never joined"; tail -30 /tmp/client.log; exit 1; }
 note "client joined (leg 1)"
+phase "2 leg-1 client joined"
 sum "- joined session 1 ($(date -u +%H:%M:%S))"
 ct "client joined"
 # v6.4.2 FIX: the relog guard baseline must be captured AFTER the join it
@@ -644,6 +654,7 @@ done
 [ "$CELLS" -ge 2000 ] 2>/dev/null || { echo "FAIL: scan never populated (cells=$CELLS)"; exit 1; }
 note "stream live: cells=$CELLS (the fill below re-streams its columns via the event push, so full scan completion is not required)"
 sum "- stream live: cells=$CELLS"
+phase "3 scan populated"
 
 # ---- 3a2. THE TERRAIN RANGE (v6.15.1, feat/visible-terrain) ------------------
 # THE USER ASK: every gallery round so far rendered ONE free-standing marker
@@ -1029,6 +1040,7 @@ fi
 grep -iE "Changed [0-9]+ block|Filled" /tmp/server.log | tail -1 \
   || note "fill summary not in log (probe loop decides)"
 sum "- fill issued: 5x$((FILL_Y1 - FILL_Y0 + 1))x5 $MARKER at $CX,$CZ (zone forceloaded ±48)"
+phase "4 marker filled"
 # v6.5.2 forensics: the SERVER's belief about the marker cells right after
 # the fill — heights/valid/words before any probe claims anything.
 sleep 3
@@ -1088,6 +1100,7 @@ NOW_JOIN=$(join_count)
 [ "$FOUND1" = "1" ] && [ "$NOW_JOIN" = "$JOIN1" ] \
   && echo "LEG 1 PASS: the edit reached the LOD paint with zero relogs" \
   && sum "- **LEG 1 PASS** (zero relogs)"
+phase "5 leg-1 probes done"
 # v6.31.1 VERDICT LEGIBILITY: a 24-probe sweep with red=0 everywhere used to
 # end SILENTLY (no LEG 1 PASS line, no fail) — #256..#368 (~110 runs) carried
 # a dead leg-1 that only the final conjunction revealed, and the feed could
@@ -1231,6 +1244,7 @@ GDT=$(echo "$GDL" | grep -o 'total=[0-9]*' | cut -d= -f2)
 sum "- leg-2 carrier probe green dust (80 m): changed-green px ${GD:-?} / total changed ${GDT:-?} vs baseline (> 100 green = a stable green carrier exists; total > 0 with green ~0 = the dust renders but fog washes it — a ruler problem, not a carrier problem)"
 echo "- leg-2 green dust changed-green px: ${GD:-?} total changed: ${GDT:-?}" >> "$PROBE_LOG"
 L2_SCENE_ALIVE=0
+phase "8 leg-2 relog probes"
 for k in $(seq 0 11); do
   assert_online "relog probe $k" || exit 1
   srv "time set noon"  # v6.9.8: keep the light flat across the window
@@ -1272,6 +1286,7 @@ elif [ "${L2_SCENE_ALIVE:-0}" = "0" ]; then
 else
   fail "marker lost after relog — stream state is not persistent/deterministic"
 fi
+phase "9 leg-2 done" 
 
 # ---- 7. verdict ---------------------------------------------------------------
 echo "=== client log pack markers ==="
@@ -1334,6 +1349,7 @@ fi
 # never to a red transport run.
 if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   ct "parity world: rebuilding the session"
+  phase "6 parity world boot"
   DIST="${MC_TEST_DIST:-$HOME/mc-test/dist}"
   PROP="$DIST/server.properties"
   if [ -f "$PROP" ]; then
@@ -1707,6 +1723,7 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     ct "parity world shot $PNAME ($PW_N/$PTOT)"
   done 3< "$PARITY"
   sum "- parity world tour done: $PW_N shots, $PW_NIGHT night-guard renames in parity/ (the gate pairs voxy/<name>.png vs parity/<name>.png)"
+  phase "7 parity tour done"
   # v6.30.0 SPARSE RE-BEAT SUMMARY RIDE (#360 pre-registered item (1)):
   # the channel counters at tour end — streamed (words actually re-spawned)
   # vs the two drop classes split the rim's transport verdict: stale = edit
@@ -1967,6 +1984,7 @@ PYEOF
     sleep 2
   done
   sum "- rim mask: scan populated (cells=$RCELLS; the state paint reads the same buffers the march reads)"
+  phase "10 rim mask lane"
   mkdir -p "$SHOTS/rim_mask"
   # 00 = THE TOWER VANTAGE ITSELF (the leg-1 eye: CX-75, y=150, yaw 270,
   # pitch 5) — the decode-state paint AT THE GATE'S OWN EYE. #369/#372 pass
