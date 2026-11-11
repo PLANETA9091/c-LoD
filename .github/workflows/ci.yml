@@ -520,6 +520,13 @@ jobs:
         with:
           name: ci-visual-verdict-${{ github.run_id }}
           path: /home/runner/mc-test/shots/ci-visual
+      # v6.33.3 THE FEED'S EYES: the verdict job lost the pillow dep when the
+      # publish moved out of the visual job (v6.31.2) — the pip install stayed
+      # behind, every jpg_to_feed.py call died on 'from PIL import Image' and
+      # the 2>/dev/null || true swallowed it: #377/#378's verdict commits
+      # carried ZERO jpgs while the text rode through.
+      - name: Install pillow (the jpg converter dep lost in the v6.31.2 publish move)
+        run: python3 -m pip install --quiet --user pillow
       - name: Publish verdict feed (ci-verdicts branch)
         env:
           RUN_ID: ${{ github.run_id }}
