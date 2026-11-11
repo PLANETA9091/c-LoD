@@ -2044,7 +2044,7 @@ VERDICT = {
     "blue": "rim = HEIGHTS NEVER DECODED — a data-coverage class: the state paint cannot even see the cells",
     "green": "rim fully decoded — the fallback is the PAINT path (shade/fog/composite), not data",
 }
-for name in ("07", "01", "12"):
+for name in ("00", "01", "12"):
     p = os.path.join(sys.argv[1], f"{name}.png")
     if not os.path.exists(p):
         continue
