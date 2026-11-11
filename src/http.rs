@@ -26,6 +26,13 @@ pub struct PackMeta {
     pub sha1_hex: String,
     pub cells: u64,
     pub total_cells: u64,
+    /// v6.30.0: the sparse re-beat channel counters (streamed / queued /
+    /// dropped-stale / dropped-undecodable) — the /clod-pack.info ride the
+    /// CI summary reads for the rim's transport state (#360 item (1)).
+    pub sparse_sent: u64,
+    pub sparse_q: u64,
+    pub sparse_stale: u64,
+    pub sparse_undec: u64,
 }
 
 pub struct PackServer {
@@ -61,6 +68,17 @@ impl PackServer {
         if let Ok(mut m) = self.meta.write() {
             m.cells = cells;
             m.total_cells = total_cells;
+        }
+    }
+
+    /// v6.30.0: refresh the sparse re-beat counters on the same 100-tick
+    /// diag beat (set_meta keeps the scan counters, this owns the channel).
+    pub fn set_sparse_diag(&self, sent: u64, q: usize, stale: u64, undec: u64) {
+        if let Ok(mut m) = self.meta.write() {
+            m.sparse_sent = sent;
+            m.sparse_q = q as u64;
+            m.sparse_stale = stale;
+            m.sparse_undec = undec;
         }
     }
 
@@ -176,8 +194,9 @@ fn handle(mut stream: TcpStream, srv: &PackServer) -> std::io::Result<()> {
             }
             let len = srv.bytes.read().map(|b| b.len()).unwrap_or(0);
             let body = format!(
-                "revision={}\nsha1={}\ncells={}/{}\nbytes={}\n",
-                meta.rev, meta.sha1_hex, meta.cells, meta.total_cells, len
+                "revision={}\nsha1={}\ncells={}/{}\nbytes={}\nsparse_sent={}\nsparse_q={}\nsparse_stale={}\nsparse_undec={}\n",
+                meta.rev, meta.sha1_hex, meta.cells, meta.total_cells, len,
+                meta.sparse_sent, meta.sparse_q, meta.sparse_stale, meta.sparse_undec
             )
             .into_bytes();
             write_plain(&mut stream, &body)
@@ -254,6 +273,7 @@ mod tests {
                 sha1_hex: "abc123".into(),
                 cells: 100,
                 total_cells: 200,
+                ..Default::default()
             },
         );
         let srv2 = Arc::clone(&srv);
@@ -309,6 +329,7 @@ mod tests {
                 sha1_hex: "fff".into(),
                 cells: 0,
                 total_cells: 0,
+                ..Default::default()
             },
         );
         // v5.2.2: the engine refreshes live scan counters every 100 ticks;

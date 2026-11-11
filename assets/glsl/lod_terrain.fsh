@@ -2,6 +2,7 @@
 #extension GL_ARB_separate_shader_objects : require
 #include <minecraft:globals.glsl>
 // __MESH_DEBUG__
+// __RIM_MASK__
 
 // c-LoD pass (v5.0 "SKY-GRID BIT-STREAM"): the actual level-of-distant-detail
 // renderer.
@@ -780,6 +781,36 @@ void main() {
         fragColor = scene;
         return;
     }
+
+#ifdef RIM_MASK
+    // v6.30.0 RIM MASK PROBE (#360 pre-registered item (2)): every march-
+    // owned pixel paints its client DECODE STATE instead of the shading —
+    // the rim (07/12) fallback class read straight off the frame:
+    //   GREEN (0,1,0): height AND color words decoded (full data)
+    //   RED   (1,0,0): height decoded, color word ABSENT (colorless — the
+    //                  color dots died client-side: pool competition, fog
+    //                  strobe margin, or the v6.23 HeightRef capture gate)
+    //   BLUE  (0,0,1): height word absent at a march hit (frontier/boundary
+    //                  artifact — the march should never own such a pixel)
+    // Reads the hit cell's buffers DIRECTLY (the okW flag at this point
+    // carries the hU call, not the center — the five ground_at calls share
+    // the out param). Vanilla-owned pixels keep the scene (the gate above
+    // already returned the colorless vanilla class — the probe paints only
+    // what the march itself owns, exactly the population the rim verdict
+    // needs). rim_mask=true swaps this block in at packgen (compile-time —
+    // a #define CANNOT fail to bind); default build keeps the marker a
+    // comment and the pack byte-stable.
+    vec4 rmh = texelFetch(HeightSampler, tc, 0);
+    vec4 rmc = texelFetch(ColBufSampler, tc, 0);
+    if (rmh.a < 0.5) {
+        fragColor = vec4(0.0, 0.0, 1.0, scene.a);
+    } else if (rmc.a < 0.5) {
+        fragColor = vec4(1.0, 0.0, 0.0, scene.a);
+    } else {
+        fragColor = vec4(0.0, 1.0, 0.0, scene.a);
+    }
+    return;
+#endif
 
     // Vanilla face shade (meshing weights: up 1.0 / z 0.8 / x 0.6) applied
     // through the height-gradient normal, exactly like Voxy's baked quads.

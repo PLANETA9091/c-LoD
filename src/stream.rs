@@ -486,8 +486,22 @@ pub struct Streamer {
     /// v6.29.0: the knob (CLOD_OPTS sparse_rebeat, default OFF — prod
     /// byte-stable; the parity world boots it on).
     pub sparse_rebeat_on: bool,
+    /// v6.30.0: the channel budget divisor (CLOD_OPTS sparse_rebeat_frac,
+    /// default 4 = the v6.29.0 hard-coded SPARSE_REBEAT_BUDGET_FRAC). The
+    /// #360 verdict priced /4 at −5.1 on view 05 (pool competition on the
+    /// vanilla-owned platform view); the parity world boots 8.
+    pub sparse_rebeat_frac: u32,
     /// v6.29.0 diag: re-beat words actually re-spawned.
     pub sparse_rebeats_streamed: u64,
+    /// v6.30.0 diag: scheduled words dropped because the VALUE moved out
+    /// from under the stamp (an edit owns the cell through its own
+    /// protocol) or the cell went invalid — the churn class.
+    pub sparse_dropped_stale: u64,
+    /// v6.30.0 diag: scheduled words dropped after SPARSE_REBEAT_RETRIES
+    /// undecodable re-queues — the decodability-window class (the rim's
+    /// sweep-era killer; if this counter dominates the rim stays data-
+    /// starved even with the re-beat on).
+    pub sparse_dropped_undecodable: u64,
     /// v6.6.2: true while the CURRENT hold's release may schedule rebeats
     /// (set at the decision arm, consumed by the release).
     rebeat_armed: bool,
@@ -574,7 +588,10 @@ impl Streamer {
             rebeat: std::collections::VecDeque::new(),
             sparse_rebeat: std::collections::VecDeque::new(),
             sparse_rebeat_on: false,
+            sparse_rebeat_frac: SPARSE_REBEAT_BUDGET_FRAC as u32,
             sparse_rebeats_streamed: 0,
+            sparse_dropped_stale: 0,
+            sparse_dropped_undecodable: 0,
             rebeat_armed: false,
             rebeat_beats_left: 0,
             pending_rebeat: false,
@@ -647,6 +664,21 @@ impl Streamer {
     /// stream diag line — ops see the bounded retry sequence live).
     pub fn rebeat_diag(&self) -> (usize, u32) {
         (self.rebeat.len(), self.rebeat_beats_left)
+    }
+
+    /// v6.30.0 diag: the sparse re-beat channel — (streamed, queued, dropped
+    /// stale, dropped undecodable). The summary ride: the #360 pre-registra-
+    /// tion names the streamed count the rim read's first leg (words schedu-
+    /// led and actually re-spawned vs dropped in their 12 s decodability
+    /// window), and the two drop classes split the failure: stale = edit
+    /// churn owns the cell, undecodable = the sweep-window killer.
+    pub fn sparse_diag(&self) -> (u64, usize, u64, u64) {
+        (
+            self.sparse_rebeats_streamed,
+            self.sparse_rebeat.len(),
+            self.sparse_dropped_stale,
+            self.sparse_dropped_undecodable,
+        )
     }
 
     /// v6.9.5 diag: (re-arm cells, ticks left) — 0/0 while the span is off.
@@ -1204,7 +1236,12 @@ impl Streamer {
         // channel consumes at most budget / SPARSE_REBEAT_BUDGET_FRAC dots
         // per tick so the phases keep the rest.
         if self.sparse_rebeat_on {
-            let sparse_budget = budget / SPARSE_REBEAT_BUDGET_FRAC;
+            let frac = if self.sparse_rebeat_frac == 0 {
+                SPARSE_REBEAT_BUDGET_FRAC
+            } else {
+                self.sparse_rebeat_frac as usize
+            };
+            let sparse_budget = budget / frac;
             let mut rotated: std::collections::VecDeque<(u32, u64, u16, u16, u32)> =
                 std::collections::VecDeque::new();
             let mut examined = 0usize;
@@ -1227,13 +1264,16 @@ impl Streamer {
                 let cx = (i % side) as u32;
                 let cz = (i / side) as u32;
                 let Some(cell) = self.get(cx, cz) else {
+                    self.sparse_dropped_stale += 1;
                     continue; // invalid cell — drop
                 };
                 if !cell.valid {
+                    self.sparse_dropped_stale += 1;
                     continue; // dropped
                 }
                 let (hword, cword) = Self::encode_words(&cell);
                 if hword != hstamp || cword != cstamp {
+                    self.sparse_dropped_stale += 1;
                     continue; // the value changed — the edit path owns it
                 }
                 let decodable = views.is_empty() || self.decodable_by_any(i, views);
@@ -1246,6 +1286,8 @@ impl Streamer {
                             cstamp,
                             retries + 1,
                         ));
+                    } else {
+                        self.sparse_dropped_undecodable += 1;
                     }
                     continue; // retries exhausted — drop
                 }
@@ -1684,9 +1726,9 @@ mod tests {
         assert!(!b.is_empty(), "the refresh path streamed the cell");
         assert_eq!(s.sparse_rebeat.len(), 1, "the fragile word scheduled");
         assert_eq!(
-            s.sparse_rebeat.front().unwrap().2 >> 8,
+            s.sparse_rebeat.front().unwrap().3 >> 8,
             12,
-            "hword stamp rides"
+            "cword stamp rides (tuple = (idx, at, hword, cword, retries))"
         );
         // Not due yet: nothing re-spawns.
         let b: Vec<Spawn> = s.tick_batch(64, &[view(20)]).to_vec();
@@ -1701,17 +1743,22 @@ mod tests {
         assert_eq!(s.sparse_rebeats_streamed, 1);
         assert!(s.sparse_rebeat.is_empty(), "fired entry consumed");
 
-        // A 3-slot word (rgb 127,178,56 -> bins (2,3,1) -> idx 56) never
-        // schedules (3 > SPARSE_REBEAT_MAX_SLOTS).
-        s.set_cell(3, 3, cell(70, false, [127, 178, 56]), 60);
+        // A NON-fragile word never schedules: stone gray [102,102,102] ->
+        // bins (2,2,2) -> idx 86 = cword 0x5600, ALL FOUR slots non-zero
+        // (fragile_slots(0x5600) = 4 > SPARSE_REBEAT_MAX_SLOTS = 2).
+        // (The v6.29.0 draft used [127,178,56] = idx 56 = 0x3800 — two
+        // non-zero pairs after the v6.27.0 palette re-snap, i.e. FRAGILE —
+        // the pre-existing failure this v6.30.0 run fixes.)
+        s.set_cell(3, 3, cell(70, false, [102, 102, 102]), 60);
         s.sparse_rebeat.clear();
         let _ = s.tick_batch(64, &[view(60)]).to_vec();
         assert!(s.sparse_rebeat.is_empty(), "a 4-slot word is not fragile");
 
         // The value stamp drops the entry when an edit changes the cell.
-        // The new rgb = a 4-slot word, so the edit path schedules nothing
-        // fragile of its own (the test isolates the stamp-drop behavior).
-        s.set_cell(2, 2, cell(75, false, [127, 178, 56]), 70);
+        // The new rgb = stone gray (a 4-slot word — see above), so the edit
+        // path schedules nothing fragile of its own (the test isolates the
+        // stamp-drop behavior).
+        s.set_cell(2, 2, cell(75, false, [102, 102, 102]), 70);
         s.sparse_rebeat.clear();
         // Re-schedule with the OLD words stamped by hand (simulate the
         // stale entry surviving an edit).
@@ -1722,6 +1769,85 @@ mod tests {
             s.sparse_rebeat.is_empty(),
             "the stamp mismatch drops the entry (the edit path owns the cell)"
         );
+        assert_eq!(
+            s.sparse_dropped_stale, 1,
+            "v6.30.0: the stamp drop lands in the stale class"
+        );
+    }
+
+    #[test]
+    fn sparse_rebeat_drops_counted_by_class_and_frac_falls_back() {
+        // v6.30.0: the two drop classes are counted separately — stale (the
+        // value moved out from under the stamp) and undecodable (the retries
+        // exhausted inside the decodability window) — and a frac=0 knob
+        // falls back to the v6.29.0 divisor instead of dividing by zero.
+        // Each phase runs a FRESH streamer: set_cell marks dirty, and a
+        // decodable later tick re-streams + re-schedules those cells —
+        // queue-length assertions must not share state across phases.
+
+        // The UNDECODABLE class: schedule at 10 (due 50), then every pop
+        // window stands at a view that cannot decode the cell — retries
+        // 0->1->2 exhaust and the entry drops with the undecodable stamp.
+        let mut s = Streamer::new(0.0, 0.0, 64, 4);
+        s.set_cell(2, 2, cell(70, false, [30, 150, 30]), 0);
+        s.sparse_rebeat_on = true;
+        let near = |t: u64| ViewHint {
+            eye: [10.0, 100.0, 60.0],
+            look: [0.0, 0.0, -1.0],
+            now: t,
+            age_ticks: u64::MAX,
+        };
+        let far = |t: u64| ViewHint {
+            eye: [10.0, 100.0, 600.0], // far outside the decode band
+            look: [0.0, 0.0, -1.0],
+            now: t,
+            age_ticks: u64::MAX,
+        };
+        let b: Vec<Spawn> = s.tick_batch(64, &[near(10)]).to_vec();
+        assert!(!b.is_empty(), "the refresh path streamed the cell");
+        assert_eq!(s.sparse_rebeat.len(), 1, "the fragile word scheduled");
+        let _ = s.tick_batch(64, &[far(50)]).to_vec();
+        assert_eq!(s.sparse_rebeat.len(), 1, "retry 1 re-queued");
+        assert_eq!(s.sparse_rebeat.front().unwrap().4, 1);
+        let _ = s.tick_batch(64, &[far(90)]).to_vec();
+        assert_eq!(s.sparse_rebeat.len(), 1, "retry 2 re-queued");
+        assert_eq!(s.sparse_rebeat.front().unwrap().4, 2);
+        let _ = s.tick_batch(64, &[far(130)]).to_vec();
+        assert!(s.sparse_rebeat.is_empty(), "retries exhausted — dropped");
+        assert_eq!(
+            s.sparse_dropped_undecodable, 1,
+            "the undecodable class counted"
+        );
+        assert_eq!(s.sparse_dropped_stale, 0, "stale untouched so far");
+        assert_eq!(s.sparse_rebeats_streamed, 0, "nothing ever fired");
+
+        // The STALE class: schedule a fragile word, then EDIT the cell (the
+        // words move out from under the stamp) before the entry is due.
+        let mut s = Streamer::new(0.0, 0.0, 64, 4);
+        s.sparse_rebeat_on = true;
+        s.set_cell(5, 5, cell(70, false, [30, 150, 30]), 200);
+        let _ = s.tick_batch(64, &[near(200)]).to_vec();
+        assert_eq!(s.sparse_rebeat.len(), 1, "the fragile word scheduled");
+        s.set_cell(5, 5, cell(80, false, [200, 60, 40]), 220); // the edit path owns the cell now
+        let _ = s.tick_batch(64, &[near(240)]).to_vec();
+        assert!(s.sparse_rebeat.is_empty(), "the stale entry dropped");
+        assert_eq!(s.sparse_dropped_stale, 1, "the stale class counted");
+        assert_eq!(
+            s.sparse_dropped_undecodable, 0,
+            "undecodable untouched in this phase"
+        );
+
+        // The frac fallback: frac=0 must not divide by zero — the pop runs
+        // on the v6.29.0 divisor and fires the re-beat normally.
+        let mut s = Streamer::new(0.0, 0.0, 64, 4);
+        s.sparse_rebeat_on = true;
+        s.set_cell(7, 7, cell(70, false, [30, 150, 30]), 300);
+        let _ = s.tick_batch(64, &[near(300)]).to_vec();
+        assert_eq!(s.sparse_rebeat.len(), 1, "scheduled");
+        s.sparse_rebeat_frac = 0;
+        let b: Vec<Spawn> = s.tick_batch(64, &[near(340)]).to_vec();
+        assert_eq!(b.len(), 8, "frac=0 falls back to /4 — the re-beat fires");
+        assert_eq!(s.sparse_rebeats_streamed, 1);
     }
 
     #[test]

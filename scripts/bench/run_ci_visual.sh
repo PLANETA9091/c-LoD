@@ -1401,7 +1401,13 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # fallback, q dead-flat through the tour — no feedback channel exists).
   # READ (pre-registered): 07/12 flat_signed +60 -> ~0, exact above 90 =
   # the first views toward 100%; worse -> rollback = drop the flag here.
-  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;sparse_rebeat=true"
+  # v6.30.0: sparse_rebeat_frac=8 — the #360 tuning: the /4 divisor priced
+  # −5.1 on view 05 (pool competition on the vanilla-owned platform view);
+  # /8 halves the channel pressure, the schedule spread doubles (retries=2
+  # stay). READ: 05 recovers toward its 94 #356 level, 06/10 hold ±2, the
+  # srbeat diag counters (below, from /clod-pack.info) show whether the
+  # undecodable-drop class now dominates the schedule.
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;sparse_rebeat=true;sparse_rebeat_frac=8"
   # v6.19.9 THE ROOT CAUSE (#302's maxima nailed it): parity stream max
   # cone 0, max zone 0 — the scheduler never sent ONE cell the whole
   # session — and the reason is the v6.4.2 regression class verbatim: THIS
@@ -1667,6 +1673,22 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     ct "parity world shot $PNAME ($PW_N/$PTOT)"
   done 3< "$PARITY"
   sum "- parity world tour done: $PW_N shots, $PW_NIGHT night-guard renames in parity/ (the gate pairs voxy/<name>.png vs parity/<name>.png)"
+  # v6.30.0 SPARSE RE-BEAT SUMMARY RIDE (#360 pre-registered item (1)):
+  # the channel counters at tour end — streamed (words actually re-spawned)
+  # vs the two drop classes split the rim's transport verdict: stale = edit
+  # churn, undecodable = the sweep-window killer. The counters live on
+  # /clod-pack.info since v6.30.0; a missing line means the module predates
+  # the endpoint (parse-safe fallback).
+  PBINFO="$(curl -s http://127.0.0.1:8199/clod-pack.info 2>/dev/null || true)"
+  PB_SENT=$(echo "$PBINFO" | grep -o 'sparse_sent=[0-9]*' | head -1 | cut -d= -f2)
+  PB_Q=$(echo "$PBINFO" | grep -o 'sparse_q=[0-9]*' | head -1 | cut -d= -f2)
+  PB_STALE=$(echo "$PBINFO" | grep -o 'sparse_stale=[0-9]*' | head -1 | cut -d= -f2)
+  PB_UNDEC=$(echo "$PBINFO" | grep -o 'sparse_undec=[0-9]*' | head -1 | cut -d= -f2)
+  if [ -n "$PB_SENT" ]; then
+    sum "- sparse re-beat channel at tour end: streamed=${PB_SENT:-0} q=${PB_Q:-0} dropped_stale=${PB_STALE:-0} dropped_undecodable=${PB_UNDEC:-0} (frac=8 boot; undecodable-dominant = the rim words die in their decodability window, stale-dominant = edit churn owns the cells)"
+  else
+    sum "- sparse re-beat channel: /clod-pack.info pre-dates v6.30.0 (no sparse_* lines) — diag absent"
+  fi
   if [ "$PW_NIGHT" -gt 0 ]; then
     fail "parity world time-of-day uncontrollable: $PW_NIGHT vantage(s) night after re-pin+reshoot — the §7b noon-pin class is broken on this runner; the matrix is infrastructure-blocked, not a renderer verdict (DAY GUARD lines + the feed's time-audit.md carry the evidence)"
   fi

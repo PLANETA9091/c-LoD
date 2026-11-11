@@ -201,6 +201,7 @@ pub fn build(cfg: &Config) -> Pack {
             cfg.mesh_debug,
             cfg.quant_ssao,
             cfg.fog_voxy,
+            cfg.rim_mask,
         );
     }
     build_zip(
@@ -213,9 +214,11 @@ pub fn build(cfg: &Config) -> Pack {
         cfg.mesh_debug,
         cfg.quant_ssao,
         cfg.fog_voxy,
+        cfg.rim_mask,
     )
 }
 
+#[allow(clippy::too_many_arguments)] // the knob set grows with every CI-lever pack; v6.30.0 added rim_mask
 fn build_zip(
     lod_terrain_tpl: &str,
     atmosphere_tpl: &str,
@@ -226,6 +229,7 @@ fn build_zip(
     mesh_debug: bool,
     quant_ssao: bool,
     fog_voxy: bool,
+    rim_mask: bool,
 ) -> Pack {
     let lod_terrain_json = substitute(lod_terrain_tpl, &map);
     let atmosphere_json = substitute(atmosphere_tpl, &map);
@@ -284,6 +288,17 @@ fn build_zip(
             "float fog = fogLive ? clamp(tHit * (1.0 / 1024.0), 0.0, 1.0) * fogOpacity : 0.0; // __FOG_VOXY__",
             "// v6.26.7 FOG VOXY EXACT: voxy post/blit_texture_depth_cutout.frag (HAS_FOG)\n    // + NormalRenderPipeline.java:99-107, FogMode default FOG_AND_FADE.\n    float invEndFogDelta = 1.0 / (FogParams.y - FogParams.x);\n    float startDelta = -FogParams.x * invEndFogDelta;\n    float endDistance = max(vanRD, 320.0) * 1.7320508; // sqrt(3)\n    float fogCap = clamp(endDistance * invEndFogDelta + startDelta, 0.0, 1.0);\n    float fog = fogLive ? clamp(tHit * invEndFogDelta + startDelta, 0.0, fogCap) * fogOpacity : 0.0; // __FOG_VOXY__",
         )
+    } else {
+        lod_terrain
+    };
+    // v6.30.0 RIM MASK PROBE (#360 pre-registered item (2)): the compile-time
+    // decode-state paint — every march-owned pixel becomes GREEN (height and
+    // color words decoded) / RED (colorless — the color word is absent) /
+    // BLUE (height absent at a march hit). One mask frame from a rim vantage
+    // (07/12) names the rim fallback class exactly; the production build
+    // keeps the marker a comment and the pack byte-stable.
+    let lod_terrain = if rim_mask {
+        lod_terrain.replace("// __RIM_MASK__", "#define RIM_MASK 1")
     } else {
         lod_terrain
     };
@@ -782,6 +797,62 @@ mod tests {
         let (both_fsh, _) = fsh_of(&Config::parse("fog_voxy=true;quant_ssao=true"));
         assert!(both_fsh.contains("float fogCap"));
         assert!(both_fsh.contains("float hq = floor(ground_at(q"));
+    }
+
+    #[test]
+    fn rim_mask_swaps_the_decode_state_probe() {
+        // v6.30.0 (#360 pre-registered item (2)): rim_mask=true ships the
+        // compile-time decode-state paint — every march-owned pixel becomes
+        // GREEN (height+color decoded) / RED (colorless: the color word is
+        // absent) / BLUE (height absent at a march hit). One mask frame from
+        // a rim vantage (07/12) names the rim fallback class exactly. The
+        // default build keeps the marker a comment and the pack byte-stable.
+        let fsh_of = |cfg: &Config| {
+            let p = build(cfg);
+            let fsh = String::from_utf8_lossy(
+                &zip_entries(&p.zip)
+                    .iter()
+                    .find(|(n, _)| n == "assets/clod/shaders/post/lod_terrain.fsh")
+                    .unwrap()
+                    .1,
+            )
+            .to_string();
+            (fsh, p.sha1_hex)
+        };
+        let (raw_fsh, raw_sha) = fsh_of(&Config::parse(""));
+        assert!(
+            !raw_fsh.contains("#define RIM_MASK 1"),
+            "rim probe leaked to prod"
+        );
+        assert!(
+            raw_fsh.contains("// __RIM_MASK__"),
+            "marker must stay in the default build"
+        );
+        let (rm_fsh, rm_sha) = fsh_of(&Config::parse("rim_mask=true"));
+        assert!(
+            rm_fsh.contains("#define RIM_MASK 1"),
+            "the rim probe define must ship"
+        );
+        assert!(
+            rm_fsh.contains("v6.30.0 RIM MASK PROBE"),
+            "the probe block must ride the same swap"
+        );
+        assert_ne!(rm_sha, raw_sha, "pack SHA must change");
+        // Determinism on the new knob.
+        let (_, rm_sha2) = fsh_of(&Config::parse("rim_mask=true"));
+        assert_eq!(rm_sha, rm_sha2);
+        // The probe composes with the parity-world lanes and the other knobs.
+        let (rm2_fsh, _) = fsh_of(&Config::parse(
+            "unfog=true;mesh_paint=true;sparse_rebeat=true;rim_mask=true",
+        ));
+        assert!(rm2_fsh.contains("#define RIM_MASK 1"));
+        // Three-knob composition with the existing shader knobs.
+        let (all_fsh, _) = fsh_of(&Config::parse(
+            "rim_mask=true;fog_voxy=true;quant_ssao=true",
+        ));
+        assert!(all_fsh.contains("#define RIM_MASK 1"));
+        assert!(all_fsh.contains("float fogCap"));
+        assert!(all_fsh.contains("float hq = floor(ground_at(q"));
     }
 
     #[test]

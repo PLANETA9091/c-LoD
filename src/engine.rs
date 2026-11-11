@@ -231,6 +231,7 @@ fn ensure_boot(state: &Arc<State>, env: Env) {
                     sha1_hex: sha.clone(),
                     cells: 0,
                     total_cells: 0,
+                    ..Default::default()
                 },
             );
             *state.pack.write().unwrap() = Some(Arc::new(new_pack));
@@ -979,6 +980,10 @@ fn arm_stream(state: &Arc<State>, ox: f64, oz: f64) {
         // v6.29.0 SPARSE-WORD RE-BEAT: the no-reset fragile-word re-stream
         // knob (default off; the parity world boots it on).
         s.sparse_rebeat_on = state.cfg.sparse_rebeat;
+        // v6.30.0 RE-BEAT BUDGET: the channel divisor (default 4 = the
+        // v6.29.0 hard-coded value; the parity world boots 8 — the #360
+        // 05-regression tuning).
+        s.sparse_rebeat_frac = state.cfg.sparse_rebeat_frac;
         (s.side, s.cells())
     };
     let lap_ticks = cells / ((state.cfg.particles_per_tick as u64) / 8).max(1);
@@ -1030,6 +1035,13 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
             ra_c,
             ra_t,
         )
+    };
+    // v6.30.0 sparse re-beat channel diag: (streamed, queued, dropped stale,
+    // dropped undecodable) — rides the log line AND /clod-pack.info so the
+    // CI summary reads the rim's transport state per run (#360 item (1)).
+    let (sr_sent, sr_q, sr_stale, sr_undec) = {
+        let s = state.stream.lock().unwrap();
+        s.sparse_diag()
     };
     // v5.5 frontier diagnostics: wish = in-flight FORCED tickets,
     // forced = chunks that completed gen and got sampled.
@@ -1107,6 +1119,10 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     // v5.2.2: /clod-pack.info serves LIVE scan counters (it used to
     // report the boot-time cells=0 forever).
     state.server.set_meta(valid, total_cells);
+    // v6.30.0: the sparse re-beat counters ride the same beat.
+    state
+        .server
+        .set_sparse_diag(sr_sent, sr_q, sr_stale, sr_undec);
     // v6.5.2 CI forensics: when debug_cell is configured, refresh the
     // /clod-cells window (the server's belief about the cells it streams)
     // on the same 100-tick beat.
@@ -1119,7 +1135,7 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     }
     let p0 = players.first();
     crate::log_info(&format!(
-        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}) ewin {} rbeat {rb_q}p/{rb_left} rearm {ra_c}c/{ra_t}t rescan {rescan_c}c/{rescan_e}e, edits {e_char}{e_pushes}p/{e_cells}c/{e_edits}e drop {e_drops}, spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} ~{kbps} kB/s {cache_stat}",
+        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}) ewin {} rbeat {rb_q}p/{rb_left} rearm {ra_c}c/{ra_t}t rescan {rescan_c}c/{rescan_e}e, edits {e_char}{e_pushes}p/{e_cells}c/{e_edits}e drop {e_drops}, spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} ~{kbps} kB/s {cache_stat}, srbeat {sr_sent}s/{sr_q}q drop {sr_stale}stale/{sr_undec}undec",
         state.stream.lock().unwrap().edit_window,
         jni::STREAM_SPAWNED.load(Ordering::Relaxed),
         jni::STREAM_FAILED.load(Ordering::Relaxed),

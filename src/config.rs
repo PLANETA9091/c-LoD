@@ -167,7 +167,7 @@ pub struct Config {
     pub quant_ssao: bool,
     /// v6.26.7 FOG VOXY EXACT (rim-class candidate): the march fog mix ports
     /// voxy's blit fog — post/blit_texture_depth_cutout.frag (HAS_FOG block)
-    /// + NormalRenderPipeline.java:99-107, FogMode default FOG_AND_FADE
+    /// plus NormalRenderPipeline.java:99-107, FogMode default FOG_AND_FADE
     /// (VoxyConfig.getFogMode(): null -> FOG_AND_FADE; the CI voxy-config.json
     /// pins no fogMode). The linear 0..1024 mix gains the voxy CAP:
     /// endDistance = max(vanillaRD_blocks, 20*16) * sqrt(3) — at RD 8 the cap
@@ -192,6 +192,21 @@ pub struct Config {
     /// production stays sparse_rebeat=false until the CI A/B reads the rim
     /// (flat_signed +60 -> ~0 = win).
     pub sparse_rebeat: bool,
+    /// v6.30.0 RE-BEAT BUDGET FRACTION: the sparse re-beat channel consumes
+    /// at most budget / frac dots per tick (the v6.29.0 hard-coded /4). The
+    /// #360 verdict priced the /4 at −5.1 on view 05 (vanilla-owned platform
+    /// view — extra dots compete for the client particle pool): frac=8 halves
+    /// the pressure while the schedule spread doubles (SPARSE_REBEAT_RETRIES
+    /// = 2 stays). 0 = clamp to the v6.29.0 default 4 (parse safety).
+    pub sparse_rebeat_frac: u32,
+    /// v6.30.0 RIM MASK PROBE (#360 item (2)): a compile-time march probe
+    /// painting every march-owned pixel with its client DECODE STATE —
+    /// GREEN = height+color decoded, RED = colorless (color word absent),
+    /// BLUE = height absent at a march hit. One mask frame from a rim
+    /// vantage names the rim fallback class exactly (color words lost vs
+    /// heights never decoded) — the question the flat +61 could not answer.
+    /// Pack SHA changes; production stays rim_mask=false (marker comment).
+    pub rim_mask: bool,
 }
 
 impl Default for Config {
@@ -242,6 +257,8 @@ impl Default for Config {
             atmosphere: true,
             edit_beats: crate::stream::EDIT_BEATS_DEFAULT,
             sparse_rebeat: false,
+            sparse_rebeat_frac: 4,
+            rim_mask: false,
         }
     }
 }
@@ -427,6 +444,16 @@ impl Config {
         // v6.29.0: sparse_rebeat — the no-reset fragile-word re-stream.
         if let Some(v) = get("sparse_rebeat") {
             cfg.sparse_rebeat = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
+        // v6.30.0: sparse_rebeat_frac — the re-beat channel budget divisor
+        // (the #360 05-regression tuning; 0 parses to the default 4).
+        if let Some(v) = get("sparse_rebeat_frac").and_then(|v| v.parse::<u32>().ok()) {
+            cfg.sparse_rebeat_frac = if v == 0 { 4 } else { v.min(64) };
+        }
+        // v6.30.0: rim_mask — the compile-time march decode-state probe
+        // (#360 item (2), the rim fallback class reader).
+        if let Some(v) = get("rim_mask") {
+            cfg.rim_mask = matches!(v.trim(), "1" | "true" | "yes" | "on");
         }
         cfg
     }
@@ -659,6 +686,39 @@ mod tests {
             "debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;sparse_rebeat=true",
         );
         assert!(t.sparse_rebeat && t.unfog && t.mesh_paint && !t.atmosphere);
+    }
+
+    #[test]
+    fn sparse_rebeat_frac_and_rim_mask_knobs() {
+        // v6.30.0: the re-beat budget divisor + the rim decode-state probe.
+        assert_eq!(
+            Config::parse("").sparse_rebeat_frac,
+            4,
+            "default = the v6.29.0 hard-coded SPARSE_REBEAT_BUDGET_FRAC"
+        );
+        assert_eq!(Config::parse("sparse_rebeat_frac=8").sparse_rebeat_frac, 8);
+        assert_eq!(
+            Config::parse("sparse_rebeat_frac=0").sparse_rebeat_frac,
+            4,
+            "0 parses to the default (div-by-zero guard)"
+        );
+        assert_eq!(
+            Config::parse("sparse_rebeat_frac=999").sparse_rebeat_frac,
+            64,
+            "clamped"
+        );
+        assert!(
+            !Config::parse("").rim_mask,
+            "rim probe default off (marker stays a comment, prod byte-stable)"
+        );
+        assert!(Config::parse("rim_mask=true").rim_mask);
+        assert!(Config::parse("rim_mask=1").rim_mask);
+        assert!(!Config::parse("rim_mask=false").rim_mask);
+        let t = Config::parse(
+            "debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;sparse_rebeat=true;sparse_rebeat_frac=8;rim_mask=true",
+        );
+        assert!(t.sparse_rebeat && t.rim_mask && t.unfog && t.mesh_paint);
+        assert_eq!(t.sparse_rebeat_frac, 8);
     }
 
     #[test]
