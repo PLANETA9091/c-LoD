@@ -47,6 +47,7 @@ uniform sampler2D PrevSampler;    // previous plane target (persistent)
 uniform sampler2D RotSampler;     // clod_rot_a (camera + fog channel)
 uniform sampler2D ResetSampler;   // clod_reset (v6.2 edit-reset flags, this frame)
 uniform sampler2D HeightRefSampler; // clod_h pair (v6.23 color-side rank cross-check)
+uniform sampler2D HeightPersistSampler; // the OTHER clod_h half — the persistent marked word (v6.36.0)
 
 // v5.0.3: SamplerInfo never existed as a client UBO — it stayed zeroed
 // (the whole capture wrote cell (0,0), the march divided by zero).
@@ -424,11 +425,23 @@ void main() {
             honest = surface_rank(float(w >> 8) - 64.0) == r;
         } else {
             // The color word carries no surface: cross-check against the
-            // height pair written by the earlier capture passes of this
-            // very frame (chain order: HI before LO). A cell whose height
-            // word is not decoded yet cannot vouch for a color word — the
-            // stream repeats every lap, the color follows the height.
+            // height pair. v6.36.0: the FRESH HI word of this frame dies to
+            // the eraser the frame its completion lands (v6.35.0's eraseFlag
+            // fires on allSlots || marked) — every frame AFTER the height
+            // completion read an empty HeightRef and the rank cross-check
+            // rejected the color word for exactly the cells whose heights
+            // were already decoded: the color window was ONE frame wide,
+            // and the #381-#383 tower frames' RED class (a ZERO color byte
+            // under a marked height — 84-150k px, replicated 4 runs) is its
+            // portrait. The PERSISTENT height half (the other ping-pong
+            // buffer — every frame's HI round merges into it and its mark
+            // survives the eraser) vouches instead: the rank gate keeps its
+            // full noise-rejection power, the vouch no longer expires with
+            // the dots.
             vec4 hpx = texelFetch(HeightRefSampler, px, 0);
+            if (hpx.a < 0.5) {
+                hpx = texelFetch(HeightPersistSampler, px, 0);
+            }
             honest = hpx.a >= 0.5 && surface_rank(hpx.r * 255.0 - 64.0) == r;
         }
         if (!honest) {
