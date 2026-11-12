@@ -466,13 +466,41 @@ void main() {
     uint prevByte = uint(prev.r * 255.0 + 0.5);
     bool reset = texelFetch(ResetSampler, px, 0).r > 0.5;
     uint fresh = word >> 8;
+    // v6.38.0 THE SLOT-COVERAGE LEDGER (the color-word completion fix):
+    // allSlots demands all four slots' dots strobing in ONE frame — but
+    // the two words of one cell lose dots INDEPENDENTLY (pool churn, fog
+    // margins, particle lifetimes), and the tower state frames (#381-#386)
+    // show the result: the color word's bits OR-accumulate across frames
+    // (the green minority grows with dwell) while the mark never lands,
+    // because the mark rides allSlots-only. The ledger rides the state
+    // green channel (the v6.35.0 one-bit erase flag widened to a nibble):
+    // the low 4 bits OR-accumulate every frame's strobed slots, bit 4
+    // stays the eraser's kill flag (dust_mask reads the bit — the nibble
+    // is invisible to it). A slot counts as covered when any of its dots
+    // strobed THIS frame. The ledger complete = the word IS decoded: the
+    // same guarantee the one-frame allSlots gave, spread over however
+    // many frames the dots needed. Byte-stability: every §5b cell
+    // completes allSlots in its first frame (ledger 0x0F + kill bit the
+    // same frame the mark lands — byte-identical steady state), and the
+    // ledger resets with the reset electron so a re-edited cell can never
+    // inherit the old word's coverage.
+    uint covered = uint(prev.g * 255.0 + 0.5) & 0x0Fu;
+    uint slotBits = (slot0 ? 0x1u : 0u) | (slot1 ? 0x2u : 0u)
+                  | (slot2 ? 0x4u : 0u) | (slot3 ? 0x8u : 0u);
     bool marked = prev.a > 0.5;
     uint outByte = prevByte;
-    if (reset && allSlots) {
-        // v6.2 EDIT PROTOCOL: after a reset electron, a COMPLETE fresh
-        // decode REPLACES the OR-merged word (an edit must be able to
-        // lose bits — a refresh cannot, that is what OR is for).
-        outByte = fresh;
+    bool ledgerDone = false;
+    if (reset) {
+        // v6.2 EDIT PROTOCOL: a reset electron wipes the OR-merged word's
+        // ledger with it — the fresh decode starts from a clean coverage
+        // history (a complete decode REPLACES the byte, a partial one
+        // seeds the new ledger; the old byte stays visible until the new
+        // word completes, exactly as v6.2 intended).
+        covered = slotBits;
+        if (allSlots) {
+            outByte = fresh;
+            ledgerDone = true;
+        }
     } else if (allSlots && !marked) {
         // v6.23 MERGE HONESTY (a): the first honest completion REPLACES
         // the accumulated partial bits. The fresh word is complete by
@@ -480,10 +508,17 @@ void main() {
         // partial is a subset of it — replacing loses nothing real and
         // throws away the noise partials the OR had already ratcheted in.
         outByte = fresh;
+        covered = 0x0Fu;
+        ledgerDone = true;
     } else if (anyHit && !marked) {
         // v6.2 (legacy, scoped): partial decodes keep the OR self-heal —
-        // on UNMARKED cells only.
+        // on UNMARKED cells only — and v6.38.0 lets the coverage history
+        // finish the row the one-frame allSlots could not.
         outByte = prevByte | fresh;
+        covered |= slotBits;
+        if (covered == 0x0Fu) {
+            ledgerDone = true;
+        }
     }
     // v6.23 MERGE HONESTY (b): a MARKED cell's word is immutable without
     // the reset electron. Honest same-word traffic is unaffected (OR of a
@@ -492,22 +527,22 @@ void main() {
     // OR bits into a proven word every frame (249 -> 255 = the #316
     // stripes); with the gate above they are rejected, and this block
     // makes the refusal permanent for the whole marked lifetime.
+    // v6.38.0: the ledger-complete completion raises the completion flag —
+    // the mark and the erase behavior follow the existing paths.
+    if (ledgerDone) {
+        allSlots = true;
+    }
     float mark = allSlots ? 1.0 : prev.a;
-    // v6.35.0 THE ERASE FLAG = COMPLETION, not anyHit. The eraser reads .g
-    // and kills a cell's dots the first frame the word strobes AT ALL —
-    // an anyHit from ONE slot fired the whole word's dot death, so a
-    // partial color word lost its 0..2 strobed slots' dots a frame later
-    // and its row could never reach allSlots: the #381 tower state frame's
-    // YELLOW class (a non-zero color byte under an unset mark, 6.8-12k px)
-    // is exactly that graveyard — the strobe fires, the OR gathers, the
-    // dots die, the row never completes, RED-dominant forever. Complete
-    // words erase as before (the §5b steady state: allSlots every frame —
-    // byte-identical rhythm), already-marked words too (the electron path
-    // re-arms them), but a PARTIAL UNMARKED word's dots now survive their
-    // full particle lifetime so the OR can finish the row. The transport
-    // stays invisible: the dots are distance-fogged 1-2 px sparkles, and
-    // the particle lifetime bounds any lingering field.
-    float eraseFlag = (allSlots || prev.a > 0.5) ? 1.0 : 0.0;
+    // v6.35.0 THE ERASE FLAG = COMPLETION, not anyHit — and v6.38.0 widens
+    // the one-bit flag into the slot-coverage ledger: bit 4 stays the
+    // eraser's kill flag (dust_mask now tests the bit, not the byte), the
+    // low nibble OR-accumulates the strobed slots across frames until the
+    // row completes. Complete words kill their dots as before (the §5b
+    // steady state: allSlots every frame — ledger 0x0F + kill bit the
+    // same frame, byte-identical rhythm), already-marked words too, and a
+    // PARTIAL UNMARKED word's dots survive (kill bit 0) while the nibble
+    // keeps the coverage alive through the ping-pong.
+    float eraseFlag = float(((allSlots || prev.a > 0.5) ? 0x10u : 0u) | covered) / 255.0;
     // .b = the FRESH word (this frame, not merged) for the eraser mask.
     fragColor = vec4(
         float(outByte) / 255.0,
