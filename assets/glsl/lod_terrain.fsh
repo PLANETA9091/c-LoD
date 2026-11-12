@@ -805,7 +805,18 @@ void main() {
     if (rmh.a < 0.5) {
         fragColor = vec4(0.0, 0.0, 1.0, scene.a);
     } else if (rmc.a < 0.5) {
-        fragColor = vec4(1.0, 0.0, 0.0, scene.a);
+        // v6.34.0 THE PARTIAL-COLOR PROBE: the color buffer's alpha mark
+        // stays 0 while the OR-merge accumulates partials (mark = allSlots
+        // ? 1 : prev.a) — so the plain RED class could not tell "the color
+        // strobe never fired" from "partial color bits ARE accumulating".
+        // YELLOW (1,1,0) = a non-zero color byte under an unset mark: the
+        // strobe fires and the OR gathers, but the row never completes
+        // (lost slots) — dig the slot losses. RED = a zero byte: the
+        // strobe never fired at all (dots absent / never strobed) — dig
+        // the spawn/probe side.
+        fragColor = rmc.r > 0.01
+            ? vec4(1.0, 1.0, 0.0, scene.a)
+            : vec4(1.0, 0.0, 0.0, scene.a);
     } else {
         fragColor = vec4(0.0, 1.0, 0.0, scene.a);
     }

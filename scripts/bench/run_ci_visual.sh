@@ -2038,8 +2038,10 @@ def classify(c):
     if g > 140 and r < 110 and b < 110: return "green"
     if r > 140 and g < 110 and b < 110: return "red"
     if b > 140 and r < 110 and g < 110: return "blue"
+    if r > 140 and g > 140 and b < 110: return "yellow"
     return None
 VERDICT = {
+    "yellow": "rim = PARTIAL COLOR class — the color strobe FIRES and the OR-merge gathers bits, but the row never completes (slot losses); dig the slot losses",
     "red": "rim = COLORLESS class — the color words die client-side (pool competition / fog strobe margin / the v6.23 HeightRef capture gate); heights ARE decoded",
     "blue": "rim = HEIGHTS NEVER DECODED — a data-coverage class: the state paint cannot even see the cells",
     "green": "rim fully decoded — the fallback is the PAINT path (shade/fog/composite), not data",
@@ -2049,16 +2051,17 @@ for name in ("00", "01", "12"):
     if not os.path.exists(p):
         continue
     im = Image.open(p).convert("RGB"); px = im.load(); w, h = im.size
-    g = r = b = 0
-    for y in range(0, h, 4):
-        for x in range(0, w, 4):
-            k = classify(px[x, y])
+    g = r = b = y = 0
+    for yy in range(0, h, 4):
+        for xx in range(0, w, 4):
+            k = classify(px[xx, yy])
             if k == "green": g += 1
             elif k == "red": r += 1
             elif k == "blue": b += 1
-    tot = g + r + b
-    dom = max((("green", g), ("red", r), ("blue", b)), key=lambda t: t[1])
-    line = f"- rim mask {name}: green={g*16} red={r*16} blue={b*16} (px, sampled /16)"
+            elif k == "yellow": y += 1
+    tot = g + r + b + y
+    dom = max((("green", g), ("red", r), ("blue", b), ("yellow", y)), key=lambda t: t[1])
+    line = f"- rim mask {name}: green={g*16} red={r*16} blue={b*16} yellow={y*16} (px, sampled /16)"
     if tot >= 40:
         line += f" -> DOMINANT {dom[0].upper()}: {VERDICT[dom[0]]}"
     else:
