@@ -480,10 +480,25 @@ void main() {
     // stripes); with the gate above they are rejected, and this block
     // makes the refusal permanent for the whole marked lifetime.
     float mark = allSlots ? 1.0 : prev.a;
+    // v6.35.0 THE ERASE FLAG = COMPLETION, not anyHit. The eraser reads .g
+    // and kills a cell's dots the first frame the word strobes AT ALL —
+    // an anyHit from ONE slot fired the whole word's dot death, so a
+    // partial color word lost its 0..2 strobed slots' dots a frame later
+    // and its row could never reach allSlots: the #381 tower state frame's
+    // YELLOW class (a non-zero color byte under an unset mark, 6.8-12k px)
+    // is exactly that graveyard — the strobe fires, the OR gathers, the
+    // dots die, the row never completes, RED-dominant forever. Complete
+    // words erase as before (the §5b steady state: allSlots every frame —
+    // byte-identical rhythm), already-marked words too (the electron path
+    // re-arms them), but a PARTIAL UNMARKED word's dots now survive their
+    // full particle lifetime so the OR can finish the row. The transport
+    // stays invisible: the dots are distance-fogged 1-2 px sparkles, and
+    // the particle lifetime bounds any lingering field.
+    float eraseFlag = (allSlots || prev.a > 0.5) ? 1.0 : 0.0;
     // .b = the FRESH word (this frame, not merged) for the eraser mask.
     fragColor = vec4(
         float(outByte) / 255.0,
-        anyHit ? 1.0 : 0.0,
+        eraseFlag,
         float(fresh) / 255.0,
         mark
     );
