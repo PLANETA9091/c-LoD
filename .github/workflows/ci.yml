@@ -586,7 +586,14 @@ jobs:
             # row (41449086366/41454021639/41454056043) were judged on white-px
             # counters alone; a picture separates a black frame (dead GL) from
             # a live scene with no particles (dead particle render) instantly.
-            for pair in "09_burst_close:burst" "09b_burst_far:far" "10_before_edit:baseline" "12_after_edit_probe23:last" "parity_dbg/01_aerial_west:mask01" "parity_dbg/07_far_north:mask07" "parity_dbg/10_marker_ray:mask10" "parity_dbg8/01m:mask8_01" "parity_dbg8/10m:mask8_10" "rim_mask/00:rim00" "rim_mask/07:rim07" "rim_mask/01:rim01" "rim_mask/12:rim12"; do
+            for pair in "09_burst_close:burst" "09b_burst_far:far" "10_before_edit:baseline" "12_after_edit_probe23:last" "11_h155_dust:h155" "11_h165_dust:h165" "11_h172_dust:h172" "11_h180_dust:h180" "11_h185_dust:h185" "parity_dbg/01_aerial_west:mask01" "parity_dbg/07_far_north:mask07" "parity_dbg/10_marker_ray:mask10" "parity_dbg8/01m:mask8_01" "parity_dbg8/10m:mask8_10" "rim_mask/00:rim00" "rim_mask/01:rim01" "rim_mask/12:rim12"; do
+            # v6.38.4: every relog probe frame rides the feed too (the
+            # red=79 flash on probe 6 needs eyes)
+            for rpf in /home/runner/mc-test/shots/ci-visual/13_after_relog_probe*.png; do
+                [ -f "$rpf" ] || continue
+                RPB=$(basename "$rpf" .png)
+                python3 scripts/bench/jpg_to_feed.py "$rpf" "/tmp/vfeed/run-${RUN_ID}-${RPB#13_after_relog_}.jpg" 2>/dev/null || true
+            done
               IMG="${pair%%:*}"; TAG="${pair##*:}"
               [ -f "$SRC/$IMG.png" ] || continue
               # the converter lives in a repo file — a heredoc on column 1
