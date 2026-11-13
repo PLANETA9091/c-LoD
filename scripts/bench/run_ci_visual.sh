@@ -1104,6 +1104,12 @@ for k in $(seq 0 23); do
   # swings with the lightmap (run #238 measured dusk purple).
   srv "time set noon"
   srv "weather clear"  # v6.32.1: per-probe storm guard
+  # v6.39.1 THE SECTION WAKE: #393/#394's LEG 1 PASS carried the v6.38.4
+  # dust bursts (y=172/180 right before the probes) and the rim session —
+  # which never gets a burst — stayed RED-dominant in the SAME runs: the
+  # burst (or the section state it creates) is what lets the LO-plane dots
+  # render and strobe. Wake the marker's section before EVERY probe.
+  srv "particle minecraft:dust{color:[0.0,1.0,0.0],scale:1.0} $CX 178 $CZ 0 0 0 0 40 force"
   shot "12_after_edit_probe$k" || exit 1
   LM=$(lens_metrics "12_after_edit_probe$k")
   case "$LM" in *lens_zero=1*)
@@ -1283,6 +1289,7 @@ for k in $(seq 0 11); do
   assert_online "relog probe $k" || exit 1
   srv "time set noon"  # v6.9.8: keep the light flat across the window
   srv "weather clear"  # v6.32.1: the relog window must stay storm-free too
+  srv "particle minecraft:dust{color:[0.0,1.0,0.0],scale:1.0} $CX 178 $CZ 0 0 0 0 40 force"  # v6.39.1 section wake
   shot "13_after_relog_probe$k" || exit 1
   SC=$(scene_count "13_after_relog_probe$k")
   if [ "${SC:-0}" -gt 0 ] 2>/dev/null; then L2_SCENE_ALIVE=1; fi
@@ -2058,6 +2065,10 @@ PYEOF
     RX=$(( ${RX//CX/$CX} )); RZ=$(( ${RZ//CZ/$CZ} ))
     srv "time set noon"
     srv "tp Stepan $RX $RY $RZ $RYAW $RPITCH"
+    # v6.39.1 section wake: the rim session must see the WOKEN state too —
+    # #394's rim read stayed RED-dominant while leg-1 (with the bursts)
+    # PASSED in the same run.
+    srv "particle minecraft:dust{color:[0.0,1.0,0.0],scale:1.0} $CX 178 $CZ 0 0 0 0 150 force"
     sleep 12
     shot "rim_mask/$RN" || true
   done
