@@ -1097,7 +1097,10 @@ PYEOF
   sum "- height ladder y=$H: ${HCNT:-?} green px over the marker (150-particle burst)"
 done
 PROBE_LOG="$SHOTS/probe_counts.txt"; : > "$PROBE_LOG"
-for k in $(seq 0 23); do
+# v6.39.2 WIDER WINDOWS: the passes are probabilistic (LEG 1 PASS in #393
+# and #394, red=0 in #395 with the same code) — the completion needs a lucky
+# frame and the 24x5 s window samples too little of the luck; 36x6 s.
+for k in $(seq 0 35); do
   assert_online "edit probe $k" || exit 1
   # v6.9.8: re-arm noon EVERY probe — the day/night boundary can cross
   # mid-loop (~5 min at 26.3's day length) and the marker's rendered hue
@@ -1129,10 +1132,10 @@ for k in $(seq 0 23); do
   sum "- probe $k: red=${PC:-?} paint=${PS:-?} ${LP} $LM (need red>=$MIN_PROBE paint>=$MIN_CHANGE lod>20)"
   if grep -q "VISUAL OK" /tmp/probe_out.txt; then
     FOUND1=1
-    note "marker VISIBLE on screen after edit (probe $k, ~$((k * 5 + 5)) s)"
+    note "marker VISIBLE on screen after edit (probe $k, ~$((k * 6 + 6)) s)"
     break
   fi
-  sleep 5
+  sleep 6
 done
 NOW_JOIN=$(join_count)
 [ "$NOW_JOIN" = "$JOIN1" ] \
@@ -1285,7 +1288,8 @@ sum "- leg-2 carrier probe green dust (80 m): changed-green px ${GD:-?} / total 
 echo "- leg-2 green dust changed-green px: ${GD:-?} total changed: ${GDT:-?}" >> "$PROBE_LOG"
 L2_SCENE_ALIVE=0
 phase "8 leg-2 relog probes"
-for k in $(seq 0 11); do
+# v6.39.2: 20x6 s (was 12x5) — same luck-window logic as leg-1.
+for k in $(seq 0 19); do
   assert_online "relog probe $k" || exit 1
   srv "time set noon"  # v6.9.8: keep the light flat across the window
   srv "weather clear"  # v6.32.1: the relog window must stay storm-free too
@@ -1317,7 +1321,7 @@ for k in $(seq 0 11); do
     note "marker STILL visible after relog (probe $k)"
     break
   fi
-  sleep 5
+  sleep 6
 done
 if [ "$FOUND2" = "1" ]; then
   echo "LEG 2 PASS: the streamed marker survives the session change"
