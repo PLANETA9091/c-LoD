@@ -1039,6 +1039,10 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     // v6.30.0 sparse re-beat channel diag: (streamed, queued, dropped stale,
     // dropped undecodable) — rides the log line AND /clod-pack.info so the
     // CI summary reads the rim's transport state per run (#360 item (1)).
+    let (er_sent, er_q) = {
+        let st = state.stream.lock().unwrap();
+        st.edit_rebeat_diag()
+    };
     let (sr_sent, sr_q, sr_stale, sr_undec) = {
         let s = state.stream.lock().unwrap();
         s.sparse_diag()
@@ -1135,7 +1139,7 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     }
     let p0 = players.first();
     crate::log_info(&format!(
-        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}) ewin {} rbeat {rb_q}p/{rb_left} rearm {ra_c}c/{ra_t}t rescan {rescan_c}c/{rescan_e}e, edits {e_char}{e_pushes}p/{e_cells}c/{e_edits}e drop {e_drops}, spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} ~{kbps} kB/s {cache_stat}, srbeat {sr_sent}s/{sr_q}q drop {sr_stale}stale/{sr_undec}undec",
+        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}) ewin {} rbeat {rb_q}p/{rb_left} rearm {ra_c}c/{ra_t}t rescan {rescan_c}c/{rescan_e}e, edits {e_char}{e_pushes}p/{e_cells}c/{e_edits}e drop {e_drops}, spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} ~{kbps} kB/s {cache_stat}, srbeat {sr_sent}s/{sr_q}q drop {sr_stale}stale/{sr_undec}undec, ereb {er_sent}s/{er_q}q",
         state.stream.lock().unwrap().edit_window,
         jni::STREAM_SPAWNED.load(Ordering::Relaxed),
         jni::STREAM_FAILED.load(Ordering::Relaxed),

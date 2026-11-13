@@ -424,6 +424,25 @@ pub const SPARSE_REBEAT_MAX_SLOTS: u32 = 2;
 /// Times a due entry may re-queue while nobody can decode it (the eye
 /// moved on) before the entry drops.
 pub const SPARSE_REBEAT_RETRIES: u32 = 2;
+/// v6.40.0 EDIT-PRIORITY RE-BEAT: the generic sparse channel shares its
+/// budget across EVERY fragile cell on the disk (~tens of thousands) and
+/// the marker's 9 cells drown in the crowd — #391-#396's red paints came
+/// through only when the timings happened to line up (LEG 1/2 PASS in
+/// 2 runs out of 4). A genuine edit's cells get their own channel: after
+/// each edit release the cells re-stream their words
+/// EDIT_REBEAT_BURSTS times, EDIT_REBEAT_DELAY_TICKS apart, OUTSIDE the
+/// sparse budget (the added wire load is 9 cells x 8 dots x bursts —
+/// noise against the phases), the value stamp drops them if a newer edit
+/// owns the cell, and an undecodable beat waits for its next slot
+/// WITHOUT burning a burst (only a delivered beat spends one). The
+/// completion turns deterministic: the client needs ONE strobe frame per
+/// slot, 25 bursts x 8 dots make p(one full row) -> 1.
+pub const EDIT_REBEAT_BURSTS: u32 = 25;
+pub const EDIT_REBEAT_DELAY_TICKS: u64 = 30;
+/// Entries older than this die (a forgotten edit cannot live forever).
+pub const EDIT_REBEAT_MAX_AGE_TICKS: u64 = 4000;
+/// Per-tick dot budget the edit channel may consume.
+pub const EDIT_REBEAT_TICK_BUDGET: usize = 256;
 /// Fraction of the tick budget the re-beat channel may consume (the
 /// phases share the rest; keeps the added wire load <= 25%).
 pub const SPARSE_REBEAT_BUDGET_FRAC: usize = 4;
@@ -554,6 +573,14 @@ pub struct Streamer {
     /// from under the stamp (an edit owns the cell through its own
     /// protocol) or the cell went invalid — the churn class.
     pub sparse_dropped_stale: u64,
+    /// v6.40.0: the edit-priority re-beat queue (idx, due, hstamp, cstamp,
+    /// beats left) — the genuine edit's cells re-stream outside the sparse
+    /// budget until the burst count or the age dies.
+    edit_rebeat: std::collections::VecDeque<(u32, u64, u16, u16, u32)>,
+    /// v6.40.0: the edit enqueue tick (the channel's age clock).
+    edit_rebeat_enqueued_at: u64,
+    /// v6.40.0 diag: edit-channel words delivered.
+    pub edit_rebeats_streamed: u64,
     /// v6.30.0 diag: scheduled words dropped after SPARSE_REBEAT_RETRIES
     /// undecodable re-queues — the decodability-window class (the rim's
     /// sweep-era killer; if this counter dominates the rim stays data-
@@ -644,6 +671,9 @@ impl Streamer {
             dirty_queue: std::collections::VecDeque::new(),
             rebeat: std::collections::VecDeque::new(),
             sparse_rebeat: std::collections::VecDeque::new(),
+            edit_rebeat: std::collections::VecDeque::new(),
+            edit_rebeat_enqueued_at: 0,
+            edit_rebeats_streamed: 0,
             sparse_rebeat_on: false,
             sparse_rebeat_frac: SPARSE_REBEAT_BUDGET_FRAC as u32,
             sparse_rebeats_streamed: 0,
@@ -729,6 +759,11 @@ impl Streamer {
     /// led and actually re-spawned vs dropped in their 12 s decodability
     /// window), and the two drop classes split the failure: stale = edit
     /// churn owns the cell, undecodable = the sweep-window killer.
+    /// v6.40.0: the edit-priority channel's (streamed, queued) pair.
+    pub fn edit_rebeat_diag(&self) -> (u64, usize) {
+        (self.edit_rebeats_streamed, self.edit_rebeat.len())
+    }
+
     pub fn sparse_diag(&self) -> (u64, usize, u64, u64) {
         (
             self.sparse_rebeats_streamed,
@@ -1024,6 +1059,23 @@ impl Streamer {
                 y: RS_TIERS[rank],
                 z: czw - 1.5 * sub,
             });
+            // v6.40.0 EDIT-PRIORITY RE-BEAT: schedule this cell's words for
+            // EDIT_REBEAT_BURSTS out-of-budget re-streams. One queue entry
+            // per cell (the burst count rides the entry); a second edit of
+            // the same cell refreshes the entry in place.
+            let due = now + EDIT_REBEAT_DELAY_TICKS;
+            if let Some(e) = self.edit_rebeat.iter_mut().find(|e| e.0 == idx) {
+                e.1 = due;
+                e.2 = hword;
+                e.3 = cword;
+                e.4 = EDIT_REBEAT_BURSTS;
+            } else {
+                if self.edit_rebeat.is_empty() {
+                    self.edit_rebeat_enqueued_at = now;
+                }
+                self.edit_rebeat
+                    .push_back((idx, due, hword, cword, EDIT_REBEAT_BURSTS));
+            }
         }
         let idx = idx as usize;
         self.last_stream[idx] = now;
@@ -1280,6 +1332,65 @@ impl Streamer {
         }
         if rebeat_rearmed {
             self.edit_window = 0;
+        }
+
+        // ---- v6.40.0 EDIT-PRIORITY RE-BEAT -------------------------------
+        // A genuine edit's cells re-stream OUTSIDE the sparse budget: the
+        // value stamp drops them if a newer edit owns the cell, an
+        // undecodable beat waits for its next slot without spending a
+        // burst, and the burst count (plus the age cap) bounds the channel.
+        while self.batch.len() < EDIT_REBEAT_TICK_BUDGET {
+            let Some(entry) = self.edit_rebeat.pop_front() else {
+                break;
+            };
+            let (idx, due, hstamp, cstamp, beats) = entry;
+            if now < due {
+                // Not due this tick: park it back and stop — the queue is
+                // FIFO by due time, nothing behind it is due either.
+                self.edit_rebeat.push_front(entry);
+                break;
+            }
+            let i = idx as usize;
+            let side = self.side as usize;
+            let cx = (i % side) as u32;
+            let cz = (i / side) as u32;
+            let Some(cell) = self.get(cx, cz) else {
+                continue; // invalid cell — the entry dies with it
+            };
+            if !cell.valid {
+                continue;
+            }
+            let (hword, cword) = Self::encode_words(&cell);
+            if hword != hstamp || cword != cstamp {
+                continue; // a newer edit owns the cell — its own entry rides
+            }
+            if now.saturating_sub(self.edit_rebeat_enqueued_at) > EDIT_REBEAT_MAX_AGE_TICKS {
+                continue; // forgotten edit — the age cap kills the channel
+            }
+            if !views.is_empty() && !self.decodable_by_any(i, views) {
+                // Wait for the next slot WITHOUT spending a burst: the
+                // re-arm window may move the cell into the decodable band.
+                self.edit_rebeat.push_back((
+                    idx,
+                    now + EDIT_REBEAT_DELAY_TICKS,
+                    hstamp,
+                    cstamp,
+                    beats,
+                ));
+                continue;
+            }
+            let sub = self.cell_size as f64 / SUB_PER_CELL;
+            self.push_sparse_rebeat(idx, sub, now);
+            self.edit_rebeats_streamed += 1;
+            if beats > 1 {
+                self.edit_rebeat.push_back((
+                    idx,
+                    now + EDIT_REBEAT_DELAY_TICKS,
+                    hword,
+                    cword,
+                    beats - 1,
+                ));
+            }
         }
 
         // ---- v6.29.0 SPARSE-WORD RE-BEAT --------------------------------
@@ -1931,6 +2042,8 @@ mod tests {
         // the v6.5.3 hold/release sequence (a settled client drains first).
         s.set_cell(2, 2, cell(75, false, [9, 9, 9]), 11);
         assert_eq!(s.dirty_pending, 1);
+        // v6.40.0: the window now ALSO carries the edit-priority re-beat
+        // bursts (no reset electrons) — accumulate everything and count.
         let mut b: Vec<Spawn> = Vec::new();
         for t in 11..(11 + EDIT_HOLD_TICKS + 2) {
             let views = [ViewHint {
@@ -1939,10 +2052,7 @@ mod tests {
                 now: t,
                 age_ticks: u64::MAX,
             }];
-            let batch = s.tick_batch(64, &views).to_vec();
-            if !batch.is_empty() {
-                b = batch;
-            }
+            b.extend(s.tick_batch(64, &views).to_vec());
         }
         let resets: Vec<&Spawn> = b.iter().filter(|p| p.y == RESET_Y).collect();
         assert_eq!(resets.len(), 1, "an edit streams exactly one reset dot");
@@ -2025,6 +2135,102 @@ mod tests {
     /// worst cell center — the v6.22 ladder put the height word at y=240
     /// (115-116 m) and spawn_visible refused it, so the tower never decoded
     /// (red=0 in every leg-1 probe since the tiers landed).
+    /// v6.40.0: the edit-priority re-beat channel — a genuine edit's cells
+    /// re-stream outside the sparse budget, one burst per
+    /// EDIT_REBEAT_DELAY_TICKS until EDIT_REBEAT_BURSTS is spent, the
+    /// value stamp drops entries when a newer edit owns the cell, and the
+    /// bursts carry NO reset electron (the OR-merge fills the losses).
+    #[test]
+    fn edit_rebeat_bursts_deliver_words_outside_the_sparse_budget() {
+        let mut s = Streamer::new(0.0, 0.0, 64, 4);
+        s.set_cell(2, 2, cell(70, false, [1, 2, 3]), 0);
+        let views = [ViewHint {
+            eye: [10.0, 100.0, 60.0],
+            look: [0.0, 0.0, -1.0],
+            now: 10,
+            age_ticks: u64::MAX,
+        }];
+        // Drain the paint/cone/zone state.
+        let _: Vec<Spawn> = s.tick_batch(2048, &views).to_vec();
+        assert!(s.edit_rebeat.is_empty(), "no edits -> no channel");
+        // THE EDIT: the RELEASE schedules one burst entry (set_cell marks
+        // dirty; the hold/release machinery decides when the release runs).
+        s.set_cell(2, 2, cell(75, false, [9, 9, 9]), 11);
+        let mut released = false;
+        for t in 11..(11 + EDIT_HOLD_TICKS + 4) {
+            let views = [ViewHint {
+                eye: [10.0, 100.0, 60.0],
+                look: [0.0, 0.0, -1.0],
+                now: t,
+                age_ticks: u64::MAX,
+            }];
+            let _: Vec<Spawn> = s.tick_batch(256, &views).to_vec();
+            if !s.edit_rebeat.is_empty() {
+                released = true;
+            }
+        }
+        assert!(released, "the edit release enqueues one entry");
+        assert_eq!(s.edit_rebeat.len(), 1, "exactly one entry per cell");
+        // Run past the delay: every burst is 8 dots (4 HI + 4 LO), no
+        // reset electron; the burst count walks down to 0 and the queue
+        // drains.
+        let mut total = 0usize;
+        let t0 = 11 + EDIT_HOLD_TICKS + 4;
+        for t in t0..(t0 + EDIT_REBEAT_DELAY_TICKS * u64::from(EDIT_REBEAT_BURSTS + 2) * 3) {
+            let views = [ViewHint {
+                eye: [10.0, 100.0, 60.0],
+                look: [0.0, 0.0, -1.0],
+                now: t,
+                age_ticks: u64::MAX,
+            }];
+            // v6.7.1's multi-beat re-dirty re-runs hold->release inside this
+            // window (its reset electrons are the RELEASE path's, not the
+            // bursts') — only the drain invariants are pinned here.
+            let batch: Vec<Spawn> = s.tick_batch(256, &views).to_vec();
+            total += batch.len();
+        }
+        // v6.40.0: the count counts DELIVERED bursts; the v6.7.1 multi-beat
+        // re-dirty may refresh the entry mid-flight (a second hold->release
+        // episode re-schedules the same cell), so the exact number is
+        // bursts + refreshes — the INVARIANT is >= the single-episode
+        // floor, the queue eventually drains, and no reset electron ever
+        // rides a burst.
+        assert!(
+            s.edit_rebeats_streamed >= u64::from(EDIT_REBEAT_BURSTS),
+            "the bursts delivered: {}",
+            s.edit_rebeats_streamed
+        );
+        assert!(
+            s.edit_rebeat.is_empty(),
+            "the bursts spent, the queue drains"
+        );
+        assert!(
+            total >= EDIT_REBEAT_BURSTS as usize * 8,
+            "each burst is 8 dots: {total}"
+        );
+        // A second edit re-schedules the entry (upsert, not a second copy):
+        // it lands on the RELEASE, so run the hold window first.
+        s.set_cell(2, 2, cell(80, false, [4, 5, 6]), 3000);
+        let mut refreshed = false;
+        for t in 3000..(3000 + EDIT_HOLD_TICKS + 4) {
+            let views = [ViewHint {
+                eye: [10.0, 100.0, 60.0],
+                look: [0.0, 0.0, -1.0],
+                now: t,
+                age_ticks: u64::MAX,
+            }];
+            let _: Vec<Spawn> = s.tick_batch(256, &views).to_vec();
+            if !s.edit_rebeat.is_empty() {
+                refreshed = true;
+            }
+        }
+        assert!(refreshed, "the re-edit enqueues its entry");
+        assert_eq!(s.edit_rebeat.len(), 1, "the re-edit refreshes in place");
+        let e = &s.edit_rebeat[0];
+        assert_eq!(e.4, EDIT_REBEAT_BURSTS, "the burst count reset");
+        assert_eq!(e.2, 0x9000, "the new hword rides the entry");
+    }
+
     #[test]
     fn marker_rank_keeps_all_three_words_inside_the_decode_band() {
         assert_eq!(tier_rank(170), 2, "the marker surface must ride rank 2");
