@@ -1,15 +1,15 @@
-# PARITY RUN 401 (run 43477213057, sha 5516cde) — gate: False
+# PARITY RUN 407 (run 43514221495, sha c30c1f1) — gate: False
 
 # PARITY GATE — c-LoD vs Voxy (pixel-perfect, per vantage)
 
-- voxy shots: 13, ours shots: 1, paired: 1, missing (voxy shot with no ours pair): 12
-- ours pair sources: . = 1
+- voxy shots: 13, ours shots: 0, paired: 0, missing (voxy shot with no ours pair): 13
+- ours pair sources: none
 - gate: 100% pixel-exact per pair; the job exits 1 while anything is below
 
 | vantage | exact % | near % (d<=8) | mean d | max d | verdict |
 |---|---|---|---|---|---|
-| 01_aerial_west | 21.257 | 33.431 | 32.912 | 255 | FAIL |
 | 00_summit_rise | — | — | — | — | FAIL (no ours shot) |
+| 01_aerial_west | — | — | — | — | FAIL (no ours shot) |
 | 02_aerial_south | — | — | — | — | FAIL (no ours shot) |
 | 03_aerial_north | — | — | — | — | FAIL (no ours shot) |
 | 04_aerial_east | — | — | — | — | FAIL (no ours shot) |
@@ -26,6 +26,3 @@
 
 ## voxy | ours | diff (triptychs)
 
-- ![tri_01_aerial_west.jpg](parity-run-401/tri_01_aerial_west.jpg)
-- time audit: [time-audit.md](parity-run-401/time-audit.md) — the §7b console channel; the #332 night-matrix class made self-diagnosing (v6.25.5)
-- view probe: [view_probe.md](parity-run-401/view_probe.md) — per-position q/settle state, the v6.26.6 settle-by-laps + dip-probe channel
