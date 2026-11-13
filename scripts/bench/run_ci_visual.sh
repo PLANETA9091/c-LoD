@@ -1069,10 +1069,18 @@ srv "weather clear"  # v6.32.1: a leg-1 storm tints the marker red below the pro
 # a forced green dust column AT the LO plane over the marker and reads its
 # white/green px — > 50 = the y=180 particles render fine and the LO strobe
 # is the suspect; ~0 = the y=180 dots do not reach the screen (spawn/occlusion).
-srv "particle minecraft:dust{color:[0.0,1.0,0.0],scale:1.0} $CX 180 $CZ 0 0 0 0 200 force"
-sleep 2
-shot "11_y180_dust" || exit 1
-Y180=$(python3 - "$SHOTS/11_y180_dust.png" <<'PYEOF' 2>/dev/null
+# v6.38.4 THE HEIGHT LADDER: #391's single y180 test read 0 green px while
+# leg-2's relog probe 6 flashed red=79 — the particles at the LO plane either
+# render or not depending on SOMETHING that flips between sessions; the
+# ladder drops the same forced green dust at 155/165/172/180/185 over the
+# marker (each 1.5 s apart, 150 particles) and counts green px per height —
+# the cutoff height names the mechanism (a hard 0 above some y = a section/
+# mesh particle cull; a smooth fade = fog/size; a flat 0 = spawn-side).
+for H in 155 165 172 180 185; do
+  srv "particle minecraft:dust{color:[0.0,1.0,0.0],scale:1.0} $CX $H $CZ 0 0 0 0 150 force"
+  sleep 1.5
+  shot "11_h${H}_dust" || exit 1
+  HCNT=$(python3 - "$SHOTS/11_h${H}_dust.png" <<'PYEOF' 2>/dev/null
 import sys
 from PIL import Image
 im = Image.open(sys.argv[1]).convert("RGB")
@@ -1085,8 +1093,9 @@ for y in range(0, h, 2):
             n += 1
 print(n * 4)
 PYEOF
-)
-sum "- y180 dust render test: ${Y180:-?} green px at the LO plane over the marker (> 50 = the y=180 dots render, the LO strobe is the suspect; ~0 = the y=180 dots never reach the screen — spawn/occlusion class)"
+  )
+  sum "- height ladder y=$H: ${HCNT:-?} green px over the marker (150-particle burst)"
+done
 PROBE_LOG="$SHOTS/probe_counts.txt"; : > "$PROBE_LOG"
 for k in $(seq 0 23); do
   assert_online "edit probe $k" || exit 1
