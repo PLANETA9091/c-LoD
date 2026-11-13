@@ -1529,6 +1529,42 @@ impl Streamer {
         // are its only paint) never hold: they stream straight through.
         self.edit_window = self.edit_window.saturating_sub(1);
         let fresh_audience = views.iter().any(|v| v.age_ticks < FRESH_CLIENT_TICKS);
+        // v6.40.1 THE RELOG RE-ARM: the edit-priority entries die by age
+        // long before a relog lands (the gate's leg-2 follows leg-1 by
+        // minutes), so a FRESH client would never see the bursts and the
+        // relog probes read red=0 (#397). Every fresh-audience tick
+        // re-schedules the REARM_EDIT_WINDOW's last-edit cells: the same
+        // upsert stamps, fresh bursts — the relogged client receives the
+        // marker's words deterministically, the persistent-cell list is
+        // already the rearm material.
+        if fresh_audience && !self.last_edit.is_empty() {
+            for &(idx, _) in self.last_edit.iter() {
+                let i = idx as usize;
+                let side = self.side as usize;
+                let cx = (i % side) as u32;
+                let cz = (i / side) as u32;
+                let Some(cell) = self.get(cx, cz) else {
+                    continue;
+                };
+                if !cell.valid {
+                    continue;
+                }
+                let (hw, cw) = Self::encode_words(&cell);
+                let due = now + EDIT_REBEAT_DELAY_TICKS;
+                if let Some(e) = self.edit_rebeat.iter_mut().find(|e| e.0 == idx) {
+                    e.1 = due;
+                    e.2 = hw;
+                    e.3 = cw;
+                    e.4 = EDIT_REBEAT_BURSTS;
+                } else {
+                    if self.edit_rebeat.is_empty() {
+                        self.edit_rebeat_enqueued_at = now;
+                    }
+                    self.edit_rebeat
+                        .push_back((idx, due, hw, cw, EDIT_REBEAT_BURSTS));
+                }
+            }
+        }
         let mut edit_streamed = 0u64;
         let mut dirty_cap_hit = false;
         if zone_mode && self.dirty_pending > 0 {
