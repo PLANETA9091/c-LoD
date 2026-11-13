@@ -1,0 +1,54 @@
+{
+ "pairs": {
+  "01_aerial_west": {
+   "exact_pct": 21.2574,
+   "near_pct": 33.4313,
+   "mean_delta": 32.912,
+   "max_delta": 255,
+   "px_total": 921600,
+   "pass": false,
+   "ours_src": "01_aerial_west.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 1.552,
+     "2-4": 3.037,
+     "4-8": 5.928,
+     "8-16": 16.68,
+     "16-32": 10.996,
+     "32-64": 18.921,
+     "64-inf": 21.629
+    },
+    "edge_vs_flat": {
+     "hot_total": 613497,
+     "flat_px": 306089,
+     "flat_signed": -0.38,
+     "edge_px": 144933,
+     "edge_signed": 26.09,
+     "mid_px": 162475
+    },
+    "sky_share_hot": 23.824,
+    "near_band": {
+     "near_px": 112195,
+     "near_flat_signed": 1.72,
+     "near_edge_signed": -0.21
+    },
+    "ours_black_share": 0.88
+   }
+  }
+ },
+ "missing": [
+  "00_summit_rise",
+  "02_aerial_south",
+  "03_aerial_north",
+  "04_aerial_east",
+  "05_oblique",
+  "06_ground_west",
+  "07_far_north",
+  "08_back_inside",
+  "09_after_mesh",
+  "10_marker_ray",
+  "11_topdown",
+  "12_far_north_re"
+ ],
+ "pass": false
+}
