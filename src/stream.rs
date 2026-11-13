@@ -437,8 +437,8 @@ pub const SPARSE_REBEAT_RETRIES: u32 = 2;
 /// WITHOUT burning a burst (only a delivered beat spends one). The
 /// completion turns deterministic: the client needs ONE strobe frame per
 /// slot, 25 bursts x 8 dots make p(one full row) -> 1.
-pub const EDIT_REBEAT_BURSTS: u32 = 25;
-pub const EDIT_REBEAT_DELAY_TICKS: u64 = 30;
+pub const EDIT_REBEAT_BURSTS: u32 = 60;
+pub const EDIT_REBEAT_DELAY_TICKS: u64 = 12;
 /// Entries older than this die (a forgotten edit cannot live forever).
 pub const EDIT_REBEAT_MAX_AGE_TICKS: u64 = 4000;
 /// Per-tick dot budget the edit channel may consume.
