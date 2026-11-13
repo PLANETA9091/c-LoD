@@ -1340,6 +1340,14 @@ pub struct Nms {
     /// particle texture the 26.3 client actually renders on software raster
     /// backends (dust/explosion/flame stay invisible: broken sprite UVs).
     happy_villager: jobject,
+    /// v6.43.0: DustParticleOptions(Vector3f(0,1,0), 1.2) static — the
+    /// STATIONARY green carrier (dust has no built-in motion). The old
+    /// 26.1-era broken-sprite-UVs note is OBSOLETE on the Mesa 26.0.8
+    /// runners: the burst_far frames render dust quads again (430 white
+    /// px at 80 m, #404). A stationary carrier stays ON its plane for the
+    /// whole lifetime — the capture strobe re-projects the plane position
+    /// and a rising happy_villager dot drifts off it within seconds.
+    dust_opts: jobject,
     /// ClientboundLevelParticlesPacket(ParticleOptions,ZZDDDFFFI)V —
     /// overrideLimiter=true rides like /particle force (never clipped by
     /// the client's render distance, always shown).
@@ -1489,6 +1497,35 @@ fn resolve_nms(env: Env) -> Option<Nms> {
         load("net.minecraft.server.network.ServerGamePacketListenerImpl")
     );
 
+    // v6.43.0: the stationary green dust carrier (DustParticleOptions
+    // carries its own color+scale).
+    let vector3f_cls = step!("vector3f_cls", load("org.joml.Vector3f"));
+    let m_vector3f_new = step!(
+        "m_vector3f_new",
+        env.get_method_id(vector3f_cls, "<init>", "(FFF)V")
+    );
+    let dust_particle_cls = step!(
+        "dust_particle_cls",
+        load("net.minecraft.core.particles.DustParticleOptions")
+    );
+    let m_dust_particle_new = step!(
+        "m_dust_particle_new",
+        env.get_method_id(dust_particle_cls, "<init>", "(Lorg/joml/Vector3f;F)V")
+    );
+    let color = env
+        .new_object(vector3f_cls, m_vector3f_new, &[jf(0.0), jf(1.0), jf(0.0)])
+        .unwrap_or(std::ptr::null_mut());
+    clear_if_pending(env);
+    let dust_opts_local = env
+        .new_object(
+            dust_particle_cls,
+            m_dust_particle_new,
+            &[jv(color), jf(1.2)],
+        )
+        .unwrap_or(std::ptr::null_mut());
+    clear_if_pending(env);
+    let dust_opts = jobj(dust_opts_local)?;
+
     let _ = &happy_villager; // consumed below in the Nms struct
     let m_particle_packet_new = step!(
         "m_particle_packet_new",
@@ -1554,6 +1591,7 @@ fn resolve_nms(env: Env) -> Option<Nms> {
     });
     Some(Nms {
         happy_villager,
+        dust_opts,
         particle_packet_cls,
         m_particle_packet_new,
         f_connection,
@@ -1622,14 +1660,21 @@ unsafe fn get_handle(env: Env, player: jobject) -> Option<jobject> {
 /// Main thread only; NMS surface must be resolved.
 /// v6.41.0: the compensating downward ySpeed (f32 bits) for the carrier
 /// particle — the sink knob's runtime copy.
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 pub static CARRIER_SINK: AtomicU32 = AtomicU32::new(0.0f32.to_bits());
+/// v6.43.0: the stationary-dust carrier knob (false = the legacy
+/// happy_villager).
+pub static CARRIER_DUST: AtomicBool = AtomicBool::new(false);
 
 /// v6.41.0: set the carrier's compensating downward ySpeed (the sink knob).
 pub fn set_carrier_sink(v: f32) {
-    use std::sync::atomic::Ordering;
     CARRIER_SINK.store(v.to_bits(), Ordering::Relaxed);
+}
+
+/// v6.43.0: switch the carrier to the stationary green dust.
+pub fn set_carrier_dust(on: bool) {
+    CARRIER_DUST.store(on, Ordering::Relaxed);
 }
 
 pub unsafe fn build_particle_packet(env: Env, x: f64, y: f64, z: f64) -> Option<jobject> {
@@ -1646,8 +1691,13 @@ pub unsafe fn build_particle_packet(env: Env, x: f64, y: f64, z: f64) -> Option<
     let sink = CARRIER_SINK.load(Ordering::Relaxed);
     let y_speed = f32::from_bits(sink);
     let n = nms()?;
-    // SimpleParticleType is a process-lifetime JVM static — borrow it directly.
-    let opts = n.happy_villager;
+    // v6.43.0: the stationary dust carrier ignores the sink (dust has no
+    // built-in motion — the dot holds its plane by itself).
+    let opts = if CARRIER_DUST.load(Ordering::Relaxed) {
+        n.dust_opts
+    } else {
+        n.happy_villager
+    };
     // (options, overrideLimiter=true, alwaysShow=true, x, y, z,
     //  xDist=0, yDist=0, zDist=0, maxSpeed, count=0 -> exactly one
     //  particle at the point; the speed triple rides maxSpeed? no — the

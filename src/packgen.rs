@@ -799,7 +799,6 @@ mod tests {
         assert!(both_fsh.contains("float hq = floor(ground_at(q"));
     }
 
-
     #[test]
     fn rim_mask_swaps_the_decode_state_probe() {
         // v6.30.0 (#360 pre-registered item (2)): rim_mask=true ships the

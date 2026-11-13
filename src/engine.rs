@@ -987,6 +987,8 @@ fn arm_stream(state: &Arc<State>, ox: f64, oz: f64) {
         // v6.41.0: the carrier sink rides the same boot (the compensating
         // downward ySpeed for the happy_villager dots — see jni.rs).
         crate::jni::set_carrier_sink(state.cfg.carrier_sink);
+        // v6.43.0: the stationary-dust carrier knob (see jni.rs).
+        crate::jni::set_carrier_dust(state.cfg.carrier_dust);
         (s.side, s.cells())
     };
     let lap_ticks = cells / ((state.cfg.particles_per_tick as u64) / 8).max(1);

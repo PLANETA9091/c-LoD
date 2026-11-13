@@ -212,6 +212,10 @@ pub struct Config {
     /// tick and the risen dot leaves its plane, killing the capture strobe;
     /// 0 = byte-stable prod, the CI lane passes the tuned negative value.
     pub carrier_sink: f32,
+    /// v6.43.0: the stationary green dust carrier (DustParticleOptions —
+    /// no built-in motion, the dot holds its plane for the whole
+    /// lifetime). false = the legacy happy_villager.
+    pub carrier_dust: bool,
 }
 
 impl Default for Config {
@@ -265,6 +269,7 @@ impl Default for Config {
             sparse_rebeat_frac: 4,
             rim_mask: false,
             carrier_sink: 0.0,
+            carrier_dust: false,
         }
     }
 }
@@ -465,6 +470,10 @@ impl Config {
         // carrier particle (f32, blocks/tick; negative = sink).
         if let Some(v) = get("carrier_sink") {
             cfg.carrier_sink = v.trim().parse::<f32>().unwrap_or(0.0);
+        }
+        // v6.43.0: carrier_dust — the stationary green dust carrier.
+        if let Some(v) = get("carrier_dust") {
+            cfg.carrier_dust = matches!(v.trim(), "1" | "true" | "yes" | "on");
         }
         cfg
     }
@@ -730,6 +739,14 @@ mod tests {
         );
         assert!(t.sparse_rebeat && t.rim_mask && t.unfog && t.mesh_paint);
         assert_eq!(t.sparse_rebeat_frac, 8);
+        // v6.41.0/v6.43.0: the carrier knobs parse and default to the
+        // prod-stable values.
+        assert_eq!(Config::parse("").carrier_sink, 0.0);
+        assert_eq!(Config::parse("carrier_sink=-0.03").carrier_sink, -0.03);
+        assert_eq!(Config::parse("carrier_sink=junk").carrier_sink, 0.0);
+        assert!(!Config::parse("").carrier_dust);
+        assert!(Config::parse("carrier_dust=true").carrier_dust);
+        assert!(!Config::parse("carrier_dust=false").carrier_dust);
     }
 
     #[test]
