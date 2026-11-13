@@ -1076,30 +1076,42 @@ srv "weather clear"  # v6.32.1: a leg-1 storm tints the marker red below the pro
 # marker (each 1.5 s apart, 150 particles) and counts green px per height —
 # the cutoff height names the mechanism (a hard 0 above some y = a section/
 # mesh particle cull; a smooth fade = fog/size; a flat 0 = spawn-side).
-for H in 155 165 172 180 185; do
-  # v6.40.3 WHITE dust + white count: the green variant read 0 at EVERY
-  # height — a green dot blends into the blue sky (g > b + 20 is
-  # impossible against b~255) and the classifier was blind, the burst_far
-  # precedent counts WHITE px instead (the same dust the leg-2 far probe
-  # reads at 80 m, proven to render).
-  srv "particle minecraft:dust{color:[1.0,1.0,1.0],scale:1.0} $CX $H $CZ 0 0 0 0 150 force"
+for H in 155 165 168 172 176 180 185; do
+  # v6.40.4 THE CARRIER LADDER: the transport's own particle is
+  # happy_villager (the only sprite 26.3 software-raster renders —
+  # dust is invisible), it RISES with age, and the client's strobe counts
+  # a dot through the fog-invariant ring delta (capture.fsh). The ladder
+  # spawns the transport's own carrier at seven heights over the marker
+  # and classifies with THE STROBE'S OWN RULE: (g-b) of the pixel vs the
+  # mean (g-b) of the 4 diagonal texels 3 px out > 0.06*255 — a pixel that
+  # would fire the capture strobe. The per-height count = the dot
+  # visibility profile: where it collapses, the strobe never fires and
+  # the transport dies at that plane.
+  srv "particle minecraft:happy_villager $CX $H $CZ 0 0 0 0 120 force"
   sleep 1.5
-  shot "11_h${H}_dust" || exit 1
-  HCNT=$(python3 - "$SHOTS/11_h${H}_dust.png" <<'PYEOF' 2>/dev/null
+  shot "11_h${H}_spark" || exit 1
+  HCNT=$(python3 - "$SHOTS/11_h${H}_spark.png" <<'PYEOF' 2>/dev/null
 import sys
 from PIL import Image
 im = Image.open(sys.argv[1]).convert("RGB")
 w, h = im.size
+px = im.load()
 n = 0
-for y in range(0, h, 2):
-    for x in range(0, w, 2):
-        r, g, b = im.getpixel((x, y))
-        if r > 200 and g > 200 and b > 200 and x < 940:
+for y in range(6, h - 6, 2):
+    for x in range(6, 934, 2):
+        r, g, b = px[x, y]
+        ring = []
+        ok = True
+        for dx, dy in ((3, 3), (-3, 3), (3, -3), (-3, -3)):
+            rr, gg, bb = px[x + dx, y + dy]
+            ring.append(gg - bb)
+        ring_gb = sum(ring) / 4.0
+        if (g - b) - ring_gb > 15:
             n += 1
 print(n * 4)
 PYEOF
   )
-  sum "- height ladder y=$H: ${HCNT:-?} white px over the marker (150-particle white burst; > 50 = particles render at that height)"
+  sum "- carrier ladder y=$H: ${HCNT:-?} strobe-visible px over the marker (120 happy_villager = the transport's own carrier; 0 = the plane's dots cannot strobe there)"
 done
 PROBE_LOG="$SHOTS/probe_counts.txt"; : > "$PROBE_LOG"
 # v6.39.2 WIDER WINDOWS: the passes are probabilistic (LEG 1 PASS in #393
