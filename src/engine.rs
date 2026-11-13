@@ -984,6 +984,9 @@ fn arm_stream(state: &Arc<State>, ox: f64, oz: f64) {
         // v6.29.0 hard-coded value; the parity world boots 8 — the #360
         // 05-regression tuning).
         s.sparse_rebeat_frac = state.cfg.sparse_rebeat_frac;
+        // v6.41.0: the carrier sink rides the same boot (the compensating
+        // downward ySpeed for the happy_villager dots — see jni.rs).
+        crate::jni::set_carrier_sink(state.cfg.carrier_sink);
         (s.side, s.cells())
     };
     let lap_ticks = cells / ((state.cfg.particles_per_tick as u64) / 8).max(1);

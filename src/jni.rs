@@ -1620,13 +1620,39 @@ unsafe fn get_handle(env: Env, player: jobject) -> Option<jobject> {
 ///
 /// # Safety
 /// Main thread only; NMS surface must be resolved.
+/// v6.41.0: the compensating downward ySpeed (f32 bits) for the carrier
+/// particle — the sink knob's runtime copy.
+use std::sync::atomic::{AtomicU32, Ordering};
+
+pub static CARRIER_SINK: AtomicU32 = AtomicU32::new(0.0f32.to_bits());
+
+/// v6.41.0: set the carrier's compensating downward ySpeed (the sink knob).
+pub fn set_carrier_sink(v: f32) {
+    use std::sync::atomic::Ordering;
+    CARRIER_SINK.store(v.to_bits(), Ordering::Relaxed);
+}
+
 pub unsafe fn build_particle_packet(env: Env, x: f64, y: f64, z: f64) -> Option<jobject> {
+    // v6.41.0 THE SINK: happy_villager RISES inside the client's particle
+    // tick (the vanilla sprite drifts upward), so a dot spawned at its
+    // plane drifts OFF it within its first seconds — the capture strobe
+    // re-projects the PLANE position and the risen dot is gone from it:
+    // the rank-2 color strobe almost never fired (#381-#404 RED-dominant
+    // with heights decoding fine). The packet carries the compensating
+    // downward ySpeed (count=0 -> the client applies (xSpeed,ySpeed,
+    // zSpeed) to the single particle directly), configurable through the
+    // carrier_sink knob (default 0 = byte-stable prod; the CI lane sets
+    // -0.06 through CLOD_OPTS to pin the dots to their planes).
+    let sink = CARRIER_SINK.load(Ordering::Relaxed);
+    let y_speed = f32::from_bits(sink);
     let n = nms()?;
     // SimpleParticleType is a process-lifetime JVM static — borrow it directly.
     let opts = n.happy_villager;
     // (options, overrideLimiter=true, alwaysShow=true, x, y, z,
-    //  xDist=0, yDist=0, zDist=0, maxSpeed=0, count=0 -> exactly one
-    //  particle at the point, zero drift)
+    //  xDist=0, yDist=0, zDist=0, maxSpeed, count=0 -> exactly one
+    //  particle at the point; the speed triple rides maxSpeed? no — the
+    // client reads the (xSpeed, ySpeed, zSpeed) constructor floats for the
+    // count=0 case; xDist/yDist/zDist are the count>0 spread)
     let args = [
         jv(opts),
         jz(true),
@@ -1635,7 +1661,7 @@ pub unsafe fn build_particle_packet(env: Env, x: f64, y: f64, z: f64) -> Option<
         jd(y),
         jd(z),
         jf(0.0),
-        jf(0.0),
+        jf(y_speed),
         jf(0.0),
         jf(0.0),
         ji(0),

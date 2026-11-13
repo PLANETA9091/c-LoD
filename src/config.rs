@@ -207,6 +207,11 @@ pub struct Config {
     /// heights never decoded) — the question the flat +61 could not answer.
     /// Pack SHA changes; production stays rim_mask=false (marker comment).
     pub rim_mask: bool,
+    /// v6.41.0: the compensating downward ySpeed (blocks/tick) for the
+    /// carrier particle — happy_villager rises inside the client's particle
+    /// tick and the risen dot leaves its plane, killing the capture strobe;
+    /// 0 = byte-stable prod, the CI lane passes the tuned negative value.
+    pub carrier_sink: f32,
 }
 
 impl Default for Config {
@@ -259,6 +264,7 @@ impl Default for Config {
             sparse_rebeat: false,
             sparse_rebeat_frac: 4,
             rim_mask: false,
+            carrier_sink: 0.0,
         }
     }
 }
@@ -454,6 +460,11 @@ impl Config {
         // (#360 item (2), the rim fallback class reader).
         if let Some(v) = get("rim_mask") {
             cfg.rim_mask = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
+        // v6.41.0: carrier_sink — the compensating downward ySpeed for the
+        // carrier particle (f32, blocks/tick; negative = sink).
+        if let Some(v) = get("carrier_sink") {
+            cfg.carrier_sink = v.trim().parse::<f32>().unwrap_or(0.0);
         }
         cfg
     }
