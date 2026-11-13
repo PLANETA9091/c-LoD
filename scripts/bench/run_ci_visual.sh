@@ -1077,7 +1077,12 @@ srv "weather clear"  # v6.32.1: a leg-1 storm tints the marker red below the pro
 # the cutoff height names the mechanism (a hard 0 above some y = a section/
 # mesh particle cull; a smooth fade = fog/size; a flat 0 = spawn-side).
 for H in 155 165 172 180 185; do
-  srv "particle minecraft:dust{color:[0.0,1.0,0.0],scale:1.0} $CX $H $CZ 0 0 0 0 150 force"
+  # v6.40.3 WHITE dust + white count: the green variant read 0 at EVERY
+  # height — a green dot blends into the blue sky (g > b + 20 is
+  # impossible against b~255) and the classifier was blind, the burst_far
+  # precedent counts WHITE px instead (the same dust the leg-2 far probe
+  # reads at 80 m, proven to render).
+  srv "particle minecraft:dust{color:[1.0,1.0,1.0],scale:1.0} $CX $H $CZ 0 0 0 0 150 force"
   sleep 1.5
   shot "11_h${H}_dust" || exit 1
   HCNT=$(python3 - "$SHOTS/11_h${H}_dust.png" <<'PYEOF' 2>/dev/null
@@ -1089,12 +1094,12 @@ n = 0
 for y in range(0, h, 2):
     for x in range(0, w, 2):
         r, g, b = im.getpixel((x, y))
-        if g > 120 and g > r + 20 and g > b + 20 and x < 940:
+        if r > 200 and g > 200 and b > 200 and x < 940:
             n += 1
 print(n * 4)
 PYEOF
   )
-  sum "- height ladder y=$H: ${HCNT:-?} green px over the marker (150-particle burst)"
+  sum "- height ladder y=$H: ${HCNT:-?} white px over the marker (150-particle white burst; > 50 = particles render at that height)"
 done
 PROBE_LOG="$SHOTS/probe_counts.txt"; : > "$PROBE_LOG"
 # v6.39.2 WIDER WINDOWS: the passes are probabilistic (LEG 1 PASS in #393
