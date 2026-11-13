@@ -1049,7 +1049,7 @@ CELLS_DUMP=$(curl -s "http://127.0.0.1:8199/clod-cells" || true)
 { echo ""
   echo "### /clod-cells AFTER FILL (server belief)"
   echo '```'
-  printf '%s\n' "$CELLS_DUMP" | head -18
+  printf '%s\n' "$CELLS_DUMP"  # v6.38.3 FULL dump — head -18 cut exactly the marker rows (cz 124+); the marker's own cword was NEVER in the feed
   echo '```'
 } >> "$SUMMARY"
 echo "cells dump captured (after fill): $(printf '%s\n' "$CELLS_DUMP" | grep -c '^[0-9-]' || true) rows"
@@ -1063,6 +1063,30 @@ echo "### stream diag after fill:" >> "$SUMMARY"
 grep "stream: tick" /tmp/server.log | tail -2 >> "$SUMMARY" || true
 srv "time set noon"  # v6.4.8: the probe loop must run in daylight
 srv "weather clear"  # v6.32.1: a leg-1 storm tints the marker red below the probe
+# v6.38.3 THE Y=180 RENDER TEST: the tower state frames (#381-#386) showed the
+# marker COLORLESS (red mass, yellow scraps) while its HEIGHTS decode — the
+# LO-plane dots (y=180) either never render or never strobe; this burst drops
+# a forced green dust column AT the LO plane over the marker and reads its
+# white/green px — > 50 = the y=180 particles render fine and the LO strobe
+# is the suspect; ~0 = the y=180 dots do not reach the screen (spawn/occlusion).
+srv "particle minecraft:dust{color:[0.0,1.0,0.0],scale:1.0} $CX 180 $CZ 0 0 0 0 200 force"
+sleep 2
+shot "11_y180_dust" || exit 1
+Y180=$(python3 - "$SHOTS/11_y180_dust.png" <<'PYEOF' 2>/dev/null
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert("RGB")
+w, h = im.size
+n = 0
+for y in range(0, h, 2):
+    for x in range(0, w, 2):
+        r, g, b = im.getpixel((x, y))
+        if g > 120 and g > r + 20 and g > b + 20 and x < 940:
+            n += 1
+print(n * 4)
+PYEOF
+)
+sum "- y180 dust render test: ${Y180:-?} green px at the LO plane over the marker (> 50 = the y=180 dots render, the LO strobe is the suspect; ~0 = the y=180 dots never reach the screen — spawn/occlusion class)"
 PROBE_LOG="$SHOTS/probe_counts.txt"; : > "$PROBE_LOG"
 for k in $(seq 0 23); do
   assert_online "edit probe $k" || exit 1
@@ -1314,7 +1338,7 @@ CELLS_DUMP2=$(curl -s "http://127.0.0.1:8199/clod-cells" || true)
 { echo ""
   echo "### /clod-cells AFTER PROBES (server belief)"
   echo '```'
-  printf '%s\n' "$CELLS_DUMP2" | head -18
+  printf '%s\n' "$CELLS_DUMP2"  # v6.38.3 FULL dump (same cut as the fill dump)
   echo '```'
 } >> "$SUMMARY"
 # v6.5.1: the edit-channel killer (run 41293241318) fired AFTER the boot
