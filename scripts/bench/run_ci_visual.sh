@@ -2080,7 +2080,15 @@ PYEOF
   # read = the empty fresh buffers, not a rim verdict). The lane now
   # shoots only OPEN-AIR vantages: 00 the tower, 01 the near-tower
   # contrast, 12 the tower re-read.
-  for row in "00 270 5 CX-75 151.6 CZ" "01 270 15 CX-40 175 CZ" "12 270 5 CX-75 151.6 CZ"; do
+  # v6.40.5 THE HIGH-EYE ROW: #403's rim00 caught the terrace class (139-170,
+  # the dots fly 18-34 m above their surface) FULLY DECODED (the green
+  # stripes on the mountain columns) while the marker (surface 170, the dots
+  # only 3-5 m above) stayed RED — the eye at 151.6 sits BELOW the marker's
+  # dots and looks UP at them against the sky; the high eye (190) looks DOWN
+  # on the same dots against the terrain — if the high-eye frame shows the
+  # marker GREEN, the up-looking geometry is the last blocker and the gate's
+  # own vantage gets the fix next.
+  for row in "00 270 5 CX-75 190 CZ" "00b 270 5 CX-75 151.6 CZ" "01 270 15 CX-40 175 CZ" "12 270 5 CX-75 190 CZ"; do
     set -- $row
     RN="$1"; RYAW="$2"; RPITCH="$3"; RX="$4"; RY="$5"; RZ="$6"
     RX=$(( ${RX//CX/$CX} )); RZ=$(( ${RZ//CZ/$CZ} ))
