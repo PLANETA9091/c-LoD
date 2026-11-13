@@ -386,10 +386,25 @@ jobs:
           # client that renders nothing.
           sudo apt-get install -y -qq xvfb ffmpeg libgl1 libglx-mesa0 libgl1-mesa-dri mesa-utils
           python3 -m pip install --quiet --user pillow numpy python-xlib
+      # v6.38.1 THE ENV LADDER: the v6.38.0 rerun (6ec17ca) died in ~15
+      # minutes — BEFORE the harness ever started (no phase stamps at all:
+      # the death sits in apt/build/CRUSSTY, the artifact carried no
+      # summary, the verdict job exited on 'no summary.md' in 20 s, the
+      # feed stayed silent 12 h). The env ladder stamps the artifact
+      # summary at every env boundary so the always() upload carries the
+      # death point for any pre-harness kill.
+      - name: Stamp env phase (pre-build)
+        run: |
+          mkdir -p /home/runner/mc-test/shots/ci-visual
+          echo "- phase: env apt+pip done ($(date -u +%H:%M:%S))" >> /home/runner/mc-test/shots/ci-visual/summary.md
       - name: Build module (release)
-        run: cargo build --release
+        run: |
+          echo "- phase: cargo build start ($(date -u +%H:%M:%S))" >> /home/runner/mc-test/shots/ci-visual/summary.md
+          cargo build --release
+          echo "- phase: cargo build done ($(date -u +%H:%M:%S))" >> /home/runner/mc-test/shots/ci-visual/summary.md
       - name: Build CRUSSTY runtime + launcher
         run: |
+          echo "- phase: crussty build start ($(date -u +%H:%M:%S))" >> /home/runner/mc-test/shots/ci-visual/summary.md
           git clone --depth 1 https://github.com/PLANETA9091/CRUSSTY.git crussty
           cargo build --release --manifest-path crussty/runtime/Cargo.toml
           mkdir -p crussty/launcher/out
