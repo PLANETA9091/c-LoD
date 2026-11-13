@@ -143,23 +143,16 @@ void main() {
                                   : texelFetch(ColBufSampler, c, 0);
                 vec4 b2 = hi ? texelFetch(Height2Sampler, c, 0)
                                    : texelFetch(ColBuf2Sampler, c, 0);
-                // v6.38.0: the capture widened the green channel into the
-                // slot-coverage ledger — bit 4 stays the kill flag, the low
-                // nibble rides the per-slot coverage history. The kill test
-                // is the BIT now (the byte itself is no longer 0/1), and the
-                // fresh-byte merge keys on the same bit.
-                bool killA = (uint(floor(b.g * 255.0 + 0.5)) & 0x10u) != 0u;
-                bool killB = (uint(floor(b2.g * 255.0 + 0.5)) & 0x10u) != 0u;
-                if (!killA && !killB) {
-                    continue; // word not completed this frame: no live dots
+                if (b.g < 0.5 && b2.g < 0.5) {
+                    continue; // word not strobed this frame: no live dots
                 }
                 // v5.3.2: merge both rounds' fresh bytes (they are identical
                 // for a steady frame; OR covers pipeline edge cases).
                 uint byte = 0u;
-                if (killA) {
+                if (b.g >= 0.5) {
                     byte |= uint(floor(b.b * 255.0 + 0.5));
                 }
-                if (killB) {
+                if (b2.g >= 0.5) {
                     byte |= uint(floor(b2.b * 255.0 + 0.5));
                 }
                 vec2 center = GridInfo.xy + (vec2(c) + 0.5) * cell;
