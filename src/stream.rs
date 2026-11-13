@@ -99,6 +99,27 @@ pub const SUB_PER_CELL: f64 = 4.0;
 /// dots, the same never-decodes outcome the old 260/300 saturation had
 /// (spawn-gated to invisibility), with zero visible garbage either way.
 ///
+/// v6.39.0 THE LIVING SECTION (rank 2 = 173/175/174): #393's LEG 1 PASS —
+/// the FIRST in ~110 runs — landed with one change in flight: the dust
+/// bursts at y=172/180 immediately before the probes (v6.38.4's ladder).
+/// The reading that stitches every observation: vanilla does not render
+/// particles in EMPTY render sections, and the section above the marker
+/// (y 176..191) holds no blocks (the column tops at 170) — the rank-2
+/// dots at 180/190 flew in a section the client never renders, the LO
+/// strobe almost never fired (RED = zero color byte; the yellow scraps =
+/// rare strays), and the marker painted only when SOMETHING woke the
+/// section (the relog probe 6 flash in #391, the bursts in #393). The
+/// planes now ride INSIDE the block-carrying section 160..175: LO=173 /
+/// HI=175 / RS=174 (the marker surface 170 + TIER_MARGIN 2 = 172 clears
+/// all three; the mid-terrace class 139..170 serves; surfaces 171..178
+/// move to rank 3 — their old planes were equally dead, so nothing
+/// regresses). Geometry from the tower eye: LO 3D 77.4 m, HI 77.9 m —
+/// inside the band, elevation +17.2/+17.8 deg — 30+ px inside the FOV-70
+/// top edge, deeper than the v6.32.0 margin; the 1-block LO/HI spacing
+/// keeps the electron (RS=174, the true midway) a full ~12 px from both
+/// data planes' probe crosses. The capture walks the three ladders
+/// independently; the words never share a plane; rank 0/1/3 untouched
+/// (§5b/§7b spawn bytes identical).
 /// v6.32.0 THE SCREEN EDGE (rank 2 = 180/190/185): #369 proved the band
 /// fix half-works — ewin 233 (the edit window FINALLY armed: the server
 /// side considers the marker deliverable) — but red=0 held, and the frame
@@ -118,9 +139,9 @@ pub const SUB_PER_CELL: f64 = 4.0;
 /// capture walks the three ladders independently and the words still
 /// never share a plane. §5b/§7b spawn bytes: rank 0/1/3 untouched, and
 /// those worlds hold NO rank-2 cells — only the marker class changes.
-pub const LO_TIERS: [f64; 4] = [80.0, 140.0, 180.0, 200.0];
-pub const HI_TIERS: [f64; 4] = [120.0, 180.0, 190.0, 240.0];
-pub const RS_TIERS: [f64; 4] = [100.0, 160.0, 185.0, 220.0];
+pub const LO_TIERS: [f64; 4] = [80.0, 140.0, 173.0, 200.0];
+pub const HI_TIERS: [f64; 4] = [120.0, 180.0, 175.0, 240.0];
+pub const RS_TIERS: [f64; 4] = [100.0, 160.0, 174.0, 220.0];
 /// The intra-cell step guard: a word's 4 dots spread +-0.75 blocks around
 /// the sampled surface point (sub = cell/4, cell = 2) while ONE sampled
 /// height stands for the whole cell — a dot at or below ANY nearby column
@@ -1981,8 +2002,16 @@ mod tests {
                                        // v6.31.0: rank 2 = 180/220/200 (the marker class, surfaces 139..178);
                                        // rank 3 = the OLD rank-2 planes 200/240/220 (surfaces 179..198 —
                                        // the §7b summits keep byte-identical spawns under a new index).
-        assert_eq!(tier_rank(177), 2); // 179 < 180
-        assert_eq!(tier_rank(178), 3); // 180 is NOT strictly above the plane
+                                       // v6.39.0: the rank-2 planes live in the marker's block-carrying
+                                       // section (160..175) — the empty 176..191 section never renders
+                                       // particles, so 180/190 never strobed (#381-#386 RED-dominant);
+                                       // surfaces 171..178 move to rank 3 (their old planes were equally
+                                       // dead — nothing regresses).
+        assert_eq!(tier_rank(168), 2); // 170 < 173
+        assert_eq!(tier_rank(170), 2); // the CI marker surface
+        assert_eq!(tier_rank(171), 3); // 173 is NOT strictly above 173
+        assert_eq!(tier_rank(177), 3);
+        assert_eq!(tier_rank(178), 3);
         assert_eq!(tier_rank(190), 3); // the §7b summits (185..190)
         assert_eq!(tier_rank(197), 3); // 199 < 200
         assert_eq!(tier_rank(198), 3);
