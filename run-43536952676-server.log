@@ -1,0 +1,1696 @@
+[launcher] kernel:  /home/runner/work/c-LoD/c-LoD/dist/versions/paper-26.3.jar
+[launcher] agent:   /home/runner/work/c-LoD/c-LoD/dist/libcrussty_runtime.so
+[launcher] modules: /home/runner/work/c-LoD/c-LoD/dist/modules (recursive)
+[launcher] exec: /usr/lib/jvm/temurin-25-jdk-amd64/bin/java -agentpath:/home/runner/work/c-LoD/c-LoD/dist/libcrussty_runtime.so=modules=/home/runner/work/c-LoD/c-LoD/dist/modules;versions=/home/runner/work/c-LoD/c-LoD/dist/versions;kernel=paper-26.3.jar -Xms256M -Xmx700M -XX:MaxMetaspaceSize=256M -XX:MaxDirectMemorySize=128M -XX:+UseG1GC -Ddist.root=/home/runner/work/c-LoD/c-LoD/dist -jar /home/runner/work/c-LoD/c-LoD/dist/versions/paper-26.3.jar --nogui
+[crussty-runtime] v2.0.0 loaded (options: modules=/home/runner/work/c-LoD/c-LoD/dist/modules;versions=/home/runner/work/c-LoD/c-LoD/dist/versions;kernel=paper-26.3.jar)
+[c-LoD] booting: sky-grid disk 512 blocks (cell 2), http :8199, fov 70, particles/tick 2048
+[cplug-sdk] log dropped (kernel not ready): [c-LoD] booting: sky-grid disk 512 blocks (cell 2), http :8199, fov 70, particles/tick 2048
+[c-LoD] c-LoD v6.9.2: STAGE EYES v2 — run #231 measured rot=ok scan=15 lens_zero=1 while the carrier column is PLAINLY VISIBLE on the burst shot (4268 green px) and the relative strobe arm fires on 399/400 of the actual dot pixels — the hue test and the camera decode are INNOCENT; the residual suspects are the projection INPUTS. The four lens strips become bucket printers: CAM (the Globals CameraBlockPos the capture sees, in cell-space buckets over the atlas — a wrong bucket convicts the post-chain camera), ROT (az/el buckets from clod_rot_a), HITS (clod_h_b.g strobe-fired cells on a 32x32 grid), MASK (clod_mask marks on a dense 64x36 grid — v6.9.0 32x18 could miss 2-3px discs). The RENDERER DEAD marker decodes the buckets against the known vantage (cam ~8, az ~0 east, el ~3) and names: Globals-camera-wrong vs az-wrong vs strobe-never-fires vs merge-dead. Also #231 taught: the visible column survives the eraser because a DENSE column repaint copies dot colors from dot neighbors (the self-repairing fill assumed isolated dots) — cosmetic, noted. v6.9.1 carried: numpy CI deps, the dynamic prompt click + prompt guard
+[cplug-sdk] log dropped (kernel not ready): [c-LoD] c-LoD v6.9.2: STAGE EYES v2 — run #231 measured rot=ok scan=15 lens_zero=1 while the carrier column is PLAINLY VISIBLE on the burst shot (4268 green px) and the relative strobe arm fires on 399/400 of the actual dot pixels — the hue test and the camera decode are INNOCENT; the residual suspects are the projection INPUTS. The four lens strips become bucket printers: CAM (the Globals CameraBlockPos the capture sees, in cell-space buckets over the atlas — a wrong bucket convicts the post-chain camera), ROT (az/el buckets from clod_rot_a), HITS (clod_h_b.g strobe-fired cells on a 32x32 grid), MASK (clod_mask marks on a dense 64x36 grid — v6.9.0 32x18 could miss 2-3px discs). The RENDERER DEAD marker decodes the buckets against the known vantage (cam ~8, az ~0 east, el ~3) and names: Globals-camera-wrong vs az-wrong vs strobe-never-fires vs merge-dead. Also #231 taught: the visible column survives the eraser because a DENSE column repaint copies dot colors from dot neighbors (the self-repairing fill assumed isolated dots) — cosmetic, noted. v6.9.1 carried: numpy CI deps, the dynamic prompt click + prompt guard
+[c-LoD] c-LoD pack server listening on 0.0.0.0:8199 (GET /clod-pack.zip | /clod-pack.sha1 | /clod-pack.info)
+[cplug-sdk] log dropped (kernel not ready): [c-LoD] c-LoD pack server listening on 0.0.0.0:8199 (GET /clod-pack.zip | /clod-pack.sha1 | /clod-pack.info)
+[crussty-runtime] module lod -> init rc=0
+[crussty-runtime] pipeline ready: 1 module hook(s)
+[crussty-rcon] RCON-WATCH installed (2s cadence)
+[crussty-runtime] transform engine: 23 rule(s) registered
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/SchedulerHooks" }
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/StorageHooks" }
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/NetHooks" }
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/TickHook" }
+[crussty-runtime] transform hook classes installed (4); transform engine armed
+[crussty:hot-reload] SIGUSR1 reload trigger armed (1 module(s) reloadable)
+Downloading mojang_26.3.jar
+Applying patches
+Starting org.bukkit.craftbukkit.Main
+2026-11-14T00:53:31.806969863Z ServerMain WARN Advanced terminal features are not available in this environment
+[00:53:32 INFO]: [bootstrap] Running Java 25 (OpenJDK 64-Bit Server VM 25.0.5+8-LTS; Eclipse Adoptium Temurin-25.0.5+8) on Linux 7.0.0-1019-azure (amd64)
+[00:53:32 INFO]: [bootstrap] Loading Paper 26.3-249-main@1a995d6 (2026-11-11T18:01:48Z) for Minecraft 26.3
+[00:53:32 INFO]: [PluginInitializerManager] Initializing plugins...
+[00:53:32 INFO]: [PluginInitializerManager] Initialized 1 plugin
+[00:53:32 INFO]: [PluginInitializerManager] Bukkit plugins (1):
+ - ClodHost (1.0.0)
+[c-LoD] kernel ready — starting engine loop
+[cplug-sdk] log emit failed: [c-LoD] kernel ready — starting engine loop
+[00:53:36 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Initialising converters for DataConverter...
+[00:53:36 INFO]: [com.destroystokyo.paper.profile.PaperServicesDiscoveryService] Environment: Environment[discoveryUrl=https://discovery.minecraftservices.com/minecraft/client, name=PROD]
+[00:53:36 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Finished initialising converters for DataConverter in 433.8ms
+[00:53:37 INFO]: Found new data pack paper, loading it automatically
+[00:53:37 INFO]: No existing world data, creating new world
+[00:53:39 INFO]: Loaded 1866 advancements
+[00:53:39 INFO]: Starting minecraft server version 26.3
+[00:53:39 INFO]: Loading properties
+[00:53:39 INFO]: This server is running Paper version 26.3-249-main@1a995d6 (2026-11-11T18:01:48Z) (Implementing API version 26.3.build.249-stable)
+[00:53:39 INFO]: [spark] This server bundles the spark profiler. For more information please visit https://docs.papermc.io/paper/profiling
+[00:53:39 INFO]: Server Ping Player Sample Count: 12
+[00:53:39 INFO]: Using 4 threads for Netty based IO
+[00:53:39 INFO]: [ca.spottedleaf.moonrise.common.util.FMA] FMA supported: true for Linux platform with feature flag: flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology tsc_reliable nonstop_tsc cpuid extd_apicid aperfmperf tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves user_shstk avx512_bf16 clzero xsaveerptr rdpru arat npt nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold v_vmsave_vmload avx512vbmi umip avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid fsrm
+[00:53:39 INFO]: [MoonriseCommon] Paper is using 1 worker threads, 1 I/O threads
+[00:53:40 INFO]: Default game type: SURVIVAL
+[00:53:40 INFO]: Generating keypair
+[00:53:40 INFO]: Starting Minecraft server on *:25565
+[00:53:40 INFO]: Paper: Using libdeflate (Linux x86_64) compression from Velocity.
+[00:53:40 INFO]: Paper: Using OpenSSL 3.x.x (Linux x86_64) cipher from Velocity.
+[00:53:40 INFO]: [ClodHost] Loading server plugin ClodHost v1.0.0
+[00:53:40 WARN]: **** SERVER IS RUNNING IN OFFLINE/INSECURE MODE!
+[00:53:40 WARN]: The server will make no attempt to authenticate usernames. Beware.
+[00:53:40 WARN]: While this makes the game possible to play without internet access, it also opens up the ability for hackers to connect with any username they choose.
+[00:53:40 WARN]: To change this, set "online-mode" to "true" in the server.properties file.
+[00:53:40 INFO]: Preparing level "world"
+[00:53:40 INFO]: Selecting spawn point for level 'minecraft:overworld'...
+[00:53:43 INFO]: Selecting spawn point for level 'minecraft:the_nether'...
+[00:53:44 INFO]: Selecting spawn point for level 'minecraft:the_end'...
+[00:53:44 INFO]: Loading 0 persistent chunks for level 'minecraft:overworld'...
+[00:53:44 INFO]: Preparing spawn area: 100%
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] warmup: resolve attempt
+[c-LoD] warmup: resolve OK
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] c-LoD JNI surface incomplete — Paper loads kernel classes lazily; retrying each tick
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] engine tick alive: tick 50
+[00:53:44 INFO]: [c-LoD] c-LoD JNI surface incomplete — Paper loads kernel classes lazily; retrying each tick
+[00:53:44 INFO]: [c-LoD] engine tick alive: tick 50
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] engine tick alive: tick 100
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[00:53:44 INFO]: [c-LoD] engine tick alive: tick 100
+[00:53:44 INFO]: Prepared spawn area in 3599 ms
+[00:53:44 INFO]: Loading 0 persistent chunks for level 'minecraft:the_nether'...
+[00:53:44 INFO]: Preparing spawn area: 100%
+[00:53:44 INFO]: Prepared spawn area in 769 ms
+[00:53:44 INFO]: Loading 0 persistent chunks for level 'minecraft:the_end'...
+[00:53:44 INFO]: Preparing spawn area: 100%
+[00:53:44 INFO]: Prepared spawn area in 295 ms
+[00:53:44 INFO]: Done preparing level "world" (3.994s)
+[00:53:44 INFO]: [ClodHost] Enabling ClodHost v1.0.0
+[00:53:44 INFO]: [ClodHost] c-LoD host plugin up — ClodEdits can register now
+[00:53:45 INFO]: [spark] Starting background profiler...
+[00:53:46 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:overworld
+[00:53:46 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_nether
+[00:53:46 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_end
+[00:53:46 INFO]: Running delayed init tasks
+[00:53:46 INFO]: Done (16.239s)! For help, type "help"
+[00:53:46 INFO]: *************************************************************************************
+[00:53:46 INFO]: This is the first time you're starting this server.
+[00:53:46 INFO]: It's recommended you read our 'Getting Started' documentation for guidance.
+[00:53:46 INFO]: View this and more helpful information here: https://docs.papermc.io/paper/next-steps
+[00:53:46 INFO]: *************************************************************************************
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] engine tick alive: tick 150
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[00:54:24 INFO]: [c-LoD] engine tick alive: tick 150
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] engine tick alive: tick 200
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[00:55:14 INFO]: [c-LoD] engine tick alive: tick 200
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] engine tick alive: tick 250
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[00:56:04 INFO]: [c-LoD] engine tick alive: tick 250
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] engine tick alive: tick 300
+[00:56:54 INFO]: [c-LoD] engine tick alive: tick 300
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] engine tick alive: tick 350
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[00:57:44 INFO]: [c-LoD] engine tick alive: tick 350
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[00:58:24 INFO]: Stopping server
+[00:58:25 INFO]: [ClodHost] Disabling ClodHost v1.0.0
+[00:58:25 INFO]: Saving players
+[00:58:25 INFO]: Saving worlds
+[00:58:25 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:overworld
+[00:58:25 INFO]: [ChunkHolderManager] Waiting 60s for chunk system to halt for world 'minecraft:overworld'
+[00:58:25 INFO]: [ChunkHolderManager] Halted chunk system for world 'minecraft:overworld'
+[00:58:25 INFO]: [ChunkHolderManager] Saving all chunkholders for world 'minecraft:overworld'
+[00:58:25 INFO]: [ChunkHolderManager] Saved 0 block chunks, 0 entity chunks, 0 poi chunks in world 'minecraft:overworld' in 0.00s
+[00:58:25 INFO]: [ChunkHolderManager] Waiting 60s for chunk I/O to halt for world 'minecraft:overworld'
+[00:58:25 INFO]: [ChunkHolderManager] Halted I/O scheduler for world 'minecraft:overworld'
+[00:58:25 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_nether
+[00:58:25 INFO]: [ChunkHolderManager] Waiting 60s for chunk system to halt for world 'minecraft:the_nether'
+[00:58:25 INFO]: [ChunkHolderManager] Halted chunk system for world 'minecraft:the_nether'
+[00:58:25 INFO]: [ChunkHolderManager] Saving all chunkholders for world 'minecraft:the_nether'
+[00:58:25 INFO]: [ChunkHolderManager] Saved 0 block chunks, 0 entity chunks, 0 poi chunks in world 'minecraft:the_nether' in 0.00s
+[00:58:25 INFO]: [ChunkHolderManager] Waiting 60s for chunk I/O to halt for world 'minecraft:the_nether'
+[00:58:25 INFO]: [ChunkHolderManager] Halted I/O scheduler for world 'minecraft:the_nether'
+[00:58:25 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_end
+[00:58:25 INFO]: [ChunkHolderManager] Waiting 60s for chunk system to halt for world 'minecraft:the_end'
+[00:58:25 INFO]: [ChunkHolderManager] Halted chunk system for world 'minecraft:the_end'
+[00:58:25 INFO]: [ChunkHolderManager] Saving all chunkholders for world 'minecraft:the_end'
+[00:58:25 INFO]: [ChunkHolderManager] Saved 0 block chunks, 0 entity chunks, 0 poi chunks in world 'minecraft:the_end' in 0.00s
+[00:58:25 INFO]: [ChunkHolderManager] Waiting 60s for chunk I/O to halt for world 'minecraft:the_end'
+[00:58:25 INFO]: [ChunkHolderManager] Halted I/O scheduler for world 'minecraft:the_end'
+[00:58:25 INFO]: Waiting for all RegionFile I/O tasks to complete...
+[00:58:25 INFO]: All RegionFile I/O tasks to complete
+[00:58:25 INFO]: [MoonriseCommon] Awaiting termination of worker pool for up to 60s...
+[00:58:25 INFO]: [MoonriseCommon] Awaiting termination of I/O pool for up to 60s...
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 132882938964874
+[c-LoD] NMS resolve FAILED at: m_dust_particle_new
+[launcher] server exited with code 143
