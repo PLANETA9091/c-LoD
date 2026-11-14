@@ -466,61 +466,24 @@ void main() {
     uint prevByte = uint(prev.r * 255.0 + 0.5);
     bool reset = texelFetch(ResetSampler, px, 0).r > 0.5;
     uint fresh = word >> 8;
-    // v6.42.1 THE ALPHA LEDGER, FLOAT-ONLY (the v6.42.0 uint version
-    // crashed the Mesa 26 client at shader compile — same signature as the
-    // v6.38.0 uint kill): the slot-coverage history rides the state
-    // alpha's value — alpha*255 = mark(128) | covered*8 — computed and
-    // re-packed in PLAIN FLOATS (no uint casts, no bitwise ops, no
-    // ternaries with integer literals). Every existing alpha reader keeps
-    // its semantics: a >= 0.5 = decoded+immutable (the HeightRef vouch,
-    // the merge honesty, the state classifiers); a covered-but-unmarked
-    // cell reads 0.03..0.47 < 0.5 — the same 0 they always saw. The
-    // ledger makes the completion PER-SLOT ACROSS FRAMES: one strobe
-    // frame per slot over the word's visible lifetime, not four
-    // simultaneous strobes in one frame — the #381-#404 pathology (the
-    // partial OR bytes growing while the mark never landed because
-    // allSlots demanded four simultaneous strobes) dies here.
     bool marked = prev.a > 0.5;
-    float a255 = floor(prev.a * 255.0 + 0.5);
-    float markPart = floor(a255 / 128.0) * 128.0;
-    float covered = floor((a255 - markPart) / 8.0); // 0..15
-    float slotBits = 0.0;
-    if (slot0) { slotBits += 1.0; }
-    if (slot1) { slotBits += 2.0; }
-    if (slot2) { slotBits += 4.0; }
-    if (slot3) { slotBits += 8.0; }
     uint outByte = prevByte;
-    bool markNow = marked;
-    bool complete = false;
-    if (reset) {
-        // v6.2 EDIT PROTOCOL, v6.42.1 edition: the reset electron kills
-        // the old word AND the old ledger in the same frame (the paint
-        // falls back for the couple of frames the fresh word needs — the
-        // edit flicker the v6.2 design already accepted); the fresh
-        // decode seeds the new ledger and a complete first frame marks
-        // immediately.
+    if (reset && allSlots) {
+        // v6.2 EDIT PROTOCOL: after a reset electron, a COMPLETE fresh
+        // decode REPLACES the OR-merged word (an edit must be able to
+        // lose bits — a refresh cannot, that is what OR is for).
         outByte = fresh;
-        covered = slotBits;
-        markNow = allSlots;
-        complete = allSlots;
     } else if (allSlots && !marked) {
         // v6.23 MERGE HONESTY (a): the first honest completion REPLACES
-        // the accumulated partial bits — replacing loses nothing real and
-        // throws away the noise partials the OR had ratcheted in.
+        // the accumulated partial bits. The fresh word is complete by
+        // construction (every slot fired this frame) and every honest
+        // partial is a subset of it — replacing loses nothing real and
+        // throws away the noise partials the OR had already ratcheted in.
         outByte = fresh;
-        covered = 15.0;
-        markNow = true;
-        complete = true;
     } else if (anyHit && !marked) {
-        // v6.2 (legacy, scoped) + v6.42.1: partial decodes keep the OR
-        // self-heal on UNMARKED cells, and the ledger finishes the row
-        // the one-frame allSlots could not.
+        // v6.2 (legacy, scoped): partial decodes keep the OR self-heal —
+        // on UNMARKED cells only.
         outByte = prevByte | fresh;
-        covered = min(covered + slotBits, 15.0);
-        if (covered >= 15.0) {
-            markNow = true;
-            complete = true;
-        }
     }
     // v6.23 MERGE HONESTY (b): a MARKED cell's word is immutable without
     // the reset electron. Honest same-word traffic is unaffected (OR of a
@@ -529,12 +492,7 @@ void main() {
     // OR bits into a proven word every frame (249 -> 255 = the #316
     // stripes); with the gate above they are rejected, and this block
     // makes the refusal permanent for the whole marked lifetime.
-    // v6.42.1: the alpha carries the mark (128) and the ledger (covered*8),
-    // packed and unpacked in floats only.
-    float mark = ((markNow ? 128.0 : 0.0) + covered * 8.0) / 255.0;
-    if (complete) {
-        allSlots = true;
-    }
+    float mark = allSlots ? 1.0 : prev.a;
     // v6.35.0 THE ERASE FLAG = COMPLETION, not anyHit. The eraser reads .g
     // and kills a cell's dots the first frame the word strobes AT ALL —
     // an anyHit from ONE slot fired the whole word's dot death, so a
