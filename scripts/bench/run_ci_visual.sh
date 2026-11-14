@@ -557,7 +557,7 @@ sum "- GL: ${GLINFO:-unavailable (glxinfo/xvfb-run missing)}"
 # threshold artifacts, not a transport recovery). The engagement evidence
 # lives on the §7b mask8 client only (the parity world, vd 8).
 # v6.37.0 THE FRAC=1 EXPERIMENT: the tower state frames (#381-#386) named the marker COLORLESS with heights decoded — the color words never complete their rows even with the erase-completion fix (v6.35.0) and the persistent vouch (v6.36.0); the green minority grows with dwell (12k -> 22k between rim00 and the re-read) = a PROBABILISTIC completion, dots are being lost and the sparse channel is the only retry — frac=1 (the full /4 divisor, x8 the v6.30.0 pressure) arms the re-beat in leg-1 too so the marker cells re-stream THROUGHOUT the probe window; if the red mass turns green the losses are the mechanism, if it holds the killer is deterministic
-export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=true;sparse_rebeat=true;sparse_rebeat_frac=8;carrier_sink=-0.03;carrier_dust=true"
+export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=true;sparse_rebeat=true;sparse_rebeat_frac=8;carrier_sink=-0.03;carrier_dust=false"
 CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" || {
   echo "FAIL: boot/gates"; tail -40 /tmp/server.log; exit 1; }
 sum "- boot + gates OK ($(date -u +%H:%M:%S))"
