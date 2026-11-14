@@ -1508,23 +1508,60 @@ fn resolve_nms(env: Env) -> Option<Nms> {
         "dust_particle_cls",
         load("net.minecraft.core.particles.DustParticleOptions")
     );
-    // v6.43.1 SIGNATURE FIX: since 1.20.5 DustParticleOptions carries the
-    // scale as an INT (the v6.43.0 "(...Vector3f;F)V" probe failed the
-    // method lookup, the NMS surface never resolved and #411 died in the
-    // boot gates).
-    let m_dust_particle_new = step!(
-        "m_dust_particle_new",
-        env.get_method_id(dust_particle_cls, "<init>", "(Lorg/joml/Vector3f;I)V")
-    );
-    let color = env
-        .new_object(vector3f_cls, m_vector3f_new, &[jf(0.0), jf(1.0), jf(0.0)])
-        .unwrap_or(std::ptr::null_mut());
-    clear_if_pending(env);
-    let dust_opts_local = env
-        .new_object(dust_particle_cls, m_dust_particle_new, &[jv(color), ji(1)])
-        .unwrap_or(std::ptr::null_mut());
-    clear_if_pending(env);
-    let dust_opts = jobj(dust_opts_local)?;
+    // v6.43.3 THE SIGNATURE PROBE CHAIN: 26.3 moved the dust options THREE
+    // times across its lifespan (Vector3f+F pre-1.20.5, Vector3f+I since
+    // 1.20.5, int-rgb+F in the 1.21.5-era packing rewrite) — a single
+    // step! killed the whole NMS surface on the first miss (#411/#412/#413
+    // died in the boot gates). The chain logs EVERY attempt into the
+    // server log and carries the winning VARIANT so build_particle_packet
+    // constructs the options with the matching argument set; a total miss
+    // falls back to happy_villager (the module stays alive, the transport
+    // keeps the legacy carrier).
+    let mut dust_variant: u8 = 0;
+    let mut dust_opts: jobject = std::ptr::null_mut();
+    for (sig, variant) in [
+        ("(Lorg/joml/Vector3f;I)V", 1u8),
+        ("(Lorg/joml/Vector3f;F)V", 2u8),
+        ("(IF)V", 3u8),
+    ] {
+        let mid = env.get_method_id(dust_particle_cls, "<init>", sig);
+        let mid_ok = matches!(mid, Some(m) if !m.is_null());
+        crate::log_info(&format!("[c-LoD] NMS probe dust ctor {sig}: {mid_ok}"));
+        if let Some(mid) = mid {
+            if !mid.is_null() {
+                let color = env
+                    .new_object(vector3f_cls, m_vector3f_new, &[jf(0.0), jf(1.0), jf(0.0)])
+                    .unwrap_or(std::ptr::null_mut());
+                clear_if_pending(env);
+                let args: Vec<jvalue> = match variant {
+                    1u8 => vec![jv(color), ji(1)],
+                    2u8 => vec![jv(color), jf(1.2)],
+                    _ => vec![ji(65280), jf(1.2)], // int-rgb green + float scale
+                };
+                let local = env
+                    .new_object(dust_particle_cls, mid, &args)
+                    .unwrap_or(std::ptr::null_mut());
+                clear_if_pending(env);
+                if !local.is_null() {
+                    dust_variant = variant;
+                    dust_opts = jobj(local)?;
+                    crate::log_info("[c-LoD] NMS dust carrier: variant constructed");
+                    break;
+                }
+            }
+            crate::log_info("[c-LoD] NMS dust ctor constructed NULL (variant skipped)");
+        }
+    }
+    let dust_variant = dust_variant;
+    let _dust_opts_probe = dust_opts;
+    if dust_variant == 0 {
+        crate::log_info("[c-LoD] NMS dust carrier: ALL variants failed — happy_villager stays the carrier, dust lane disabled");
+    }
+    let dust_opts = if dust_variant > 0 {
+        dust_opts
+    } else {
+        std::ptr::null_mut()
+    };
 
     let _ = &happy_villager; // consumed below in the Nms struct
     let m_particle_packet_new = step!(
