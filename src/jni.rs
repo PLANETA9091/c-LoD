@@ -1508,20 +1508,20 @@ fn resolve_nms(env: Env) -> Option<Nms> {
         "dust_particle_cls",
         load("net.minecraft.core.particles.DustParticleOptions")
     );
+    // v6.43.1 SIGNATURE FIX: since 1.20.5 DustParticleOptions carries the
+    // scale as an INT (the v6.43.0 "(...Vector3f;F)V" probe failed the
+    // method lookup, the NMS surface never resolved and #411 died in the
+    // boot gates).
     let m_dust_particle_new = step!(
         "m_dust_particle_new",
-        env.get_method_id(dust_particle_cls, "<init>", "(Lorg/joml/Vector3f;F)V")
+        env.get_method_id(dust_particle_cls, "<init>", "(Lorg/joml/Vector3f;I)V")
     );
     let color = env
         .new_object(vector3f_cls, m_vector3f_new, &[jf(0.0), jf(1.0), jf(0.0)])
         .unwrap_or(std::ptr::null_mut());
     clear_if_pending(env);
     let dust_opts_local = env
-        .new_object(
-            dust_particle_cls,
-            m_dust_particle_new,
-            &[jv(color), jf(1.2)],
-        )
+        .new_object(dust_particle_cls, m_dust_particle_new, &[jv(color), ji(1)])
         .unwrap_or(std::ptr::null_mut());
     clear_if_pending(env);
     let dust_opts = jobj(dust_opts_local)?;
