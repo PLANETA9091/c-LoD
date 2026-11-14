@@ -1,0 +1,134 @@
+Downloading mojang_26.3.jar
+Applying patches
+Starting org.bukkit.craftbukkit.Main
+2026-11-14T16:43:17.061809138Z ServerMain WARN Advanced terminal features are not available in this environment
+[16:43:17 INFO]: [bootstrap] Running Java 25 (OpenJDK 64-Bit Server VM 25.0.5+8-LTS; Eclipse Adoptium Temurin-25.0.5+8) on Linux 7.0.0-1019-azure (amd64)
+[16:43:17 INFO]: [bootstrap] Loading Paper 26.3-251-main@da964e3 (2026-11-14T13:23:20Z) for Minecraft 26.3
+[16:43:17 INFO]: [PluginInitializerManager] Initializing plugins...
+[16:43:17 INFO]: [PluginInitializerManager] Initialized 0 plugins
+[16:43:21 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Initialising converters for DataConverter...
+[16:43:22 INFO]: [com.destroystokyo.paper.profile.PaperServicesDiscoveryService] Environment: Environment[discoveryUrl=https://discovery.minecraftservices.com/minecraft/client, name=PROD]
+[16:43:22 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Finished initialising converters for DataConverter in 746.8ms
+[16:43:22 INFO]: Found new data pack paper, loading it automatically
+[16:43:23 INFO]: No existing world data, creating new world
+[16:43:24 INFO]: Loaded 1866 advancements
+[16:43:25 INFO]: Starting minecraft server version 26.3
+[16:43:25 INFO]: Loading properties
+[16:43:25 INFO]: This server is running Paper version 26.3-251-main@da964e3 (2026-11-14T13:23:20Z) (Implementing API version 26.3.build.251-stable)
+[16:43:25 INFO]: [spark] This server bundles the spark profiler. For more information please visit https://docs.papermc.io/paper/profiling
+[16:43:25 INFO]: Server Ping Player Sample Count: 12
+[16:43:25 INFO]: Using 4 threads for Netty based IO
+[16:43:25 INFO]: [MoonriseCommon] Paper is using 1 worker threads, 1 I/O threads
+[16:43:25 INFO]: [ca.spottedleaf.moonrise.common.util.FMA] FMA supported: true for Linux platform with feature flag: flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl tsc_reliable nonstop_tsc cpuid extd_apicid aperfmperf tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid rdseed adx smap clflushopt clwb sha_ni xsaveopt xsavec xgetbv1 xsaves user_shstk clzero xsaveerptr rdpru arat npt nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold v_vmsave_vmload umip vaes vpclmulqdq rdpid fsrm
+[16:43:26 INFO]: Default game type: SURVIVAL
+[16:43:26 INFO]: Generating keypair
+[16:43:26 INFO]: Starting Minecraft server on *:25565
+[16:43:26 INFO]: Paper: Using libdeflate (Linux x86_64) compression from Velocity.
+[16:43:26 INFO]: Paper: Using OpenSSL 3.x.x (Linux x86_64) cipher from Velocity.
+[16:43:26 WARN]: **** SERVER IS RUNNING IN OFFLINE/INSECURE MODE!
+[16:43:26 WARN]: The server will make no attempt to authenticate usernames. Beware.
+[16:43:26 WARN]: While this makes the game possible to play without internet access, it also opens up the ability for hackers to connect with any username they choose.
+[16:43:26 WARN]: To change this, set "online-mode" to "true" in the server.properties file.
+[16:43:26 INFO]: Preparing level "world"
+[16:43:26 INFO]: Selecting spawn point for level 'minecraft:overworld'...
+[16:43:30 INFO]: Selecting spawn point for level 'minecraft:the_nether'...
+[16:43:31 INFO]: Selecting spawn point for level 'minecraft:the_end'...
+[16:43:31 INFO]: Loading 0 persistent chunks for level 'minecraft:overworld'...
+[16:43:31 INFO]: Preparing spawn area: 100%
+[16:43:31 INFO]: Prepared spawn area in 5055 ms
+[16:43:31 INFO]: Loading 0 persistent chunks for level 'minecraft:the_nether'...
+[16:43:31 INFO]: Preparing spawn area: 100%
+[16:43:31 INFO]: Prepared spawn area in 895 ms
+[16:43:31 INFO]: Loading 0 persistent chunks for level 'minecraft:the_end'...
+[16:43:31 INFO]: Preparing spawn area: 100%
+[16:43:31 INFO]: Prepared spawn area in 223 ms
+[16:43:31 INFO]: Done preparing level "world" (5.342s)
+[16:43:31 INFO]: [spark] Starting background profiler...
+[16:43:32 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:overworld
+[16:43:32 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_nether
+[16:43:32 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_end
+[16:43:32 INFO]: Running delayed init tasks
+[16:43:32 INFO]: Done (16.803s)! For help, type "help"
+[16:43:32 INFO]: *************************************************************************************
+[16:43:32 INFO]: This is the first time you're starting this server.
+[16:43:32 INFO]: It's recommended you read our 'Getting Started' documentation for guidance.
+[16:43:32 INFO]: View this and more helpful information here: https://docs.papermc.io/paper/next-steps
+[16:43:32 INFO]: *************************************************************************************
+[16:43:54 INFO]: UUID of player Stepan is d1652ad9-77ce-3200-9642-f973c97adf36
+[16:44:01 INFO]: System chat: Stepan joined the game
+[16:44:01 INFO]: Stepan[/127.0.0.1:49644] logged in with entity id 8 at ([minecraft:overworld]-336.5, 122.0, -135.5)
+[16:44:07 INFO]: System chat: Game rule advance_time is now set to false
+[16:44:07 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[16:44:07 INFO]: System chat: Set the weather to clear
+[16:44:07 INFO]: System chat: Set Stepan's game mode to Spectator Mode
+[16:44:11 INFO]: System chat: Marked 9 chunks in minecraft:overworld from [-60, 47] to [-58, 49] to be force loaded
+[16:44:11 INFO]: System chat: Successfully filled 15999 block(s)
+[16:44:11 INFO]: System chat: Successfully filled 169 block(s)
+[16:44:11 INFO]: System chat: Successfully filled 1944 block(s)
+[16:44:11 INFO]: System chat: Successfully filled 81 block(s)
+[16:44:11 INFO]: System chat: Successfully filled 250 block(s)
+[16:44:13 INFO]: System chat: Marked 4 chunks in minecraft:overworld from [-59, 50] to [-58, 51] to be force loaded
+[16:44:15 INFO]: System chat: Successfully filled 16383 block(s)
+[16:44:15 INFO]: System chat: Successfully filled 169 block(s)
+[16:44:15 INFO]: System chat: Successfully filled 1944 block(s)
+[16:44:15 INFO]: System chat: Successfully filled 81 block(s)
+[16:44:15 INFO]: System chat: Successfully filled 250 block(s)
+[16:44:18 INFO]: System chat: Marked 36 chunks in minecraft:overworld from [-62, 46] to [-56, 52] to be force loaded
+[16:44:19 INFO]: System chat: Successfully filled 2775 block(s)
+[16:44:21 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[16:48:21 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[16:48:21 INFO]: System chat: Teleported Stepan to -1004.500000, 180.000000, 796.500000
+[16:48:53 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[16:48:53 INFO]: System chat: Teleported Stepan to -929.500000, 140.000000, 796.500000
+[16:49:24 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[16:49:24 INFO]: System chat: Teleported Stepan to -929.500000, 140.000000, 796.500000
+[16:49:56 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[16:49:56 INFO]: System chat: Teleported Stepan to -929.500000, 140.000000, 796.500000
+[16:50:27 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[16:50:27 INFO]: System chat: Teleported Stepan to -929.500000, 140.000000, 796.500000
+[16:50:59 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[16:50:59 INFO]: System chat: Teleported Stepan to -929.500000, 170.000000, 796.500000
+[16:51:30 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[16:51:30 INFO]: System chat: Teleported Stepan to -929.500000, 100.000000, 796.500000
+[16:52:02 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[16:52:02 INFO]: System chat: Teleported Stepan to -929.500000, 160.000000, -219.500000
+[16:52:33 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[16:52:33 INFO]: System chat: Teleported Stepan to -929.500000, 120.000000, 796.500000
+[16:53:05 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[16:53:05 INFO]: System chat: Teleported Stepan to -1004.500000, 151.600000, 796.500000
+[16:53:37 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[16:53:37 INFO]: System chat: Teleported Stepan to -929.500000, 140.000000, 796.500000
+[16:54:08 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[16:54:08 INFO]: System chat: Teleported Stepan to -929.500000, 160.000000, -219.500000
+[16:56:40 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[16:56:40 INFO]: System chat: Teleported Stepan to -929.500000, 140.000000, 796.500000
+[16:57:11 INFO]: Stopping server
+[16:57:11 INFO]: Saving players
+[16:57:11 INFO]: Stepan lost connection: Disconnected
+[16:57:11 INFO]: System chat: Stepan left the game
+[16:57:11 INFO]: Saving worlds
+[16:57:11 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:overworld
+[16:57:11 INFO]: [ChunkHolderManager] Waiting 60s for chunk system to halt for world 'minecraft:overworld'
+[16:57:11 INFO]: [ChunkHolderManager] Halted chunk system for world 'minecraft:overworld'
+[16:57:11 INFO]: [ChunkHolderManager] Saving all chunkholders for world 'minecraft:overworld'
+[16:57:12 INFO]: [ChunkHolderManager] Saved 693 block chunks, 26 entity chunks, 1 poi chunks in world 'minecraft:overworld' in 0.50s
+[16:57:12 INFO]: [ChunkHolderManager] Waiting 60s for chunk I/O to halt for world 'minecraft:overworld'
+[16:57:12 INFO]: [ChunkHolderManager] Halted I/O scheduler for world 'minecraft:overworld'
+[16:57:12 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_nether
+[16:57:12 INFO]: [ChunkHolderManager] Waiting 60s for chunk system to halt for world 'minecraft:the_nether'
+[16:57:12 INFO]: [ChunkHolderManager] Halted chunk system for world 'minecraft:the_nether'
+[16:57:12 INFO]: [ChunkHolderManager] Saving all chunkholders for world 'minecraft:the_nether'
+[16:57:12 INFO]: [ChunkHolderManager] Saved 0 block chunks, 0 entity chunks, 0 poi chunks in world 'minecraft:the_nether' in 0.00s
+[16:57:12 INFO]: [ChunkHolderManager] Waiting 60s for chunk I/O to halt for world 'minecraft:the_nether'
+[16:57:12 INFO]: [ChunkHolderManager] Halted I/O scheduler for world 'minecraft:the_nether'
+[16:57:12 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_end
+[16:57:12 INFO]: [ChunkHolderManager] Waiting 60s for chunk system to halt for world 'minecraft:the_end'
+[16:57:12 INFO]: [ChunkHolderManager] Halted chunk system for world 'minecraft:the_end'
+[16:57:12 INFO]: [ChunkHolderManager] Saving all chunkholders for world 'minecraft:the_end'
+[16:57:12 INFO]: [ChunkHolderManager] Saved 0 block chunks, 0 entity chunks, 0 poi chunks in world 'minecraft:the_end' in 0.00s
+[16:57:12 INFO]: [ChunkHolderManager] Waiting 60s for chunk I/O to halt for world 'minecraft:the_end'
+[16:57:12 INFO]: [ChunkHolderManager] Halted I/O scheduler for world 'minecraft:the_end'
+[16:57:12 INFO]: Waiting for all RegionFile I/O tasks to complete...
+[16:57:12 INFO]: All RegionFile I/O tasks to complete
+[16:57:12 INFO]: [MoonriseCommon] Awaiting termination of worker pool for up to 60s...
+[16:57:12 INFO]: [MoonriseCommon] Awaiting termination of I/O pool for up to 60s...
