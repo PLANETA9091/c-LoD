@@ -1,0 +1,1069 @@
+[launcher] kernel:  /home/runner/work/c-LoD/c-LoD/dist/versions/paper-26.3.jar
+[launcher] agent:   /home/runner/work/c-LoD/c-LoD/dist/libcrussty_runtime.so
+[launcher] modules: /home/runner/work/c-LoD/c-LoD/dist/modules (recursive)
+[launcher] exec: /usr/lib/jvm/temurin-25-jdk-amd64/bin/java -agentpath:/home/runner/work/c-LoD/c-LoD/dist/libcrussty_runtime.so=modules=/home/runner/work/c-LoD/c-LoD/dist/modules;versions=/home/runner/work/c-LoD/c-LoD/dist/versions;kernel=paper-26.3.jar -Xms256M -Xmx700M -XX:MaxMetaspaceSize=256M -XX:MaxDirectMemorySize=128M -XX:+UseG1GC -Ddist.root=/home/runner/work/c-LoD/c-LoD/dist -jar /home/runner/work/c-LoD/c-LoD/dist/versions/paper-26.3.jar --nogui
+[crussty-runtime] v2.0.0 loaded (options: modules=/home/runner/work/c-LoD/c-LoD/dist/modules;versions=/home/runner/work/c-LoD/c-LoD/dist/versions;kernel=paper-26.3.jar)
+[c-LoD] booting: sky-grid disk 512 blocks (cell 2), http :8199, fov 70, particles/tick 2048
+[cplug-sdk] log dropped (kernel not ready): [c-LoD] booting: sky-grid disk 512 blocks (cell 2), http :8199, fov 70, particles/tick 2048
+[c-LoD] c-LoD v6.9.2: STAGE EYES v2 — run #231 measured rot=ok scan=15 lens_zero=1 while the carrier column is PLAINLY VISIBLE on the burst shot (4268 green px) and the relative strobe arm fires on 399/400 of the actual dot pixels — the hue test and the camera decode are INNOCENT; the residual suspects are the projection INPUTS. The four lens strips become bucket printers: CAM (the Globals CameraBlockPos the capture sees, in cell-space buckets over the atlas — a wrong bucket convicts the post-chain camera), ROT (az/el buckets from clod_rot_a), HITS (clod_h_b.g strobe-fired cells on a 32x32 grid), MASK (clod_mask marks on a dense 64x36 grid — v6.9.0 32x18 could miss 2-3px discs). The RENDERER DEAD marker decodes the buckets against the known vantage (cam ~8, az ~0 east, el ~3) and names: Globals-camera-wrong vs az-wrong vs strobe-never-fires vs merge-dead. Also #231 taught: the visible column survives the eraser because a DENSE column repaint copies dot colors from dot neighbors (the self-repairing fill assumed isolated dots) — cosmetic, noted. v6.9.1 carried: numpy CI deps, the dynamic prompt click + prompt guard
+[cplug-sdk] log dropped (kernel not ready): [c-LoD] c-LoD v6.9.2: STAGE EYES v2 — run #231 measured rot=ok scan=15 lens_zero=1 while the carrier column is PLAINLY VISIBLE on the burst shot (4268 green px) and the relative strobe arm fires on 399/400 of the actual dot pixels — the hue test and the camera decode are INNOCENT; the residual suspects are the projection INPUTS. The four lens strips become bucket printers: CAM (the Globals CameraBlockPos the capture sees, in cell-space buckets over the atlas — a wrong bucket convicts the post-chain camera), ROT (az/el buckets from clod_rot_a), HITS (clod_h_b.g strobe-fired cells on a 32x32 grid), MASK (clod_mask marks on a dense 64x36 grid — v6.9.0 32x18 could miss 2-3px discs). The RENDERER DEAD marker decodes the buckets against the known vantage (cam ~8, az ~0 east, el ~3) and names: Globals-camera-wrong vs az-wrong vs strobe-never-fires vs merge-dead. Also #231 taught: the visible column survives the eraser because a DENSE column repaint copies dot colors from dot neighbors (the self-repairing fill assumed isolated dots) — cosmetic, noted. v6.9.1 carried: numpy CI deps, the dynamic prompt click + prompt guard
+[c-LoD] c-LoD pack server listening on 0.0.0.0:8199 (GET /clod-pack.zip | /clod-pack.sha1 | /clod-pack.info)
+[cplug-sdk] log dropped (kernel not ready): [c-LoD] c-LoD pack server listening on 0.0.0.0:8199 (GET /clod-pack.zip | /clod-pack.sha1 | /clod-pack.info)
+[crussty-runtime] module lod -> init rc=0
+[crussty-runtime] pipeline ready: 1 module hook(s)
+[crussty-rcon] RCON-WATCH installed (2s cadence)
+[crussty-runtime] transform engine: 23 rule(s) registered
+[crussty:hot-reload] SIGUSR1 reload trigger armed (1 module(s) reloadable)
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/SchedulerHooks" }
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/StorageHooks" }
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/NetHooks" }
+[crussty-runtime] hook class in visible table: JNIStr { internal: "dev/crussty/hooks/TickHook" }
+[crussty-runtime] transform hook classes installed (4); transform engine armed
+Starting org.bukkit.craftbukkit.Main
+2026-11-14T06:56:36.856798162Z ServerMain WARN Advanced terminal features are not available in this environment
+[06:56:37 INFO]: [bootstrap] Running Java 25 (OpenJDK 64-Bit Server VM 25.0.5+8-LTS; Eclipse Adoptium Temurin-25.0.5+8) on Linux 7.0.0-1019-azure (amd64)
+[06:56:37 INFO]: [bootstrap] Loading Paper 26.3-249-main@1a995d6 (2026-11-11T18:01:48Z) for Minecraft 26.3
+[06:56:37 INFO]: [PluginInitializerManager] Initializing plugins...
+[06:56:37 INFO]: [PluginInitializerManager] Initialized 1 plugin
+[06:56:37 INFO]: [PluginInitializerManager] Bukkit plugins (1):
+ - ClodHost (1.0.0)
+[c-LoD] kernel ready — starting engine loop
+[cplug-sdk] log emit failed: [c-LoD] kernel ready — starting engine loop
+[06:56:41 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Initialising converters for DataConverter...
+[06:56:41 INFO]: [com.destroystokyo.paper.profile.PaperServicesDiscoveryService] Environment: Environment[discoveryUrl=https://discovery.minecraftservices.com/minecraft/client, name=PROD]
+[06:56:41 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Finished initialising converters for DataConverter in 596.9ms
+[06:56:44 INFO]: Loaded 1866 advancements
+[06:56:44 INFO]: Starting minecraft server version 26.3
+[06:56:44 INFO]: Loading properties
+[06:56:44 INFO]: This server is running Paper version 26.3-249-main@1a995d6 (2026-11-11T18:01:48Z) (Implementing API version 26.3.build.249-stable)
+[06:56:44 INFO]: [spark] This server bundles the spark profiler. For more information please visit https://docs.papermc.io/paper/profiling
+[06:56:44 INFO]: Using 4 threads for Netty based IO
+[06:56:44 INFO]: Server Ping Player Sample Count: 12
+[06:56:44 INFO]: [MoonriseCommon] Paper is using 4 worker threads, 2 I/O threads
+[06:56:44 INFO]: [ca.spottedleaf.moonrise.common.util.FMA] FMA supported: true for Linux platform with feature flag: flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology tsc_reliable nonstop_tsc cpuid extd_apicid aperfmperf tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves user_shstk avx_vnni avx512_bf16 clzero xsaveerptr rdpru arat npt nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold v_vmsave_vmload avx512vbmi umip avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid fsrm avx512_vp2intersect
+[06:56:45 INFO]: Default game type: SURVIVAL
+[06:56:45 INFO]: Generating keypair
+[06:56:45 INFO]: Starting Minecraft server on *:25565
+[06:56:45 INFO]: Paper: Using libdeflate (Linux x86_64) compression from Velocity.
+[06:56:45 INFO]: Paper: Using OpenSSL 3.x.x (Linux x86_64) cipher from Velocity.
+[06:56:45 INFO]: [ClodHost] Loading server plugin ClodHost v1.0.0
+[06:56:45 WARN]: **** SERVER IS RUNNING IN OFFLINE/INSECURE MODE!
+[06:56:45 WARN]: The server will make no attempt to authenticate usernames. Beware.
+[06:56:45 WARN]: While this makes the game possible to play without internet access, it also opens up the ability for hackers to connect with any username they choose.
+[06:56:45 WARN]: To change this, set "online-mode" to "true" in the server.properties file.
+[06:56:45 INFO]: Preparing level "world"
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] warmup: resolve attempt
+[06:56:45 INFO]: Loading 121 persistent chunks for level 'minecraft:overworld'...
+[c-LoD] warmup: resolve OK
+[c-LoD] NMS warmup: resolving...
+[c-LoD] NMS resolve: loader = 133198886670050
+[c-LoD] [c-LoD] NMS probe dust ctor (Lorg/joml/Vector3f;I)V: false
+[cplug-sdk] log emit failed: [c-LoD] [c-LoD] NMS probe dust ctor (Lorg/joml/Vector3f;I)V: false
+[c-LoD] [c-LoD] NMS probe dust ctor (Lorg/joml/Vector3f;F)V: false
+[cplug-sdk] log emit failed: [c-LoD] [c-LoD] NMS probe dust ctor (Lorg/joml/Vector3f;F)V: false
+[c-LoD] [c-LoD] NMS probe dust ctor (IF)V: true
+[c-LoD] [c-LoD] NMS dust carrier: variant constructed
+[c-LoD] c-LoD JNI bridge resolved: true (incl. NMS particle surface)
+[06:56:46 INFO]: [c-LoD] [c-LoD] NMS probe dust ctor (IF)V: true
+[06:56:46 INFO]: [c-LoD] [c-LoD] NMS dust carrier: variant constructed
+[06:56:46 INFO]: [c-LoD] c-LoD JNI bridge resolved: true (incl. NMS particle surface)
+[06:56:46 INFO]: [c-LoD] c-LoD pack finalized (ONE-TIME, static): shader-only, 127551 bytes, sha1 c7293c2a24265e83ebf9025127549657b5234c3b — zero textures, zero world data, one push per join
+[06:56:46 INFO]: [c-LoD] c-LoD streaming world: world
+[c-LoD] c-LoD pack finalized (ONE-TIME, static): shader-only, 127551 bytes, sha1 c7293c2a24265e83ebf9025127549657b5234c3b — zero textures, zero world data, one push per join
+[c-LoD] c-LoD streaming world: world
+[c-LoD] c-LoD sky-grid stream armed: 256x256 cells at (-1186,540), 2048 particles/tick, 256 ticks/lap
+[06:56:46 INFO]: [c-LoD] c-LoD sky-grid stream armed: 256x256 cells at (-1186,540), 2048 particles/tick, 256 ticks/lap
+[06:56:46 INFO]: [c-LoD] edit events: helper defined, hunting a host plugin
+[c-LoD] edit events: helper defined, hunting a host plugin
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] engine tick alive: tick 50
+[c-LoD] EB: enter, native_gen=true
+[06:56:47 INFO]: [c-LoD] engine tick alive: tick 50
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[06:56:47 INFO]: Prepared spawn area in 1797 ms
+[06:56:47 INFO]: Loading 0 persistent chunks for level 'minecraft:the_nether'...
+[06:56:47 INFO]: Prepared spawn area in 0 ms
+[06:56:47 INFO]: Loading 0 persistent chunks for level 'minecraft:the_end'...
+[06:56:47 INFO]: Prepared spawn area in 1 ms
+[06:56:47 INFO]: Done preparing level "world" (2.398s)
+[06:56:47 INFO]: [ClodHost] Enabling ClodHost v1.0.0
+[06:56:47 INFO]: [ClodHost] c-LoD host plugin up — ClodEdits can register now
+[06:56:47 INFO]: [spark] Starting background profiler...
+[06:56:48 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:overworld
+[06:56:48 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_nether
+[06:56:48 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_end
+[06:56:48 INFO]: Running delayed init tasks
+[c-LoD] EB: enter, native_gen=true
+[06:56:48 INFO]: Done (12.112s)! For help, type "help"
+[c-LoD] edit events: listener registered — edits push straight into the dirty phase
+[c-LoD] EB: enter, native_gen=true
+[06:56:48 INFO]: [c-LoD] edit events: listener registered — edits push straight into the dirty phase
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[crussty-runtime] transform 'net/minecraft/network/PacketDecoder' failed; class runs untransformed: StackMapTable entry #0 (full_frame local) [head 00 05 ff 00 1d 00 05 07 00 08 07 00 38 07 00 0e 07 00 65 01 00 01 07 00 21 fd 00 12 00 07 00 21 ff 00 02 00 06 07 00 08 07 00 38 07 00 0e 07 00 65 01 07 00 1f 00 00 fc]: unknown verification_type_info tag 56 (near [00 05 ff 00 1d 00 05 07 00 08 07 00] at abs 12 )
+[crussty-runtime] transform 'net/minecraft/network/PacketEncoder' failed; class runs untransformed: StackMapTable entry #3 (full_frame local) [head 00 09 fd 00 7e 07 00 d6 01 3c 0a ff 00 07 00 05 07 00 08 07 00 18 07 00 0e 07 00 44 07 00 d6 00 01 07 00 97 fc 00 22 07 00 97 ff 00 02 00 05 07 00 08 07 00 18 07 00 0e]: unknown verification_type_info tag 24 (near [00 09 fd 00 7e 07 00 d6 01 3c 0a ff 00 07 00 05 07 00 08 07 00] at abs 21 )
+[06:57:03 INFO]: UUID of player Stepan is d1652ad9-77ce-3200-9642-f973c97adf36
+[c-LoD] EB: enter, native_gen=true
+[06:57:04 INFO]: System chat: Stepan joined the game
+[06:57:04 INFO]: Stepan[/127.0.0.1:44922] logged in with entity id 15 at ([minecraft:overworld]-1004.5, 151.6, 796.5)
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] seedgen: ARMED — 3 native workers, batch 8 chunks/call (noise+surface per column, no tickets), helper: one JNI call per batch, trees on
+[06:57:04 INFO]: [c-LoD] seedgen: ARMED — 3 native workers, batch 8 chunks/call (noise+surface per column, no tickets), helper: one JNI call per batch, trees on
+[c-LoD] relog re-armed for d1652ad9-77ce-3200-9642-f973c97adf36 (the last edit's cells cycle drain+release for 3000 ticks)
+[c-LoD] tier Off -> Full for d1652ad9-77ce-3200-9642-f973c97adf36 at (-1005, 796) world
+[c-LoD] effect terrain resync (remove -> true) add -> true (d1652ad9-77ce-3200-9642-f973c97adf36)
+[c-LoD] effect terrain add -> true (d1652ad9-77ce-3200-9642-f973c97adf36 2)
+[06:57:04 INFO]: [c-LoD] relog re-armed for d1652ad9-77ce-3200-9642-f973c97adf36 (the last edit's cells cycle drain+release for 3000 ticks)
+[06:57:04 INFO]: [c-LoD] tier Off -> Full for d1652ad9-77ce-3200-9642-f973c97adf36 at (-1005, 796) world
+[06:57:04 INFO]: [c-LoD] effect terrain resync (remove -> true) add -> true (d1652ad9-77ce-3200-9642-f973c97adf36)
+[06:57:04 INFO]: [c-LoD] effect terrain add -> true (d1652ad9-77ce-3200-9642-f973c97adf36 2)
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] engine tick alive: tick 100
+[c-LoD] EB: enter, native_gen=true
+[06:57:05 INFO]: [c-LoD] engine tick alive: tick 100
+[c-LoD] stream: tick 100 13952/65536 cells, lap 0, cone 364 zone 384 dirty 18 (q 567) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 1600c/299e, edits +0p/0c/0e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 28 forced 20, native 2240c/46ch fail 0 (3w q 908) helper on, trees 54ch/fail 0, wire bundle 4049p/4b fail 0 ~21 kB/s cache 4049/24576 h0 m4049 e0, srbeat 0s/271q drop 0stale/0undec, ereb 0s/18q
+[06:57:06 INFO]: [c-LoD] stream: tick 100 13952/65536 cells, lap 0, cone 364 zone 384 dirty 18 (q 567) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 1600c/299e, edits +0p/0c/0e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 28 forced 20, native 2240c/46ch fail 0 (3w q 908) helper on, trees 54ch/fail 0, wire bundle 4049p/4b fail 0 ~21 kB/s cache 4049/24576 h0 m4049 e0, srbeat 0s/271q drop 0stale/0undec, ereb 0s/18q
+[06:57:06 INFO]: [c-LoD] gate: sky true near 0 far 0 cone 2
+[c-LoD] gate: sky true near 0 far 0 cone 2
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] pack pushed to d1652ad9-77ce-3200-9642-f973c97adf36 (http://10.1.1.37:8199/clod-pack.zip): 127551 bytes, sha1 c7293c2a24265e83ebf9025127549657b5234c3b — the ONE push this session
+[06:57:09 INFO]: [c-LoD] pack pushed to d1652ad9-77ce-3200-9642-f973c97adf36 (http://10.1.1.37:8199/clod-pack.zip): 127551 bytes, sha1 c7293c2a24265e83ebf9025127549657b5234c3b — the ONE push this session
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] engine tick alive: tick 150
+[c-LoD] EB: enter, native_gen=true
+[06:57:10 INFO]: [c-LoD] engine tick alive: tick 150
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] engine tick alive: tick 200
+[c-LoD] EB: enter, native_gen=true
+[06:57:15 INFO]: [c-LoD] engine tick alive: tick 200
+[c-LoD] stream: tick 200 65536/65536 cells, lap 98, cone 1595 zone 697 dirty 18 (q 3663) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 63479c/1202e, edits +1p/1c/0e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 264 forced 567, native 17328c/954ch fail 0 (3w q 0) helper on, trees 954ch/fail 0, wire bundle 24880p/47b fail 0 ~109 kB/s cache 11660/24576 h13220 m11660 e0, srbeat 853s/96q drop 0stale/0undec, ereb 144s/18q
+[06:57:15 INFO]: [c-LoD] stream: tick 200 65536/65536 cells, lap 98, cone 1595 zone 697 dirty 18 (q 3663) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 63479c/1202e, edits +1p/1c/0e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 264 forced 567, native 17328c/954ch fail 0 (3w q 0) helper on, trees 954ch/fail 0, wire bundle 24880p/47b fail 0 ~109 kB/s cache 11660/24576 h13220 m11660 e0, srbeat 853s/96q drop 0stale/0undec, ereb 144s/18q
+[c-LoD] gate: sky true near 0 far 0 cone 0
+[06:57:15 INFO]: [c-LoD] gate: sky true near 0 far 0 cone 0
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] engine tick alive: tick 250
+[c-LoD] EB: enter, native_gen=true
+[06:57:20 INFO]: [c-LoD] engine tick alive: tick 250
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[06:57:25 INFO]: System chat: Game rule advance_time is already set to false
+[06:57:25 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[06:57:25 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[06:57:25 INFO]: System chat: Teleported Stepan to -1004.500000, 190.000000, 796.500000
+[06:57:25 INFO]: System chat: Displaying particle minecraft:dust
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[06:57:25 INFO]: [c-LoD] engine tick alive: tick 300
+[c-LoD] engine tick alive: tick 300
+[c-LoD] EB: enter, native_gen=true
+[06:57:25 INFO]: [c-LoD] stream: tick 300 65536/65536 cells, lap 198, cone 3788 zone 764 dirty 19 (q 3662) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 128823c/1202e, edits +1p/1c/0e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 264 forced 567, native 17328c/954ch fail 0 (3w q 0) helper on, trees 954ch/fail 0, wire bundle 49349p/109b fail 0 ~129 kB/s cache 12198/24576 h37151 m12198 e0, srbeat 1688s/116q drop 0stale/0undec, ereb 288s/19q
+[c-LoD] stream: tick 300 65536/65536 cells, lap 198, cone 3788 zone 764 dirty 19 (q 3662) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 128823c/1202e, edits +1p/1c/0e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 264 forced 567, native 17328c/954ch fail 0 (3w q 0) helper on, trees 954ch/fail 0, wire bundle 49349p/109b fail 0 ~129 kB/s cache 12198/24576 h37151 m12198 e0, srbeat 1688s/116q drop 0stale/0undec, ereb 288s/19q
+[c-LoD] gate: sky true near 0 far 96 cone 0
+[06:57:25 INFO]: [c-LoD] gate: sky true near 0 far 96 cone 0
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[06:57:30 INFO]: [c-LoD] engine tick alive: tick 350
+[c-LoD] engine tick alive: tick 350
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] engine tick alive: tick 400
+[c-LoD] EB: enter, native_gen=true
+[06:57:36 INFO]: [c-LoD] engine tick alive: tick 400
+[c-LoD] stream: tick 400 65536/65536 cells, lap 298, cone 5870 zone 764 dirty 19 (q 3665) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 204598c/1203e, edits +4p/4c/3e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 264 forced 567, native 17328c/954ch fail 0 (3w q 0) helper on, trees 954ch/fail 0, wire bundle 61271p/178b fail 0 ~62 kB/s cache 12206/24576 h49065 m12206 e0, srbeat 1996s/859q drop 0stale/0undec, ereb 296s/19q
+[06:57:36 INFO]: [c-LoD] stream: tick 400 65536/65536 cells, lap 298, cone 5870 zone 764 dirty 19 (q 3665) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 204598c/1203e, edits +4p/4c/3e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 264 forced 567, native 17328c/954ch fail 0 (3w q 0) helper on, trees 954ch/fail 0, wire bundle 61271p/178b fail 0 ~62 kB/s cache 12206/24576 h49065 m12206 e0, srbeat 1996s/859q drop 0stale/0undec, ereb 296s/19q
+[c-LoD] gate: sky true near 0 far 384 cone 2
+[06:57:36 INFO]: [c-LoD] gate: sky true near 0 far 384 cone 2
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[06:57:39 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[06:57:39 INFO]: System chat: Teleported Stepan to -1004.500000, 151.600000, 796.500000
+[06:57:39 INFO]: System chat: Displaying particle minecraft:dust
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] engine tick alive: tick 450
+[c-LoD] EB: enter, native_gen=true
+[06:57:41 INFO]: [c-LoD] engine tick alive: tick 450
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] engine tick alive: tick 500
+[06:57:46 INFO]: [c-LoD] engine tick alive: tick 500
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] stream: tick 500 65536/65536 cells, lap 398, cone 7604 zone 764 dirty 19 (q 3666) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 269940c/1205e, edits +6p/6c/4e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 264 forced 567, native 17328c/954ch fail 0 (3w q 0) helper on, trees 954ch/fail 0, wire bundle 82461p/253b fail 0 ~111 kB/s cache 12206/24576 h70255 m12206 e0, srbeat 3209s/26q drop 0stale/251undec, ereb 407s/19q
+[06:57:46 INFO]: [c-LoD] stream: tick 500 65536/65536 cells, lap 398, cone 7604 zone 764 dirty 19 (q 3666) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 269940c/1205e, edits +6p/6c/4e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 264 forced 567, native 17328c/954ch fail 0 (3w q 0) helper on, trees 954ch/fail 0, wire bundle 82461p/253b fail 0 ~111 kB/s cache 12206/24576 h70255 m12206 e0, srbeat 3209s/26q drop 0stale/251undec, ereb 407s/19q
+[06:57:46 INFO]: [c-LoD] gate: sky true near 0 far 0 cone 0
+[c-LoD] gate: sky true near 0 far 0 cone 0
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[06:57:51 INFO]: [c-LoD] engine tick alive: tick 550
+[c-LoD] engine tick alive: tick 550
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[06:57:52 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[06:57:52 INFO]: System chat: Teleported Stepan to -969.500000, 175.000000, 796.500000
+[06:57:52 INFO]: System chat: Displaying particle minecraft:dust
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] engine tick alive: tick 600
+[c-LoD] EB: enter, native_gen=true
+[06:57:56 INFO]: [c-LoD] engine tick alive: tick 600
+[c-LoD] stream: tick 600 65536/65536 cells, lap 498, cone 9404 zone 871 dirty 23 (q 3664) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 348404c/1205e, edits +8p/8c/6e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 15, wish 264 forced 567, native 17328c/954ch fail 0 (3w q 0) helper on, trees 954ch/fail 0, wire bundle 103178p/321b fail 0 ~109 kB/s cache 14014/24576 h89164 m14014 e0, srbeat 3902s/297q drop 0stale/251undec, ereb 505s/23q
+[c-LoD] gate: sky true near 0 far 0 cone 0
+[06:57:56 INFO]: [c-LoD] stream: tick 600 65536/65536 cells, lap 498, cone 9404 zone 871 dirty 23 (q 3664) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 348404c/1205e, edits +8p/8c/6e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 15, wish 264 forced 567, native 17328c/954ch fail 0 (3w q 0) helper on, trees 954ch/fail 0, wire bundle 103178p/321b fail 0 ~109 kB/s cache 14014/24576 h89164 m14014 e0, srbeat 3902s/297q drop 0stale/251undec, ereb 505s/23q
+[06:57:56 INFO]: [c-LoD] gate: sky true near 0 far 0 cone 0
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[06:58:01 INFO]: [c-LoD] engine tick alive: tick 650
+[c-LoD] engine tick alive: tick 650
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] engine tick alive: tick 700
+[c-LoD] EB: enter, native_gen=true
+[06:58:06 INFO]: [c-LoD] engine tick alive: tick 700
+[c-LoD] stream: tick 700 65536/65536 cells, lap 598, cone 10144 zone 871 dirty 23 (q 3664) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 417139c/1206e, edits +8p/8c/6e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 15, wish 264 forced 567, native 17328c/954ch fail 0 (3w q 0) helper on, trees 954ch/fail 0, wire bundle 112679p/380b fail 0 ~50 kB/s cache 14014/24576 h98665 m14014 e0, srbeat 4356s/197q drop 0stale/347undec, ereb 541s/23q
+[06:58:06 INFO]: [c-LoD] stream: tick 700 65536/65536 cells, lap 598, cone 10144 zone 871 dirty 23 (q 3664) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 417139c/1206e, edits +8p/8c/6e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 15, wish 264 forced 567, native 17328c/954ch fail 0 (3w q 0) helper on, trees 954ch/fail 0, wire bundle 112679p/380b fail 0 ~50 kB/s cache 14014/24576 h98665 m14014 e0, srbeat 4356s/197q drop 0stale/347undec, ereb 541s/23q
+[c-LoD] gate: sky true near 0 far 0 cone 0
+[06:58:06 INFO]: [c-LoD] gate: sky true near 0 far 0 cone 0
+[c-LoD] EB: enter, native_gen=true
+[06:58:06 INFO]: System chat: Set minecraft:overworld to time marker minecraft:noon
+[06:58:06 INFO]: System chat: Teleported Stepan to -1004.500000, 190.000000, 796.500000
+[06:58:06 INFO]: System chat: Displaying particle minecraft:dust
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] engine tick alive: tick 750
+[c-LoD] EB: enter, native_gen=true
+[06:58:11 INFO]: [c-LoD] engine tick alive: tick 750
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] engine tick alive: tick 800
+[c-LoD] EB: enter, native_gen=true
+[06:58:16 INFO]: [c-LoD] engine tick alive: tick 800
+[c-LoD] stream: tick 800 65536/65536 cells, lap 698, cone 12746 zone 871 dirty 23 (q 3664) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 500276c/1206e, edits +9p/9c/6e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 264 forced 567, native 17328c/954ch fail 0 (3w q 0) helper on, trees 954ch/fail 0, wire bundle 127202p/457b fail 0 ~76 kB/s cache 14014/24576 h113188 m14014 e0, srbeat 4645s/827q drop 0stale/539undec, ereb 550s/23q
+[06:58:16 INFO]: [c-LoD] stream: tick 800 65536/65536 cells, lap 698, cone 12746 zone 871 dirty 23 (q 3664) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 500276c/1206e, edits +9p/9c/6e drop 0, spawned 0 / failed 0, cam0 yaw -90 pitch 5, wish 264 forced 567, native 17328c/954ch fail 0 (3w q 0) helper on, trees 954ch/fail 0, wire bundle 127202p/457b fail 0 ~76 kB/s cache 14014/24576 h113188 m14014 e0, srbeat 4645s/827q drop 0stale/539undec, ereb 550s/23q
+[06:58:16 INFO]: [c-LoD] gate: sky true near 0 far 0 cone 0
+[c-LoD] gate: sky true near 0 far 0 cone 0
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[06:58:20 INFO]: Stopping server
+[06:58:20 INFO]: [ClodHost] Disabling ClodHost v1.0.0
+[06:58:20 INFO]: Saving players
+[06:58:20 INFO]: Stepan lost connection: Server closed
+[06:58:20 INFO]: System chat: Stepan left the game
+[06:58:20 INFO]: Saving worlds
+[06:58:20 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:overworld
+[06:58:20 INFO]: [ChunkHolderManager] Waiting 60s for chunk system to halt for world 'minecraft:overworld'
+[06:58:20 INFO]: [ChunkHolderManager] Halted chunk system for world 'minecraft:overworld'
+[06:58:20 INFO]: [ChunkHolderManager] Saving all chunkholders for world 'minecraft:overworld'
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[06:58:20 INFO]: [ChunkHolderManager] Saved 995 block chunks, 974 entity chunks, 0 poi chunks in world 'minecraft:overworld' in 0.64s
+[06:58:20 INFO]: [ChunkHolderManager] Waiting 60s for chunk I/O to halt for world 'minecraft:overworld'
+[06:58:20 INFO]: [ChunkHolderManager] Halted I/O scheduler for world 'minecraft:overworld'
+[06:58:20 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_nether
+[06:58:20 INFO]: [ChunkHolderManager] Waiting 60s for chunk system to halt for world 'minecraft:the_nether'
+[06:58:20 INFO]: [ChunkHolderManager] Halted chunk system for world 'minecraft:the_nether'
+[06:58:20 INFO]: [ChunkHolderManager] Saving all chunkholders for world 'minecraft:the_nether'
+[06:58:20 INFO]: [ChunkHolderManager] Saved 0 block chunks, 0 entity chunks, 0 poi chunks in world 'minecraft:the_nether' in 0.00s
+[06:58:20 INFO]: [ChunkHolderManager] Waiting 60s for chunk I/O to halt for world 'minecraft:the_nether'
+[06:58:20 INFO]: [ChunkHolderManager] Halted I/O scheduler for world 'minecraft:the_nether'
+[06:58:20 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_end
+[06:58:20 INFO]: [ChunkHolderManager] Waiting 60s for chunk system to halt for world 'minecraft:the_end'
+[06:58:20 INFO]: [ChunkHolderManager] Halted chunk system for world 'minecraft:the_end'
+[06:58:20 INFO]: [ChunkHolderManager] Saving all chunkholders for world 'minecraft:the_end'
+[06:58:20 INFO]: [ChunkHolderManager] Saved 0 block chunks, 0 entity chunks, 0 poi chunks in world 'minecraft:the_end' in 0.00s
+[06:58:20 INFO]: [ChunkHolderManager] Waiting 60s for chunk I/O to halt for world 'minecraft:the_end'
+[06:58:20 INFO]: [ChunkHolderManager] Halted I/O scheduler for world 'minecraft:the_end'
+[06:58:20 INFO]: Waiting for all RegionFile I/O tasks to complete...
+[06:58:20 INFO]: All RegionFile I/O tasks to complete
+[06:58:20 INFO]: [MoonriseCommon] Awaiting termination of worker pool for up to 60s...
+[06:58:20 INFO]: [MoonriseCommon] Awaiting termination of I/O pool for up to 60s...
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[launcher] server exited with code 143
