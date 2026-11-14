@@ -490,6 +490,13 @@ stop_stack() {
 # forensics: a red X with no logs is worthless.
 dump_summary() {
   # rc was captured by the EXIT trap BEFORE stop_stack ran
+  # v6.43.2 THE FULL SERVER LOG RIDES THE ARTIFACT: the boot-gate deaths
+  # (#411/#412 — the NMS resolve fails, the module stays silent, the gates
+  # kill the stack) print NOTHING into the summary — the tail-only copy
+  # showed 25 shutdown lines and the JNI failure was invisible. The full
+  # log lands next to the summary (the verdict job publishes it as
+  # run-<id>-server.log).
+  cp -f /tmp/server.log "$SHOTS/server_full.log" 2>/dev/null || true
   sum ""
   sum "### boot / stream"
   sum '```'
