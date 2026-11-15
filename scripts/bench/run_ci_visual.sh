@@ -510,7 +510,11 @@ dump_summary() {
   sum '```'
   sum "### client log tail"
   sum '```'
-  tail -30 /tmp/client.log 2>/dev/null >> "$SUMMARY" || echo "(no client log)" >> "$SUMMARY"
+  { tail -80 /tmp/client.log 2>/dev/null
+    echo '--- exceptions (Realms/RTKit noise filtered) ---'
+    grep -nE "Exception|ERROR|Disconnected|disconnect" /tmp/client.log 2>/dev/null \
+      | grep -vE "Realms|RTKit|SignedJWT" | tail -15
+  } >> "$SUMMARY" || echo "(no client log)" >> "$SUMMARY"
   sum '```'
   sum "### server log tail"
   sum '```'
@@ -776,6 +780,19 @@ sum "- paint settled=$SETTLED (wire ${LAST_WIRE}p)"
 # now 6 tries with a 10 s drain between them (worst case ~2 min extra).
 DRIFT=999999
 for t in 1 2 3 4 5 6; do
+  # v6.47.5 THE REJOIN GUARD: the client sometimes leaves cleanly 1-2 s
+  # after the pack push / the first TP (the runs #451-#455 died to the
+  # OpenAL crash — fixed in v6.47.4 — and #456 still disconnected cleanly
+  # right after the teleport, the pack never applied). One relaunch keeps
+  # such transients from burning the whole session; a second leave exits.
+  if ! online; then
+    note "baseline try $t: client offline — relaunching (rejoin guard)"
+    bash "$BENCH_DIR/run_client.sh" || { fail "relaunch rc nonzero"; exit 1; }
+    wait_log "Stepan joined the game" /tmp/server.log 240 || {
+      echo "FAIL: relaunched client never joined"; tail -30 /tmp/client.log; exit 1; }
+    accept_pack_prompt "rejoin$t" 60
+    assert_online "rejoin$t" || exit 1
+  fi
   assert_online "baseline try $t" || exit 1
   srv "time set noon"  # v6.4.8: keep the strobe bright across the tries
   srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"
