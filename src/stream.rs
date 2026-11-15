@@ -3651,6 +3651,21 @@ mod tests {
             "the anchor re-dirty cycle must release inside the run"
         );
         let in_window = release_ticks.iter().any(|&t| (6350..7150).contains(&t));
+        // v6.44.1 diagnostics: the release cadence the probes sample. The
+        // cycle is re-dirty(5) + hold(60) + post-window(200) ~= 265 ticks;
+        // the dots live 3-5 s, so each release covers ~5 probe instants
+        // worth of 6 s sampling only via its own 50-tick life.
+        let first = *release_ticks.first().unwrap();
+        let last = *release_ticks.last().unwrap();
+        let span = last.saturating_sub(first).max(1);
+        let moments = release_ticks
+            .iter()
+            .filter(|&&t| t < first + 60 || t >= last)
+            .count();
+        println!(
+            "release moments: {} ticks ({first}..{last}), span {span}, ~{moments} starts",
+            release_ticks.len()
+        );
         assert!(
             in_window,
             "at least one release must land inside the probe window (ticks 6350..7150); releases at {release_ticks:?}"
