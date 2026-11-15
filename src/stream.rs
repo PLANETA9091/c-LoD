@@ -3587,6 +3587,76 @@ mod tests {
         assert_eq!(s.rearm_diag(900).0, 2 * REARM_MAX_CELLS);
     }
 
+    /// v6.44.0 CI-TIMELINE integration: the exact leg-1 -> leg-2 shape of
+    /// runs #438/#439 — boot fill (a 555-cell WAVE at tick ~3000), the
+    /// relog joins at ~5150, the probes run 6350..7150 (20x6 s) — must
+    /// produce live anchor re-dirty releases INSIDE the probe window. The
+    /// pre-fix behavior is the assert's reason to exist: the wave recorded
+    /// nothing, rearm 0c/0t, no release ever fired after the relog.
+    #[test]
+    fn relog_timeline_anchors_release_inside_the_probe_window() {
+        let (cx, cz, region) = (-930.0, 796.0, 512);
+        let half = f64::from(region) * 0.5;
+        let mut s = Streamer::new(cx - half, cz - half, region, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
+            }
+        }
+        let vantage = |now: u64, joined: u64| ViewHint {
+            eye: [cx - 75.0, 150.0 + 1.62, cz],
+            look: look_dir(-90.0, 5.0),
+            now,
+            age_ticks: now.saturating_sub(joined),
+        };
+        // SESSION 1: join ~tick 100, scan settles, the fill lands at 3000
+        // (the harness's 5x111x5 red_concrete: 555 changed cells in ONE
+        // drain) and streams as a WAVE — the pre-fix code recorded none.
+        let fill: Vec<u32> = (0..555u32).map(|k| 100 * 256 + 50 + k).collect();
+        for &idx in fill.iter().take(16) {
+            let i = idx as usize;
+            s.set_cell(
+                (i % 256) as u32,
+                (i / 256) as u32,
+                cell(70, false, [142, 33, 33]),
+                3001,
+            );
+        }
+        // The drain records the TRUE cohort at edit time.
+        s.record_edit_cells(3001, &fill);
+        let joined1 = 100u64;
+        for t in 3002..3400 {
+            let _: Vec<Spawn> = s.tick_batch(2048, &[vantage(t, joined1)]).to_vec();
+        }
+        assert_eq!(s.anchor_edit.len(), REARM_MAX_CELLS);
+        assert!(s.rearm_until == 0, "no span before the relog");
+
+        // THE RELOG: session 2 joins at ~5150 (the engine's fresh
+        // per-player entry arms the span; the CI gap is ~3.7 min).
+        let joined2 = 5150u64;
+        s.arm_relog_rearm(joined2);
+        assert_eq!(s.rearm_diag(joined2).0, REARM_MAX_CELLS);
+        // The probe window: 20 probes x 6 s = ticks 6350..7150. Count the
+        // release moments (reset electrons on the wire = an edit release,
+        // the marker's words riding it) and the live span coverage.
+        let mut release_ticks = Vec::new();
+        for t in 5150..7150 {
+            let batch: Vec<Spawn> = s.tick_batch(2048, &[vantage(t, joined2)]).to_vec();
+            if batch.iter().any(|sp| sp.y == RESET_Y) {
+                release_ticks.push(t);
+            }
+        }
+        assert!(
+            !release_ticks.is_empty(),
+            "the anchor re-dirty cycle must release inside the run"
+        );
+        let in_window = release_ticks.iter().any(|&t| (6350..7150).contains(&t));
+        assert!(
+            in_window,
+            "at least one release must land inside the probe window (ticks 6350..7150); releases at {release_ticks:?}"
+        );
+    }
+
     /// v6.9.10: a fresh edit's cells stream FIRST, ahead of a backlog that
     /// would otherwise fill the batch cap (#240's LEG 1: the fill cells sat
     /// at the tail of the 12k backlog queue; the pop filled the cap on
