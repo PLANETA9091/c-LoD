@@ -168,6 +168,12 @@ float smooth_w2(float t) {
     return smoothstep(288.0, 448.0, t);
 }
 
+// v6.45.0 GAP FILL: the 8-neighborhood the void path of ground_at averages
+// (file-scope const — the void path has no other allocation).
+const ivec2 FILL_NB8[8] = ivec2[8](ivec2(-1, -1), ivec2(0, -1), ivec2(1, -1),
+                                   ivec2(-1, 0),                  ivec2(1, 0),
+                                   ivec2(-1, 1),  ivec2(0, 1),  ivec2(1, 1));
+
 // Sample the streamed ground at a world xz. Returns the surface Y, or -1e8
 // for "no data" (void, never decoded). Water cells stream their real
 // surface height; the water FLAG lives in the color word (idx 216).
@@ -192,7 +198,38 @@ float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
     water = c.a >= 0.5 && abs(c.r * 255.0 - 216.0) < 0.5;
     vec4 h = texelFetch(HeightSampler, celli, 0);
     if (h.a < 0.5) {
-        return -1.0e8; // height word not decoded yet (or the cell is void)
+        // v6.45.0 GAP FILL: the height buffer fills by OR-merge over laps
+        // while the vanilla particle pool rejects most spawns under the
+        // refresh flood — at any moment only a sparse subset of the band's
+        // cells holds a decoded height word, and the march painted that
+        // subset as isolated vertical threads (the user's own test verdict:
+        // «это не лоды, ужасно» — runs #440+ frames show thread bundles
+        // instead of terrain). A void cell now samples its 8 neighbors:
+        // the average of the VALID ones becomes the cell's height, so the
+        // surface reads continuous while the transport backfills the true
+        // words (the OR-merge owns the buffer; this read-side fill invents
+        // nothing persistent). Radius 1 only: wider holes stay void, the
+        // disk frontier (outside 0..255) stays void, and no decode state
+        // is faked — h.a stays 0.5-gated for every writer.
+        float fsum = 0.0;
+        float fcnt = 0.0;
+        for (int i = 0; i < 8; ++i) {
+            ivec2 q = celli + FILL_NB8[i];
+            if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, ivec2(256)))) {
+                continue;
+            }
+            vec4 hq = texelFetch(HeightSampler, q, 0);
+            if (hq.a < 0.5) {
+                continue;
+            }
+            fsum += hq.r * 255.0 - 64.0;
+            fcnt += 1.0;
+        }
+        if (fcnt < 0.5) {
+            return -1.0e8; // no decoded neighbor either — real void
+        }
+        ok = true;
+        return fsum / fcnt;
     }
     ok = true;
     float h0 = h.r * 255.0 - 64.0;
