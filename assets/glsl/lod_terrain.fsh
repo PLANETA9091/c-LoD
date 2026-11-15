@@ -257,7 +257,11 @@ float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
             return -1.0e8; // no decoded neighbor either — real void
         }
         ok = true;
-        return fsum / fcnt;
+        // v6.47.0: the fill averages to fractional heights — the smooth-blob
+        // look. Floor restores the v4.4-atlas staircase (flat tops, vertical
+        // walls) on exactly the cells the transport has not backfilled yet;
+        // the true integral words behave identically when they arrive.
+        return floor(fsum / fcnt);
     }
     ok = true;
     float h0 = h.r * 255.0 - 64.0;
@@ -322,10 +326,42 @@ vec3 color_at(ivec2 celli, float w, float w2, out bool water, out bool colorless
     // mid-band cells paint ColLow/ColHigh by height — see ground_at). It is
     // NOT lattice index 0: before this gate the (0,0,0,0) texel decoded as
     // idx 0 = pure black, one of the #305 dark classes.
+    // v6.47.0 COLOR GAP FILL: mirrors the v6.45.0 height fill — the wave
+    // sweep backfills true words over laps while the OR-merge owns the
+    // buffer; a void color cell paints the average of its VALID LAND
+    // neighbors' decoded RGB instead of the flat ColLow/ColHigh fallback
+    // (the v4.4-atlas look: real block colors across the whole surface).
+    // Water stays a flag of the cell's OWN word — a filled cell can never
+    // claim water (the v6.21.0 rule, and averaging water into land would
+    // wash the shores). colorless stays TRUE for filled cells: the
+    // v6.21.1 vanilla gate keeps them off real vanilla textures — an
+    // invented color must never repaint vanilla chunks (the #307 lesson).
     if (c.a < 0.5) {
         water = false;
         colorless = true;
-        return vec3(-1.0);
+        vec3 fsum = vec3(0.0);
+        float fcnt = 0.0;
+        for (int i = 0; i < 8; ++i) {
+            ivec2 q = celli + FILL_NB8[i];
+            if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, ivec2(256)))) {
+                continue;
+            }
+            vec4 cq = texelFetch(ColBufSampler, q, 0);
+            if (cq.a < 0.5) {
+                continue;
+            }
+            float iq = floor(cq.r * 255.0 + 0.5);
+            if (iq > 215.5) {
+                continue; // water: not a spreadable land color
+            }
+            vec3 lq = vec3(mod(iq, 6.0), mod(floor(iq / 6.0), 6.0), floor(iq / 36.0));
+            fsum += lq * (51.0 / 255.0);
+            fcnt += 1.0;
+        }
+        if (fcnt < 0.5) {
+            return vec3(-1.0); // no decoded neighbor either — flat fallback
+        }
+        return fsum / fcnt;
     }
     colorless = false;
     float idx = floor(c.r * 255.0 + 0.5);

@@ -270,7 +270,14 @@ impl Default for Config {
             mesh_debug: false,
             quant_ssao: false,
             fog_voxy: false,
-            voxy_deltas: false,
+            // v6.47.0: the two evidence-cited voxy deltas (the water shore
+            // gradient + the edge haze band, docs/voxy-evidence/ref2) ship
+            // in the DEFAULT pack — the user's verdict after the wave-sweep
+            // coverage fix was «сделай идеально», and both deltas are
+            // CI-measured every run (the parity world arms the knob
+            // explicitly, so its read stays valid). Rollback:
+            // CLOD_EXTRA_OPTS voxy_deltas=false.
+            voxy_deltas: true,
             atmosphere: true,
             edit_beats: crate::stream::EDIT_BEATS_DEFAULT,
             sparse_rebeat: false,

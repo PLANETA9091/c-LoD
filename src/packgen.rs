@@ -871,10 +871,11 @@ mod tests {
     fn voxy_deltas_swap_the_shading_treatment() {
         // v6.44.2: voxy_deltas=true ships the two evidence-cited shading
         // deltas (water shore gradient + edge haze band) as one compile-time
-        // define. The default build keeps the marker a comment and the pack
-        // byte-stable; the parity world boots the treatment for the visual
-        // verdict. The concavity AO delta is NOT ported — march_ssao already
-        // owns the AO slot on this line.
+        // define. v6.47.0: the deltas are the DEFAULT (the user's «сделай
+        // идеально» after the wave-sweep coverage fix — the v4.4-atlas look
+        // includes real shore colors), and voxy_deltas=false opts OUT (the
+        // byte-stable prod build of the v6.44.2 era). The concavity AO delta
+        // is NOT ported — march_ssao already owns the AO slot on this line.
         let fsh_of = |cfg: &Config| {
             let p = build(cfg);
             let fsh = String::from_utf8_lossy(
@@ -887,21 +888,23 @@ mod tests {
             .to_string();
             (fsh, p.sha1_hex)
         };
-        let (raw_fsh, raw_sha) = fsh_of(&Config::parse(""));
+        let (def_fsh, def_sha) = fsh_of(&Config::parse(""));
+        assert!(
+            def_fsh.contains("#define VOXY_DELTAS 1"),
+            "v6.47.0: the treatment is the DEFAULT (imperfect-by-default is over)"
+        );
+        let (raw_fsh, raw_sha) = fsh_of(&Config::parse("voxy_deltas=false"));
         assert!(
             !raw_fsh.contains("#define VOXY_DELTAS 1"),
-            "the treatment leaked to prod"
+            "the opt-out stays COMPILE-TIME OFF (the #ifdef blocks ride the template)"
         );
         assert!(
             raw_fsh.contains("// __VOXY_DELTAS__"),
-            "marker must stay in the default build"
-        );
-        assert!(
-            !raw_fsh.contains("#define VOXY_DELTAS 1"),
-            "the treatment stays COMPILE-TIME OFF in prod (the #ifdef blocks ride the template)"
+            "marker must stay in the opt-out build"
         );
         let (vd_fsh, vd_sha) = fsh_of(&Config::parse("voxy_deltas=true"));
         assert!(vd_fsh.contains("#define VOXY_DELTAS 1"));
+        assert_eq!(vd_sha, def_sha, "explicit true equals the default build");
         assert!(
             vd_fsh.contains("float shore = water_shore(tc);"),
             "the shore gradient must ride the swap"
