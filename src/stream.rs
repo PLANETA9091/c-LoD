@@ -1830,29 +1830,39 @@ impl Streamer {
             }
         }
 
-        // ---- v6.46.0 WAVE SWEEP state machine ------------------------------
-        // Advances once per tick ONLY while the edit machinery is idle (its
-        // hold/release runs the same physics and owns the wire). Starts in
-        // RELEASE (the fresh client's pool is empty — no drain needed), then
-        // alternates drain / release for the session's lifetime. The cone
-        // and zone phases below are silent whenever the drain counter is up:
-        // the steady state's only path into the client is a wave that lands
-        // into an emptied particle pool (see SWEEP_* for the arithmetic).
-        let wave_idle = zone_mode && self.edit_window == 0 && self.edit_hold == 0;
-        if wave_idle {
+        // ---- v6.46.0 WAVE SWEEP state machine (v6.47.1 fix) -----------------
+        // Alternates drain / release for the session's lifetime. The drain
+        // counts EVERY wire silence — the edit hold's drain beat and the
+        // post-release window co-drain the pool toward the same goal, so the
+        // machine keeps ticking through edit phases. The release countdown
+        // parks inside an edit window (the wire is already silent there —
+        // burning the wave against it would lose it) and fires when the
+        // window clears.
+        //
+        // v6.47.1 THE STALLED DRAIN (run #447's diag: `spawned 0` from tick
+        // ~2500 on, ewin 196, dirty q 11998, leg 2 probes scene=0 red=0 —
+        // the client received NOTHING): the rescan churn re-arms the edit
+        // window every ~100-200 ticks, the machine paused mid-drain, and
+        // the old sweep_silent (drain_left > 0) stayed TRUE FOREVER — the
+        // cone/zone phases starved the whole session. The silence now rides
+        // the drain phase alone, and the drain advances through edit
+        // silences: under churn the cycle stretches but never deadlocks.
+        if zone_mode {
             if self.sweep_release_left == 0 && self.sweep_drain_left == 0 {
                 self.sweep_release_left = SWEEP_RELEASE_TICKS;
             }
             if self.sweep_release_left > 0 {
-                self.sweep_release_left -= 1;
-                if self.sweep_release_left == 0 {
-                    self.sweep_drain_left = SWEEP_DRAIN_TICKS;
+                if self.edit_window == 0 {
+                    self.sweep_release_left -= 1;
+                    if self.sweep_release_left == 0 {
+                        self.sweep_drain_left = SWEEP_DRAIN_TICKS;
+                    }
                 }
             } else {
                 self.sweep_drain_left -= 1;
             }
         }
-        let sweep_silent = self.sweep_drain_left > 0 && self.sweep_release_left == 0;
+        let sweep_silent = zone_mode && self.sweep_release_left == 0 && self.sweep_drain_left > 0;
 
         // ---- phase 1: cone priority (v5.3.3, v6.6 ROUND-ROBIN) -------------
         // v6.5.3: SKIPPED inside an edit window — every spawn the steady
