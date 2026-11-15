@@ -1,0 +1,107 @@
+# parity session time audit (the §7b console channel)
+
+- v6.25.5: boot markers, pins, gamerules and joins from the parity session server.log (tail 40). The #332 night-matrix class is self-diagnosing from here on.
+
+```
+229:[10:01:49 INFO]: System chat: Stepan joined the game
+1593:[10:03:58 INFO]: System chat: Game rule advance_time is already set to false
+1595:[10:03:58 INFO]: System chat: Game rule advance_time is already set to false
+1657:[10:04:04 INFO]: System chat: Game rule advance_time is already set to false
+1750:[10:04:12 INFO]: System chat: Game rule advance_time is already set to false
+1816:[10:04:18 INFO]: System chat: Game rule advance_time is already set to false
+1886:[10:04:24 INFO]: System chat: Game rule advance_time is already set to false
+1976:[10:04:33 INFO]: System chat: Game rule advance_time is already set to false
+2032:[10:04:38 INFO]: System chat: Game rule advance_time is already set to false
+2103:[10:04:44 INFO]: System chat: Game rule advance_time is already set to false
+2192:[10:04:52 INFO]: System chat: Game rule advance_time is already set to false
+2258:[10:04:58 INFO]: System chat: Game rule advance_time is already set to false
+2329:[10:05:04 INFO]: System chat: Game rule advance_time is already set to false
+2387:[10:05:10 INFO]: System chat: Game rule advance_time is already set to false
+2454:[10:05:16 INFO]: System chat: Game rule advance_time is already set to false
+2522:[10:05:22 INFO]: System chat: Game rule advance_time is already set to false
+2591:[10:05:28 INFO]: System chat: Game rule advance_time is already set to false
+2662:[10:05:35 INFO]: System chat: Game rule advance_time is already set to false
+2749:[10:05:43 INFO]: System chat: Game rule advance_time is already set to false
+2821:[10:05:49 INFO]: System chat: Game rule advance_time is already set to false
+2887:[10:05:55 INFO]: System chat: Game rule advance_time is already set to false
+2968:[10:06:02 INFO]: System chat: Game rule advance_time is already set to false
+3035:[10:06:08 INFO]: System chat: Game rule advance_time is already set to false
+3105:[10:06:15 INFO]: System chat: Game rule advance_time is already set to false
+3194:[10:06:23 INFO]: System chat: Game rule advance_time is already set to false
+3260:[10:06:29 INFO]: System chat: Game rule advance_time is already set to false
+3333:[10:06:35 INFO]: System chat: Game rule advance_time is already set to false
+3414:[10:06:42 INFO]: System chat: Game rule advance_time is already set to false
+3481:[10:06:49 INFO]: System chat: Game rule advance_time is already set to false
+3543:[10:06:54 INFO]: System chat: Game rule advance_time is already set to false
+3643:[10:07:03 INFO]: System chat: Game rule advance_time is already set to false
+3715:[10:07:09 INFO]: System chat: Game rule advance_time is already set to false
+3782:[10:07:15 INFO]: System chat: Game rule advance_time is already set to false
+3860:[10:07:23 INFO]: System chat: Game rule advance_time is already set to false
+3917:[10:07:28 INFO]: System chat: Game rule advance_time is already set to false
+3985:[10:07:34 INFO]: System chat: Game rule advance_time is already set to false
+4089:[10:07:43 INFO]: System chat: Game rule advance_time is already set to false
+4162:[10:07:49 INFO]: System chat: Game rule advance_time is already set to false
+4228:[10:07:55 INFO]: System chat: Game rule advance_time is already set to false
+4306:[10:08:03 INFO]: System chat: Game rule advance_time is already set to false
+4373:[10:08:09 INFO]: System chat: Game rule advance_time is already set to false
+4443:[10:08:15 INFO]: System chat: Game rule advance_time is already set to false
+4535:[10:08:23 INFO]: System chat: Game rule advance_time is already set to false
+4605:[10:08:29 INFO]: System chat: Game rule advance_time is already set to false
+4661:[10:08:35 INFO]: System chat: Game rule advance_time is already set to false
+4751:[10:08:43 INFO]: System chat: Game rule advance_time is already set to false
+4817:[10:08:49 INFO]: System chat: Game rule advance_time is already set to false
+4887:[10:08:55 INFO]: System chat: Game rule advance_time is already set to false
+4978:[10:09:03 INFO]: System chat: Game rule advance_time is already set to false
+5082:[10:09:13 INFO]: System chat: Game rule advance_time is already set to false
+5148:[10:09:19 INFO]: System chat: Game rule advance_time is already set to false
+5221:[10:09:25 INFO]: System chat: Game rule advance_time is already set to false
+5308:[10:09:33 INFO]: System chat: Game rule advance_time is already set to false
+5375:[10:09:39 INFO]: System chat: Game rule advance_time is already set to false
+5447:[10:09:46 INFO]: System chat: Game rule advance_time is already set to false
+5528:[10:09:53 INFO]: System chat: Game rule advance_time is already set to false
+5595:[10:09:59 INFO]: System chat: Game rule advance_time is already set to false
+5666:[10:10:05 INFO]: System chat: Game rule advance_time is already set to false
+5758:[10:10:13 INFO]: System chat: Game rule advance_time is already set to false
+5823:[10:10:20 INFO]: System chat: Game rule advance_time is already set to false
+5883:[10:10:25 INFO]: System chat: Game rule advance_time is already set to false
+5974:[10:10:33 INFO]: System chat: Game rule advance_time is already set to false
+6041:[10:10:39 INFO]: System chat: Game rule advance_time is already set to false
+6111:[10:10:45 INFO]: System chat: Game rule advance_time is already set to false
+6200:[10:10:53 INFO]: System chat: Game rule advance_time is already set to false
+6257:[10:10:59 INFO]: System chat: Game rule advance_time is already set to false
+6328:[10:11:05 INFO]: System chat: Game rule advance_time is already set to false
+6417:[10:11:13 INFO]: System chat: Game rule advance_time is already set to false
+6482:[10:11:19 INFO]: System chat: Game rule advance_time is already set to false
+6553:[10:11:25 INFO]: System chat: Game rule advance_time is already set to false
+6644:[10:11:34 INFO]: System chat: Game rule advance_time is already set to false
+6698:[10:11:39 INFO]: System chat: Game rule advance_time is already set to false
+6770:[10:11:45 INFO]: System chat: Game rule advance_time is already set to false
+6870:[10:11:54 INFO]: System chat: Game rule advance_time is already set to false
+8566:[10:14:34 INFO]: System chat: Game rule advance_time is already set to false
+8678:[10:14:44 INFO]: System chat: Game rule advance_time is already set to false
+8790:[10:14:54 INFO]: System chat: Game rule advance_time is already set to false
+8902:[10:15:04 INFO]: System chat: Game rule advance_time is already set to false
+9013:[10:15:14 INFO]: System chat: Game rule advance_time is already set to false
+9123:[10:15:24 INFO]: System chat: Game rule advance_time is already set to false
+9233:[10:15:34 INFO]: System chat: Game rule advance_time is already set to false
+9343:[10:15:44 INFO]: System chat: Game rule advance_time is already set to false
+9457:[10:15:54 INFO]: System chat: Game rule advance_time is already set to false
+9572:[c-LoD] EB: enter, native_gen=[10:16:04 INFO]: System chat: Game rule advance_time is already set to false
+9686:[10:16:14 INFO]: System chat: Game rule advance_time is already set to false
+9798:[10:16:24 INFO]: System chat: Game rule advance_time is already set to false
+9908:[10:16:34 INFO]: System chat: Game rule advance_time is already set to false
+10022:[10:16:44 INFO]: System chat: Game rule advance_time is already set to false
+10365:[10:17:16 INFO]: System chat: Game rule advance_time is already set to false
+10703:[10:17:48 INFO]: System chat: Game rule advance_time is already set to false
+11043:[10:18:19 INFO]: System chat: Game rule advance_time is already set to false
+11385:[10:18:51 INFO]: System chat: Game rule advance_time is already set to false
+11735:[10:19:23 INFO]: System chat: Game rule advance_time is already set to false
+12075:[10:19:55 INFO]: System chat: Game rule advance_time is already set to false
+12417:[10:20:26 INFO]: System chat: Game rule advance_time is already set to false
+12761:[10:20:58 INFO]: System chat: Game rule advance_time is already set to false
+13107:[10:21:30 INFO]: System chat: Game rule advance_time is already set to false
+13449:[10:22:01 INFO]: System chat: Game rule advance_time is already set to false
+13791:[10:22:33 INFO]: System chat: Game rule advance_time is already set to false
+14128:[10:23:05 INFO]: System chat: Game rule advance_time is already set to false
+--- gamerule probe (the advance_time success/error echo, known signatures filtered) ---
+```
