@@ -355,6 +355,20 @@ pub const EDIT_HOLD_TICKS: u64 = 60;
 /// paint and must never trigger the hold/release sequence.
 pub const EDIT_HOLD_MAX_BATCH: u64 = 100;
 
+/// v6.47.1 HOLD-PATH COOLDOWN: one hold+window episode costs 260 silent
+/// ticks (EDIT_HOLD_TICKS 60 + EDIT_WINDOW_TICKS 200), and the rescan churn
+/// produces small decodable dirty episodes almost every tick — runs #447/
+/// #448/#450 measured the phases silent from tick ~2500 on (`spawned 0`,
+/// ewin 196 re-armed continuously, leg 2 probes scene=0: the client
+/// received nothing). The machinery now fires at most once per this many
+/// ticks; between episodes the dirty drip streams THROUGH the normal
+/// budget (the pool churns as it always did, the cone/zone phases live),
+/// and a genuine edit arriving mid-cooldown waits <= 600 ticks for its
+/// hold — its words still land (the wave/through-stream paints them, the
+/// anchor channel re-delivers them). The relog re-arm's cadence rides the
+/// ereb channel (outside the hold path) and keeps its rhythm.
+pub const EDIT_HOLD_COOLDOWN_TICKS: u64 = 600;
+
 /// v6.6.1 EDIT RECENCY: only dirty cells YOUNGER than this participate in
 /// the hold/release decision. Why: the v6.6 CI visual run measured the
 /// boot-era backlog (~12k seedgen-upgrade cells) still sitting in the
@@ -583,6 +597,17 @@ pub struct Streamer {
     /// v6.46.0 WAVE SWEEP: drain ticks left before the next release. The
     /// wire is silent (cone+zone) while this is positive.
     sweep_drain_left: u32,
+    /// v6.47.1 HOLD-PATH COOLDOWN: the engine tick the hold path last
+    /// armed (0 = never). The churn's small dirty episodes must not re-arm
+    /// the 260-tick hold+window silence every few ticks — between episodes
+    /// the drip streams through the normal budget (see
+    /// EDIT_HOLD_COOLDOWN_TICKS). Continuation arms (pending_rebeat) are
+    /// exempt.
+    last_hold_arm: u64,
+    /// v6.47.1 WAVE SWEEP: the last tick saw an edit phase (hold or window).
+    /// The busy -> quiet transition starts a release immediately — the edit
+    /// silence already drained the pool.
+    sweep_prev_busy: bool,
     /// Cone-phase cells streamed since boot (diagnostics).
     pub cone_cells: u64,
     /// v5.4: cells flagged for re-stream (real edits, words differ).
@@ -719,6 +744,8 @@ impl Streamer {
             tick_counter: 0,
             sweep_release_left: 0,
             sweep_drain_left: 0,
+            last_hold_arm: 0,
+            sweep_prev_busy: false,
             view_caches: Vec::new(),
             cone_cursor: 0,
             cone_cells: 0,
@@ -1803,7 +1830,20 @@ impl Streamer {
                         }
                     }
                 }
-                if decodable_waiting > 0 && decodable_waiting <= EDIT_HOLD_MAX_BATCH {
+                if decodable_waiting > 0
+                    && decodable_waiting <= EDIT_HOLD_MAX_BATCH
+                    // v6.47.1 HOLD-PATH COOLDOWN: the churn's small episodes
+                    // must not re-arm the 260-tick silence every few ticks —
+                    // the runs #447/#448/#450 starvation. A CONTINUATION arm
+                    // (a rebeat re-dirty — the same episode's next beat, or
+                    // the relog re-arm's cycle) is exempt: it IS the
+                    // machinery working as designed. Between new episodes
+                    // the drip streams through the normal budget instead.
+                    && (self.pending_rebeat
+                        || self.last_hold_arm == 0
+                        || now.saturating_sub(self.last_hold_arm)
+                            >= EDIT_HOLD_COOLDOWN_TICKS)
+                {
                     // A genuine edit: start the drain, release in
                     // EDIT_HOLD_TICKS ticks. v6.6.2/v6.7.1: a GENUINE arm
                     // starts a new episode (the release schedules retry beat
@@ -1814,6 +1854,7 @@ impl Streamer {
                     self.pending_rebeat = false;
                     self.edit_hold = EDIT_HOLD_TICKS;
                     self.edit_window = EDIT_HOLD_TICKS + EDIT_WINDOW_TICKS;
+                    self.last_hold_arm = now;
                 } else {
                     self.stream_dirty(
                         cap,
@@ -1830,39 +1871,51 @@ impl Streamer {
             }
         }
 
-        // ---- v6.46.0 WAVE SWEEP state machine (v6.47.1 fix) -----------------
-        // Alternates drain / release for the session's lifetime. The drain
-        // counts EVERY wire silence — the edit hold's drain beat and the
-        // post-release window co-drain the pool toward the same goal, so the
-        // machine keeps ticking through edit phases. The release countdown
-        // parks inside an edit window (the wire is already silent there —
-        // burning the wave against it would lose it) and fires when the
-        // window clears.
-        //
-        // v6.47.1 THE STALLED DRAIN (run #447's diag: `spawned 0` from tick
-        // ~2500 on, ewin 196, dirty q 11998, leg 2 probes scene=0 red=0 —
-        // the client received NOTHING): the rescan churn re-arms the edit
-        // window every ~100-200 ticks, the machine paused mid-drain, and
-        // the old sweep_silent (drain_left > 0) stayed TRUE FOREVER — the
-        // cone/zone phases starved the whole session. The silence now rides
-        // the drain phase alone, and the drain advances through edit
-        // silences: under churn the cycle stretches but never deadlocks.
+        // ---- v6.46.0 WAVE SWEEP state machine (v6.47.1 final) ---------------
+        // Runs the drain/release cycle on QUIET ticks only (the edit
+        // machinery owns the wire during its hold/window phases — the
+        // machine freezes there, and its counters hold too). Transitions:
+        //   quiet start       -> release 8 ticks (the phases are the wave);
+        //   release ends      -> drain 100 quiet ticks (the pool empties);
+        //   drain ends        -> release again;
+        //   edit phase begins -> freeze (its silence drains the pool anyway);
+        //   edit phase ends   -> the pool is empty -> release immediately
+        //                        (the edit_window_silences contract: the
+        //                        phases recover right after the window).
+        // The coverage engine under churn is the DIRTY DRIP: the machinery's
+        // else branch streams the rescan/upgrade cells through the normal
+        // budget on every quiet tick while the drained pool lets their dots
+        // render for dozens of frames — they decode reliably; the waves
+        // matter in quiet sessions where nothing else silences the wire.
         if zone_mode {
-            if self.sweep_release_left == 0 && self.sweep_drain_left == 0 {
-                self.sweep_release_left = SWEEP_RELEASE_TICKS;
-            }
-            if self.sweep_release_left > 0 {
-                if self.edit_window == 0 {
+            let edit_quiet = self.edit_window == 0 && self.edit_hold == 0;
+            if !edit_quiet {
+                self.sweep_prev_busy = true;
+            } else {
+                if self.sweep_prev_busy {
+                    // busy -> quiet: the edit silence drained the pool —
+                    // the wave is ready now.
+                    self.sweep_drain_left = 0;
+                    self.sweep_release_left = SWEEP_RELEASE_TICKS;
+                }
+                self.sweep_prev_busy = false;
+                if self.sweep_release_left > 0 {
                     self.sweep_release_left -= 1;
                     if self.sweep_release_left == 0 {
                         self.sweep_drain_left = SWEEP_DRAIN_TICKS;
                     }
+                } else if self.sweep_drain_left > 0 {
+                    self.sweep_drain_left -= 1;
+                } else {
+                    self.sweep_release_left = SWEEP_RELEASE_TICKS;
                 }
-            } else {
-                self.sweep_drain_left -= 1;
             }
         }
-        let sweep_silent = zone_mode && self.sweep_release_left == 0 && self.sweep_drain_left > 0;
+        let sweep_silent = zone_mode
+            && self.edit_window == 0
+            && self.edit_hold == 0
+            && self.sweep_release_left == 0
+            && self.sweep_drain_left > 0;
 
         // ---- phase 1: cone priority (v5.3.3, v6.6 ROUND-ROBIN) -------------
         // v6.5.3: SKIPPED inside an edit window — every spawn the steady
@@ -3032,8 +3085,13 @@ mod tests {
         assert!(s.sweep_diag().0 > 0, "the machine opened a release window");
         let mut silent_seen = false;
         let mut released_again = false;
-        for _ in 0..(SWEEP_RELEASE_TICKS + SWEEP_DRAIN_TICKS + 4) {
-            let b: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        // The engine clock must ADVANCE per tick (a frozen `now` ages nothing
+        // and the refresh gates starve the release — the first draft of this
+        // test pinned now=100 and the post-drain release found every
+        // decodable cell age-gated at zero elapsed ticks).
+        for i in 0..(SWEEP_RELEASE_TICKS + SWEEP_DRAIN_TICKS + 4) {
+            let vi = vhint(128.0, 128.0, 0.0, 0.0, 100 + i as u64);
+            let b: Vec<Spawn> = s.tick_batch(2048, &[vi]).to_vec();
             let (rel, drn) = s.sweep_diag();
             if drn > 0 && rel == 0 {
                 assert!(b.is_empty(), "a drain tick must be silent");
@@ -3048,6 +3106,53 @@ mod tests {
             silent_seen && released_again,
             "one full wave cycle must complete"
         );
+    }
+
+    /// v6.47.1 HOLD-PATH COOLDOWN: the rescan churn produces small decodable
+    /// dirty episodes almost every tick; runs #447/#448/#450 measured the
+    /// phases starving under the re-armed 260-tick hold+window silence
+    /// (`spawned 0`, leg 2 probes scene=0 — the client received nothing).
+    /// The machinery arms at most once per EDIT_HOLD_COOLDOWN_TICKS, and
+    /// THE WIRE NEVER DIES FOR LONG: every 300-tick span sees spawns (the
+    /// through-streaming drip + the wave release windows).
+    #[test]
+    fn hold_path_cooldown_throttles_the_churn() {
+        let mut s = Streamer::new(0.0, 0.0, 256, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
+            }
+        }
+        // A small genuine edit every 30 ticks — the churn's cadence.
+        let mut arms = Vec::new();
+        let mut last_arm = 0u64;
+        let mut spawned_spans = [0u32; 4]; // 300-tick spans of the 1200 run
+        for tick in 1..=1200u64 {
+            if tick % 30 == 0 {
+                s.set_cell(100, 100, cell(71, false, [110, 110, 110]), tick);
+            }
+            let v = vhint(128.0, 128.0, 0.0, 0.0, 100 + tick);
+            let b: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+            if !b.is_empty() {
+                spawned_spans[((tick - 1) / 300) as usize] += 1;
+            }
+            if s.last_hold_arm != last_arm && s.last_hold_arm != 0 {
+                arms.push(s.last_hold_arm);
+                last_arm = s.last_hold_arm;
+            }
+        }
+        assert!(
+            arms.len() <= 3,
+            "1200 ticks of churn must arm the hold path at most ~2-3 times, got {}",
+            arms.len()
+        );
+        for (i, n) in spawned_spans.iter().enumerate() {
+            assert!(
+                *n >= 2,
+                "span {i} saw {n} spawning ticks — the wire starved (the \
+                 #447/#450 regression)"
+            );
+        }
     }
 
     /// v5.4 delta: a dirty cell NOBODY can decode waits in the queue and
