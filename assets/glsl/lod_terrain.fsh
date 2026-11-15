@@ -5,33 +5,6 @@
 // __RIM_MASK__
 // __VOXY_DELTAS__
 
-#ifdef VOXY_DELTAS
-// voxy-evidence-deltas: water shore factor (evidence:
-// docs/voxy-evidence/ref2_ocean_horizon.jpg — shallows read lighter/cyan near
-// shores, open water deepens toward the measured #1c335d): fraction of LAND
-// cells among the 4-neighbors of a water cell.
-float water_shore(ivec2 celli) {
-    float land = 0.0;
-    float cnt = 0.0;
-    ivec2 nb[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
-    for (int i = 0; i < 4; ++i) {
-        ivec2 q = celli + nb[i];
-        if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, ivec2(256)))) {
-            continue;
-        }
-        vec4 cq = texelFetch(ColBufSampler, q, 0);
-        if (cq.a < 0.5) {
-            continue;
-        }
-        cnt += 1.0;
-        if (floor(cq.r * 255.0 + 0.5) <= 215.5) {
-            land += 1.0;
-        }
-    }
-    return cnt > 0.0 ? land / cnt : 0.0;
-}
-#endif
-
 // c-LoD pass (v5.0 "SKY-GRID BIT-STREAM"): the actual level-of-distant-detail
 // renderer.
 //
@@ -78,6 +51,33 @@ uniform sampler2D HeightSampler;  // clod_h_b — streamed height bytes (1 px = 
 uniform sampler2D ColBufSampler;  // clod_c_b — streamed color index bytes (1 px = 1 cell)
 uniform sampler2D RotSampler;     // clod:clod_rot_a (2x2 persistent, camera + fog channel)
 uniform sampler2D MaskSampler;    // clod_mask — dust eraser mask (this frame, v5.3)
+
+#ifdef VOXY_DELTAS
+// voxy-evidence-deltas: water shore factor (evidence:
+// docs/voxy-evidence/ref2_ocean_horizon.jpg — shallows read lighter/cyan near
+// shores, open water deepens toward the measured #1c335d): fraction of LAND
+// cells among the 4-neighbors of a water cell.
+float water_shore(ivec2 celli) {
+    float land = 0.0;
+    float cnt = 0.0;
+    ivec2 nb[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
+    for (int i = 0; i < 4; ++i) {
+        ivec2 q = celli + nb[i];
+        if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, ivec2(256)))) {
+            continue;
+        }
+        vec4 cq = texelFetch(ColBufSampler, q, 0);
+        if (cq.a < 0.5) {
+            continue;
+        }
+        cnt += 1.0;
+        if (floor(cq.r * 255.0 + 0.5) <= 215.5) {
+            land += 1.0;
+        }
+    }
+    return cnt > 0.0 ? land / cnt : 0.0;
+}
+#endif
 
 // v5.0.3: SamplerInfo never existed as a client UBO — it stayed zeroed
 // (the whole capture wrote cell (0,0), the march divided by zero).

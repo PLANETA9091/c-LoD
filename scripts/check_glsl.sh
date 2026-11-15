@@ -169,6 +169,17 @@ for fsh in sorted(list(Path("assets/glsl").glob("*.fsh")) + list(Path("assets/gl
         extra.append("layout(location = 0) in vec2 texCoord;")
     ext = "vert" if fsh.suffix == ".vsh" else "frag"
     (work / (fsh.stem + ".comp." + ext)).write_text(src + "\n" + "\n".join(extra) + "\n")
+
+    # v6.47.6: the packgen swaps every full-line comment marker (// __NAME__)
+    # for a compile-time define (#define NAME 1). The RAW template leaves the
+    # ifdef code DEAD — the run #451-#457 client death (ShaderCompileException:
+    # 'ColBufSampler' undeclared inside #ifdef VOXY_DELTAS, which sits ABOVE
+    # the uniform declaration) lived through every raw-only validation. The
+    # marker-substituted variant is what actually ships when a knob is on —
+    # validate it too.
+    defined = re.sub(r"^//\s*__([A-Z0-9_]+)__\s*$", r"#define \1 1", src, flags=re.M)
+    if defined != src:
+        (work / (fsh.stem + ".defined.comp." + ext)).write_text(defined + "\n" + "\n".join(extra) + "\n")
 PYEOF
 
 status=0
