@@ -2401,7 +2401,11 @@ mod tests {
             q2.push(3, 4);
             q2.push(5, 6);
         });
-        let b = q.pop_batch(2, 5000).expect("woken by pushes");
-        assert_eq!(b, vec![(3, 4), (5, 6)]);
+        // v6.44.4: pop_batch returns the moment ANY job is available, so a
+        // max=2 pop racing a two-push spawner can wake with ONE job on a
+        // preempted runner (the #442 CI flake — the property under test is
+        // blocks-then-wakes, not the batch fill). max=1 pins the count.
+        let b = q.pop_batch(1, 5000).expect("woken by pushes");
+        assert_eq!(b, vec![(3, 4)]);
     }
 }
