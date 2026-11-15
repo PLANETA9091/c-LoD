@@ -16,6 +16,20 @@ sleep 2
 export DISPLAY=:99
 export LIBGL_ALWAYS_SOFTWARE=1
 export MESA_GL_VERSION_OVERRIDE=4.5
+
+# v6.47.4 HEADLESS AUDIO: the CI runner has no audio device. The pack apply
+# reloads SoundEngine, OpenAL init throws (IllegalStateException: Failed to
+# open OpenAL device — runs #453/#454), and the client LEAVES the game
+# mid-test: the visual shot lands on the main-menu panorama, not the world.
+# The OpenAL Soft null backend opens a silent device instead — same natives,
+# zero audio, no crash.
+export ALSOFT_CONF="$C/alsoft.conf"
+mkdir -p "$C"
+cat > "$C/alsoft.conf" << 'EOF'
+[general]
+drivers = null
+EOF
+
 # glvnd in this container must route GLX to the mesa vendor (swrast/llvmpipe)
 export __GLX_VENDOR_LIBRARY_NAME=mesa
 export GLX_VENDOR_LIBRARY_NAME=mesa
