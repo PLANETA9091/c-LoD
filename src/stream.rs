@@ -1887,7 +1887,13 @@ impl Streamer {
         // budget on every quiet tick while the drained pool lets their dots
         // render for dozens of frames — they decode reliably; the waves
         // matter in quiet sessions where nothing else silences the wire.
-        if zone_mode {
+        // v6.47.3 THE BOOT GATE: a FRESH client's pool is empty — its only
+        // paint is the continuous cone/zone stream, and every dot lands.
+        // The run #453 diag caught the machine draining the wire through the
+        // client's whole pack-prompt window (`sweep 0r/100d`, `spawned 0`,
+        // h0 words at tick 500 — the client rendered NOTHING). The machine
+        // starts cycling only after FRESH_CLIENT_TICKS.
+        if zone_mode && !fresh_audience {
             let edit_quiet = self.edit_window == 0 && self.edit_hold == 0;
             if !edit_quiet {
                 self.sweep_prev_busy = true;
@@ -1912,6 +1918,7 @@ impl Streamer {
             }
         }
         let sweep_silent = zone_mode
+            && !fresh_audience
             && self.edit_window == 0
             && self.edit_hold == 0
             && self.sweep_release_left == 0
