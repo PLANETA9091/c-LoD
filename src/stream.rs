@@ -498,6 +498,30 @@ pub const REARM_MAX_CELLS: usize = 80;
 /// the wave's REARM_MAX_CELLS record capture.
 pub const REARM_ANCHOR_BATCH: usize = 50;
 
+/// v6.46.0 WAVE SWEEP: the zone/cone steady state runs the hold->release
+/// discipline the edit tier proved. The measured steady state (#381-#446,
+/// the user's «это не лоды, ужасно»): the client's particle pool
+/// saturates within seconds of the join (16384 slots / 8 dots per cell =
+/// 2048 cells) and after that EVERY steady spawn loses the slot race —
+/// the height buffer held 1.3-5% of the band (mask8 dump: marked
+/// h=27/2048) and the march painted vertical thread bundles instead of
+/// terrain. The v4.4 atlas looked «имба» because a baked texture has
+/// FULL coverage; the real-time engine gets the same coverage the same
+/// way the anchor re-arm gets its marker: dots land ONLY into a DRAINED
+/// pool. The sweep alternates
+///   RELEASE (SWEEP_RELEASE_TICKS): the cursor streams the normal budget
+///     — up to SWEEP_RELEASE_TICKS * budget dots into the emptied pool;
+///   DRAIN (SWEEP_DRAIN_TICKS): the wire goes silent — the pool's 3-5 s
+///     dots expire, the next wave lands into an empty pool.
+/// One cycle covers ~2048 decodable cells; a full band lap (13k cells,
+/// two views) ≈ 7 waves ≈ 13 min, the near ring (the cells the march
+/// actually paints) in the first two. The cone phase shares the cycle:
+/// refresh is only needed for edits (the rebeat channel owns those) and
+/// the client's buffers persist every decoded word. The edit machinery
+/// pauses the machine (its own hold/release runs the same physics).
+pub const SWEEP_RELEASE_TICKS: u32 = 8;
+pub const SWEEP_DRAIN_TICKS: u32 = 100;
+
 /// v6.9.8: how long a recorded edit's cells stay in the re-arm material.
 /// Run #237 showed the re-arm cycling 15 marker cells; run #238 showed it
 /// cycling ONE — a small single-cell background edit (the rescan wave and
@@ -552,6 +576,13 @@ pub struct Streamer {
     view_caches: Vec<ConeCache>,
     /// v6.6: round-robin cursor over the views slice for the cone phase.
     cone_cursor: usize,
+    /// v6.46.0 WAVE SWEEP: release ticks left in the current wave. Both
+    /// counters zero = the machine is unstarted (the first zone tick opens
+    /// a release — the fresh client's pool is empty, no drain needed).
+    sweep_release_left: u32,
+    /// v6.46.0 WAVE SWEEP: drain ticks left before the next release. The
+    /// wire is silent (cone+zone) while this is positive.
+    sweep_drain_left: u32,
     /// Cone-phase cells streamed since boot (diagnostics).
     pub cone_cells: u64,
     /// v5.4: cells flagged for re-stream (real edits, words differ).
@@ -686,6 +717,8 @@ impl Streamer {
             laps: 0,
             last_stream: vec![0; n],
             tick_counter: 0,
+            sweep_release_left: 0,
+            sweep_drain_left: 0,
             view_caches: Vec::new(),
             cone_cursor: 0,
             cone_cells: 0,
@@ -786,6 +819,13 @@ impl Streamer {
     /// v6.40.0: the edit-priority channel's (streamed, queued) pair.
     pub fn edit_rebeat_diag(&self) -> (u64, usize) {
         (self.edit_rebeats_streamed, self.edit_rebeat.len())
+    }
+
+    /// v6.46.0 WAVE SWEEP diag: (release ticks left, drain ticks left).
+    /// Both zero = the machine is unstarted or legacy mode; drain > 0 = the
+    /// wire is intentionally silent this tick (the client's pool drains).
+    pub fn sweep_diag(&self) -> (u32, u32) {
+        (self.sweep_release_left, self.sweep_drain_left)
     }
 
     pub fn sparse_diag(&self) -> (u64, usize, u64, u64) {
@@ -1790,6 +1830,30 @@ impl Streamer {
             }
         }
 
+        // ---- v6.46.0 WAVE SWEEP state machine ------------------------------
+        // Advances once per tick ONLY while the edit machinery is idle (its
+        // hold/release runs the same physics and owns the wire). Starts in
+        // RELEASE (the fresh client's pool is empty — no drain needed), then
+        // alternates drain / release for the session's lifetime. The cone
+        // and zone phases below are silent whenever the drain counter is up:
+        // the steady state's only path into the client is a wave that lands
+        // into an emptied particle pool (see SWEEP_* for the arithmetic).
+        let wave_idle = zone_mode && self.edit_window == 0 && self.edit_hold == 0;
+        if wave_idle {
+            if self.sweep_release_left == 0 && self.sweep_drain_left == 0 {
+                self.sweep_release_left = SWEEP_RELEASE_TICKS;
+            }
+            if self.sweep_release_left > 0 {
+                self.sweep_release_left -= 1;
+                if self.sweep_release_left == 0 {
+                    self.sweep_drain_left = SWEEP_DRAIN_TICKS;
+                }
+            } else {
+                self.sweep_drain_left -= 1;
+            }
+        }
+        let sweep_silent = self.sweep_drain_left > 0 && self.sweep_release_left == 0;
+
         // ---- phase 1: cone priority (v5.3.3, v6.6 ROUND-ROBIN) -------------
         // v6.5.3: SKIPPED inside an edit window — every spawn the steady
         // state makes competes with the edit's dots for the client's
@@ -1800,7 +1864,9 @@ impl Streamer {
         // tick (single-player fill speed is unchanged), the cursor hands
         // it to the next view every tick, and each tracked view keeps its
         // own cone cache matched by eye/look drift.
-        if self.edit_window == 0 && !views.is_empty() {
+        // v6.46.0: also skipped on a sweep drain tick — a cone refresh into
+        // a full pool is a rejected spawn, and the drain needs an empty pool.
+        if self.edit_window == 0 && !views.is_empty() && !sweep_silent {
             let vi = self.cone_cursor % views.len();
             self.cone_cursor = self.cone_cursor.wrapping_add(1);
             let v = views[vi];
@@ -1842,7 +1908,8 @@ impl Streamer {
         // Legacy mode (no views): stream every valid cell (diagnostics,
         // self-heal with nobody online). v6.5.3: also silent inside the
         // edit window — the released dots' lifetime must pass undisturbed.
-        if self.edit_window == 0 {
+        // v6.46.0: also silent on a sweep drain tick (see phase 1).
+        if self.edit_window == 0 && !sweep_silent {
             let mut steps = 0u64;
             while self.batch.len() < budget && steps < total {
                 let t = self.cursor % total;
@@ -2647,8 +2714,15 @@ mod tests {
         let a2 = vhint(60.0, 60.0, 0.0, 0.0, late);
         let b2 = vhint(196.0, 196.0, 180.0, 0.0, late);
         let c2 = s.cone_cells;
-        let _ = s.tick_batch(2048, &[a2, b2]);
-        let _ = s.tick_batch(2048, &[a2, b2]);
+        // v6.46.0 WAVE SWEEP: the steady state streams in waves — the two
+        // service ticks may land on a drain; the wave cycle guarantees a
+        // release within SWEEP_RELEASE_TICKS + SWEEP_DRAIN_TICKS ticks.
+        for _ in 0..(SWEEP_RELEASE_TICKS + SWEEP_DRAIN_TICKS) {
+            let _ = s.tick_batch(2048, &[a2, b2]);
+            if s.cone_cells > c2 {
+                break;
+            }
+        }
         assert!(
             s.cone_cells > c2,
             "tracked views must keep cone service after cache churn"
@@ -2892,13 +2966,28 @@ mod tests {
         }
         // Steady state (v5.4 DELTA-ZONE): the painted, unchanged zone
         // collapses the batch to ZERO — cone cells age < 60, sweep cells
-        // age < 600, no dirty cells. Zero waste.
+        // age < 600, no dirty cells. Zero waste. v6.46.0 WAVE SWEEP: the
+        // assertion must land on a RELEASE tick to stay meaningful — run
+        // the drain out first (the machine advances per call, `sweep_diag`
+        // reads the phase).
+        while s.sweep_diag().1 > 0 {
+            let _ = s.tick_batch(2048, &[vhint(128.0, 128.0, 0.0, 0.0, 150)]);
+        }
         let v_idle = vhint(128.0, 128.0, 0.0, 0.0, 150);
         let b: Vec<Spawn> = s.tick_batch(2048, &[v_idle]).to_vec();
         assert!(b.is_empty(), "idle zone must collapse to zero spawns");
         // The refresh wave: cone cells painted at tick 100 come due at 160.
+        // v6.46.0 WAVE SWEEP: the due cells ride the next RELEASE window —
+        // drain ticks in between are silent by design, so the probe runs
+        // until the cycle's release (bounded by one full wave cycle).
         let v_due = vhint(128.0, 128.0, 0.0, 0.0, 161);
-        let b: Vec<Spawn> = s.tick_batch(2048, &[v_due]).to_vec();
+        let mut b: Vec<Spawn> = Vec::new();
+        for _ in 0..(SWEEP_RELEASE_TICKS + SWEEP_DRAIN_TICKS) {
+            b = s.tick_batch(2048, &[v_due]).to_vec();
+            if !b.is_empty() {
+                break;
+            }
+        }
         assert!(!b.is_empty(), "due cone cells must refresh");
         for sp in &b {
             let dx = sp.x - v_due.eye[0];
@@ -2912,6 +3001,43 @@ mod tests {
                 && d2 <= (ZONE_FAR + 4.0) * (ZONE_FAR + 4.0);
             assert!(in_band && in_cone, "refresh spawn outside the zone");
         }
+    }
+
+    /// v6.46.0 WAVE SWEEP: the steady state alternates a SILENT drain (the
+    /// client's saturated particle pool empties — dots live 3-5 s) with a
+    /// release wave into the emptied pool. Determinism contract: the first
+    /// zone tick streams (no initial drain — the fresh pool is empty), the
+    /// wave ends, the drain goes silent, the next release resumes.
+    #[test]
+    fn wave_sweep_alternates_silence_and_release() {
+        let mut s = Streamer::new(0.0, 0.0, 256, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
+            }
+        }
+        let v = vhint(128.0, 128.0, 0.0, 0.0, 100);
+        let b: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+        assert!(!b.is_empty(), "the first tick streams (no initial drain)");
+        assert!(s.sweep_diag().0 > 0, "the machine opened a release window");
+        let mut silent_seen = false;
+        let mut released_again = false;
+        for _ in 0..(SWEEP_RELEASE_TICKS + SWEEP_DRAIN_TICKS + 4) {
+            let b: Vec<Spawn> = s.tick_batch(2048, &[v]).to_vec();
+            let (rel, drn) = s.sweep_diag();
+            if drn > 0 && rel == 0 {
+                assert!(b.is_empty(), "a drain tick must be silent");
+                silent_seen = true;
+            } else if silent_seen {
+                assert!(!b.is_empty(), "the release must resume after the drain");
+                released_again = true;
+                break;
+            }
+        }
+        assert!(
+            silent_seen && released_again,
+            "one full wave cycle must complete"
+        );
     }
 
     /// v5.4 delta: a dirty cell NOBODY can decode waits in the queue and
