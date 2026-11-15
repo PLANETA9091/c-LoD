@@ -176,6 +176,13 @@ pub struct Config {
     /// Pack SHA changes; production stays fog_voxy=false until the CI A/B
     /// reads the rim views (flat_signed +61 -> ~0 = win).
     pub fog_voxy: bool,
+    /// v6.44.2 VOXY EVIDENCE DELTAS: the two shading deltas ported from the
+    /// evidence branch onto the current march (water shore gradient + edge
+    /// haze band; the third delta — the concavity AO proxy — is superseded
+    /// by march_ssao on this line). Compile-time #define swap at packgen,
+    /// same discipline as rim_mask: default build stays byte-stable, the
+    /// parity world boots the treatment for the visual verdict.
+    pub voxy_deltas: bool,
     /// v6.7.1 MULTI-BEAT: retry beats a genuine edit gets after its release
     /// (total decode chances = edit_beats + 1). Each retry re-runs the
     /// hold→release sequence with a fresh reset electron, so a beat whose
@@ -263,6 +270,7 @@ impl Default for Config {
             mesh_debug: false,
             quant_ssao: false,
             fog_voxy: false,
+            voxy_deltas: false,
             atmosphere: true,
             edit_beats: crate::stream::EDIT_BEATS_DEFAULT,
             sparse_rebeat: false,
@@ -443,6 +451,11 @@ impl Config {
         // v6.26.7: fog_voxy=true — the voxy-exact blit fog (the endDistance cap).
         if let Some(v) = get("fog_voxy") {
             cfg.fog_voxy = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
+        // v6.44.2: voxy_deltas=true — the evidence-branch shading deltas
+        // (water shore gradient + edge haze band) as one compile-time swap.
+        if let Some(v) = get("voxy_deltas") {
+            cfg.voxy_deltas = matches!(v.trim(), "1" | "true" | "yes" | "on");
         }
         // v6.18: atmosphere=false — never attach the veil effect.
         if let Some(v) = get("atmosphere") {

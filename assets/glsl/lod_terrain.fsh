@@ -3,6 +3,34 @@
 #include <minecraft:globals.glsl>
 // __MESH_DEBUG__
 // __RIM_MASK__
+// __VOXY_DELTAS__
+
+#ifdef VOXY_DELTAS
+// voxy-evidence-deltas: water shore factor (evidence:
+// docs/voxy-evidence/ref2_ocean_horizon.jpg — shallows read lighter/cyan near
+// shores, open water deepens toward the measured #1c335d): fraction of LAND
+// cells among the 4-neighbors of a water cell.
+float water_shore(ivec2 celli) {
+    float land = 0.0;
+    float cnt = 0.0;
+    ivec2 nb[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
+    for (int i = 0; i < 4; ++i) {
+        ivec2 q = celli + nb[i];
+        if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, ivec2(256)))) {
+            continue;
+        }
+        vec4 cq = texelFetch(ColBufSampler, q, 0);
+        if (cq.a < 0.5) {
+            continue;
+        }
+        cnt += 1.0;
+        if (floor(cq.r * 255.0 + 0.5) <= 215.5) {
+            land += 1.0;
+        }
+    }
+    return cnt > 0.0 ? land / cnt : 0.0;
+}
+#endif
 
 // c-LoD pass (v5.0 "SKY-GRID BIT-STREAM"): the actual level-of-distant-detail
 // renderer.
@@ -803,7 +831,21 @@ void main() {
     bool colWater; bool colorless;
     vec3 col = color_at(tc, sw, sw2, colWater, colorless);
     float hn = clamp((hitPos.y - sea) / max(maxY - sea, 1.0), 0.0, 1.0);
-    vec3 fallback = (isWater || colWater) ? ColWater.rgb : mix(ColLow.rgb, ColHigh.rgb, smoothstep(0.15, 0.9, hn));
+    vec3 fallback;
+#ifdef VOXY_DELTAS
+    if (isWater || colWater) {
+        // voxy-evidence-deltas: shore gradient (evidence:
+        // docs/voxy-evidence/ref2 — shallows lighter, open water #1c335d).
+        // NOTE: 0.85/1.3 multipliers are calibration to the measured
+        // palette, pending the voxy-reference visual verdict.
+        float shore = water_shore(tc);
+        fallback = ColWater.rgb * mix(0.85, 1.3, shore);
+    } else {
+        fallback = mix(ColLow.rgb, ColHigh.rgb, smoothstep(0.15, 0.9, hn));
+    }
+#else
+    fallback = (isWater || colWater) ? ColWater.rgb : mix(ColLow.rgb, ColHigh.rgb, smoothstep(0.15, 0.9, hn));
+#endif
     vec3 albedo = colWater ? fallback : (col.r < 0.0 ? fallback : col);
 
     // v6.21.1 THE VANILLA-PATH COLOR GATE: the height-only cells (no color
@@ -939,7 +981,19 @@ void main() {
     float rd = fogLive ? max(vanRD, 64.0) : 128.0;
     float gate = (tVan > 0.0) ? 1.0 : smoothstep(rd * 0.92, rd * 1.10, tHit);
 
+#ifdef VOXY_DELTAS
+    // voxy-evidence-deltas: edge haze band (evidence:
+    // docs/voxy-evidence/ref2 — the disk edge sits in a pale band of the
+    // vanilla fog colour #c0d7ff, 82% of the band pixels): inside the
+    // fade-out zone the LOD color pulls toward fogTint (the live vanilla
+    // fog color) before the scene mix, reproducing the pale band.
+    // NOTE: the 0.8 pull strength is calibration, pending the
+    // voxy-reference visual verdict.
+    vec3 edgeCol = mix(lit, fogTint, 0.8 * fadeOut);
+    vec3 outCol = mix(scene.rgb, edgeCol, fade * gate);
+#else
     vec3 outCol = mix(mix(scene.rgb, lit, fade * gate), scene.rgb, fadeOut);
+#endif
 #ifdef MESH_DEBUG
     // v6.19.2: the vanilla-path ENGAGEMENT MAP — every pixel the depth-
     // tested march owns carries a 35% magenta lift, unmistakable in the

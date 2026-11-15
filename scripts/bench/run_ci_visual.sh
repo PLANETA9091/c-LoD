@@ -1508,6 +1508,14 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # srbeat diag counters (below, from /clod-pack.info) show whether the
   # undecodable-drop class now dominates the schedule.
   export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;sparse_rebeat=true;sparse_rebeat_frac=8"
+  # v6.44.2 THE DELTA ARM: the parity world boots the evidence-cited shading
+  # deltas (water shore gradient + edge haze band, one compile-time define
+  # voxy_deltas) — the leg worlds stay on the default pack, the anchor A/B
+  # is uncontaminated. READ pre-registered: the water-heavy aerials (02/04)
+  # mean-d down, 05_oblique holds <=2.5 (it is already near-parity and has
+  # no water/edge in frame), 07/12 flat_signed unchanged (the fog line is
+  # untouched). Rollback = drop the knob.
+  CLOD_EXTRA_OPTS="${CLOD_EXTRA_OPTS};voxy_deltas=true"
   # v6.19.9 THE ROOT CAUSE (#302's maxima nailed it): parity stream max
   # cone 0, max zone 0 — the scheduler never sent ONE cell the whole
   # session — and the reason is the v6.4.2 regression class verbatim: THIS

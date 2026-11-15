@@ -202,6 +202,7 @@ pub fn build(cfg: &Config) -> Pack {
             cfg.quant_ssao,
             cfg.fog_voxy,
             cfg.rim_mask,
+            cfg.voxy_deltas,
         );
     }
     build_zip(
@@ -215,6 +216,7 @@ pub fn build(cfg: &Config) -> Pack {
         cfg.quant_ssao,
         cfg.fog_voxy,
         cfg.rim_mask,
+        cfg.voxy_deltas,
     )
 }
 
@@ -230,6 +232,7 @@ fn build_zip(
     quant_ssao: bool,
     fog_voxy: bool,
     rim_mask: bool,
+    voxy_deltas: bool,
 ) -> Pack {
     let lod_terrain_json = substitute(lod_terrain_tpl, &map);
     let atmosphere_json = substitute(atmosphere_tpl, &map);
@@ -299,6 +302,15 @@ fn build_zip(
     // keeps the marker a comment and the pack byte-stable.
     let lod_terrain = if rim_mask {
         lod_terrain.replace("// __RIM_MASK__", "#define RIM_MASK 1")
+    } else {
+        lod_terrain
+    };
+    // v6.44.2 VOXY EVIDENCE DELTAS: the two evidence-cited shading deltas
+    // (water shore gradient + edge haze band) swap in as one compile-time
+    // define — the default build keeps the marker a comment and the pack
+    // byte-stable.
+    let lod_terrain = if voxy_deltas {
+        lod_terrain.replace("// __VOXY_DELTAS__", "#define VOXY_DELTAS 1")
     } else {
         lod_terrain
     };
@@ -853,6 +865,61 @@ mod tests {
         assert!(all_fsh.contains("#define RIM_MASK 1"));
         assert!(all_fsh.contains("float fogCap"));
         assert!(all_fsh.contains("float hq = floor(ground_at(q"));
+    }
+
+    #[test]
+    fn voxy_deltas_swap_the_shading_treatment() {
+        // v6.44.2: voxy_deltas=true ships the two evidence-cited shading
+        // deltas (water shore gradient + edge haze band) as one compile-time
+        // define. The default build keeps the marker a comment and the pack
+        // byte-stable; the parity world boots the treatment for the visual
+        // verdict. The concavity AO delta is NOT ported — march_ssao already
+        // owns the AO slot on this line.
+        let fsh_of = |cfg: &Config| {
+            let p = build(cfg);
+            let fsh = String::from_utf8_lossy(
+                &zip_entries(&p.zip)
+                    .iter()
+                    .find(|(n, _)| n == "assets/clod/shaders/post/lod_terrain.fsh")
+                    .unwrap()
+                    .1,
+            )
+            .to_string();
+            (fsh, p.sha1_hex)
+        };
+        let (raw_fsh, raw_sha) = fsh_of(&Config::parse(""));
+        assert!(
+            !raw_fsh.contains("#define VOXY_DELTAS 1"),
+            "the treatment leaked to prod"
+        );
+        assert!(
+            raw_fsh.contains("// __VOXY_DELTAS__"),
+            "marker must stay in the default build"
+        );
+        assert!(
+            !raw_fsh.contains("#define VOXY_DELTAS 1"),
+            "the treatment stays COMPILE-TIME OFF in prod (the #ifdef blocks ride the template)"
+        );
+        let (vd_fsh, vd_sha) = fsh_of(&Config::parse("voxy_deltas=true"));
+        assert!(vd_fsh.contains("#define VOXY_DELTAS 1"));
+        assert!(
+            vd_fsh.contains("float shore = water_shore(tc);"),
+            "the shore gradient must ride the swap"
+        );
+        assert!(
+            vd_fsh.contains("vec3 edgeCol = mix(lit, fogTint, 0.8 * fadeOut);"),
+            "the edge haze band must ride the swap"
+        );
+        assert_ne!(vd_sha, raw_sha, "pack SHA must change");
+        let (_, vd_sha2) = fsh_of(&Config::parse("voxy_deltas=true"));
+        assert_eq!(vd_sha, vd_sha2);
+        // Composes with the parity lanes and the other shader knobs.
+        let (all_fsh, _) = fsh_of(&Config::parse(
+            "voxy_deltas=true;fog_voxy=true;quant_ssao=true;rim_mask=true",
+        ));
+        assert!(all_fsh.contains("#define VOXY_DELTAS 1"));
+        assert!(all_fsh.contains("#define RIM_MASK 1"));
+        assert!(all_fsh.contains("float fogCap"));
     }
 
     #[test]
