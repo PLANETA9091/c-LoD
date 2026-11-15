@@ -338,6 +338,14 @@ unsafe fn drain(state: &Arc<State>, env: Env, ch: &mut EditChannel) {
         return;
     }
     let world = as_obj(world_handle);
+    // v6.44.0: the cohort of cells whose words actually CHANGED in this
+    // drain — the true edit episode, sized by the ring's deduped columns.
+    // The re-arm's anchor tier records HERE: the marker fill lands as one
+    // 555-cell drain call (an ANCHOR, immune to the rescan churn that
+    // poisoned every release-side recording), and small cosmetic episodes
+    // upsert the small-edit tier instead. The scan can never reach this
+    // list — the ring carries edits only.
+    let mut changed: Vec<u32> = Vec::new();
     for (wx, wz) in cols {
         // Inside the streamed disk? (world_to_cell returns None outside.)
         let cell = {
@@ -357,12 +365,26 @@ unsafe fn drain(state: &Arc<State>, env: Env, ch: &mut EditChannel) {
         crate::engine::scan_cell(state, env, world, cx, cz, wx, wz, false);
         let after = {
             let s = state.stream.lock().unwrap();
-            s.get(cx, cz)
-                .map(|c| crate::stream::Streamer::encode_words(&c))
+            let words = s
+                .get(cx, cz)
+                .map(|c| crate::stream::Streamer::encode_words(&c));
+            if words != before && words.is_some() {
+                let idx = cz as usize * s.side as usize + cx as usize;
+                changed.push(idx as u32);
+            }
+            words
         };
         if before != after {
             state.edits.edits.fetch_add(1, Ordering::Relaxed);
         }
+    }
+    if !changed.is_empty() {
+        let now = state.tick_no.load(Ordering::Relaxed).max(1);
+        state
+            .stream
+            .lock()
+            .unwrap()
+            .record_edit_cells(now, &changed);
     }
 }
 

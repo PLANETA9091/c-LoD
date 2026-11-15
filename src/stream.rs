@@ -478,11 +478,25 @@ pub const SPARSE_REBEAT_BUDGET_FRAC: usize = 4;
 /// margin; a session change arms ~30 drain+release chances.
 pub const REARM_SPAN_TICKS: u64 = 3000;
 
-/// v6.9.5: cap on the recorded last-edit cells (the genuine-edit gate
-/// never arms above EDIT_HOLD_MAX_BATCH recent decodable cells; stale
-/// queue stragglers streamed by the same release are cut here so the
-/// re-arm stays a bounded marker-sized batch).
-pub const REARM_MAX_CELLS: usize = 100;
+/// v6.9.5: cap on the recorded re-arm material per tier (the genuine-edit
+/// gate never arms above EDIT_HOLD_MAX_BATCH recent decodable cells; the
+/// re-dirty cycle must stay UNDER that cap or the decision misreads the
+/// re-arm's own batch as a wave and skips the pool drain — the release
+/// then floods a saturated pool and nothing lands). 80 leaves headroom
+/// below the 100-cell batch cap for stray cosmetic dirt.
+pub const REARM_MAX_CELLS: usize = 80;
+
+/// v6.44.0: a record call at or above this many cells is a MAJOR edit —
+/// the marker fill (5x111x5 -> 555 cells, one wave) — and its cohort
+/// lands in the ANCHOR tier, immune to eviction by the churn of small
+/// background edits. Runs #438/#439 re-proved #241's failure mode one
+/// layer deeper: the fill is a WAVE (> EDIT_HOLD_MAX_BATCH decodable
+/// cells), waves recorded NOTHING, and last_edit was empty at every
+/// relog — rearm 0c/0t in every diag, both re-arm mechanisms dead, leg 2
+/// a ~15% dice roll (#391's single red=144 probe was luck, not state).
+/// 50 sits safely above the rescan churn's ~1-10 cell episodes and below
+/// the wave's REARM_MAX_CELLS record capture.
+pub const REARM_ANCHOR_BATCH: usize = 50;
 
 /// v6.9.8: how long a recorded edit's cells stay in the re-arm material.
 /// Run #237 showed the re-arm cycling 15 marker cells; run #238 showed it
@@ -606,6 +620,15 @@ pub struct Streamer {
     /// bounded by REARM_MAX_CELLS, entries older than
     /// REARM_EDIT_WINDOW_TICKS drop out.
     last_edit: Vec<(u32, u64)>,
+    /// v6.44.0 ANCHOR TIER: the cells of MAJOR edits (record calls at or
+    /// above REARM_ANCHOR_BATCH — the marker fill's wave). The marker IS a
+    /// wave, so the old genuine-release-only recording left this empty at
+    /// every relog; and a plain merged set would not survive either — the
+    /// rescan churn's small episodes (573 in run #439's 3.7-minute
+    /// fill->relog gap) rotate the cap and evict the marker cells within
+    /// seconds. Anchors only expire by age (REARM_EDIT_WINDOW_TICKS) or by
+    /// a NEWER major edit's upserts; small edits never touch this list.
+    anchor_edit: Vec<(u32, u64)>,
     /// v6.9.5: engine tick until which the re-arm keeps cycling the last
     /// edit's cells (0 = the re-arm is off).
     rearm_until: u64,
@@ -683,6 +706,7 @@ impl Streamer {
             rebeat_beats_left: 0,
             pending_rebeat: false,
             last_edit: Vec::new(),
+            anchor_edit: Vec::new(),
             rearm_until: 0,
             edit_beats: EDIT_BEATS_DEFAULT,
             dirty_pending: 0,
@@ -781,6 +805,7 @@ impl Streamer {
             let fresh = self
                 .last_edit
                 .iter()
+                .chain(self.anchor_edit.iter())
                 .filter(|&&(_, t)| now.saturating_sub(t) < REARM_EDIT_WINDOW_TICKS)
                 .count();
             (fresh, self.rearm_until - now)
@@ -799,7 +824,7 @@ impl Streamer {
     /// join before any genuine edit is a no-op: the boot paint flows
     /// through the fresh-client path exactly as before.
     pub fn arm_relog_rearm(&mut self, now: u64) {
-        if self.last_edit.is_empty() {
+        if self.last_edit.is_empty() && self.anchor_edit.is_empty() {
             return;
         }
         self.rearm_until = now + REARM_SPAN_TICKS;
@@ -811,22 +836,79 @@ impl Streamer {
     /// than REARM_EDIT_WINDOW_TICKS are pruned on every merge and on every
     /// re-arm pass — a background cosmetic edit can never erase the
     /// marker's cells while they are inside the window.
-    fn record_edit_cells(&mut self, now: u64, cells: &[u32]) {
-        // The prune runs FIRST — even on an empty merge the aging must
-        // advance (the tick passed in is the merge's clock).
-        self.last_edit
-            .retain(|&(_, t)| now.saturating_sub(t) < REARM_EDIT_WINDOW_TICKS);
+    ///
+    /// v6.44.0: this is the EDIT-SOURCE path — edits.rs's ring drain calls
+    /// it with the cohort of cells whose words actually changed, sized by
+    /// the TRUE episode (the ring's deduped columns), so the marker fill
+    /// (555 changed cells in one drain) lands as an ANCHOR. The old
+    /// release-only recording saw only waves' streamed cells and the fill
+    /// — a WAVE — recorded nothing: last_edit was empty at every relog
+    /// (rearm 0c/0t in runs #438/#439, leg 2 a ~15% dice roll).
+    pub fn record_edit_cells(&mut self, now: u64, cells: &[u32]) {
+        if cells.len() >= REARM_ANCHOR_BATCH {
+            // Spread the cohort across the edit's footprint: the drain
+            // hands SORTED columns, so a tail cap would keep one corner
+            // strip of the marker wall; a stride keeps the whole footprint
+            // represented on screen after the re-arm's release.
+            if cells.len() > REARM_MAX_CELLS {
+                let stride = cells.len().div_ceil(REARM_MAX_CELLS);
+                let picked: Vec<u32> = cells.iter().step_by(stride).copied().collect();
+                Self::upsert_tier(&mut self.anchor_edit, now, &picked);
+            } else {
+                Self::upsert_tier(&mut self.anchor_edit, now, cells);
+            }
+            return;
+        }
+        Self::upsert_tier(&mut self.last_edit, now, cells);
+    }
+
+    /// v6.44.0: refresh-only upsert for the DELIVERY side (a hold release's
+    /// recorded cells). Creates NOTHING — a large release of foreign cells
+    /// (a boot backlog wave) must not become the re-arm material — but the
+    /// re-arm cycle's own re-dirty releases refresh the anchor stamps so
+    /// the material stays inside the freshness window for the whole span.
+    fn refresh_edit_cells(&mut self, now: u64, cells: &[u32]) {
         for &idx in cells {
+            if let Some(e) = self.anchor_edit.iter_mut().find(|e| e.0 == idx) {
+                e.1 = now;
+            }
             if let Some(e) = self.last_edit.iter_mut().find(|e| e.0 == idx) {
                 e.1 = now;
-            } else {
-                self.last_edit.push((idx, now));
             }
         }
-        if self.last_edit.len() > REARM_MAX_CELLS {
-            self.last_edit.sort_by_key(|&(_, t)| t);
-            let excess = self.last_edit.len() - REARM_MAX_CELLS;
-            self.last_edit.drain(0..excess);
+    }
+
+    /// Stamped upsert over one tier: prune the age window first (even on an
+    /// empty merge the aging must advance — the tick passed in is the
+    /// merge's clock), refresh existing stamps, append new cells, cap with
+    /// oldest-stamp eviction.
+    fn upsert_tier(tier: &mut Vec<(u32, u64)>, now: u64, cells: &[u32]) {
+        tier.retain(|&(_, t)| now.saturating_sub(t) < REARM_EDIT_WINDOW_TICKS);
+        for &idx in cells {
+            if let Some(e) = tier.iter_mut().find(|e| e.0 == idx) {
+                e.1 = now;
+            } else {
+                tier.push((idx, now));
+            }
+        }
+        if tier.len() > REARM_MAX_CELLS {
+            tier.sort_by_key(|&(_, t)| t);
+            let excess = tier.len() - REARM_MAX_CELLS;
+            tier.drain(0..excess);
+        }
+    }
+
+    /// v6.44.0: the re-arm material the span cycles — the anchor tier when
+    /// a major edit has landed (the marker), the small-edit tier otherwise.
+    /// Anchors stay <= REARM_MAX_CELLS = 80 < EDIT_HOLD_MAX_BATCH, so the
+    /// re-dirty batch still reads as a GENUINE edit to the hold decision
+    /// (a wave-sized batch would skip the drain and flood a saturated
+    /// pool — run #235's red=0 mechanism).
+    fn rearm_material(&self) -> &[(u32, u64)] {
+        if self.anchor_edit.is_empty() {
+            &self.last_edit
+        } else {
+            &self.anchor_edit
         }
     }
 
@@ -1495,7 +1577,10 @@ impl Streamer {
         if now < self.rearm_until {
             self.last_edit
                 .retain(|&(_, t)| now.saturating_sub(t) < REARM_EDIT_WINDOW_TICKS);
-            for &(idx, _) in self.last_edit.iter() {
+            self.anchor_edit
+                .retain(|&(_, t)| now.saturating_sub(t) < REARM_EDIT_WINDOW_TICKS);
+            let material: Vec<u32> = self.rearm_material().iter().map(|&(idx, _)| idx).collect();
+            for &idx in &material {
                 let i = idx as usize;
                 if !self.dirty[i] {
                     if self.rebeat.len() < REBEAT_MAX && !self.rebeat.iter().any(|&(e, _)| e == idx)
@@ -1533,12 +1618,14 @@ impl Streamer {
         // long before a relog lands (the gate's leg-2 follows leg-1 by
         // minutes), so a FRESH client would never see the bursts and the
         // relog probes read red=0 (#397). Every fresh-audience tick
-        // re-schedules the REARM_EDIT_WINDOW's last-edit cells: the same
-        // upsert stamps, fresh bursts — the relogged client receives the
-        // marker's words deterministically, the persistent-cell list is
-        // already the rearm material.
-        if fresh_audience && !self.last_edit.is_empty() {
-            for &(idx, _) in self.last_edit.iter() {
+        // re-schedules the rearm material's cells (v6.44.0: the ANCHOR
+        // tier — the drain-recorded major-edit cohort, non-empty at last —
+        // with the small-edit list as fallback): the same upsert stamps,
+        // fresh bursts — the relogged client receives the marker's words
+        // deterministically.
+        if fresh_audience && !self.rearm_material().is_empty() {
+            let material: Vec<u32> = self.rearm_material().iter().map(|&(idx, _)| idx).collect();
+            for &idx in &material {
                 let i = idx as usize;
                 let side = self.side as usize;
                 let cx = (i % side) as u32;
@@ -1595,13 +1682,18 @@ impl Streamer {
                     } else {
                         schedule_rebeat = false;
                     }
-                    // v6.9.5: a genuine episode's delivered cells become the
+                    // v6.9.5: a genuine episode's delivered cells join the
                     // relog re-arm's material. v6.9.8: EVERY hold release
-                    // records (stamped upserts) — continuation beats refresh
-                    // their cells' stamps so the material lives as long as
-                    // the cycle runs, and a background single-cell edit that
-                    // joins the episode ADDS itself instead of overwriting
-                    // the marker's cells (#238's `rearm 1c`).
+                    // refreshes (stamped upserts) — continuation beats keep
+                    // their cells' stamps alive so the material lives as
+                    // long as the cycle runs. v6.44.0: REFRESH-ONLY — the
+                    // material's CREATION moved to the edit source (the
+                    // ring drain's true episode cohort); a release of
+                    // foreign cells (a boot backlog wave riding the same
+                    // queue) must never become the re-arm material, and the
+                    // background single-cell edit that joins the episode
+                    // already records itself at the drain (#238's
+                    // `rearm 1c` fixed there, not here).
                     let mut recorded: Vec<(u32, u64)> = Vec::new();
                     self.stream_dirty(
                         cap,
@@ -1616,7 +1708,7 @@ impl Streamer {
                     );
                     if !recorded.is_empty() {
                         let cells: Vec<u32> = recorded.iter().map(|&(i, _)| i).collect();
-                        self.record_edit_cells(now, &cells);
+                        self.refresh_edit_cells(now, &cells);
                     }
                     if edit_streamed > 0
                         && !dirty_cap_hit
@@ -2935,6 +3027,9 @@ mod tests {
 
         // THE EDIT: the disk-center cell (decodable, dead ahead) changes.
         s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 401);
+        // v6.44.0: the edit SOURCE records the cohort (edits.rs's ring
+        // drain); the release path only refreshes stamps.
+        s.record_edit_cells(401, &[128 * 256 + 128]);
         assert_eq!(s.dirty_pending, 1);
         // Beat 1 — HOLD: the wire goes silent FIRST (the pool drains), the
         // edit batch waits; the window covers hold + post.
@@ -3109,6 +3204,9 @@ mod tests {
         // The genuine edit: hold -> release -> the cells are recorded.
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled(400)]).to_vec();
         s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 401);
+        // v6.44.0: the edit SOURCE records the cohort (edits.rs's ring
+        // drain); the release path only refreshes stamps.
+        s.record_edit_cells(401, &[128 * 256 + 128]);
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled(401)]).to_vec();
         for t in 402..(401 + EDIT_HOLD_TICKS) {
             let _: Vec<Spawn> = s.tick_batch(2048, &[settled(t)]).to_vec();
@@ -3225,6 +3323,9 @@ mod tests {
         };
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled]).to_vec();
         s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 201);
+        // v6.44.0: the edit SOURCE records the cohort (edits.rs's ring
+        // drain); the release path only refreshes stamps.
+        s.record_edit_cells(201, &[128 * 256 + 128]);
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled]).to_vec();
         for t in 202..(201 + EDIT_HOLD_TICKS) {
             let v = ViewHint {
@@ -3300,6 +3401,9 @@ mod tests {
         // A small genuine edit: hold -> release -> recorded.
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled(400)]).to_vec();
         s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 401);
+        // v6.44.0: the edit SOURCE records the cohort (edits.rs's ring
+        // drain); the release path only refreshes stamps.
+        s.record_edit_cells(401, &[128 * 256 + 128]);
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled(401)]).to_vec();
         for t in 402..(401 + EDIT_HOLD_TICKS) {
             let _: Vec<Spawn> = s.tick_batch(2048, &[settled(t)]).to_vec();
@@ -3353,6 +3457,9 @@ mod tests {
         // The marker edit (the disk-center cell) delivers and records.
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled(400)]).to_vec();
         s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 401);
+        // v6.44.0: the edit SOURCE records the cohort (edits.rs's ring
+        // drain); the release path only refreshes stamps.
+        s.record_edit_cells(401, &[128 * 256 + 128]);
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled(401)]).to_vec();
         for t in 402..(401 + EDIT_HOLD_TICKS) {
             let _: Vec<Spawn> = s.tick_batch(2048, &[settled(t)]).to_vec();
@@ -3369,6 +3476,9 @@ mod tests {
         // so both cells ride ONE release a few ticks past the naive
         // hold+1 schedule — the loop ticks until the merge registers.
         s.set_cell(129, 128, cell(70, false, [142, 33, 33]), 500);
+        // v6.44.0: the background edit records itself at the drain — the
+        // merge is immediate (the release only refreshes).
+        s.record_edit_cells(500, &[128 * 256 + 129]);
         let mut merged = false;
         for t in 501..700 {
             let _: Vec<Spawn> = s.tick_batch(2048, &[settled(t)]).to_vec();
@@ -3402,6 +3512,79 @@ mod tests {
             0,
             "both entries age out one window after the last delivery"
         );
+    }
+
+    /// v6.44.0: a MAJOR edit (the marker fill: 555 changed cells in ONE
+    /// ring drain) records an ANCHOR cohort — stride-spread across the
+    /// drain's sorted columns so the whole wall is represented — that
+    /// small background edits cannot evict, and the release path refreshes
+    /// without creating. The relog re-arm cycles the anchors.
+    #[test]
+    fn major_edit_anchors_survive_the_background_churn() {
+        let (cx, cz, region) = (-930.0, 796.0, 512);
+        let half = f64::from(region) * 0.5;
+        let mut s = Streamer::new(cx - half, cz - half, region, 2);
+        for cz in 0..256u32 {
+            for cx in 0..256u32 {
+                s.set_cell(cx, cz, cell(70, false, [100, 100, 100]), 0);
+            }
+        }
+        // THE FILL: 555 changed cells in one drain call, sorted-column
+        // order (row-major contiguous).
+        let fill: Vec<u32> = (0..555u32).map(|k| 100 * 256 + 50 + k).collect();
+        s.record_edit_cells(401, &fill);
+        assert_eq!(
+            s.anchor_edit.len(),
+            REARM_MAX_CELLS,
+            "the major cohort caps at the anchor tier size"
+        );
+        assert!(
+            s.last_edit.is_empty(),
+            "a major edit never pollutes the small-edit tier"
+        );
+        // The stride spread: the anchors span the WHOLE fill footprint
+        // (a tail cap would keep one corner strip).
+        let (lo, hi) = (fill[0], *fill.last().unwrap());
+        let amin = s.anchor_edit.iter().map(|e| e.0).min().unwrap();
+        let amax = s.anchor_edit.iter().map(|e| e.0).max().unwrap();
+        assert!(
+            f64::from(amax - amin) >= 0.9 * f64::from(hi - lo),
+            "the stride must spread the anchors across the fill"
+        );
+        // The rescan churn: 100 small background edits (one cell each) —
+        // the anchors survive untouched.
+        for t in 600..700u64 {
+            s.record_edit_cells(t, &[(40_000 + t as u32)]);
+        }
+        assert_eq!(
+            s.anchor_edit.len(),
+            REARM_MAX_CELLS,
+            "small edits cannot evict the anchors"
+        );
+        assert!(
+            s.anchor_edit.iter().all(|e| fill.contains(&e.0)),
+            "the anchor set is still the fill cohort"
+        );
+        assert_eq!(
+            s.last_edit.len(),
+            REARM_MAX_CELLS,
+            "the churn fills the small-edit tier instead"
+        );
+        // The release path refreshes stamps and creates NOTHING.
+        s.refresh_edit_cells(800, &fill);
+        assert!(s.anchor_edit.iter().all(|&(_, t)| t == 800));
+        s.refresh_edit_cells(800, &[65_000]);
+        assert_eq!(
+            s.anchor_edit.len(),
+            REARM_MAX_CELLS,
+            "a foreign refresh must not create an anchor"
+        );
+        // The re-arm material: the anchors win; a relog arm sees the whole
+        // material and the re-dirty batch stays under the hold cap.
+        assert_eq!(s.rearm_material().len(), REARM_MAX_CELLS);
+        assert!(s.rearm_material().len() < EDIT_HOLD_MAX_BATCH as usize);
+        s.arm_relog_rearm(900);
+        assert_eq!(s.rearm_diag(900).0, 2 * REARM_MAX_CELLS);
     }
 
     /// v6.9.10: a fresh edit's cells stream FIRST, ahead of a backlog that
@@ -3491,6 +3674,9 @@ mod tests {
         // The genuine edit delivers once and records its cell.
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled(400)]).to_vec();
         s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 401);
+        // v6.44.0: the edit SOURCE records the cohort (edits.rs's ring
+        // drain); the release path only refreshes stamps.
+        s.record_edit_cells(401, &[128 * 256 + 128]);
         let _: Vec<Spawn> = s.tick_batch(2048, &[settled(401)]).to_vec();
         for t in 402..(401 + EDIT_HOLD_TICKS) {
             let _: Vec<Spawn> = s.tick_batch(2048, &[settled(t)]).to_vec();
@@ -3579,6 +3765,9 @@ mod tests {
         };
         let _: Vec<Spawn> = s.tick_batch(2048, &[view_at(400)]).to_vec();
         s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 401);
+        // v6.44.0: the edit SOURCE records the cohort (edits.rs's ring
+        // drain); the release path only refreshes stamps.
+        s.record_edit_cells(401, &[128 * 256 + 128]);
         let t_rel = 401 + EDIT_HOLD_TICKS;
         let mut released = false;
         for t in 401..=t_rel + 1 {
@@ -3627,6 +3816,9 @@ mod tests {
         };
         let _: Vec<Spawn> = s.tick_batch(2048, &[view_at(400)]).to_vec();
         s.set_cell(128, 128, cell(70, false, [142, 33, 33]), 401);
+        // v6.44.0: the edit SOURCE records the cohort (edits.rs's ring
+        // drain); the release path only refreshes stamps.
+        s.record_edit_cells(401, &[128 * 256 + 128]);
         // March the engine until the episode must be over: 4 beats ×
         // (REBEAT_DELAY + hold + post margin) covers the whole timeline.
         let horizon = 401 + 4 * (REBEAT_DELAY_TICKS + EDIT_HOLD_TICKS + 2) + EDIT_WINDOW_TICKS;
