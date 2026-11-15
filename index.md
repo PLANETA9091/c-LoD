@@ -1,3 +1,3 @@
 # c-LoD visual verdicts
 
-- run 43701843512 (#445) 058e541 2026-11-15T10:54:13Z: 2 FAIL lines in summary
+- run 43703052408 (#447) f49f26c 2026-11-15T11:02:00Z: 1 FAIL lines in summary
