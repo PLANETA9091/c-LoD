@@ -294,6 +294,8 @@ mask_reg = strip(80, 104)
 # v6.48.1 FOG strip [106,130): row0 = group-B payload liveness (full yellow
 # row = dead, lit pixel = alive), row1 = fEnd bucket (24 over 0..320 m).
 fog_reg = strip(106, 130)
+# v6.48.3 HITS2 strip [132,156): the HI-plane strobe-fired cell count.
+hits2_reg = strip(132, 156)
 def bucket_val(reg, gl_row, mode):
     # mode 'direct': 24 buckets over 24 columns -> bucket = lit column
     # mode 'el':     8 buckets drawn as 3-px groups -> bucket = column // 3
@@ -317,7 +319,8 @@ mask = int(round(mask_reg[:, :, 0].max() / 8.0))
 fr0 = fog_reg[7, :, 0]; fg0 = fog_reg[7, :, 1]
 fog_live = "dead" if (fr0 > 240).mean() > 0.8 and (fg0 > 240).mean() > 0.8 else "live"
 fend = bucket_val(fog_reg, 1, 'direct')
-print(f"lens_red={red} lens_black={black} lens_water={water} lens_dark={dark} lens_zero={zero} rot={rot_state} cam_x_b={cxb} cam_z_b={czb} az_b={azb} el_b={elb} fog={fog_live} fog_end_b={fend} strobe_hits={hits} mask_hits={mask}")
+hits_hi = int(round(hits2_reg[:, :, 0].max() / 8.0))
+print(f"lens_red={red} lens_black={black} lens_water={water} lens_dark={dark} lens_zero={zero} rot={rot_state} cam_x_b={cxb} cam_z_b={czb} az_b={azb} el_b={elb} fog={fog_live} fog_end_b={fend} strobe_hits={hits} hits_hi={hits_hi} mask_hits={mask}")
 PYEOF
 }
 

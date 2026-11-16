@@ -112,6 +112,24 @@ vec3 color_lattice(float idxF) {
 // sit 43 deg below the horizon vs the 35-deg half-FOV) — the v6.9.2
 // strobe_hits=0 was blind by construction. The LO plane is the one that
 // carries the marker.
+// v6.48.3: the HI-plane twin — #464 showed paint 18k (the fills working)
+// with strobe_hits=0 and an almost-empty h panel; without a HI counter the
+// lens cannot tell "the LO dots specifically never strobe" (a capture-side
+// c bug) from "NO data dots strobe at all" (the carrier render class — the
+// #244 far-burst cut). The height buffer's flag channel already holds the
+// HI evidence; this counter just reads it.
+int strobe_hits_hi() {
+    int hits = 0;
+    for (int j = 0; j < 32; ++j) {
+        for (int i = 0; i < 32; ++i) {
+            if (texelFetch(HeightSampler, ivec2(j * 8 + 4, i * 8 + 4), 0).g > 0.5) {
+                ++hits;
+            }
+        }
+    }
+    return hits;
+}
+
 int strobe_hits() {
     int hits = 0;
     for (int j = 0; j < 32; ++j) {
@@ -243,6 +261,15 @@ bool stage_eyes(vec2 px, float x0, float ya, float panel) {
             return true;
         }
         fragColor = vec4(vec3(0.0), 1.0);
+        return true;
+    }
+
+    // v6.48.3 HITS2 strip [132,156): the HI-plane strobe-fired cell count
+    // this frame (x8 scale, cap 240) — the h/c strobe split. LO=0 + HI>0
+    // convicts the color-word path; both 0 convict the carrier render.
+    if (col >= 132 && col < 156) {
+        float v = float(min(strobe_hits_hi() * 8, 240)) / 255.0;
+        fragColor = vec4(v, v, 0.0, 1.0);
         return true;
     }
 
