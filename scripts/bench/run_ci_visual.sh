@@ -570,7 +570,7 @@ sum "- GL: ${GLINFO:-unavailable (glxinfo/xvfb-run missing)}"
 # threshold artifacts, not a transport recovery). The engagement evidence
 # lives on the §7b mask8 client only (the parity world, vd 8).
 # v6.37.0 THE FRAC=1 EXPERIMENT: the tower state frames (#381-#386) named the marker COLORLESS with heights decoded — the color words never complete their rows even with the erase-completion fix (v6.35.0) and the persistent vouch (v6.36.0); the green minority grows with dwell (12k -> 22k between rim00 and the re-read) = a PROBABILISTIC completion, dots are being lost and the sparse channel is the only retry — frac=1 (the full /4 divisor, x8 the v6.30.0 pressure) arms the re-beat in leg-1 too so the marker cells re-stream THROUGHOUT the probe window; if the red mass turns green the losses are the mechanism, if it holds the killer is deterministic
-export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=true;sparse_rebeat=true;sparse_rebeat_frac=4;carrier_sink=-0.03;carrier_dust=false;mesh_paint=true;fog_voxy=true;voxy_deltas=true"
+export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=true;sparse_rebeat=true;sparse_rebeat_frac=2;carrier_sink=-0.03;carrier_dust=false;mesh_paint=true;fog_voxy=true;voxy_deltas=true"
 CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" || {
   echo "FAIL: boot/gates"; tail -40 /tmp/server.log; exit 1; }
 sum "- boot + gates OK ($(date -u +%H:%M:%S))"
@@ -1533,13 +1533,13 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   # fallback, q dead-flat through the tour — no feedback channel exists).
   # READ (pre-registered): 07/12 flat_signed +60 -> ~0, exact above 90 =
   # the first views toward 100%; worse -> rollback = drop the flag here.
-  # v6.30.0: sparse_rebeat_frac=4 — the #360 tuning: the /4 divisor priced
+  # v6.30.0: sparse_rebeat_frac=2 — the #360 tuning: the /4 divisor priced
   # −5.1 on view 05 (pool competition on the vanilla-owned platform view);
   # /8 halves the channel pressure, the schedule spread doubles (retries=2
   # stay). READ: 05 recovers toward its 94 #356 level, 06/10 hold ±2, the
   # srbeat diag counters (below, from /clod-pack.info) show whether the
   # undecodable-drop class now dominates the schedule.
-  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;sparse_rebeat=true;sparse_rebeat_frac=4"
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;sparse_rebeat=true;sparse_rebeat_frac=2"
   # v6.44.2 THE DELTA ARM: the parity world boots the evidence-cited shading
   # deltas (water shore gradient + edge haze band, one compile-time define
   # voxy_deltas) — the leg worlds stay on the default pack, the anchor A/B
@@ -2065,7 +2065,7 @@ PYEOF
   # frame is the contrast class (near-band data decodes fully — GREEN).
   # Non-fatal by design (evidence, never the gate's input); runs AFTER the
   # mask8 lane so its own boot/log/forensics stay untouched.
-  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;sparse_rebeat=true;sparse_rebeat_frac=4;rim_mask=true"
+  export CLOD_EXTRA_OPTS="debug_cell_x=${CX};debug_cell_z=${CZ};debug_lens=false;unfog=true;mesh_paint=true;atmosphere=false;sparse_rebeat=true;sparse_rebeat_frac=2;rim_mask=true"
   CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" \
     || note "rimmask: boot_server.sh rc=$? (the rim evidence degrades, the gate unaffected)"
   pkill -f "net.minecraft.client.main.Main" 2>/dev/null || true
