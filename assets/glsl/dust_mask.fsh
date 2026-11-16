@@ -235,6 +235,30 @@ void main() {
         ringLum *= 0.25 / 3.0;
         bool absolute = raw.g > 0.45 && raw.g > raw.r + 0.08 && raw.g > raw.b + 0.08;
         bool relative = (raw.g - raw.b) - ringGB > 0.06 && raw.g > raw.r + 0.02;
+        // v6.55 BLUE-FADED ARM: #477's last frame shows a tall blue column on
+        // the marker zone — measured (64,84,91) shadows through (199,226,245)
+        // highlights, b>g>r throughout. Every existing arm hunts a GREEN
+        // excess, but a fog-diluted carrier flips: the sky bleeds THROUGH the
+        // sprite and blue dominates. The arm is the v6.5 relative gate with
+        // the sign flipped onto blue: (b-g) excess over the ring's own (b-g)
+        // — a smooth sky gradient carries no local contrast (its (b-g) equals
+        // the ring's), a carrier disc does (the #319-era self-repair argument
+        // holds: a false positive repaints a texel from its own surroundings).
+        // The g > r + 0.02 tail keeps a green remnant requirement so pure sky
+        // and pure shadow can never fire it.
+        float ringBG = 0.0;
+        for (int d = 0; d < 4; ++d) {
+            ivec2 o = d == 0 ? ivec2(3, 3)
+                    : d == 1 ? ivec2(-3, 3)
+                    : d == 2 ? ivec2(3, -3)
+                    : ivec2(-3, -3);
+            ivec2 q = clamp(basePx + o, ivec2(0), ivec2(scrPx) - 1);
+            vec3 s2 = texelFetch(InSampler, q, 0).rgb;
+            ringBG += s2.b - s2.g;
+        }
+        ringBG *= 0.25;
+        bool blueFaded = (raw.b - raw.g) - ringBG > 0.04
+            && raw.b > raw.g && raw.g > raw.r + 0.02;
         // v6.25 MIRROR NET ARM: the canopy-shadowed carrier is NEUTRAL DARK
         // (measured (35,38,42), 100% inside |g-b| <= 0.08 && |g-r| <= 0.08,
         // lum 0.15 vs ring 0.41 on the #319 mask8 10m frame) — the hue nets
@@ -249,7 +273,7 @@ void main() {
         bool mirror = (ringLum - lum) > 0.06
             && abs(raw.g - raw.b) <= 0.08
             && abs(raw.g - raw.r) <= 0.08;
-        if (absolute || relative || mirror) {
+        if (absolute || relative || mirror || blueFaded) {
             marked = 1.0;
             radius = bandOK ? 3.0 : 2.0;
         }
