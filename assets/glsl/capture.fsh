@@ -443,17 +443,21 @@ void main() {
         // committed byte's rank is the noise defense the fresh check used to
         // be). The never-committed cell waits for a complete frame — the
         // bootstrap survives, the accumulation resumes.
-        vec4 prevEarly = texelFetch(PrevSampler, px, 0);
-        bool prevMarked = prevEarly.a >= 0.5;
+        // v6.51 THE GATE REPEAL: v6.50 trusted completeness, but #472 shows
+        // the bootstrap is still dead — a never-committed cell needs a
+        // complete-word frame to start, and all four dots strobing in one
+        // frame almost never happens (hits_hi plateaued at 3-8, the lens
+        // panels stayed dark, commits stayed 0 while strobe_hits saturated
+        // at 30). The rank-consistency check was a relic of the 8-bit rot
+        // era, when dots landed at imprecise world positions and cross-tier
+        // mixing was real; the 16-bit rot (v6.48.0) killed that noise class
+        // at the source, and the eraser + the edit-reset plane still clean
+        // bad cells. The height path now accepts ANY strobe: the OR-merge
+        // ratchets partial bits in frame over frame, a complete word
+        // replaces wholesale. #472 is the portrait of the gate strangling
+        // the pipeline it was built to protect.
         if (hiPass) {
-            // encode_words: height byte = (surface + 64).clamp(0, 255) —
-            // cells above the byte ceiling were never encodable; their
-            // decoded rank reads 2 and their rank-3 spawn is rejected
-            // (they stay void — the honest outcome for unknowable data).
-            honest = all
-                ? surface_rank(float(w >> 8) - 64.0) == r
-                : prevMarked &&
-                      surface_rank(prevEarly.r * 255.0 - 64.0) == r;
+            honest = true;
         } else {
             // The color word carries no surface: cross-check against the
             // height pair. v6.36.0: the FRESH HI word of this frame dies to
@@ -473,12 +477,11 @@ void main() {
             if (hpx.a < 0.5) {
                 hpx = texelFetch(HeightPersistSampler, px, 0);
             }
-            // A complete color word is self-evident (all four slots strobed
-            // under the 16-bit rot — the projection noise that motivated the
-            // gate died with v6.48.0); a partial one still needs the height
-            // vouch for its rank.
-            honest = all || (hpx.a >= 0.5 &&
-                             surface_rank(hpx.r * 255.0 - 64.0) == r);
+            // The color word rides the height truth of its own cell: the
+            // fresh HI word of THIS frame (the c pass runs after the h
+            // capture) or the persistent half. Presence only — the rank
+            // cross-check died with the 8-bit rot (see above).
+            honest = hpx.a >= 0.5;
         }
         if (!honest) {
             continue;
