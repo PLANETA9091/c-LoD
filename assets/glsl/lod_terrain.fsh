@@ -45,6 +45,8 @@
 // everywhere it holds data. Where vanilla is genuinely closer, vanilla keeps
 // the pixel. mesh_paint=false keeps the pre-G8d behavior byte-for-byte.
 
+__PALETTE_DECL__
+
 uniform sampler2D InSampler;      // minecraft:main color
 uniform sampler2D InDepthSampler; // minecraft:main depth
 uniform sampler2D HeightSampler;  // clod_h_b — streamed height bytes (1 px = 1 cell)
@@ -354,8 +356,7 @@ vec3 color_at(ivec2 celli, float w, float w2, out bool water, out bool colorless
             if (iq > 215.5) {
                 continue; // water: not a spreadable land color
             }
-            vec3 lq = vec3(mod(iq, 6.0), mod(floor(iq / 6.0), 6.0), floor(iq / 36.0));
-            fsum += lq * (51.0 / 255.0);
+            fsum += CLOD_PALETTE[int(iq)]; // v6.49 real-palette lookup
             fcnt += 1.0;
         }
         if (fcnt < 0.5) {
@@ -369,8 +370,10 @@ vec3 color_at(ivec2 celli, float w, float w2, out bool water, out bool colorless
     if (water) {
         return vec3(-1.0);
     }
-    vec3 lattice = vec3(mod(idx, 6.0), mod(floor(idx / 6.0), 6.0), floor(idx / 36.0));
-    vec3 rgb = lattice * (51.0 / 255.0);
+    // v6.49 THE REAL PALETTE: the server indexes palette::PALETTE (the exact
+    // baked colors), the march looks the same table up — the round trip is
+    // pixel-exact instead of the 6x6x6 lattice's 51-step snap (the soap).
+    vec3 rgb = CLOD_PALETTE[int(idx)];
     if (w <= 0.0) {
         return rgb;
     }
@@ -394,8 +397,7 @@ vec3 color_at(ivec2 celli, float w, float w2, out bool water, out bool colorless
             wc += 1.0;
             continue;
         }
-        vec3 lq = vec3(mod(iq, 6.0), mod(floor(iq / 6.0), 6.0), floor(iq / 36.0));
-        sum += lq * (51.0 / 255.0);
+        sum += CLOD_PALETTE[int(iq)]; // v6.49 real-palette lookup
         cnt += 1.0;
     }
     if (wc > (cnt + wc) * 0.5) {
@@ -425,8 +427,7 @@ vec3 color_at(ivec2 celli, float w, float w2, out bool water, out bool colorless
             w2c += 1.0;
             continue;
         }
-        vec3 lq = vec3(mod(iq, 6.0), mod(floor(iq / 6.0), 6.0), floor(iq / 36.0));
-        s2 += lq * (51.0 / 255.0);
+        s2 += CLOD_PALETTE[int(iq)]; // v6.49 real-palette lookup
         c2 += 1.0;
     }
     if (w2c > c2 * 0.5) {

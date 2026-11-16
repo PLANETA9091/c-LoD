@@ -48,6 +48,25 @@ fn vec4(v: [f32; 4]) -> String {
 /// trims to "80" (the v6.19.3 lesson), and the pack assert greps the
 /// one-decimal ladder verbatim; both forms are valid JSON numbers, the
 /// .1 format just keeps the ladder self-describing.
+// v6.49: the 216-entry color table as a GLSL const declaration (0..1
+// floats). Dead pad rows decode to black, but no real color ever indexes
+// them (the server emits only table colors; the argmin keeps foreign
+// colors on live entries).
+fn palette_glsl() -> String {
+    let mut s = String::from("const vec3 CLOD_PALETTE[216] = vec3[216](\n");
+    for (i, c) in crate::palette::PALETTE.iter().enumerate() {
+        s.push_str(&format!(
+            "    vec3({:.6}, {:.6}, {:.6}){}\n",
+            f64::from(c[0]) / 255.0,
+            f64::from(c[1]) / 255.0,
+            f64::from(c[2]) / 255.0,
+            if i + 1 < 216 { "," } else { "" }
+        ));
+    }
+    s.push_str(");\n");
+    s
+}
+
 fn tiers_vec(v: [f64; 4]) -> String {
     v.iter()
         .map(|&y| format!("{y:.1}"))
@@ -176,6 +195,11 @@ pub fn build(cfg: &Config) -> Pack {
         // (StreamInfo.z, legacy mode-2 lane), per-cell resets ride the
         // ClodTiers ladder the capture walks instead.
         ("__RESET_Y__", fmt_f(crate::stream::RS_TIERS[0] as f32)),
+        // v6.49 THE REAL PALETTE: the march's color decode becomes a lookup
+        // of the same 216-entry table the server indexes (the exact round
+        // trip, no more bin*51 snap). Baked as a GLSL const into every
+        // shader that decodes a color word.
+        ("__PALETTE_DECL__", palette_glsl()),
     ];
 
     // v6.7 lens window: 64x64 cells around the debug window center (the
@@ -314,6 +338,11 @@ fn build_zip(
     } else {
         lod_terrain
     };
+    // v6.49 THE REAL PALETTE: the shader templates carry __PALETTE_DECL__ —
+    // the fsh files otherwise ship verbatim and a leaked token would fail
+    // the client's shader compile. The same table the server indexes, baked
+    // as a GLSL const.
+    let lod_terrain = lod_terrain.replace("__PALETTE_DECL__", &palette_glsl());
     let clod_blit = include_str!("../assets/glsl/clod_blit.fsh");
     let atmosphere = include_str!("../assets/glsl/atmosphere.fsh");
     // v6.18: the un-fog shader ships in EVERY unfog variant; unfog_debug
@@ -329,7 +358,10 @@ fn build_zip(
     };
     // v6.7: the capture lens ships ONLY in the debug pack.
     let debug_lens_fsh = if debug_lens {
-        Some(include_str!("../assets/glsl/debug_lens.fsh"))
+        Some(
+            include_str!("../assets/glsl/debug_lens.fsh")
+                .replace("__PALETTE_DECL__", &palette_glsl()),
+        )
     } else {
         None
     };
@@ -470,6 +502,10 @@ mod tests {
         assert!(
             blob.contains("80.0, 140.0, 173.0, 193.0"),
             "the tier ladder must ride the pack (ClodTiers UBO) — v6.48.2 tier-3 fix"
+        );
+        assert!(
+            blob.contains("CLOD_PALETTE[216]") && !blob.contains("__PALETTE_DECL__"),
+            "the real-palette table must ride the pack — v6.49 exact color round trip"
         );
         assert!(blob.contains("clod_h_b"), "stream targets must be present");
     }

@@ -295,15 +295,15 @@ pub struct Cell {
 }
 
 impl Cell {
-    /// The 8-bit color index (6x6x6 RGB lattice, water=216).
+    /// The 8-bit color index. v6.49: the nearest REAL-PALETTE entry
+    /// (palette::PALETTE — the exact round trip for every surface_color
+    /// output) instead of the 6x6x6 lattice bin, whose bin*51 decode snapped
+    /// every cell up to 25 per channel off the baked color. water=216.
     pub fn color_index(&self) -> u16 {
         if self.water {
             return COLOR_WATER;
         }
-        let r = (self.rgb[0] / 51).min(5) as u16;
-        let g = (self.rgb[1] / 51).min(5) as u16;
-        let b = (self.rgb[2] / 51).min(5) as u16;
-        r + g * 6 + b * 36
+        crate::palette::palette_index(self.rgb)
     }
 }
 
@@ -2072,15 +2072,31 @@ mod tests {
     }
 
     #[test]
-    fn color_index_lattice_and_water() {
-        let c = cell(70, false, [0, 0, 0]);
-        assert_eq!(c.color_index(), 0);
-        let c = cell(70, false, [255, 255, 255]);
-        assert_eq!(c.color_index(), 5 + 5 * 6 + 5 * 36);
-        let c = cell(70, false, [127, 178, 56]);
-        assert_eq!(c.color_index(), 2 + 3 * 6 + 36);
+    fn color_index_palette_round_trip_is_exact() {
+        // v6.49: every live palette entry must survive the wire round trip
+        // pixel-exactly — the index names the entry, the march looks the
+        // same table up. The 6x6x6 lattice snapped each channel to the bin
+        // corner (up to 25 off the baked color — the soap).
+        let mut live = 0usize;
+        for (i, rgb) in crate::palette::PALETTE.iter().enumerate() {
+            let c = cell(70, false, *rgb);
+            let idx = c.color_index();
+            assert!(
+                (idx as usize) < crate::palette::PALETTE.len(),
+                "index {idx} out of the table"
+            );
+            assert_eq!(
+                crate::palette::PALETTE[idx as usize],
+                *rgb,
+                "palette entry {i} does not round trip"
+            );
+            if *rgb != [0, 0, 0] || i == 0 {
+                live += 1;
+            }
+        }
+        assert!(live >= 80, "the palette table lost entries: {live}");
         let c = cell(70, true, [10, 20, 30]);
-        assert_eq!(c.color_index(), COLOR_WATER);
+        assert_eq!(c.color_index(), COLOR_WATER, "water stays the sentinel");
     }
 
     #[test]
@@ -2164,9 +2180,10 @@ mod tests {
     #[test]
     fn sparse_rebeat_schedules_fires_and_drops() {
         let mut s = Streamer::new(0.0, 0.0, 64, 4);
-        // rgb (30,150,30) -> bins (0,2,0) -> color index 12 -> cword 0x0C00
-        // = ONE non-zero slot pair = the fragile class.
-        s.set_cell(2, 2, cell(70, false, [30, 150, 30]), 0);
+        // v6.49: rgb (92,48,68) is palette[8] exactly (the round trip is
+        // exact), index 8 = slots (0,0,2,0) -> cword 0x0800 = ONE non-zero
+        // slot pair = the fragile class (the old lattice picked index 12).
+        s.set_cell(2, 2, cell(70, false, [92, 48, 68]), 0);
         s.sparse_rebeat_on = true;
         let view = |t: u64| ViewHint {
             eye: [10.0, 100.0, 60.0],
@@ -2181,7 +2198,7 @@ mod tests {
         assert_eq!(s.sparse_rebeat.len(), 1, "the fragile word scheduled");
         assert_eq!(
             s.sparse_rebeat.front().unwrap().3 >> 8,
-            12,
+            8,
             "cword stamp rides (tuple = (idx, at, hword, cword, retries))"
         );
         // Not due yet: nothing re-spawns.

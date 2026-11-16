@@ -59,6 +59,8 @@
 //                        on a 64x36 grid (v6.9.0's 32x18 could miss 2-3px
 //                        discs; the dense carrier column needs this).
 
+__PALETTE_DECL__
+
 uniform sampler2D InSampler;      // clod_swap (v6.8.2: the lens REPLACED the
                                   // blit pass — reading minecraft:main while
                                   // writing minecraft:main was a framebuffer
@@ -93,15 +95,15 @@ layout(std140) uniform ClodLens {
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 
-// The 6x6x6 lattice decode (matches lod_terrain.fsh color_at): idx -> rgb.
-// Water (216) renders as a fixed blue; idx 0 stays black.
+// v6.49: the real-palette decode (the same CLOD_PALETTE the march uses) —
+// the lens panels show the EXACT colors the frame will paint. Water (216)
+// renders as a fixed blue; idx 0 = palette[0].
 vec3 color_lattice(float idxF) {
     int idx = int(floor(idxF + 0.5));
     if (idx > 215) {
         return vec3(70.0, 130.0, 240.0) / 255.0;
     }
-    ivec3 l = ivec3(idx % 6, (idx / 6) % 6, idx / 36);
-    return vec3(l) * (51.0 / 255.0);
+    return CLOD_PALETTE[idx];
 }
 
 // ---- v6.9.2 stage eyes v2 --------------------------------------------------
