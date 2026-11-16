@@ -6,7 +6,7 @@
 
 | vantage | exact % | near % (d<=8) | mean d | max d | verdict |
 |---|---|---|---|---|---|
-| 01_aerial_west | 21.824 | 33.268 | 32.928 | 255 | FAIL |
+| 01_aerial_west | 22.073 | 33.444 | 33.699 | 255 | FAIL |
 | 00_summit_rise | — | — | — | — | FAIL (no ours shot) |
 | 02_aerial_south | — | — | — | — | FAIL (no ours shot) |
 | 03_aerial_north | — | — | — | — | FAIL (no ours shot) |
