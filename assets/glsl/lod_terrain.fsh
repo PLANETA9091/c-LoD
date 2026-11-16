@@ -885,6 +885,18 @@ void main() {
 #endif
     vec3 albedo = colWater ? fallback : (col.r < 0.0 ? fallback : col);
 
+    // v6.52 THE MICRO-NOISE (the owner's 'indistinguishable from chunks'
+    // bar): vanilla chunks are TEXTURED — grass/stone noise breaks the flat
+    // look, the LOD cells were 2 m flat quads and the seam read instantly.
+    // voxy mip-averages its baked textures, which lands between the two; a
+    // deterministic per-cell brightness hash (cell coords, screen-stable —
+    // no flicker under the 16-bit rot) at +-6% approximates that mip grain.
+    // Water stays smooth (the voxy water is flat too).
+    if (!colWater && !isWater) {
+        float nz = fract(sin(dot(vec2(tc), vec2(12.9898, 78.233))) * 43758.5453);
+        albedo *= 0.94 + 0.12 * nz;
+    }
+
     // v6.21.1 THE VANILLA-PATH COLOR GATE: the height-only cells (no color
     // word — the §7b mid-band 80..120 m whose color dots sit inside the
     // terrain) may own SKY pixels, never VANILLA pixels: the G8d depth test
