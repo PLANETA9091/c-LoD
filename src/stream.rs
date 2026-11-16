@@ -147,12 +147,22 @@ pub const SUB_PER_CELL: f64 = 4.0;
 // above the screen top and never decoded — the #460 missing tower tops,
 // red=0 on the marker mountains. The top rank now hugs the surface with
 // the same 2 m pair the rank-2 pair uses (173/175): the capture tells the
-// h/c words apart by plane height, and 193 vs 194.5 is ~19 px apart at
-// 83 m — well within the probe's own plane targeting. HI hugs the gate's
-// 194.9 screen-top assert with margin to spare.
+// h/c words apart by plane height; the 0.5 m pair is ~8 px apart at 73 m —
+// well within the probe's own plane targeting.
+// v6.48.4 THE SCREEN-TOP RECOMPUTE: 194.5 was checked against the 75-m
+// reference (the gate assert's own distance) but the tall band spans
+// 66..82 m — at the marker's real 73.4 m the 194.5 plane sits 38.6 degrees
+// above the screen center vs the 35-degree half-FOV: the HI dots were
+// still OFF-SCREEN (4 px past the top edge), the height words never
+// committed, and the v6.36 rank cross-check rejected every color word in
+// their shadow — red=0 again. The physics: a plane must clear the 190
+// surface by TIER_MARGIN (>= 192) AND sit under 151.62 + 0.577*d for the
+// cell's own distance d — the window is non-empty only from d >= 70.9 m
+// (the marker at 73.4 m qualifies). HI hugs the floor of that window:
+// 192.5, with LO 193 and the reset electron 192.75 between them.
 pub const LO_TIERS: [f64; 4] = [80.0, 140.0, 173.0, 193.0];
-pub const HI_TIERS: [f64; 4] = [120.0, 180.0, 175.0, 194.5];
-pub const RS_TIERS: [f64; 4] = [100.0, 160.0, 174.0, 194.0];
+pub const HI_TIERS: [f64; 4] = [120.0, 180.0, 175.0, 192.5];
+pub const RS_TIERS: [f64; 4] = [100.0, 160.0, 174.0, 192.75];
 /// The intra-cell step guard: a word's 4 dots spread +-0.75 blocks around
 /// the sampled surface point (sub = cell/4, cell = 2) while ONE sampled
 /// height stands for the whole cell — a dot at or below ANY nearby column
