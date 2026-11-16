@@ -139,9 +139,20 @@ pub const SUB_PER_CELL: f64 = 4.0;
 /// capture walks the three ladders independently and the words still
 /// never share a plane. §5b/§7b spawn bytes: rank 0/1/3 untouched, and
 /// those worlds hold NO rank-2 cells — only the marker class changes.
-pub const LO_TIERS: [f64; 4] = [80.0, 140.0, 173.0, 200.0];
-pub const HI_TIERS: [f64; 4] = [120.0, 180.0, 175.0, 240.0];
-pub const RS_TIERS: [f64; 4] = [100.0, 160.0, 174.0, 220.0];
+// v6.48.2 TIER-3 GEOMETRY FIX: the top rank's planes used to ride 200/240,
+// but the bench eye sits at 151.6 with pitch 5 down and a 70-degree FOV —
+// the screen top is only ~30 degrees above the horizontal, and the 200
+// plane is 30.9..36.3 degrees up at the 66..82 m band while 240 is 61+:
+// every tall cell's words (172..190 surface) were spawned unreachably
+// above the screen top and never decoded — the #460 missing tower tops,
+// red=0 on the marker mountains. The top rank now hugs the surface with
+// the same 2 m pair the rank-2 pair uses (173/175): the capture tells the
+// h/c words apart by plane height, and 193 vs 194.5 is ~19 px apart at
+// 83 m — well within the probe's own plane targeting. HI hugs the gate's
+// 194.9 screen-top assert with margin to spare.
+pub const LO_TIERS: [f64; 4] = [80.0, 140.0, 173.0, 193.0];
+pub const HI_TIERS: [f64; 4] = [120.0, 180.0, 175.0, 194.5];
+pub const RS_TIERS: [f64; 4] = [100.0, 160.0, 174.0, 194.0];
 /// The intra-cell step guard: a word's 4 dots spread +-0.75 blocks around
 /// the sampled surface point (sub = cell/4, cell = 2) while ONE sampled
 /// height stands for the whole cell — a dot at or below ANY nearby column
@@ -2547,6 +2558,57 @@ mod tests {
         }
         // the words never share a plane (one cell's words are told apart by
         // plane height).
+        assert_ne!(LO_TIERS[rank], HI_TIERS[rank]);
+        assert_ne!(LO_TIERS[rank], RS_TIERS[rank]);
+        assert_ne!(HI_TIERS[rank], RS_TIERS[rank]);
+    }
+
+    #[test]
+    fn tall_marker_rank_keeps_all_three_words_inside_the_decode_band() {
+        // v6.48.2: the #460 hole — this gate only ever exercised rank 2
+        // (tier_rank(170)), so the top rank rode 200/240 above the FOV-70
+        // screen top for a year: every 172..190 cell's words spawned
+        // undecodable and the marker mountains painted red=0. The tall
+        // marker cells (tops 185/190) must pass the same assertions.
+        assert_eq!(tier_rank(185), 3, "the tall marker surface rides rank 3");
+        assert_eq!(tier_rank(190), 3, "the top surface stays rank 3");
+        let rank = tier_rank(185);
+        let (ex, ey, ez) = (-1004.5, 151.62, 796.5);
+        let cells = [
+            (-934.0, 776.0),
+            (-932.0, 812.0),
+            (-935.0, 777.0),
+            (-931.0, 811.0),
+        ];
+        for (name, plane) in [
+            ("LO", LO_TIERS[rank]),
+            ("HI", HI_TIERS[rank]),
+            ("RS", RS_TIERS[rank]),
+        ] {
+            assert!(
+                plane > 190.0 + TIER_MARGIN,
+                "{name} plane {plane} must clear the tall surface"
+            );
+            assert!(
+                plane <= ey + 75.0 * (30.0_f64).to_radians().tan(),
+                "{name} plane {plane} is above the FOV-70 screen top — spawned but never decodable"
+            );
+            let worst = cells
+                .iter()
+                .map(|&(cx, cz)| {
+                    ((cx - ex) * (cx - ex) + (plane - ey) * (plane - ey) + (cz - ez) * (cz - ez))
+                        .sqrt()
+                })
+                .fold(0.0_f64, f64::max);
+            assert!(
+                worst <= ZONE_FAR - 2.0,
+                "{name} plane {plane} at {worst} m exceeds the rank-probe band"
+            );
+            assert!(
+                worst >= CULL_RADIUS,
+                "{name} plane {plane} at {worst} m sits inside the cull bubble"
+            );
+        }
         assert_ne!(LO_TIERS[rank], HI_TIERS[rank]);
         assert_ne!(LO_TIERS[rank], RS_TIERS[rank]);
         assert_ne!(HI_TIERS[rank], RS_TIERS[rank]);
