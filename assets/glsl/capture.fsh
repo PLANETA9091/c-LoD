@@ -429,12 +429,31 @@ void main() {
             continue;
         }
         bool honest;
+        // v6.50 THE PARTIAL-WRITE UNLOCK (#465 forensics): the rank check ran
+        // on the FRESH probe bytes — a single missed dot zeroes its 2-bit
+        // pair, the reconstructed height lies, the rank mismatches and the
+        // write dies BEFORE the OR-merge ever sees it. #465's counters: 4 HI
+        // strobe fires per frame, ZERO h commits, ZERO c commits — the
+        // partial strobes were real, the gate ate every one of them; the
+        // complete-word capture (all four dots strobing in one frame) is the
+        // only path that ever passed, and it almost never happens. The gate
+        // now trusts the word's OWN completeness: a complete fresh word
+        // carries all four pairs, its rank check is meaningful; a partial
+        // write only merges ON TOP of a committed word of the same rank (the
+        // committed byte's rank is the noise defense the fresh check used to
+        // be). The never-committed cell waits for a complete frame — the
+        // bootstrap survives, the accumulation resumes.
+        vec4 prevEarly = texelFetch(PrevSampler, px, 0);
+        bool prevMarked = prevEarly.a >= 0.5;
         if (hiPass) {
             // encode_words: height byte = (surface + 64).clamp(0, 255) —
             // cells above the byte ceiling were never encodable; their
             // decoded rank reads 2 and their rank-3 spawn is rejected
             // (they stay void — the honest outcome for unknowable data).
-            honest = surface_rank(float(w >> 8) - 64.0) == r;
+            honest = all
+                ? surface_rank(float(w >> 8) - 64.0) == r
+                : prevMarked &&
+                      surface_rank(prevEarly.r * 255.0 - 64.0) == r;
         } else {
             // The color word carries no surface: cross-check against the
             // height pair. v6.36.0: the FRESH HI word of this frame dies to
@@ -454,7 +473,12 @@ void main() {
             if (hpx.a < 0.5) {
                 hpx = texelFetch(HeightPersistSampler, px, 0);
             }
-            honest = hpx.a >= 0.5 && surface_rank(hpx.r * 255.0 - 64.0) == r;
+            // A complete color word is self-evident (all four slots strobed
+            // under the 16-bit rot — the projection noise that motivated the
+            // gate died with v6.48.0); a partial one still needs the height
+            // vouch for its rank.
+            honest = all || (hpx.a >= 0.5 &&
+                             surface_rank(hpx.r * 255.0 - 64.0) == r);
         }
         if (!honest) {
             continue;
