@@ -99,12 +99,12 @@ void main() {
             for (int i = 2; i < 8; ++i) {
                 a[i - 2] = texelFetch(InSampler, ivec2(base + i, best), 0).a * 255.0;
             }
-            float azq = a[0] * 256.0 + a[1];
-            float elq = a[2] * 256.0 + a[3];
-            float fovq = a[4];
-            float az = azq / 65535.0 * 6.28318530718;
-            float el = elq / 65535.0 * PI - PI * 0.5;
-            rot = vec4(az / 6.28318530718, (el + PI * 0.5) / PI, 1.0, fovq / 254.0);
+            // v6.48.0: R/G carry the EXACT high bytes of the 16-bit az/el
+            // frames (a[0]=azh, a[2]=elh straight from the strip — no float
+            // roundtrip): RGBA8 used to truncate az to 1.4-degree steps and
+            // the capture's projections flickered +-7 px at 70 m. The low
+            // bytes ride pixel (2,0) below; capture.fsh rebuilds the frames.
+            rot = vec4(a[0] / 255.0, a[2] / 255.0, 1.0, a[4] / 254.0);
         }
         fragColor = rot;
     } else if (px == ivec2(1, 0)) {
@@ -152,6 +152,23 @@ void main() {
             fragColor = vec4(t / 24000.0, 1.0, 0.0, 1.0);
         } else {
             fragColor = vec4(prev.r, prev.g, 0.0, 1.0);
+        }
+    } else if (px == ivec2(2, 0)) {
+        // v6.48.0 AZ/EL LOW BYTES: the wide target's extra pixel carries the
+        // low bytes of the 16-bit az/el frames (strip k3=azl, k5=ell); with
+        // the camera pixel's exact high bytes the capture rebuilds the full
+        // frames — the projected dot positions stop flickering and the
+        // strobe cross lands on the dots deterministically.
+        vec4 prev = texelFetch(PrevSampler, ivec2(2, 0), 0);
+        float strip;
+        int best = best_row(0, strip);
+        if (best >= 0) {
+            int base = strip_base(strip);
+            float azl = texelFetch(InSampler, ivec2(base + 3, best), 0).a * 255.0;
+            float ell = texelFetch(InSampler, ivec2(base + 5, best), 0).a * 255.0;
+            fragColor = vec4(azl / 255.0, ell / 255.0, 0.0, 1.0);
+        } else {
+            fragColor = prev;
         }
     } else {
         fragColor = vec4(0.0);

@@ -124,8 +124,16 @@ void probe_word(vec2 cellWorld, float planeY, float sub, float depthNear, out ui
     allSlots = true;
 
     vec4 rotP = texelFetch(RotSampler, ivec2(0, 0), 0);
-    float az = rotP.r * 2.0 * PI;
-    float el = rotP.g * PI - PI * 0.5;
+    // v6.48.0 16-BIT AZ/EL: the camera pixel holds the exact high bytes and
+    // pixel (2,0) the low bytes of the sky's 16-bit frames; the RGBA8-only
+    // basis (1.4-degree az steps) flickered the projected dot positions
+    // +-7 px at 70 m — beyond the +-0.75 px strobe cross — and the decode
+    // degraded to a probabilistic completion (the #459 narrow towers).
+    vec4 lo = texelFetch(RotSampler, ivec2(2, 0), 0);
+    float az = (floor(rotP.r * 255.0 + 0.5) * 256.0 + floor(lo.r * 255.0 + 0.5))
+        / 65535.0 * 2.0 * PI;
+    float el = (floor(rotP.g * 255.0 + 0.5) * 256.0 + floor(lo.g * 255.0 + 0.5))
+        / 65535.0 * PI - PI * 0.5;
     float fov = 5.0 + rotP.a * 115.0;
 
     vec3 F = vec3(cos(el) * cos(az), sin(el), cos(el) * sin(az));
