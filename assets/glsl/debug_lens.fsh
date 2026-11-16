@@ -216,6 +216,36 @@ bool stage_eyes(vec2 px, float x0, float ya, float panel) {
         return true;
     }
 
+    // v6.48.1 FOG strip [106,130): row0 = group-B payload liveness (a lit
+    // green pixel at column 0 = fogLive; the FULL row yellow = the fog
+    // payload never decoded and the capture runs on defaults), row1 =
+    // fEnd bucket (24 buckets over 0..320 m). #460's 60-m far cut has two
+    // candidate mechanisms — a dead fog payload (the un-fog defaults
+    // fStart=96/fEnd=320 dwarf the real RD=8 fog, so far dots cannot pass
+    // the hue arms) vs the vanilla particle cull/fog at ~64 m — and the
+    // lens could not tell them apart. This strip can.
+    if (col >= 106 && col < 130) {
+        vec4 fogCol = texelFetch(RotSampler, ivec2(1, 0), 0);
+        vec4 fogRng = texelFetch(RotSampler, ivec2(0, 1), 0);
+        bool live = fogRng.a > 0.5 && fogCol.a > 0.004;
+        if (row == 0) {
+            if (!live) {
+                fragColor = vec4(1.0, 1.0, 0.0, 1.0); // full yellow row = dead
+            } else {
+                fragColor = vec4((col == 106) ? lit : vec3(0.0), 1.0);
+            }
+            return true;
+        }
+        if (row == 1) {
+            float fEnd = live ? fogRng.g * 255.0 * 8.0 : 320.0;
+            int b = int(clamp(fEnd / 320.0, 0.0, 0.999) * 24.0);
+            fragColor = vec4((col - 106 == b) ? lit : vec3(0.0), 1.0);
+            return true;
+        }
+        fragColor = vec4(vec3(0.0), 1.0);
+        return true;
+    }
+
     return false;
 }
 

@@ -153,8 +153,12 @@ void probe_word(vec2 cellWorld, float planeY, float sub, float depthNear, out ui
     vec4 fogCol = texelFetch(RotSampler, ivec2(1, 0), 0);
     vec4 fogRng = texelFetch(RotSampler, ivec2(0, 1), 0);
     bool fogLive = fogRng.a > 0.5 && fogCol.a > 0.004;
-    float fStart = fogLive ? fogRng.r * 255.0 * 8.0 : 96.0;
-    float fEnd = fogLive ? fogRng.g * 255.0 * 8.0 : 320.0;
+    // v6.48.1: the dead-payload defaults now match the bench client (RD=8):
+    // 96/320 dwarfed the real RD=8 environmental fog (~64..128), so with a
+    // dead group B the un-fog was a no-op until 96 m and the hue arms
+    // failed on every dot beyond ~60 m (the #460 far cut).
+    float fStart = fogLive ? fogRng.r * 255.0 * 8.0 : 64.0;
+    float fEnd = fogLive ? fogRng.g * 255.0 * 8.0 : 128.0;
     float vanRD = fogRng.b * 255.0 * 16.0;
     vec3 fogTint = fogLive ? fogCol.rgb : vec3(0.75, 0.85, 1.0);
     float fogOpacity = fogLive ? fogCol.a : 1.0;
