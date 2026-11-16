@@ -1265,7 +1265,7 @@ done
 note "client rejoined (leg 2)"
 sum "- joined session 2 ($(date -u +%H:%M:%S))"
 sleep 5
-accept_pack_prompt leg2 30
+accept_pack_prompt leg2 60
 # v6.4.6: both 2026-10-31 sessions died 2-19 s after the pack push — the
 # rejoin leg must not probe a menu, say it loudly and stop here.
 assert_online "after leg-2 pack accept" || exit 1
@@ -1274,7 +1274,13 @@ assert_online "15 s after leg-2 pack accept" || exit 1
 srv "time set noon"  # v6.4.8: was 'time set 6000' — night in the 26.3 scale
 srv "gamemode spectator Stepan"
 srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"
-sleep 30   # fresh session: the dust must re-deliver the persisted disk
+# v6.49.2 RELOG COMPILE SETTLE: the fresh client recompiles the whole post
+# chain under llvmpipe (~60 s measured on the 26.3 software rasterizer) —
+# the 30 s settle probed the middle of the compile: the baseline caught 143
+# stray scene px and every later probe read 0 (the #241-#247
+# 'fresh-session chain never commits' class). 75 s covers the compile plus
+# the first dust re-delivery lap.
+sleep 75   # fresh session: chain recompile + the dust re-delivery lap
 # v6.10.0: the leg-2 BASELINE shot — everything the leg-2 rulers count is
 # CHANGED pixels against this frame, so the lens-panel column and the sky
 # gradient cannot masquerade as burst/marker content (the v6.9.14 green
