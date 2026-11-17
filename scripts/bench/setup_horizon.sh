@@ -36,6 +36,10 @@ VJAR="$VJ/versions/26.3/26.3.jar"
 [ -f "$PJAR" ] || { echo "FAIL: paper.jar missing at $PJAR (fetch step must run first)"; exit 1; }
 
 echo "- horizon: prepare (import client.jar + assets + libraries, verify vs research-lock)" >&2
+# research-lock.json sits in the checkout root; horizon-prepare searches
+# beside the program or ABOVE THE CWD (#489: run from ~/horizon-test it
+# died on "no research-lock.json ... pass --root") — run from $SRC.
+cd "$SRC"
 cargo run --profile fast --manifest-path "$SRC/Cargo.toml" -p horizon-prepare -- \
   --prepare \
   --client-jar "$VJAR" \
