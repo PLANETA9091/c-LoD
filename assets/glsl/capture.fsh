@@ -242,12 +242,29 @@ void probe_word(vec2 cellWorld, float planeY, float sub, float depthNear, out ui
             float zScene = depthNear / max(texture(InDepthSampler, sc).r, 1.0e-6);
             float fog = clamp(z * invEndFogDelta + startDelta, 0.0, maxFog) * fogOpacity;
             bool dust = false;
-            for (int t = 0; t < 5; ++t) {
+            // v6.56 THE UP-RISE ARM: the happy_villager carrier RISES with
+            // age (v6.40.4), so a dot born on the LO plane (the marker
+            // cells ride LO_TIERS[2] = 173) drifts UP out of the 0.75-px
+            // strobe cross within a second and only re-enters a strobe
+            // band when it reaches the next plane (HI 180) — the measured
+            // LO/HI strobe split (LO 2-5/frame vs HI 9-11 across
+            // #473-#481) is the rise, not a spawn deficit. The arm adds
+            // two UPWARD taps (+4 / +8 texels): the ray still crossed the
+            // cell's LO plane, so the word attribution is exact; the hue
+            // gates below are unchanged, and a fresh dot rises <= 1-2
+            // blocks (~8 px at 75 m) inside its first bright second — the
+            // arm catches exactly that window. 8 px up at a cell edge can
+            // graze a neighbor's dot: the OR-merge unions identical words
+            // and the ring-delta gates still bound every tap, so the
+            // worst case is a harmless double decode.
+            for (int t = 0; t < 7; ++t) {
                 vec2 off = t == 0 ? vec2(0.0)
                     : t == 1 ? vec2(0.75 * texel.x, 0.0)
                     : t == 2 ? vec2(-0.75 * texel.x, 0.0)
                     : t == 3 ? vec2(0.0, 0.75 * texel.y)
-                    : vec2(0.0, -0.75 * texel.y);
+                    : t == 4 ? vec2(0.0, -0.75 * texel.y)
+                    : t == 5 ? vec2(0.0, 4.0 * texel.y)
+                    : vec2(0.0, 8.0 * texel.y);
                 vec3 raw = texture(InSampler, sc + off).rgb;
                 vec3 pc = (raw - fogTint * fog) / max(1.0 - fog, 0.15);
                 // v6.5 two arms: the v5.3.1 absolute hue test on the

@@ -275,7 +275,15 @@ void main() {
             && abs(raw.g - raw.r) <= 0.08;
         if (absolute || relative || mirror || blueFaded) {
             marked = 1.0;
-            radius = bandOK ? 3.0 : 2.0;
+            // v6.56 THE GROWN-DOT RADIUS: #480 kept the blue column alive
+            // through the v6.55 blue-faded arm — the arm FIRES on the disc
+            // core but the mask disc is 2-3 px while the fog-diluted sprite
+            // renders 10-20 px (the happy_villager carrier grows with age,
+            // v6.40.4) — the rings around the core survive every frame. A
+            // 10 px in-band disc (4 px out-of-band) covers the grown sprite;
+            // the repaint is self-repairing from unmasked surroundings
+            // (v5.3.2), so the wider false-positive surface costs nothing.
+            radius = bandOK ? 10.0 : 4.0;
         }
     }
 
