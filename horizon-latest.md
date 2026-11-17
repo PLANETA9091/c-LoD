@@ -1,3 +1,3 @@
-- phase: env apt+pip done (horizon job, 10:15:58)
-- phase: cargo build start (horizon, 10:15:58)
-- phase: cargo build done (horizon, 10:16:04)
+- phase: env apt+pip done (horizon job, 10:36:18)
+- phase: cargo build start (horizon, 10:36:18)
+- phase: cargo build done (horizon, 10:36:23)
