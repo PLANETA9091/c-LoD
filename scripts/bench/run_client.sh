@@ -2,6 +2,14 @@
 # Launch the real vanilla 26.3 client under Xvfb and auto-join the bench server.
 # Usage: run_client.sh   — logs to /tmp/client.log, DISPLAY :99 (1280x720)
 set -euo pipefail
+
+# v6.57 THE HORIZON BRIDGE: MC_CLIENT=horizon launches the Rust Horizon
+# client (26.3 rewrite) with the same Xvfb/shot/log contract; the default
+# stays vanilla. See run_client_horizon.sh.
+if [ "${MC_CLIENT:-vanilla}" = "horizon" ]; then
+  exec bash "$(cd "$(dirname "$0")" && pwd)/run_client_horizon.sh"
+fi
+
 C="$HOME/mc-test/client"
 JAVA="${CLOD_JAVA:-$HOME/tools/jdk25/bin/java}"
 
