@@ -39,7 +39,17 @@ VJAR="$VJ/versions/26.3/26.3.jar"
 VJSON="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/bench/26.3.json"
 [ -f "$VJSON" ] || { echo "FAIL: version json missing at $VJSON"; exit 1; }
 [ -f "$VJAR" ] || { echo "FAIL: vanilla client.jar missing at $VJAR (setup_client.py must run first)"; exit 1; }
-[ -f "$PJAR" ] || { echo "FAIL: paper.jar missing at $PJAR (fetch step must run first)"; exit 1; }
+# horizon-prepare verifies the server jar against ITS research-lock pin —
+# and that pin is the VANILLA Mojang server (#492: paper's sha1 mismatched,
+# "expected 33680f..., got 1b3287..."). The paper jar stays the bench
+# server; the pin check runs on the manifest's server.jar.
+VSJ="$SRC/vanilla-server.jar"
+VS_SHA=$(python3 -c "import json;print(json.load(open('$VJSON'))['downloads']['server']['sha1'])")
+if [ ! -f "$VSJ" ] || ! echo "$VS_SHA  $VSJ" | sha1sum -c --status 2>/dev/null; then
+  V_URL=$(python3 -c "import json;print(json.load(open('$VJSON'))['downloads']['server']['url'])")
+  curl -sL -o "$VSJ" "$V_URL"
+  echo "$VS_SHA  $VSJ" | sha1sum -c --status || { echo "FAIL: vanilla server.jar sha1 mismatch"; exit 1; }
+fi
 
 echo "- horizon: prepare (import client.jar + assets + libraries, verify vs research-lock)" >&2
 # research-lock.json sits in the checkout root; horizon-prepare searches
@@ -50,7 +60,7 @@ cargo run --profile fast --manifest-path "$SRC/Cargo.toml" -p horizon-prepare --
   --prepare \
   --version-json "$VJSON" \
   --client-jar "$VJAR" \
-  --server-jar "$PJAR" \
+  --server-jar "$VSJ" \
   --assets-dir "$VJ/assets" \
   --libraries-dir "$VJ/libraries"
 
