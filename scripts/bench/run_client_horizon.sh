@@ -47,10 +47,20 @@ export HORIZON_HOME="$H/home"
 mkdir -p "$H/home"
 
 cd "$H"
+# v6.58.2 (#494): prepare writes the prepared content into the CHECKOUT's
+# .local (horizon-src/.local/horizon-client/26.3) while the client searches
+# .local/horizon-client/26.3 relative to ITS cwd (horizon-test) — the client
+# said so itself ("no horizon-resources.json ... or pass --resources <folder>")
+# after the renderer was already alive on lavapipe. Point --resources at the
+# prepare output explicitly.
+HORIZON_RES="${HORIZON_RESOURCES:-$HOME/horizon-src/.local/horizon-client/26.3}"
+[ -f "$HORIZON_RES/horizon-resources.json" ] \
+  || { echo "FAIL: prepared resources missing at $HORIZON_RES (setup_horizon.sh must run first)"; exit 1; }
 # --render-distance 8 mirrors the vanilla options.txt pin (renderDistance:8);
 # --name Stepan pins the offline identity; --server joins directly (title
 # screen is skipped — no ctl dance needed).
 nohup "$HC_BIN" --server 127.0.0.1:25565 --render-distance 8 --name Stepan \
+  --resources "$HORIZON_RES" \
   > /tmp/client.log 2>&1 &
 CLI=$!
 echo "horizon-client pid $CLI (xvfb ok, lavapipe: ${LVP:-none})"
