@@ -1,17 +1,17 @@
-# voxy reference shots — run 44084928442 (#494) 2026-11-17T12:52:28Z
+# voxy reference shots — run 44087716273 (#496) 2026-11-17T13:10:47Z
 
-13 shots in run-44084928442/ (1280 px JPEG).
+13 shots in run-44087716273/ (1280 px JPEG).
 
-- ![00_summit_rise.jpg](run-44084928442/00_summit_rise.jpg)
-- ![01_aerial_west.jpg](run-44084928442/01_aerial_west.jpg)
-- ![02_aerial_south.jpg](run-44084928442/02_aerial_south.jpg)
-- ![03_aerial_north.jpg](run-44084928442/03_aerial_north.jpg)
-- ![04_aerial_east.jpg](run-44084928442/04_aerial_east.jpg)
-- ![05_oblique.jpg](run-44084928442/05_oblique.jpg)
-- ![06_ground_west.jpg](run-44084928442/06_ground_west.jpg)
-- ![07_far_north.jpg](run-44084928442/07_far_north.jpg)
-- ![08_back_inside.jpg](run-44084928442/08_back_inside.jpg)
-- ![09_after_mesh.jpg](run-44084928442/09_after_mesh.jpg)
-- ![10_marker_ray.jpg](run-44084928442/10_marker_ray.jpg)
-- ![11_topdown.jpg](run-44084928442/11_topdown.jpg)
-- ![12_far_north_re.jpg](run-44084928442/12_far_north_re.jpg)
+- ![00_summit_rise.jpg](run-44087716273/00_summit_rise.jpg)
+- ![01_aerial_west.jpg](run-44087716273/01_aerial_west.jpg)
+- ![02_aerial_south.jpg](run-44087716273/02_aerial_south.jpg)
+- ![03_aerial_north.jpg](run-44087716273/03_aerial_north.jpg)
+- ![04_aerial_east.jpg](run-44087716273/04_aerial_east.jpg)
+- ![05_oblique.jpg](run-44087716273/05_oblique.jpg)
+- ![06_ground_west.jpg](run-44087716273/06_ground_west.jpg)
+- ![07_far_north.jpg](run-44087716273/07_far_north.jpg)
+- ![08_back_inside.jpg](run-44087716273/08_back_inside.jpg)
+- ![09_after_mesh.jpg](run-44087716273/09_after_mesh.jpg)
+- ![10_marker_ray.jpg](run-44087716273/10_marker_ray.jpg)
+- ![11_topdown.jpg](run-44087716273/11_topdown.jpg)
+- ![12_far_north_re.jpg](run-44087716273/12_far_north_re.jpg)
