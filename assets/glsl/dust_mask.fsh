@@ -275,15 +275,16 @@ void main() {
             && abs(raw.g - raw.r) <= 0.08;
         if (absolute || relative || mirror || blueFaded) {
             marked = 1.0;
-            // v6.56 THE GROWN-DOT RADIUS: #480 kept the blue column alive
-            // through the v6.55 blue-faded arm — the arm FIRES on the disc
-            // core but the mask disc is 2-3 px while the fog-diluted sprite
-            // renders 10-20 px (the happy_villager carrier grows with age,
-            // v6.40.4) — the rings around the core survive every frame. A
-            // 10 px in-band disc (4 px out-of-band) covers the grown sprite;
-            // the repaint is self-repairing from unmasked surroundings
-            // (v5.3.2), so the wider false-positive surface costs nothing.
-            radius = bandOK ? 10.0 : 4.0;
+            // v6.56b THE SPLIT RADIUS: v6.56's flat 10 px disc erased the
+            // blue column (#483-probe3 confirms it is GONE) but also ate
+            // the LOD paint — paint fell 19639 -> 3264: vanilla grass
+            // (97,119,97) sits ON the absolute arm's margin (g = 0.47 >
+            // 0.45, g > r + 0.08 by 1/255) and every grass pixel then
+            // disc-painted 10 px of terraces back to sky. The grown-dot
+            // radius now applies ONLY to the blue-faded class (the fog-
+            // diluted carrier sprites — the column's own signature); the
+            // calibrated arms keep the v5.3.2 self-repairing 3 px disc.
+            radius = blueFaded ? 10.0 : (bandOK ? 3.0 : 2.0);
         }
     }
 
