@@ -46,6 +46,15 @@ export HORIZON_NO_AUDIO=1
 export HORIZON_HOME="$H/home"
 mkdir -p "$H/home"
 
+# v6.58.3 (#497): the leg-1 baseline drifted 24874 px between frames (vanilla
+# on the same stack: 2 px) — Horizon draws its default cloudRange:128 cloud
+# mass, the same drift class the vanilla lane killed with renderClouds:false
+# (v5.1.1). Pin cloudRange:0. Particles stay at their default: the happy_
+# villager transport needs them ON (the vanilla pin is ALL too).
+OPT="$H/home/options.txt"
+touch "$OPT"; chmod u+w "$OPT"
+grep -q "^cloudRange:" "$OPT" && sed -i 's/^cloudRange:.*/cloudRange:0/' "$OPT" || echo "cloudRange:0" >> "$OPT"
+
 cd "$H"
 # v6.58.2 (#494): prepare writes the prepared content into the CHECKOUT's
 # .local (horizon-src/.local/horizon-client/26.3) while the client searches
