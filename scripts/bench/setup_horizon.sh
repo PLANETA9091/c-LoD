@@ -32,6 +32,12 @@ ls -1 "$SRC/target/fast/" | grep -E "^horizon-(client|ctl)$" || {
   echo "FAIL: horizon bins missing after build"; ls "$SRC/target/fast/" 2>/dev/null; exit 1; }
 
 VJAR="$VJ/versions/26.3/26.3.jar"
+# The committed version manifest: without --version-json horizon-prepare
+# IGNORES --client-jar/--assets-dir/--libraries-dir and demands the official
+# launcher layout in ~/.minecraft (#490: "Missing
+# /home/runner/.minecraft/versions/26.3/26.3.json").
+VJSON="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/bench/26.3.json"
+[ -f "$VJSON" ] || { echo "FAIL: version json missing at $VJSON"; exit 1; }
 [ -f "$VJAR" ] || { echo "FAIL: vanilla client.jar missing at $VJAR (setup_client.py must run first)"; exit 1; }
 [ -f "$PJAR" ] || { echo "FAIL: paper.jar missing at $PJAR (fetch step must run first)"; exit 1; }
 
@@ -42,6 +48,7 @@ echo "- horizon: prepare (import client.jar + assets + libraries, verify vs rese
 cd "$SRC"
 cargo run --profile fast --manifest-path "$SRC/Cargo.toml" -p horizon-prepare -- \
   --prepare \
+  --version-json "$VJSON" \
   --client-jar "$VJAR" \
   --server-jar "$PJAR" \
   --assets-dir "$VJ/assets" \
