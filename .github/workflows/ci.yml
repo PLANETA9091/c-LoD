@@ -547,11 +547,11 @@ jobs:
         run: |
           sudo apt-get update -qq
           # mesa-vulkan-drivers = lavapipe: Horizon renders through wgpu, the
-          # vanilla leg needs GL only. libasound2-dev + pkg-config: the
-          # first horizon build died on alsa-sys (cpal's audio backend needs
-          # the ALSA headers at build time; HORIZON_NO_AUDIO=1 silences the
-          # runtime, not the build).
-          sudo apt-get install -y -qq xvfb ffmpeg libgl1 libglx-mesa0 libgl1-mesa-dri mesa-utils mesa-vulkan-drivers vulkan-tools libasound2-dev pkg-config
+          # vanilla leg needs GL only. The rest is Horizon's own CI package
+          # list (tools/ci/linux-runner.sh system_packages verbatim) — the
+          # first two builds died one dep at a time (alsa-sys, then
+          # libudev-sys); this list ends that lottery.
+          sudo apt-get install -y -qq build-essential pkg-config cmake libasound2-dev libudev-dev mesa-vulkan-drivers libvulkan1 libxcursor1 libxrandr2 libxi6 libxinerama1 libxkbcommon0 libxkbcommon-x11-0 libegl1 rsync xvfb ffmpeg libgl1 libglx-mesa0 libgl1-mesa-dri mesa-utils vulkan-tools
           python3 -m pip install --quiet --user pillow numpy python-xlib
       - name: Stamp env phase (pre-build)
         run: |
