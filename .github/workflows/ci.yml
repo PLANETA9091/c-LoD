@@ -610,6 +610,10 @@ jobs:
           } > dist/server.properties
       - name: Vanilla 26.3 content for the Horizon import (client.jar + assets + libraries, cached)
         run: python3 scripts/bench/setup_client.py
+      - name: sRGB GLX shim (the bench preflight demands it even on the Vulkan client lane)
+        run: |
+          mkdir -p ~/mc-test/shim
+          gcc -shared -fPIC -O2 -o ~/mc-test/shim/libGL.so.1 scripts/bench/libclodgl.c -ldl
       # v6.57.5: the horizon build is ~15 min uncached and the pin changes
       # rarely — cache the whole checkout (sources + target/fast).
       - name: Horizon checkout + build cache
