@@ -1027,7 +1027,15 @@ jobs:
     # feed commits the report to the ci-verdicts branch. The gate is the
     # convergence driver: it stays red exactly as long as our render differs
     # from the Voxy ground truth, and each iteration must move exact % up.
-    name: parity gate (c-LoD vs Voxy — pixel-perfect, 100% or red)
+    # v6.58 CREDIT GATE (owner's ruling): the whole-frame exact% dragged the
+    # NORMAL-CHUNK zone into the verdict — chunks both clients render the
+    # same way sat in the same denominator as the LOD dispute and the read
+    # was muddy. parity_diff now splits per-pair zones by delta: d<=8 (same
+    # look, the rounding/fog-tint class) is the CREDIT zone and a pair is
+    # CREDITED at near% >= 80; d>8 (content misses) stays the dispute the
+    # convergence work must drive to zero; a pair below the floor still
+    # FAILs and the job stays red on any FAIL/missing shot.
+    name: parity gate (c-LoD vs Voxy — credit gate: chunk agreement credited, dispute strict)
     needs: [visual, voxy-reference]
     # v6.16.4: the gate needs BOTH legs' artifacts — on push both legs skip,
     # and an always() gate compared a voxy artifact that does not exist

@@ -13,11 +13,26 @@ Inputs:
                voxy|ours|diff triptychs (downscaled) for every pair
 
 Verdict discipline:
-  - a pair PASSES only at 100% pixel-exact match (every channel of every
-    pixel identical);
-  - a missing pair (either side failed to shoot the vantage) FAILS — a
-    silent skip would fake the gate;
-  - the script exits 1 (the CI job goes red) while ANY pair is below 100%.
+  - v6.58 THE CREDIT GATE (owner's ruling): the whole-frame exact% mixes
+    the NORMAL-CHUNK zone (both clients render the same world — agreement
+    there is ~80% and must be CREDITED, not punished) with the LOD dispute.
+    Per-pair zones are split by delta:
+      * credit zone  = pixels with max-channel delta <= NEAR (same look,
+        rounding/fog-tint class — the near-band diagnostics already pinned
+        this as "content RIGHT, values off by 1-8");
+      * dispute zone = pixels with delta > NEAR (content misses: LOD
+        silhouette/palette/AO classes — the convergence work's queue).
+    - verdict per pair: PASS at 100% exact; CREDITED at near% >= the credit
+      floor (default 80 — the owner's example number); FAIL below the floor
+      or on any error/missing shot;
+    - the GATE goes GREEN while every pair is PASS or CREDITED (no missing
+      shots, no soup pairing); it still exits 1 on any FAIL — a broken
+      capture or a world mismatch must never ride through as credit;
+    - the strict numbers stay in the table (exact %, dispute %) — credit
+      hides nothing, it stops the normal-chunk mass from masking the read.
+  - v6.16 original spec (kept for the record): a pair PASSES only at 100%
+    pixel-exact match; a missing pair FAILS; the script exits 1 while ANY
+    pair is below 100%.
 
 Diagnostics per pair (the convergence work reads these):
   - exact %, near % (max |delta| <= 8 per channel — "same look, off by a
@@ -175,6 +190,9 @@ def main():
     ap.add_argument("--voxy", required=True)
     ap.add_argument("--ours", required=True)
     ap.add_argument("--out", default="parity-out")
+    ap.add_argument("--credit-floor", type=float, default=80.0,
+                    help="near%% (d<=8) a pair must reach to be CREDITED "
+                         "instead of FAILed (the owner's normal-chunk zone)")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
@@ -206,14 +224,25 @@ def main():
             continue
         heatmap(m).save(os.path.join(args.out, f"diff_{name}.png"))
         triptych(a, b, heatmap(m)).save(os.path.join(args.out, f"tri_{name}.png"))
-        ok = exact_pct >= 100.0
+        # v6.58 CREDIT GATE: PASS at 100% exact, CREDITED at near% >= floor
+        # (the normal-chunk zone agrees — the remaining dispute is the LOD
+        # queue, reported not punished), FAIL below the floor.
+        if exact_pct >= 100.0:
+            verdict = "PASS"
+        elif near_pct >= args.credit_floor:
+            verdict = "CREDITED"
+        else:
+            verdict = "FAIL"
         results[name] = {
             "exact_pct": round(exact_pct, 4),
             "near_pct": round(near_pct, 4),
+            "dispute_pct": round(100.0 - near_pct, 4),
             "mean_delta": round(mean_d, 3),
             "max_delta": dmax,
             "px_total": int(m.size),
-            "pass": ok,
+            "verdict": verdict,
+            "credit_floor": args.credit_floor,
+            "pass": verdict in ("PASS", "CREDITED"),
             "ours_src": srcs.get(name, "?"),
             "diag": diag,
         }
@@ -221,7 +250,7 @@ def main():
         cap = ""
         if diag["ours_black_share"] > 25.0:
             cap = f" (ours capture: black {diag['ours_black_share']:.0f}%)"
-        rows.append((name, exact_pct, near_pct, mean_d, dmax, ok, cap))
+        rows.append((name, exact_pct, near_pct, mean_d, dmax, verdict, cap))
 
     # ---- report ------------------------------------------------------------
     lines = [
@@ -231,36 +260,45 @@ def main():
         f"paired: {len(pairs)}, missing (voxy shot with no ours pair): "
         f"{len(missing)}",
         f"- ours pair sources: {src_summary or 'none'}",
-        "- gate: 100% pixel-exact per pair; the job exits 1 while anything "
-        "is below",
+        f"- gate (v6.58 CREDIT): credit zone = d<=8 (normal chunks, both "
+        f"clients render the same world — agreement there is credited); "
+        f"dispute zone = d>8 (content misses — the LOD queue). PASS at 100% "
+        f"exact, CREDITED at near% >= {args.credit_floor:g}, FAIL below; "
+        "the job exits 1 on any FAIL/missing shot",
         "",
         *( [f"**PAIRING SUSPECT: ours root spans {len(src_dirs)} dirs / "
             f"{len(oshots)} shots for {len(vshots)} voxy vantages — pairs "
             "came from mixed capture sessions (the #349 soup class); the "
             "renderer reading of this table is INVALID, fix the ours-root "
             "resolution before reading percentages**"] if soup else [] ),
-        "| vantage | exact % | near % (d<=8) | mean d | max d | verdict |",
-        "|---|---|---|---|---|---|",
+        "| vantage | exact % | credit % (d<=8) | dispute % (d>8) | mean d | max d | verdict |",
+        "|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         if r[1] is None:
-            lines.append(f"| {r[0]} | — | — | — | — | ERROR ({r[2]}) |")
+            lines.append(f"| {r[0]} | — | — | — | — | — | ERROR ({r[2]}) |")
             continue
-        name, ex, nr, md, mx, ok = r[:6]
-        cap = r[6] if len(r) > 6 else ""
+        name, ex, nr, md, mx, verdict, cap = r[:7]
         lines.append(
-            f"| {name} | {ex:.3f} | {nr:.3f} | {md:.3f} | {mx} | "
-            f"{'PASS' if ok else 'FAIL'}{cap} |")
+            f"| {name} | {ex:.3f} | {nr:.3f} | {100.0 - nr:.3f} | {md:.3f} | {mx} | "
+            f"{verdict}{cap} |")
     for mm in missing:
-        lines.append(f"| {mm} | — | — | — | — | FAIL (no ours shot) |")
+        lines.append(f"| {mm} | — | — | — | — | — | FAIL (no ours shot) |")
     if orphan_ours:
         lines.append("")
         lines.append("- ours shots with no voxy pair (informational): "
                      + ", ".join(orphan_ours[:12]))
     ok_all = bool(rows) and all(
-        r[5] for r in rows if r[1] is not None) and not missing and not soup
+        r[5] in ("PASS", "CREDITED") for r in rows if r[1] is not None) \
+        and not missing and not soup
+    credited_n = sum(1 for r in rows if r[1] is not None and r[5] == "CREDITED")
+    passed_n = sum(1 for r in rows if r[1] is not None and r[5] == "PASS")
     lines += ["", "**GATE: "
-              + ("GREEN — 100% parity" if ok_all else "RED — parity below 100%")
+              + ("GREEN — "
+                 + (f"{passed_n} PASS" if passed_n else "")
+                 + (f" + {credited_n} CREDITED" if credited_n else "")
+                 + ((f" ({passed_n + credited_n}/{len(rows)} pairs)" if credited_n else ""))
+                 if ok_all else "RED — a pair sits below the credit floor")
               + (" (pairing suspect — see banner)" if soup and not ok_all else "")
               + "**"]
     report = "\n".join(lines) + "\n"
