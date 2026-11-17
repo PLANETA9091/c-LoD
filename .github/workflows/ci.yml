@@ -1035,7 +1035,7 @@ jobs:
     # CREDITED at near% >= 80; d>8 (content misses) stays the dispute the
     # convergence work must drive to zero; a pair below the floor still
     # FAILs and the job stays red on any FAIL/missing shot.
-    name: parity gate (c-LoD vs Voxy — credit gate: chunk agreement credited, dispute strict)
+    name: "parity gate (c-LoD vs Voxy — credit gate: chunk agreement credited, dispute strict)"
     needs: [visual, voxy-reference]
     # v6.16.4: the gate needs BOTH legs' artifacts — on push both legs skip,
     # and an always() gate compared a voxy artifact that does not exist
