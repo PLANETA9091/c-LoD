@@ -1415,3 +1415,12 @@ Stage Summary:
 5. Диск песочницы чистился (gc .git 3.4G→407M, старые тест-серверы удалены) — 3.2G свободно.
 
 **Открытое**: #484 (v6.56b) в полёте — вердикт решит: краска вернулась (≥15k)? красный PASS держится? столб не вернулся? Next: по вердикту — финальный визуальный аудит кадров «имба» (неразличимость от чанков).
+
+## v6.57 THE HORIZON BRIDGE (2026-11-17, приказ хозяина: клиент = Horizon в CI и локально)
+
+Проверено в upstream (horizon-rust/horizon, 8.2k stars): post_effect/*.json + shaders/post/*.fsh поддержаны ПОЛНОСТЬЮ (naga-трансляция, depth inputs, persistent targets) — наш capture/dust_mask живут именно в post-пайплайне; happy_villager реализован; оффлайн-имя: --name → HORIZON_PLAYER_NAME → генерация (Stepan запинен обоими каналами); horizon-client --server 127.0.0.1:25565 подключается напрямую, без ctl-танца.
+
+Бридж:
+- run_client.sh: MC_CLIENT=horizon → run_client_horizon.sh (Xvfb :99 + lavapipe ICD + тот же /tmp/client.log — ffmpeg x11grab кадры и серверный join-гейт «Stepan joined the game» работают без изменений бенча).
+- setup_horizon.sh: клон horizon (пин 2a247ac1), cargo build --profile fast, horizon-prepare импортирует НАШ client.jar/assets/libraries (их чекаут никогда не качает игру — by design).
+- ci.yml: новая джоба «horizon client (parity probe)» = тот же визуальный бенч против Rust-клиента + horizon-префиксованный вердикт-фид (не конфликтует с ванильным). Ванила остаётся судьёй до совпадения гейтов; после — дефолт флипается (приказ: «с ним всё быстрее»).
