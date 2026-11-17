@@ -610,6 +610,13 @@ jobs:
           } > dist/server.properties
       - name: Vanilla 26.3 content for the Horizon import (client.jar + assets + libraries, cached)
         run: python3 scripts/bench/setup_client.py
+      # v6.57.5: the horizon build is ~15 min uncached and the pin changes
+      # rarely — cache the whole checkout (sources + target/fast).
+      - name: Horizon checkout + build cache
+        uses: actions/cache@v4
+        with:
+          path: ~/horizon-src
+          key: horizon-src-${{ env.HORIZON_SHA }}
       - name: Build Horizon (Rust client, pinned SHA) + import content
         env:
           MC_TEST_DIST: ${{ github.workspace }}/dist

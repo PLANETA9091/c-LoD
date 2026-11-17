@@ -36,7 +36,7 @@ VJAR="$VJ/versions/26.3/26.3.jar"
 # IGNORES --client-jar/--assets-dir/--libraries-dir and demands the official
 # launcher layout in ~/.minecraft (#490: "Missing
 # /home/runner/.minecraft/versions/26.3/26.3.json").
-VJSON="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/bench/26.3.json"
+VJSON="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/bench/26.3.json"
 [ -f "$VJSON" ] || { echo "FAIL: version json missing at $VJSON"; exit 1; }
 [ -f "$VJAR" ] || { echo "FAIL: vanilla client.jar missing at $VJAR (setup_client.py must run first)"; exit 1; }
 [ -f "$PJAR" ] || { echo "FAIL: paper.jar missing at $PJAR (fetch step must run first)"; exit 1; }
