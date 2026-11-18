@@ -121,6 +121,17 @@ shot() { # name
     && note "shot $1" || note "screenshot $1 failed"
 }
 accept_pack_prompt cascade-shot 5
+# v6.59.8i THE RENDER-RENDER CONTROL: vanilla console bursts 15-40 m in
+# front of the vantage — end_rod (white) and the cascade's own carrier
+# happy_villager. If neither shows on the burst shot, the pack kills
+# particle rendering wholesale (the visual control already proved the
+# pack-free client renders bursts); if they show, the wire's dots are
+# the suspect (positions/packet fields), not the renderer.
+srv "particle minecraft:end_rod -915 145 826 0.2 0.2 0.2 0 400 force"
+srv "particle minecraft:happy_villager -930 142 836 0.2 0.2 0.2 0 400 force"
+sleep 2
+shot cascade_burst
+sleep 3
 shot cascade_aerial
 # v6.59.7: decode the march's cascade atlas heartbeat strip (GL row 2 =
 # PNG y h-3, x 200..204): ring-1/2/3 height slices (marked fraction, max

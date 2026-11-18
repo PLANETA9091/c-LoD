@@ -422,6 +422,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cascade_pack_chain_json_parses() {
+        // v6.59.8h: one un-substituted placeholder inside the cascade chain
+        // JSON invalidates the whole post effect ("Requested post effect
+        // does not exist") and the client silently runs pack-free — the
+        // v6.59.8a-8g atlas zeros were THIS, not the transport. Parse every
+        // post_effect JSON of every variant as strict JSON.
+        for opts in ["", "cascade=true", "unfog=true", "debug_lens=true"] {
+            let cfg = Config::parse(opts);
+            let pack = build(&cfg);
+            for (name, blob) in zip_entries(&pack.zip) {
+                if name.contains("post_effect") && name.ends_with(".json") {
+                    let txt = String::from_utf8(blob.clone()).unwrap();
+                    for (ln, line) in txt.lines().enumerate() {
+                        for token in line.split('"') {
+                            if token.starts_with("__") && token.ends_with("__") {
+                                panic!("{} in {}:{}: un-substituted {}", opts, name, ln + 1, token);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn pack_builds_and_is_valid_zip() {
         let cfg = Config::parse("");
         let pack = build(&cfg);
