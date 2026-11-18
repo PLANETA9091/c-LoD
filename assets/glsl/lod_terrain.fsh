@@ -722,7 +722,7 @@ void main() {
     //   x=203: ring-1 COLOR slice (marked fraction, max lattice byte, min).
     //   x=204: ring-3 height slice.
     ivec2 hb = ivec2(gl_FragCoord.xy);
-    if (hb.y == 2 && ((hb.x >= 200 && hb.x <= 204) || hb.x == 205)) {
+    if (hb.y == 2 && ((hb.x >= 200 && hb.x <= 204) || hb.x == 205 || hb.x == 206)) {
         float marked = 0.0;
         float mx = 0.0;
         float mn = 1.0;
@@ -754,6 +754,46 @@ void main() {
         if (hb.x == 205) {
             vec4 rw = texelFetch(RwinSampler, ivec2(0, 0), 0);
             fragColor = vec4(rw.r, rw.g, rw.a, 1.0);
+            return;
+        }
+        if (hb.x == 206) {
+            // v6.59.8c BEACON PIXEL PROBE: project the beacon slot center
+            // (the capture's own geometry) and report what the screen holds
+            // there: R = the raw center delta (g-b), G = the max 5-tap
+            // delta, B = the ring ambient (the 4-corner mean of g-b).
+            vec4 rotP = texelFetch(RotSampler, ivec2(0, 0), 0);
+            float az = rotP.r * 2.0 * PI;
+            float el = rotP.g * PI - PI * 0.5;
+            float fov = 5.0 + rotP.a * 115.0;
+            vec3 F = vec3(cos(el) * cos(az), sin(el), cos(el) * sin(az));
+            vec3 R = vec3(-sin(az), 0.0, cos(az));
+            vec3 U = vec3(-cos(az) * sin(el), cos(el), -sin(az) * sin(el));
+            float tanH = tan(radians(fov) * 0.5);
+            float aspect = ScreenSize.x / max(ScreenSize.y, 1.0);
+            vec3 cam = vec3(CameraBlockPos) + CameraOffset;
+            vec2 anchor = floor(vec2(CameraBlockPos) / 128.0) * 128.0;
+            vec3 P = vec3(anchor.x + 127.0, 120.0 + 0.0, anchor.y + 127.0);
+            vec3 d = P - cam;
+            float z = dot(d, F);
+            vec2 ndc = vec2(dot(d, R) / (z * tanH * aspect),
+                            dot(d, U) / (z * tanH));
+            vec2 sc = ndc * 0.5 + 0.5;
+            vec2 texel = 1.0 / ScreenSize;
+            vec3 raw = texture(InSampler, sc).rgb;
+            float ring = 0.0;
+            float mxd = -1.0;
+            for (int t = 0; t < 5; ++t) {
+                vec2 off = t == 0 ? vec2(0.0)
+                    : t == 1 ? vec2(0.75 * texel.x, 0.0)
+                    : t == 2 ? vec2(-0.75 * texel.x, 0.0)
+                    : t == 3 ? vec2(0.0, 0.75 * texel.y)
+                    : vec2(0.0, -0.75 * texel.y);
+                vec3 s = texture(InSampler, sc + off).rgb;
+                mxd = max(mxd, (s.g - s.b) - (raw.g - raw.b));
+                if (t > 0) { ring += s.g - s.b; }
+            }
+            ring *= 0.25;
+            fragColor = vec4((raw.g - raw.b) * 4.0, mxd * 4.0, ring * 4.0, 1.0);
             return;
         }
         if (hb.x == 203) {
