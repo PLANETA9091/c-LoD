@@ -104,8 +104,14 @@ while [ "$(date +%s)" -lt "$DEADLINE" ]; do
   note "coverage r0=${r0}% r1=${r1}% (best $best_r0/$best_r1)"
   ok=$(python3 -c "print(1 if $r0 >= $R0_FLOOR and $r1 >= $R1_FLOOR else 0)")
   [ "$ok" = "1" ] && break
+  # Run #504's frames: the required-pack prompt RE-RENDERS after every pack
+  # apply (the same reason the visual lanes accept before every probe) —
+  # one click at session start leaves the prompt up for the whole fill.
+  # Accept inside the loop so the world stays visible for the capture.
+  accept_pack_prompt cascade-loop 2
   sleep 30
 done
+accept_pack_prompt cascade-final 5
 info > "$SHOTS/pack-info.txt"
 
 # ---- the shots --------------------------------------------------------------
@@ -114,10 +120,12 @@ shot() { # name
     -i :99 -frames:v 1 "$SHOTS/$1.png" 2>>"$SHOTS/ffmpeg.err" \
     && note "shot $1" || note "screenshot $1 failed"
 }
+accept_pack_prompt cascade-shot 5
 shot cascade_aerial
 # the far-horizon view: look south across the rings (yaw 0 = +Z)
 srv "tp Stepan $CX 150 $CZ 0 0"
 sleep 8
+accept_pack_prompt cascade-shot2 5
 shot cascade_horizon
 # zoom crops (the owner reads the frames with his own eyes)
 python3 - <<PYEOF || true
