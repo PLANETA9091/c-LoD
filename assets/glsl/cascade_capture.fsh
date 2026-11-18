@@ -287,15 +287,22 @@ void main() {
         bool honest;
         if (hiPass) {
             // The word's own tag MUST name this fragment's window (the
-            // stateless lap gate) and the height byte's rank must match the
-            // tier it decoded from (the v6.23 honesty, ring form).
+            // stateless lap gate). The v6.23 rank equality is DROPPED for
+            // rings (run #508 forensics): the engine paints the word on the
+            // slot's LOCAL rank plane (the eye-band geometry, 28..112 m),
+            // which has no reason to equal the far cell's height rank — the
+            // rank gate rejected every rank-1/2/3 cell forever and the atlas
+            // stayed empty. The rings' merge is safe without it: a complete
+            // decode replaces the cell outright, partials never set the
+            // mark, so no ratchet class can poison a marked byte.
             float tag = floor(float((w >> 4) & 0xFu) + 0.5);
-            honest = tag == wExp && surface_rank(float(fresh) - 64.0) == r;
+            honest = tag == wExp;
         } else {
             // The color word carries no tag: the height twin vouches (same
-            // slot, same cell, streamed together — the v6.36 pattern).
+            // slot, same cell, streamed together — the v6.36 pattern). The
+            // rank equality drops with the HI gate (same forensics).
             vec4 hpx = texelFetch(HeightRefSampler, px, 0);
-            honest = hpx.a >= 0.5 && surface_rank(hpx.r * 255.0 - 64.0) == r;
+            honest = hpx.a >= 0.5;
         }
         if (!honest) {
             continue;

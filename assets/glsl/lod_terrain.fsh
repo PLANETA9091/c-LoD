@@ -708,6 +708,66 @@ void main() {
         return;
     }
 #endif
+#ifdef CASCADE
+    // v6.59.7 CASCADE ATLAS HEARTBEAT (CI-only; the production pack never
+    // defines CASCADE). Run #508's "terrain wall" was the NEAR disk seen
+    // edge-on — the ring atlases were empty client-side while the gate
+    // measured the SERVER store. GL row 2, x 200..204 (PNG y = h-3):
+    //   x=200: ring-1 height slice (atlas x 256..511): R = marked fraction
+    //          over a 32x32 stride-8 sweep, G = max height byte, B = min.
+    //   x=201: the same for the ring-2 slice (x 512..767).
+    //   x=202: the rot channel (R = az, G = el, B = conf — a blind camera
+    //          (< 0.25) makes every capture pass early-out).
+    //   x=203: ring-1 COLOR slice (marked fraction, max lattice byte, min).
+    //   x=204: ring-3 height slice.
+    ivec2 hb = ivec2(gl_FragCoord.xy);
+    if (hb.y == 2 && hb.x >= 200 && hb.x <= 204) {
+        float marked = 0.0;
+        float mx = 0.0;
+        float mn = 1.0;
+        // One explicit block per pixel: samplers stay literal (a sampler
+        // chosen by a non-uniform condition is non-portable GLSL).
+        if (hb.x == 200) {
+            for (int i = 0; i < 32; ++i)
+            for (int j = 0; j < 32; ++j) {
+                vec4 t = texelFetch(HAtlasSampler, ivec2(256 + i * 8, j * 8), 0);
+                if (t.a >= 0.5) { marked += 1.0; mx = max(mx, t.r); mn = min(mn, t.r); }
+            }
+            fragColor = vec4(marked / 1024.0, mx, mn, 1.0);
+            return;
+        }
+        if (hb.x == 201) {
+            for (int i = 0; i < 32; ++i)
+            for (int j = 0; j < 32; ++j) {
+                vec4 t = texelFetch(HAtlasSampler, ivec2(512 + i * 8, j * 8), 0);
+                if (t.a >= 0.5) { marked += 1.0; mx = max(mx, t.r); mn = min(mn, t.r); }
+            }
+            fragColor = vec4(marked / 1024.0, mx, mn, 1.0);
+            return;
+        }
+        if (hb.x == 202) {
+            vec4 rotP = texelFetch(RotSampler, ivec2(0, 0), 0);
+            fragColor = vec4(rotP.rgb, 1.0);
+            return;
+        }
+        if (hb.x == 203) {
+            for (int i = 0; i < 32; ++i)
+            for (int j = 0; j < 32; ++j) {
+                vec4 t = texelFetch(CAtlasSampler, ivec2(256 + i * 8, j * 8), 0);
+                if (t.a >= 0.5) { marked += 1.0; mx = max(mx, t.r); mn = min(mn, t.r); }
+            }
+            fragColor = vec4(marked / 1024.0, mx, mn, 1.0);
+            return;
+        }
+        for (int i = 0; i < 32; ++i)
+        for (int j = 0; j < 32; ++j) {
+            vec4 t = texelFetch(HAtlasSampler, ivec2(1024 + i * 8, j * 8), 0);
+            if (t.a >= 0.5) { marked += 1.0; mx = max(mx, t.r); mn = min(mn, t.r); }
+        }
+        fragColor = vec4(marked / 1024.0, mx, mn, 1.0);
+        return;
+    }
+#endif
     vec4 scene = texture(InSampler, texCoord);
     float depth = texture(InDepthSampler, texCoord).r;
     vec2 px = texCoord * ScreenSize;
