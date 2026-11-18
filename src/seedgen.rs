@@ -2071,6 +2071,13 @@ unsafe fn gen_batch(
         };
 
         let mut results: Vec<Result<usize, String>> = vec![Ok(0); k];
+        // v6.59 THE CASCADE: chunks generated for the far rings land in the
+        // cascade store too. The lock order stays stream -> cascade (the
+        // same order engine::stream_step uses) — no deadlock by construction.
+        let mut cascade_guard = state.cascade.lock().unwrap();
+        let mut cascade = cascade_guard
+            .as_mut()
+            .map(|c| (c, Vec::<crate::cascade::Column>::new()));
         for (i, (ok, cells)) in parsed.segments.iter().enumerate() {
             if !ok {
                 results[i] = Err("helper segment threw".into());
@@ -2078,6 +2085,56 @@ unsafe fn gen_batch(
             }
             let (cx, cz) = jobs[i];
             let mut written = 0usize;
+            // v6.59: collect the chunk's columns once for the cascade ingest.
+            if let Some((cas, batch)) = cascade.as_mut() {
+                batch.clear();
+                for gx in 0..n_side {
+                    for gz in 0..n_side {
+                        let l = cells[gx * n_side + gz];
+                        if l == 0 {
+                            continue; // void column: valid bit clear
+                        }
+                        let wx = cx * 16 + gx as i32 * cell;
+                        let wz = cz * 16 + gz as i32 * cell;
+                        let (top_y, liquid, mo, bo) = unpack_cell(l);
+                        let material = tables
+                            .mats
+                            .get(mo)
+                            .map(String::as_str)
+                            .unwrap_or("")
+                            .to_string();
+                        let biome = tables
+                            .bios
+                            .get(bo)
+                            .map(String::as_str)
+                            .unwrap_or("")
+                            .to_string();
+                        batch.push(crate::cascade::Column {
+                            wx,
+                            wz,
+                            height: top_y.clamp(-64, 1023) as i16,
+                            liquid,
+                            material,
+                            biome,
+                        });
+                    }
+                }
+                let sea = state.cfg.sea_level;
+                let rgb_of = |y: i16, liquid: bool| -> [u8; 3] {
+                    // The winning column's material/biome resolve through the
+                    // same intern tables (the ingest re-scan is cheap: one
+                    // linear pass over the chunk's columns).
+                    let m = batch.iter().find(|c| c.height == y && c.liquid == liquid);
+                    match m {
+                        Some(c) => {
+                            palette::surface_color(&c.material, &c.biome, c.liquid || liquid)
+                        }
+                        None => palette::surface_color("grass_block", "plains", liquid),
+                    }
+                };
+                let origin = crate::cascade::Cascade::ring_origin(&state.cfg);
+                cas.ingest_chunk(origin, cx, cz, batch, sea, &rgb_of);
+            }
             for gx in 0..n_side {
                 for gz in 0..n_side {
                     let l = cells[gx * n_side + gz];

@@ -592,7 +592,7 @@ pub struct Streamer {
     /// Grid side in cells (region_blocks / cell_size).
     pub side: u32,
     /// side x side cells, row-major z outer.
-    cells: Vec<Cell>,
+    pub(crate) cells: Vec<Cell>,
     /// Next cell offset (0..side^2) to stream.
     cursor: u64,
     /// Pre-allocated spawn batch for the current tick.

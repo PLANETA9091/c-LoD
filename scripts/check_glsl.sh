@@ -169,17 +169,13 @@ for fsh in sorted(list(Path("assets/glsl").glob("*.fsh")) + list(Path("assets/gl
         extra.append("layout(location = 0) in vec2 texCoord;")
     ext = "vert" if fsh.suffix == ".vsh" else "frag"
     (work / (fsh.stem + ".comp." + ext)).write_text(src + "\n" + "\n".join(extra) + "\n")
-
-    # v6.47.6: the packgen swaps every full-line comment marker (// __NAME__)
-    # for a compile-time define (#define NAME 1). The RAW template leaves the
-    # ifdef code DEAD — the run #451-#457 client death (ShaderCompileException:
-    # 'ColBufSampler' undeclared inside #ifdef VOXY_DELTAS, which sits ABOVE
-    # the uniform declaration) lived through every raw-only validation. The
-    # marker-substituted variant is what actually ships when a knob is on —
-    # validate it too.
-    defined = re.sub(r"^//\s*__([A-Z0-9_]+)__\s*$", r"#define \1 1", src, flags=re.M)
-    if defined != src:
-        (work / (fsh.stem + ".defined.comp." + ext)).write_text(defined + "\n" + "\n".join(extra) + "\n")
+    # v6.59 THE CASCADE: the cascade-armed march compiles too (packgen
+    # substitutes #define CASCADE 1; a broken cascade block must not reach
+    # the runner to die at reload).
+    if fsh.name == "lod_terrain.fsh":
+        cas_src = src.replace("// __CASCADE__", "#define CASCADE 1", 1)
+        (work / f"lod_terrain_cascade.comp.{ext}").write_text(
+            cas_src + "\n" + "\n".join(extra) + "\n")
 PYEOF
 
 status=0
@@ -229,17 +225,26 @@ PYEOF
 # disconnected mid-session. Gate the mapping statically: every
 # "uniform sampler2D X;" in the shader must have an input named X minus
 # the "Sampler" suffix, and every input must be used by the shader.
+# v6.59: the gates are #ifdef-aware — the march's cascade samplers ride
+# #ifdef CASCADE (a compile-time packgen substitution), so the cascade
+# chains keep the block and production chains strip it (the same lines
+# the game never compiles there).
 python3 - <<'PYEOF'
 import json, re, sys
 from pathlib import Path
 ok = True
+def variant_src(src: str, cascade_chain: bool) -> str:
+    if cascade_chain:
+        return src
+    return re.sub(r"#ifdef CASCADE.*?#endif", "", src, flags=re.S)
 for chain in sorted(Path("assets/post_effect").glob("*.json")):
     txt = re.sub(r"__[A-Z0-9_]+__", "0", chain.read_text())
     txt = re.sub(r"^\s*//.*$", "", txt, flags=re.M)
     j = json.loads(txt)
+    is_cascade = "cascade_capture" in txt
     for i, p in enumerate(j.get("passes", [])):
         fs = p["fragment_shader"].split("/")[-1]
-        src = Path(f"assets/glsl/{fs}.fsh").read_text()
+        src = variant_src(Path(f"assets/glsl/{fs}.fsh").read_text(), is_cascade)
         declared = set(re.findall(r"uniform sampler2D (\w+);", src))
         have = {f"{inp['sampler_name']}Sampler" for inp in p.get("inputs", [])}
         missing, unused = declared - have, have - declared
@@ -271,13 +276,18 @@ from pathlib import Path
 ok = True
 VANILLA = {"Globals", "Fog", "DynamicTransforms", "Projection",
            "ProjectionMatrixBuffer", "SamplerInfo", "FogInstanced"}
+def variant_src(src: str, cascade_chain: bool) -> str:
+    if cascade_chain:
+        return src
+    return re.sub(r"#ifdef CASCADE.*?#endif", "", src, flags=re.S)
 for chain in sorted(Path("assets/post_effect").glob("*.json")):
     txt = re.sub(r"__[A-Z0-9_]+__", "0", chain.read_text())
     txt = re.sub(r"^\s*//.*$", "", txt, flags=re.M)
     j = json.loads(txt)
+    is_cascade = "cascade_capture" in txt
     for i, p in enumerate(j.get("passes", [])):
         fs = p["fragment_shader"].split("/")[-1]
-        src = Path(f"assets/glsl/{fs}.fsh").read_text()
+        src = variant_src(Path(f"assets/glsl/{fs}.fsh").read_text(), is_cascade)
         declared = set(re.findall(r"layout\(std140\)\s+uniform\s+(\w+)\s*\{", src))
         declared -= VANILLA
         have = set((p.get("uniforms") or {}).keys())

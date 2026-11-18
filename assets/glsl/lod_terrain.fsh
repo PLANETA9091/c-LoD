@@ -3,7 +3,7 @@
 #include <minecraft:globals.glsl>
 // __MESH_DEBUG__
 // __RIM_MASK__
-// __VOXY_DELTAS__
+// __CASCADE__
 
 // c-LoD pass (v5.0 "SKY-GRID BIT-STREAM"): the actual level-of-distant-detail
 // renderer.
@@ -45,8 +45,6 @@
 // everywhere it holds data. Where vanilla is genuinely closer, vanilla keeps
 // the pixel. mesh_paint=false keeps the pre-G8d behavior byte-for-byte.
 
-__PALETTE_DECL__
-
 uniform sampler2D InSampler;      // minecraft:main color
 uniform sampler2D InDepthSampler; // minecraft:main depth
 uniform sampler2D HeightSampler;  // clod_h_b — streamed height bytes (1 px = 1 cell)
@@ -54,31 +52,11 @@ uniform sampler2D ColBufSampler;  // clod_c_b — streamed color index bytes (1 
 uniform sampler2D RotSampler;     // clod:clod_rot_a (2x2 persistent, camera + fog channel)
 uniform sampler2D MaskSampler;    // clod_mask — dust eraser mask (this frame, v5.3)
 
-#ifdef VOXY_DELTAS
-// voxy-evidence-deltas: water shore factor (evidence:
-// docs/voxy-evidence/ref2_ocean_horizon.jpg — shallows read lighter/cyan near
-// shores, open water deepens toward the measured #1c335d): fraction of LAND
-// cells among the 4-neighbors of a water cell.
-float water_shore(ivec2 celli) {
-    float land = 0.0;
-    float cnt = 0.0;
-    ivec2 nb[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
-    for (int i = 0; i < 4; ++i) {
-        ivec2 q = celli + nb[i];
-        if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, ivec2(256)))) {
-            continue;
-        }
-        vec4 cq = texelFetch(ColBufSampler, q, 0);
-        if (cq.a < 0.5) {
-            continue;
-        }
-        cnt += 1.0;
-        if (floor(cq.r * 255.0 + 0.5) <= 215.5) {
-            land += 1.0;
-        }
-    }
-    return cnt > 0.0 ? land / cnt : 0.0;
-}
+// v6.59 THE CASCADE: the ring atlases (2048x256, 256 px per ring slice,
+// ring idx = slice; ring k cell = 16 m * 4^k, all centered on GridInfo.xy).
+#ifdef CASCADE
+uniform sampler2D HAtlasSampler;  // clod_rh_b — cascade height atlas
+uniform sampler2D CAtlasSampler;  // clod_rc_b — cascade color atlas
 #endif
 
 // v5.0.3: SamplerInfo never existed as a client UBO — it stayed zeroed
@@ -126,7 +104,11 @@ layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 
 const float PI = 3.14159265358979;
+#ifdef CASCADE
+const int MAX_STEPS = 420; // the six coarse rings add march distance
+#else
 const int MAX_STEPS = 260;
+#endif
 const int BISECT = 7;
 const float FADE_START = 0.9; // Voxy: fade begins at 90% of the view radius
 
@@ -198,12 +180,6 @@ float smooth_w2(float t) {
     return smoothstep(288.0, 448.0, t);
 }
 
-// v6.45.0 GAP FILL: the 8-neighborhood the void path of ground_at averages
-// (file-scope const — the void path has no other allocation).
-const ivec2 FILL_NB8[8] = ivec2[8](ivec2(-1, -1), ivec2(0, -1), ivec2(1, -1),
-                                   ivec2(-1, 0),                  ivec2(1, 0),
-                                   ivec2(-1, 1),  ivec2(0, 1),  ivec2(1, 1));
-
 // Sample the streamed ground at a world xz. Returns the surface Y, or -1e8
 // for "no data" (void, never decoded). Water cells stream their real
 // surface height; the water FLAG lives in the color word (idx 216).
@@ -216,7 +192,7 @@ const ivec2 FILL_NB8[8] = ivec2[8](ivec2(-1, -1), ivec2(0, -1), ivec2(1, -1),
 // the caller's height fallback (color_at returns the sentinel); a cell
 // with neither word is still void. Water stays color-gated (the flag lives
 // in the color word — an undecoded color word cannot claim water).
-float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
+float ground_at0(vec2 xz, float w, float w2, out bool water, out bool ok) {
     float cell = RegionInfo.y;             // blocks per cell
     ivec2 celli = ivec2(floor((xz - GridInfo.xy) / cell)); // 0..255
     ok = false;
@@ -228,42 +204,7 @@ float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
     water = c.a >= 0.5 && abs(c.r * 255.0 - 216.0) < 0.5;
     vec4 h = texelFetch(HeightSampler, celli, 0);
     if (h.a < 0.5) {
-        // v6.45.0 GAP FILL: the height buffer fills by OR-merge over laps
-        // while the vanilla particle pool rejects most spawns under the
-        // refresh flood — at any moment only a sparse subset of the band's
-        // cells holds a decoded height word, and the march painted that
-        // subset as isolated vertical threads (the user's own test verdict:
-        // «это не лоды, ужасно» — runs #440+ frames show thread bundles
-        // instead of terrain). A void cell now samples its 8 neighbors:
-        // the average of the VALID ones becomes the cell's height, so the
-        // surface reads continuous while the transport backfills the true
-        // words (the OR-merge owns the buffer; this read-side fill invents
-        // nothing persistent). Radius 1 only: wider holes stay void, the
-        // disk frontier (outside 0..255) stays void, and no decode state
-        // is faked — h.a stays 0.5-gated for every writer.
-        float fsum = 0.0;
-        float fcnt = 0.0;
-        for (int i = 0; i < 8; ++i) {
-            ivec2 q = celli + FILL_NB8[i];
-            if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, ivec2(256)))) {
-                continue;
-            }
-            vec4 hq = texelFetch(HeightSampler, q, 0);
-            if (hq.a < 0.5) {
-                continue;
-            }
-            fsum += hq.r * 255.0 - 64.0;
-            fcnt += 1.0;
-        }
-        if (fcnt < 0.5) {
-            return -1.0e8; // no decoded neighbor either — real void
-        }
-        ok = true;
-        // v6.47.0: the fill averages to fractional heights — the smooth-blob
-        // look. Floor restores the v4.4-atlas staircase (flat tops, vertical
-        // walls) on exactly the cells the transport has not backfilled yet;
-        // the true integral words behave identically when they arrive.
-        return floor(fsum / fcnt);
+        return -1.0e8; // height word not decoded yet (or the cell is void)
     }
     ok = true;
     float h0 = h.r * 255.0 - 64.0;
@@ -315,6 +256,50 @@ float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
     return mix(avg, s2 / c2, w2);
 }
 
+#ifdef CASCADE
+// v6.59 THE CASCADE dispatcher: ring 0 inside its disk, then the finest
+// cascade ring whose square contains the point. Void cascade cells return
+// no-data (the march keeps sky there — the ring fill is progressive).
+float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
+    float g = ground_at0(xz, w, w2, water, ok);
+    if (ok) {
+        return g;
+    }
+    for (int r = 1; r <= 6; ++r) {
+        float csz = 16.0 * exp2(2.0 * float(r - 1));
+        ivec2 ci = ivec2(floor((xz - GridInfo.xy) / csz));
+        if (any(lessThan(ci, ivec2(0))) || any(greaterThanEqual(ci, ivec2(256)))) {
+            continue;
+        }
+        vec4 h = texelFetch(HAtlasSampler, ivec2((r - 1) * 256 + ci.x, ci.y), 0);
+        if (h.a < 0.5) {
+            continue;
+        }
+        vec4 c = texelFetch(CAtlasSampler, ivec2((r - 1) * 256 + ci.x, ci.y), 0);
+        water = c.a >= 0.5 && abs(c.r * 255.0 - 216.0) < 0.5;
+        ok = true;
+        return h.r * 255.0 - 64.0;
+    }
+    return -1.0e8;
+}
+// The cell size of the finest ring covering xz (the march step scale and
+// the shading's per-cell normal offsets).
+float cell_at(vec2 xz) {
+    for (int r = 0; r <= 6; ++r) {
+        float csz = r == 0 ? RegionInfo.y : 16.0 * exp2(2.0 * float(r - 1));
+        ivec2 ci = ivec2(floor((xz - GridInfo.xy) / csz));
+        if (all(greaterThanEqual(ci, ivec2(0))) && all(lessThan(ci, ivec2(256)))) {
+            return csz;
+        }
+    }
+    return RegionInfo.y;
+}
+#else
+// Production build (cascade off): ground_at IS the ring-0 sampler — the
+// call sites stay untouched, the march stays byte-identical.
+#define ground_at ground_at0
+#endif
+
 // Surface color of one streamed cell: the 6x6x6 RGB lattice decode.
 // Water (idx 216) returns a negative sentinel — the caller uses its own
 // water fallback color. v6.21.0: an undecoded color word ALSO returns the
@@ -328,41 +313,10 @@ vec3 color_at(ivec2 celli, float w, float w2, out bool water, out bool colorless
     // mid-band cells paint ColLow/ColHigh by height — see ground_at). It is
     // NOT lattice index 0: before this gate the (0,0,0,0) texel decoded as
     // idx 0 = pure black, one of the #305 dark classes.
-    // v6.47.0 COLOR GAP FILL: mirrors the v6.45.0 height fill — the wave
-    // sweep backfills true words over laps while the OR-merge owns the
-    // buffer; a void color cell paints the average of its VALID LAND
-    // neighbors' decoded RGB instead of the flat ColLow/ColHigh fallback
-    // (the v4.4-atlas look: real block colors across the whole surface).
-    // Water stays a flag of the cell's OWN word — a filled cell can never
-    // claim water (the v6.21.0 rule, and averaging water into land would
-    // wash the shores). colorless stays TRUE for filled cells: the
-    // v6.21.1 vanilla gate keeps them off real vanilla textures — an
-    // invented color must never repaint vanilla chunks (the #307 lesson).
     if (c.a < 0.5) {
         water = false;
         colorless = true;
-        vec3 fsum = vec3(0.0);
-        float fcnt = 0.0;
-        for (int i = 0; i < 8; ++i) {
-            ivec2 q = celli + FILL_NB8[i];
-            if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, ivec2(256)))) {
-                continue;
-            }
-            vec4 cq = texelFetch(ColBufSampler, q, 0);
-            if (cq.a < 0.5) {
-                continue;
-            }
-            float iq = floor(cq.r * 255.0 + 0.5);
-            if (iq > 215.5) {
-                continue; // water: not a spreadable land color
-            }
-            fsum += CLOD_PALETTE[int(iq)]; // v6.49 real-palette lookup
-            fcnt += 1.0;
-        }
-        if (fcnt < 0.5) {
-            return vec3(-1.0); // no decoded neighbor either — flat fallback
-        }
-        return fsum / fcnt;
+        return vec3(-1.0);
     }
     colorless = false;
     float idx = floor(c.r * 255.0 + 0.5);
@@ -370,10 +324,8 @@ vec3 color_at(ivec2 celli, float w, float w2, out bool water, out bool colorless
     if (water) {
         return vec3(-1.0);
     }
-    // v6.49 THE REAL PALETTE: the server indexes palette::PALETTE (the exact
-    // baked colors), the march looks the same table up — the round trip is
-    // pixel-exact instead of the 6x6x6 lattice's 51-step snap (the soap).
-    vec3 rgb = CLOD_PALETTE[int(idx)];
+    vec3 lattice = vec3(mod(idx, 6.0), mod(floor(idx / 6.0), 6.0), floor(idx / 36.0));
+    vec3 rgb = lattice * (51.0 / 255.0);
     if (w <= 0.0) {
         return rgb;
     }
@@ -397,7 +349,8 @@ vec3 color_at(ivec2 celli, float w, float w2, out bool water, out bool colorless
             wc += 1.0;
             continue;
         }
-        sum += CLOD_PALETTE[int(iq)]; // v6.49 real-palette lookup
+        vec3 lq = vec3(mod(iq, 6.0), mod(floor(iq / 6.0), 6.0), floor(iq / 36.0));
+        sum += lq * (51.0 / 255.0);
         cnt += 1.0;
     }
     if (wc > (cnt + wc) * 0.5) {
@@ -427,7 +380,8 @@ vec3 color_at(ivec2 celli, float w, float w2, out bool water, out bool colorless
             w2c += 1.0;
             continue;
         }
-        s2 += CLOD_PALETTE[int(iq)]; // v6.49 real-palette lookup
+        vec3 lq = vec3(mod(iq, 6.0), mod(floor(iq / 6.0), 6.0), floor(iq / 36.0));
+        s2 += lq * (51.0 / 255.0);
         c2 += 1.0;
     }
     if (w2c > c2 * 0.5) {
@@ -527,6 +481,27 @@ float march_ssao(vec3 pos, vec3 n) {
     return pow(clamp(1.0 - ao * (1.0 / SSAO_STEPS_F), 0.0, 1.0), 2.5); // :226
 }
 
+#ifdef CASCADE
+// v6.59: the cascade color word — the same 6x6x6 lattice, no smoothing
+// (the ring cells are already the coarse representation).
+vec3 color_at_c(ivec2 celli, int ring, out bool water, out bool colorless) {
+    vec4 c = texelFetch(CAtlasSampler, ivec2((ring - 1) * 256 + celli.x, celli.y), 0);
+    if (c.a < 0.5) {
+        water = false;
+        colorless = true;
+        return vec3(-1.0);
+    }
+    colorless = false;
+    float idx = floor(c.r * 255.0 + 0.5);
+    water = idx > 215.5;
+    if (water) {
+        return vec3(-1.0);
+    }
+    vec3 lattice = vec3(mod(idx, 6.0), mod(floor(idx / 6.0), 6.0), floor(idx / 36.0));
+    return lattice * (51.0 / 255.0);
+}
+#endif
+
 // Horizontal distance from cam to the box boundary along dir.xz.
 float edge_distance_xz(vec3 cam, vec3 dir, vec2 minW, vec2 maxW) {
     float e = 1.0e9;
@@ -591,7 +566,12 @@ float march_terrain(vec3 cam, vec3 dir, float t0, float tCap, float tanH,
     }
 
     float t = t0;
+#ifdef CASCADE
+    float dt = max(cell_at(cam.xz + dir.xz * t) * (t > 2048.0 ? 2.0 : 0.5),
+                   t * (2.0 * tanH / max(ScreenSize.y, 1.0)));
+#else
     float dt = max(cell * 0.5, t * (2.0 * tanH / max(ScreenSize.y, 1.0)));
+#endif
 
     // Sign convention: above = groundY - rayY; POSITIVE means the ray is
     // UNDER the surface. A hit is the ENTERING crossing (above-ground ->
@@ -607,9 +587,15 @@ float march_terrain(vec3 cam, vec3 dir, float t0, float tCap, float tanH,
 
     for (int i = 0; i < MAX_STEPS; ++i) {
         t = min(t + dt, tCap);
+#ifdef CASCADE
+        vec2 xz = cam.xz + dir.xz * t;
+        dt = max(cell_at(xz) * (t > 2048.0 ? 2.0 : 0.5),
+                 t * (2.0 * tanH / max(ScreenSize.y, 1.0)));
+#else
         dt = max(cell * 0.5, t * (2.0 * tanH / max(ScreenSize.y, 1.0)));
 
         vec2 xz = cam.xz + dir.xz * t;
+#endif
         float above = ground_at(xz, smooth_w(t), 0.0, wflag, okflag) - (cam.y + dir.y * t);
 
         if (above > 0.0 && prevDiff <= 0.0) {
@@ -775,6 +761,11 @@ void main() {
     // The march spans two regions in every direction (the 2x2 slot grid);
     // stale data beyond that is stamp-rejected anyway.
     float horizon = region * 2.0;
+#ifdef CASCADE
+    // v6.59: the march owns everything the cascade covers — the far ring's
+    // half-span (16 m * 4^5 * 128 = ±2.1 Mm) plus box slack.
+    horizon = 16.0 * 1024.0 * 128.0 * 1.05;
+#endif
 
     // v6.19 G8d MESH PAINT — the vanilla path. The vanilla fragment's ray
     // distance is reconstructed from the device depth (eyeZ = DEPTH_NEAR /
@@ -826,6 +817,19 @@ void main() {
 
     float fade = smoothstep(minConf, minConf + 0.15, conf);
     vec3 hitPos = cam + dir * tHit;
+#ifdef CASCADE
+    // The hit's ring: ring 0 when its disk covers the hit, else the finest
+    // cascade ring at that point (the dispatcher's own choice).
+    int hring = 0;
+    for (int r = 1; r <= 6; ++r) {
+        float csz = 16.0 * exp2(2.0 * float(r - 1));
+        ivec2 ci = ivec2(floor((hitPos.xz - GridInfo.xy) / csz));
+        if (all(greaterThanEqual(ci, ivec2(0))) && all(lessThan(ci, ivec2(256)))) {
+            hring = r;
+            break;
+        }
+    }
+#endif
 
     // ---- LIVE FOG STATE (camera channel group B) --------------------------
     vec4 fogCol = texelFetch(RotSampler, ivec2(1, 0), 0);
@@ -843,59 +847,64 @@ void main() {
     // Shade inputs at the hit: per-cell flags + per-cell gradient normal
     // (nearest reads; the normal is constant per cell = flat Voxy quads).
     float rb = region;
+#ifdef CASCADE
+    // The fade references the ACTIVE ring's data frontier (the ring disk).
+    if (hring > 0) {
+        rb = 16.0 * exp2(2.0 * float(hring - 1)) * 256.0;
+    }
+#endif
     vec2 hr = floor((hitPos.xz - GridInfo.xy) / rb);
     vec2 hmin = GridInfo.xy + hr * rb;
     vec2 hmax = hmin + vec2(rb);
     ivec2 tc = ivec2(floor((hitPos.xz - GridInfo.xy) / cell));
+#ifdef CASCADE
+    if (hring > 0) {
+        tc = ivec2(floor((hitPos.xz - GridInfo.xy)
+                         / (16.0 * exp2(2.0 * float(hring - 1)))));
+    }
+#endif
 
     bool isWater = false; bool okW; bool dum;
     float sw = smooth_w(tHit);  // level-1 weight
     float sw2 = smooth_w2(tHit); // level-2 weight (v5.2.1)
     float hC = ground_at(hitPos.xz, sw, sw2, isWater, okW);
+#ifdef CASCADE
+    // Far-ring hits shade with THEIR cell size (flat Voxy quads at the
+    // ring's resolution — the ring-0 2 m offsets would read one flat cell).
+    float hcell = cell_at(hitPos.xz);
+    float hL = ground_at(hitPos.xz - vec2(hcell, 0.0), sw, sw2, dum, okW);
+    float hR = ground_at(hitPos.xz + vec2(hcell, 0.0), sw, sw2, dum, okW);
+    float hD = ground_at(hitPos.xz - vec2(0.0, hcell), sw, sw2, dum, okW);
+    float hU = ground_at(hitPos.xz + vec2(0.0, hcell), sw, sw2, dum, okW);
+#else
     float hL = ground_at(hitPos.xz - vec2(cell, 0.0), sw, sw2, dum, okW);
     float hR = ground_at(hitPos.xz + vec2(cell, 0.0), sw, sw2, dum, okW);
     float hD = ground_at(hitPos.xz - vec2(0.0, cell), sw, sw2, dum, okW);
     float hU = ground_at(hitPos.xz + vec2(0.0, cell), sw, sw2, dum, okW);
+#endif
     // Void neighbors read -1e8: clamp them to the center height so the
     // normal stays flat instead of exploding at the data frontier.
     hL = hL < -1.0e7 ? hC : hL;
     hR = hR < -1.0e7 ? hC : hR;
     hD = hD < -1.0e7 ? hC : hD;
     hU = hU < -1.0e7 ? hC : hU;
+#ifdef CASCADE
+    vec3 nrm = normalize(vec3(hL - hR, 2.0 * hcell, hD - hU));
+#else
     vec3 nrm = normalize(vec3(hL - hR, 2.0 * cell, hD - hU));
+#endif
 
     // ---- COLOR: the Voxy model -------------------------------------------
     bool colWater; bool colorless;
-    vec3 col = color_at(tc, sw, sw2, colWater, colorless);
-    float hn = clamp((hitPos.y - sea) / max(maxY - sea, 1.0), 0.0, 1.0);
-    vec3 fallback;
-#ifdef VOXY_DELTAS
-    if (isWater || colWater) {
-        // voxy-evidence-deltas: shore gradient (evidence:
-        // docs/voxy-evidence/ref2 — shallows lighter, open water #1c335d).
-        // NOTE: 0.85/1.3 multipliers are calibration to the measured
-        // palette, pending the voxy-reference visual verdict.
-        float shore = water_shore(tc);
-        fallback = ColWater.rgb * mix(0.85, 1.3, shore);
-    } else {
-        fallback = mix(ColLow.rgb, ColHigh.rgb, smoothstep(0.15, 0.9, hn));
-    }
+#ifdef CASCADE
+    vec3 col = (hring == 0) ? color_at(tc, sw, sw2, colWater, colorless)
+                            : color_at_c(tc, hring, colWater, colorless);
 #else
-    fallback = (isWater || colWater) ? ColWater.rgb : mix(ColLow.rgb, ColHigh.rgb, smoothstep(0.15, 0.9, hn));
+    vec3 col = color_at(tc, sw, sw2, colWater, colorless);
 #endif
+    float hn = clamp((hitPos.y - sea) / max(maxY - sea, 1.0), 0.0, 1.0);
+    vec3 fallback = (isWater || colWater) ? ColWater.rgb : mix(ColLow.rgb, ColHigh.rgb, smoothstep(0.15, 0.9, hn));
     vec3 albedo = colWater ? fallback : (col.r < 0.0 ? fallback : col);
-
-    // v6.52 THE MICRO-NOISE (the owner's 'indistinguishable from chunks'
-    // bar): vanilla chunks are TEXTURED — grass/stone noise breaks the flat
-    // look, the LOD cells were 2 m flat quads and the seam read instantly.
-    // voxy mip-averages its baked textures, which lands between the two; a
-    // deterministic per-cell brightness hash (cell coords, screen-stable —
-    // no flicker under the 16-bit rot) at +-6% approximates that mip grain.
-    // Water stays smooth (the voxy water is flat too).
-    if (!colWater && !isWater) {
-        float nz = fract(sin(dot(vec2(tc), vec2(12.9898, 78.233))) * 43758.5453);
-        albedo *= 0.94 + 0.12 * nz;
-    }
 
     // v6.21.1 THE VANILLA-PATH COLOR GATE: the height-only cells (no color
     // word — the §7b mid-band 80..120 m whose color dots sit inside the
@@ -1010,7 +1019,19 @@ void main() {
     // opacity. Voxy's own finish() applies the same dimension fog on top
     // of its march — 150 m forest: mix 0.15 (dark, matches), far summits:
     // 0.3-0.7 (fogged, matches).
+#ifdef CASCADE
+    // v6.59 CASCADE FOG: the vanilla 0..1024 pair would wall the far rings
+    // behind a 1 km fog ceiling. The vanilla line keeps its near-field
+    // shape, then the DH-style curve carries the horizon to the data
+    // frontier (0.92 ceiling — the far terrain stays visible).
+    float fogNear = clamp(tHit * (1.0 / 1024.0), 0.0, 1.0)
+        * (1.0 - smoothstep(1024.0, 4096.0, tHit));
+    float fogFar = smoothstep(fogLive ? max(vanRD, 128.0) : 128.0,
+                              horizon * 0.995, tHit) * 0.92;
+    float fog = fogLive ? (fogNear + fogFar) * fogOpacity : 0.0; // __FOG_VOXY__
+#else
     float fog = fogLive ? clamp(tHit * (1.0 / 1024.0), 0.0, 1.0) * fogOpacity : 0.0; // __FOG_VOXY__
+#endif
     lit = mix(lit, fogTint, fog);
 
     // ---- FADE: Voxy FogMode.FADE, MODE=1 (xz only), last 10% ------------
@@ -1030,19 +1051,7 @@ void main() {
     float rd = fogLive ? max(vanRD, 64.0) : 128.0;
     float gate = (tVan > 0.0) ? 1.0 : smoothstep(rd * 0.92, rd * 1.10, tHit);
 
-#ifdef VOXY_DELTAS
-    // voxy-evidence-deltas: edge haze band (evidence:
-    // docs/voxy-evidence/ref2 — the disk edge sits in a pale band of the
-    // vanilla fog colour #c0d7ff, 82% of the band pixels): inside the
-    // fade-out zone the LOD color pulls toward fogTint (the live vanilla
-    // fog color) before the scene mix, reproducing the pale band.
-    // NOTE: the 0.8 pull strength is calibration, pending the
-    // voxy-reference visual verdict.
-    vec3 edgeCol = mix(lit, fogTint, 0.8 * fadeOut);
-    vec3 outCol = mix(scene.rgb, edgeCol, fade * gate);
-#else
     vec3 outCol = mix(mix(scene.rgb, lit, fade * gate), scene.rgb, fadeOut);
-#endif
 #ifdef MESH_DEBUG
     // v6.19.2: the vanilla-path ENGAGEMENT MAP — every pixel the depth-
     // tested march owns carries a 35% magenta lift, unmistakable in the

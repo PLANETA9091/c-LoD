@@ -1112,6 +1112,120 @@ jobs:
           name: parity-gallery
           path: parity-out/
 
+  cascade-probe:
+    name: cascade probe (the six coarse rings — real LoDs to millions of blocks)
+    # v6.59 THE CASCADE: dispatch-only lane. Boots the module with
+    # cascade=true, fills the ring pyramid (ring idx 0 inner = the disk
+    # downsample; the annuli sample ONE real chunk per cell through the
+    # seedgen native path), streams it through the eye-anchored SCAFFOLD
+    # (the decode band is 28..112 m, so far cells ride a local transport
+    # grid with the window tag painted INTO the words), and shoots the
+    # aerial + horizon frames the owner reads with his own eyes. The
+    # fill vantage sits at y=140 so every scaffold word rides the v5.1
+    # rank-0 planes (the LIVING SECTION lesson, v6.39).
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - name: X11 + software GL + python deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb ffmpeg libgl1 libglx-mesa0 libgl1-mesa-dri mesa-utils curl
+          python3 -m pip install --quiet --user pillow numpy
+      - name: Build module (release)
+        run: cargo build --release
+      - name: Build CRUSSTY runtime + launcher
+        run: |
+          git clone --depth 1 https://github.com/PLANETA9091/CRUSSTY.git crussty
+          cargo build --release --manifest-path crussty/runtime/Cargo.toml
+          mkdir -p crussty/launcher/out
+          javac -d crussty/launcher/out crussty/launcher/src/main/java/dev/dist/launcher/Main.java
+          jar cfe crussty/launcher/launcher.jar dev.dist.launcher.Main -C crussty/launcher/out .
+      - name: Fetch Paper 26.3
+        run: |
+          URL=$(curl -s https://fill.papermc.io/v3/projects/paper/versions/26.3/builds/latest \
+            | python3 -c "import json,sys;print(json.load(sys.stdin)['downloads']['server:default']['url'])")
+          curl -sL -o paper.jar "$URL"
+          mkdir -p dist/versions
+          cp paper.jar dist/versions/paper-26.3.jar
+      - name: Build c-LoD host plugin (ClodEdits needs one enabled plugin)
+        run: |
+          APIV=$(curl -s https://repo.papermc.io/repository/maven-public/io/papermc/paper/paper-api/maven-metadata.xml \
+            | grep -o "26\.3\.build\.[0-9]*-stable" | tail -1)
+          B="https://repo.papermc.io/repository/maven-public"
+          curl -sL -o paper-api.jar "$B/io/papermc/paper/paper-api/${APIV}/paper-api-${APIV}.jar"
+          curl -sL -o adventure-api.jar "$B/net/kyori/adventure-api/5.2.0/adventure-api-5.2.0.jar"
+          curl -sL -o adventure-key.jar "$B/net/kyori/adventure-key/5.2.0/adventure-key-5.2.0.jar"
+          for j in paper-api adventure-api adventure-key; do
+            test -s "$j.jar" || { echo "$j.jar download failed"; exit 1; }
+          done
+          mkdir -p dist/plugins hostout
+          javac -cp paper-api.jar:adventure-api.jar:adventure-key.jar \
+            -d hostout scripts/java/host/ClodHost.java \
+            || { echo "javac failed"; exit 1; }
+          jar cf dist/plugins/clodhost.jar -C hostout clod -C scripts/java/host plugin.yml
+      - name: Assemble dist root (fixed seed; view-distance 4)
+        run: |
+          mkdir -p dist/modules/lod
+          cp target/release/liblod.so dist/modules/lod/
+          cp module.json dist/modules/lod/
+          cp crussty/launcher/launcher.jar dist/
+          cp crussty/runtime/target/release/libcrussty_runtime.so dist/
+          printf 'eula=true\n' > dist/eula.txt
+          {
+            echo 'online-mode=false'
+            echo 'white-list=false'
+            echo 'enforce-secure-profile=false'
+            echo 'view-distance=4'
+            echo 'simulation-distance=4'
+            echo 'server-port=25565'
+            echo 'spawn-protection=0'
+            echo 'white-list=false'
+            echo 'motd=c-LoD cascade probe'
+            echo 'level-seed=clodbench2026'
+          } > dist/server.properties
+      - name: sRGB GLX shim
+        run: |
+          mkdir -p ~/mc-test/shim
+          gcc -shared -fPIC -O2 -o ~/mc-test/shim/libGL.so.1 scripts/bench/libclodgl.c -ldl
+      - name: Restore vanilla 26.3 client cache (~600 MB)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/mc-test/client
+          key: mc263-client-v1
+      - name: Vanilla 26.3 client runtime (official manifest, ~600 MB)
+        run: python3 scripts/bench/setup_client.py
+      - name: Save vanilla client cache
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ~/mc-test/client
+          key: mc263-client-v1
+      - name: "CASCADE PROBE — fill the rings, shoot the millions"
+        env:
+          MC_TEST_DIST: ${{ github.workspace }}/dist
+        run: |
+          export CLOD_JAVA="$JAVA_HOME/bin/java"
+          export SHOTS=/home/runner/mc-test/shots/cascade
+          bash scripts/bench/run_cascade_probe.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cascade-evidence
+          path: |
+            /home/runner/mc-test/shots/cascade/
+            /tmp/client.log
+            /tmp/server.log
+          if-no-files-found: warn
+
   strict:
     name: strictness gate (all green)
     needs: [fmt, clippy, test, glsl, build, packaging, e2e-live, visual]

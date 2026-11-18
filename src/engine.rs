@@ -80,6 +80,9 @@ pub struct State {
     /// stream_diag — the deltas turn the counter into kB/s for ops.
     pub diag_wire_bytes: AtomicU64,
     pub diag_wire_tick: AtomicU64,
+    /// v6.59 THE CASCADE: the six coarse rings + the scaffold streamer.
+    /// None until the disk arms (cascade=true builds it alongside).
+    pub cascade: Mutex<Option<crate::cascade::Cascade>>,
 }
 
 #[derive(Clone)]
@@ -151,6 +154,7 @@ impl State {
             pkt_cache: Mutex::new(crate::wire::PacketCache::new()),
             diag_wire_bytes: AtomicU64::new(0),
             diag_wire_tick: AtomicU64::new(0),
+            cascade: Mutex::new(None),
         })
     }
 }
@@ -992,6 +996,18 @@ fn arm_stream(state: &Arc<State>, ox: f64, oz: f64) {
         (s.side, s.cells())
     };
     let lap_ticks = cells / ((state.cfg.particles_per_tick as u64) / 8).max(1);
+    // v6.59 THE CASCADE: arm the six coarse rings with the disk.
+    if state.cfg.cascade {
+        let mut cas = state.cascade.lock().unwrap();
+        *cas = Some(crate::cascade::Cascade::new());
+        let far =
+            crate::cascade::RING_BASE_CELL * 4f64.powi((crate::cascade::RINGS - 1) as i32) * 128.0;
+        crate::log_info(&format!(
+            "c-LoD CASCADE armed: {} rings, cells 16m*4^k, far ring covers ±{:.0} blocks (the millions)",
+            crate::cascade::RINGS,
+            far
+        ));
+    }
     state.stream_armed.store(1, Ordering::SeqCst);
     crate::log_info(&format!(
         "c-LoD sky-grid stream armed: {side}x{side} cells at ({ox:.0},{oz:.0}), {} particles/tick, {lap_ticks} ticks/lap",
@@ -1135,6 +1151,20 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     // v5.2.2: /clod-pack.info serves LIVE scan counters (it used to
     // report the boot-time cells=0 forever).
     state.server.set_meta(valid, total_cells);
+    // v6.59 THE CASCADE: the ring coverage line for the CI fill gate.
+    {
+        let cas = state.cascade.lock().unwrap();
+        if let Some(c) = cas.as_ref() {
+            let line = c
+                .rings
+                .iter()
+                .enumerate()
+                .map(|(k, r)| format!("r{}={:.1}%", k, r.coverage()))
+                .collect::<Vec<_>>()
+                .join(" ");
+            state.server.set_cascade_cov(format!("cascade {line}"));
+        }
+    }
     // v6.30.0: the sparse re-beat counters ride the same beat.
     state
         .server
@@ -1222,11 +1252,65 @@ fn stream_step(state: &Arc<State>, env: Env) {
             })
             .collect()
     };
-    let batch: Vec<crate::stream::Spawn> = {
+    let mut batch: Vec<crate::stream::Spawn> = {
         let mut s = state.stream.lock().unwrap();
         s.tick_batch(state.cfg.particles_per_tick as usize, &views)
             .to_vec()
     };
+    // v6.59 THE CASCADE: builder pump (far-ring chunk admissions) + the
+    // SCAFFOLD stream — the eye-anchored transport that carries the six
+    // coarse rings' words inside the decode band. The dots merge into the
+    // SAME per-tick batch: the wire and the per-player spawn gate serve
+    // them unchanged (other players' gates refuse them, the anchor owner
+    // decodes).
+    if state.cfg.cascade {
+        let world_handle = *state.world_obj.lock().unwrap();
+        if world_handle != 0 {
+            let world = unsafe { as_obj(world_handle) };
+            let tick = state.tick_no.load(Ordering::Relaxed);
+            let mut cas = state.cascade.lock().unwrap();
+            if let Some(c) = cas.as_mut() {
+                // Builder pump: admit far-ring chunk samples to the seedgen
+                // FIFO (nearest ring first, budgeted).
+                let sg = state.seedgen.lock().unwrap().clone();
+                let mut admit = |cx: i32, cz: i32| {
+                    if let Some(sg) = &sg {
+                        let _ = sg.push(cx, cz);
+                    }
+                };
+                {
+                    let s = state.stream.lock().unwrap();
+                    c.pump(
+                        &s,
+                        &state.cfg,
+                        state.cfg.cascade_gen_budget as usize,
+                        &mut admit,
+                    );
+                }
+                // Scaffold stream: views[0]'s eye anchors the transport.
+                if let Some(v) = views.first() {
+                    // Sky-blind rule mirrors the per-player gate (pitch < 47
+                    // deg ⇔ look.y > -sin(47°)).
+                    let sky_visible = v.look[1] > -0.7314;
+                    let mut rank_probe = |wx: i32, wz: i32| -> Option<i16> {
+                        jni::sample_surface(env, world, wx, wz).map(|(y, _, _, _)| y as i16)
+                    };
+                    c.stream_tick(
+                        &state.cfg,
+                        tick,
+                        state.cfg.cascade_lap_ticks,
+                        state.cfg.cascade_guard_ticks,
+                        state.cfg.cascade_budget as usize,
+                        v.eye,
+                        v.look,
+                        sky_visible,
+                        &mut rank_probe,
+                        &mut batch,
+                    );
+                }
+            }
+        }
+    }
     stream_diag(state, &players);
     if batch.is_empty() {
         return;

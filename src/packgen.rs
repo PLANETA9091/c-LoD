@@ -48,25 +48,6 @@ fn vec4(v: [f32; 4]) -> String {
 /// trims to "80" (the v6.19.3 lesson), and the pack assert greps the
 /// one-decimal ladder verbatim; both forms are valid JSON numbers, the
 /// .1 format just keeps the ladder self-describing.
-// v6.49: the 216-entry color table as a GLSL const declaration (0..1
-// floats). Dead pad rows decode to black, but no real color ever indexes
-// them (the server emits only table colors; the argmin keeps foreign
-// colors on live entries).
-fn palette_glsl() -> String {
-    let mut s = String::from("const vec3 CLOD_PALETTE[216] = vec3[216](\n");
-    for (i, c) in crate::palette::PALETTE.iter().enumerate() {
-        s.push_str(&format!(
-            "    vec3({:.6}, {:.6}, {:.6}){}\n",
-            f64::from(c[0]) / 255.0,
-            f64::from(c[1]) / 255.0,
-            f64::from(c[2]) / 255.0,
-            if i + 1 < 216 { "," } else { "" }
-        ));
-    }
-    s.push_str(");\n");
-    s
-}
-
 fn tiers_vec(v: [f64; 4]) -> String {
     v.iter()
         .map(|&y| format!("{y:.1}"))
@@ -99,7 +80,14 @@ pub fn build(cfg: &Config) -> Pack {
     // parity world session runs the plain production unfog chain.
     let debug_lens = cfg.debug_lens;
     let unfog = cfg.unfog;
-    let lod_terrain_tpl = if debug_lens && unfog {
+    // v6.59 THE CASCADE: cascade=true swaps in the cascade chain (the ring
+    // atlas targets + the beacon/ring capture passes + the march's atlas
+    // bindings) and defines CASCADE in the march shader. The production
+    // pack (cascade off) stays byte-identical to the pre-cascade artifact.
+    let cascade = cfg.cascade;
+    let lod_terrain_tpl = if cascade {
+        include_str!("../assets/post_effect/lod_terrain_cascade.json")
+    } else if debug_lens && unfog {
         // v6.18.2: the debug chain + the un-fog pass — the §5b evidence lane
         // (lens panels + the un-fog engagement map in one client).
         include_str!("../assets/post_effect/lod_terrain_debug_unfog.json")
@@ -190,16 +178,14 @@ pub fn build(cfg: &Config) -> Pack {
             "__SUB__",
             fmt_f(cfg.cell_size as f32 / crate::stream::SUB_PER_CELL as f32),
         ),
+        // v6.59: the CASCADE scaffold sub quantum — SCAFFOLD_PITCH/4, a
+        // transport constant independent of the ring-0 cell size.
+        ("__SCAFFOLD_SUB__", "0.5".to_string()),
         // v6.2 edit-reset plane (must match src/stream.rs exactly); v6.22:
         // the RANK-0 reset plane — the JSON still carries a single scalar
         // (StreamInfo.z, legacy mode-2 lane), per-cell resets ride the
         // ClodTiers ladder the capture walks instead.
         ("__RESET_Y__", fmt_f(crate::stream::RS_TIERS[0] as f32)),
-        // v6.49 THE REAL PALETTE: the march's color decode becomes a lookup
-        // of the same 216-entry table the server indexes (the exact round
-        // trip, no more bin*51 snap). Baked as a GLSL const into every
-        // shader that decodes a color word.
-        ("__PALETTE_DECL__", palette_glsl()),
     ];
 
     // v6.7 lens window: 64x64 cells around the debug window center (the
@@ -226,7 +212,7 @@ pub fn build(cfg: &Config) -> Pack {
             cfg.quant_ssao,
             cfg.fog_voxy,
             cfg.rim_mask,
-            cfg.voxy_deltas,
+            cascade,
         );
     }
     build_zip(
@@ -240,11 +226,12 @@ pub fn build(cfg: &Config) -> Pack {
         cfg.quant_ssao,
         cfg.fog_voxy,
         cfg.rim_mask,
-        cfg.voxy_deltas,
+        cascade,
     )
 }
 
-#[allow(clippy::too_many_arguments)] // the knob set grows with every CI-lever pack; v6.30.0 added rim_mask
+// the knob set grows with every CI-lever pack; v6.30.0 added rim_mask, v6.59 cascade
+#[allow(clippy::too_many_arguments)]
 fn build_zip(
     lod_terrain_tpl: &str,
     atmosphere_tpl: &str,
@@ -256,7 +243,7 @@ fn build_zip(
     quant_ssao: bool,
     fog_voxy: bool,
     rim_mask: bool,
-    voxy_deltas: bool,
+    cascade: bool,
 ) -> Pack {
     let lod_terrain_json = substitute(lod_terrain_tpl, &map);
     let atmosphere_json = substitute(atmosphere_tpl, &map);
@@ -329,20 +316,14 @@ fn build_zip(
     } else {
         lod_terrain
     };
-    // v6.44.2 VOXY EVIDENCE DELTAS: the two evidence-cited shading deltas
-    // (water shore gradient + edge haze band) swap in as one compile-time
-    // define — the default build keeps the marker a comment and the pack
-    // byte-stable.
-    let lod_terrain = if voxy_deltas {
-        lod_terrain.replace("// __VOXY_DELTAS__", "#define VOXY_DELTAS 1")
+    // v6.59 THE CASCADE: the compile-time march arm (a #define CANNOT fail
+    // to bind — the v6.19.2 lesson). cascade=true defines CASCADE; the
+    // default build keeps the marker a comment and the march byte-stable.
+    let lod_terrain = if cascade {
+        lod_terrain.replace("// __CASCADE__", "#define CASCADE 1")
     } else {
         lod_terrain
     };
-    // v6.49 THE REAL PALETTE: the shader templates carry __PALETTE_DECL__ —
-    // the fsh files otherwise ship verbatim and a leaked token would fail
-    // the client's shader compile. The same table the server indexes, baked
-    // as a GLSL const.
-    let lod_terrain = lod_terrain.replace("__PALETTE_DECL__", &palette_glsl());
     let clod_blit = include_str!("../assets/glsl/clod_blit.fsh");
     let atmosphere = include_str!("../assets/glsl/atmosphere.fsh");
     // v6.18: the un-fog shader ships in EVERY unfog variant; unfog_debug
@@ -358,10 +339,7 @@ fn build_zip(
     };
     // v6.7: the capture lens ships ONLY in the debug pack.
     let debug_lens_fsh = if debug_lens {
-        Some(
-            include_str!("../assets/glsl/debug_lens.fsh")
-                .replace("__PALETTE_DECL__", &palette_glsl()),
-        )
+        Some(include_str!("../assets/glsl/debug_lens.fsh"))
     } else {
         None
     };
@@ -390,6 +368,12 @@ fn build_zip(
     );
     zip.add("assets/clod/shaders/post/rot_copy.fsh", rot_copy.as_bytes());
     zip.add("assets/clod/shaders/post/capture.fsh", capture.as_bytes());
+    if cascade {
+        zip.add(
+            "assets/clod/shaders/post/cascade_capture.fsh",
+            include_str!("../assets/glsl/cascade_capture.fsh").as_bytes(),
+        );
+    }
     zip.add(
         "assets/clod/shaders/post/dust_mask.fsh",
         dust_mask.as_bytes(),
@@ -499,13 +483,17 @@ mod tests {
             !blob.contains("__TIERS_LO__"),
             "tier tokens must be substituted"
         );
+        // v6.59: the ladder derives from stream::LO_TIERS (the tiers re-pin
+        // with the transport forensics — a hardcoded string rots, v6.48.2
+        // proved it: rank 3 rides 193.0 now).
+        let want_ladder = crate::stream::LO_TIERS
+            .iter()
+            .map(|y| format!("{y:.1}"))
+            .collect::<Vec<_>>()
+            .join(", ");
         assert!(
-            blob.contains("80.0, 140.0, 173.0, 193.0"),
-            "the tier ladder must ride the pack (ClodTiers UBO) — v6.48.2 tier-3 fix"
-        );
-        assert!(
-            blob.contains("CLOD_PALETTE[216]") && !blob.contains("__PALETTE_DECL__"),
-            "the real-palette table must ride the pack — v6.49 exact color round trip"
+            blob.contains(&want_ladder),
+            "the tier ladder must ride the pack (ClodTiers UBO): want {want_ladder}"
         );
         assert!(blob.contains("clod_h_b"), "stream targets must be present");
     }
@@ -904,64 +892,6 @@ mod tests {
     }
 
     #[test]
-    fn voxy_deltas_swap_the_shading_treatment() {
-        // v6.44.2: voxy_deltas=true ships the two evidence-cited shading
-        // deltas (water shore gradient + edge haze band) as one compile-time
-        // define. v6.47.0: the deltas are the DEFAULT (the user's «сделай
-        // идеально» after the wave-sweep coverage fix — the v4.4-atlas look
-        // includes real shore colors), and voxy_deltas=false opts OUT (the
-        // byte-stable prod build of the v6.44.2 era). The concavity AO delta
-        // is NOT ported — march_ssao already owns the AO slot on this line.
-        let fsh_of = |cfg: &Config| {
-            let p = build(cfg);
-            let fsh = String::from_utf8_lossy(
-                &zip_entries(&p.zip)
-                    .iter()
-                    .find(|(n, _)| n == "assets/clod/shaders/post/lod_terrain.fsh")
-                    .unwrap()
-                    .1,
-            )
-            .to_string();
-            (fsh, p.sha1_hex)
-        };
-        let (def_fsh, def_sha) = fsh_of(&Config::parse(""));
-        assert!(
-            def_fsh.contains("#define VOXY_DELTAS 1"),
-            "v6.47.0: the treatment is the DEFAULT (imperfect-by-default is over)"
-        );
-        let (raw_fsh, raw_sha) = fsh_of(&Config::parse("voxy_deltas=false"));
-        assert!(
-            !raw_fsh.contains("#define VOXY_DELTAS 1"),
-            "the opt-out stays COMPILE-TIME OFF (the #ifdef blocks ride the template)"
-        );
-        assert!(
-            raw_fsh.contains("// __VOXY_DELTAS__"),
-            "marker must stay in the opt-out build"
-        );
-        let (vd_fsh, vd_sha) = fsh_of(&Config::parse("voxy_deltas=true"));
-        assert!(vd_fsh.contains("#define VOXY_DELTAS 1"));
-        assert_eq!(vd_sha, def_sha, "explicit true equals the default build");
-        assert!(
-            vd_fsh.contains("float shore = water_shore(tc);"),
-            "the shore gradient must ride the swap"
-        );
-        assert!(
-            vd_fsh.contains("vec3 edgeCol = mix(lit, fogTint, 0.8 * fadeOut);"),
-            "the edge haze band must ride the swap"
-        );
-        assert_ne!(vd_sha, raw_sha, "pack SHA must change");
-        let (_, vd_sha2) = fsh_of(&Config::parse("voxy_deltas=true"));
-        assert_eq!(vd_sha, vd_sha2);
-        // Composes with the parity lanes and the other shader knobs.
-        let (all_fsh, _) = fsh_of(&Config::parse(
-            "voxy_deltas=true;fog_voxy=true;quant_ssao=true;rim_mask=true",
-        ));
-        assert!(all_fsh.contains("#define VOXY_DELTAS 1"));
-        assert!(all_fsh.contains("#define RIM_MASK 1"));
-        assert!(all_fsh.contains("float fogCap"));
-    }
-
-    #[test]
     fn unfog_debug_swaps_the_mask_shader() {
         // v6.18.2: unfog_debug=true points the chain's un-fog pass at the
         // engagement-mask shader and ships it under its own name.
@@ -1184,6 +1114,97 @@ mod tests {
     }
 
     #[test]
+    fn cascade_pack_ships_atlas_chain_march_stays_byte_stable() {
+        // v6.59 THE CASCADE: cascade=true swaps the chain template (the ring
+        // atlas targets + the beacon/ring capture passes + the march's atlas
+        // bindings), ships cascade_capture.fsh and defines CASCADE in the
+        // march. The PRODUCTION pack (cascade off) stays byte-identical to
+        // the pre-cascade artifact: 13 entries, no cascade shader, the
+        // marker stays a comment, no ring targets, no scaffold token.
+        let prod = build(&Config::parse(""));
+        let prod_entries = zip_entries(&prod.zip);
+        assert_eq!(prod_entries.len(), 13, "production entry count fixed");
+        assert!(!prod_entries
+            .iter()
+            .any(|(n, _)| n.contains("cascade_capture")));
+        let prod_chain = String::from_utf8_lossy(
+            &prod_entries
+                .iter()
+                .find(|(n, _)| n == "assets/clod/post_effect/lod_terrain.json")
+                .unwrap()
+                .1,
+        );
+        assert!(!prod_chain.contains("clod_rh_a"), "ring targets in prod");
+        assert!(!prod_chain.contains("clod:post/cascade_capture"));
+        assert!(!prod_chain.contains("__SCAFFOLD_SUB__"));
+        let prod_march = String::from_utf8_lossy(
+            &prod_entries
+                .iter()
+                .find(|(n, _)| n == "assets/clod/shaders/post/lod_terrain.fsh")
+                .unwrap()
+                .1,
+        );
+        assert!(prod_march.contains("// __CASCADE__"), "the marker stays");
+        assert!(!prod_march.contains("#define CASCADE"));
+
+        let cas = build(&Config::parse("cascade=true"));
+        let entries = zip_entries(&cas.zip);
+        assert_eq!(
+            entries.len(),
+            14,
+            "cascade pack = prod + cascade_capture.fsh"
+        );
+        assert!(entries
+            .iter()
+            .any(|(n, _)| n == "assets/clod/shaders/post/cascade_capture.fsh"));
+        let chain = String::from_utf8_lossy(
+            &entries
+                .iter()
+                .find(|(n, _)| n == "assets/clod/post_effect/lod_terrain.json")
+                .unwrap()
+                .1,
+        )
+        .to_string();
+        for token in [
+            "\"clod_rh_a\"",
+            "\"clod_rh_b\"",
+            "\"clod_rc_a\"",
+            "\"clod_rc_b\"",
+            "\"clod_rwin\"",
+            "clod:post/cascade_capture",
+            "\"sampler_name\": \"HAtlas\", \"target\": \"clod_rh_b\"",
+            "\"sampler_name\": \"CAtlas\", \"target\": \"clod_rc_b\"",
+        ] {
+            assert!(chain.contains(token), "cascade chain token {token}");
+        }
+        assert!(!chain.contains("__SCAFFOLD_SUB__"), "token substituted");
+        assert!(chain.contains("2048"), "the atlas target size must ride");
+        // The march defines CASCADE (compile-time — a #define CANNOT fail).
+        let march = String::from_utf8_lossy(
+            &entries
+                .iter()
+                .find(|(n, _)| n == "assets/clod/shaders/post/lod_terrain.fsh")
+                .unwrap()
+                .1,
+        );
+        assert!(march.contains("#define CASCADE 1"));
+        assert!(!march.contains("// __CASCADE__"));
+        // Determinism + the SHA shift (one-time re-push on the runner).
+        let cas2 = build(&Config::parse("cascade=true"));
+        assert_eq!(cas.zip, cas2.zip);
+        assert_ne!(cas.sha1_hex, prod.sha1_hex);
+        // The cascade pack still carries the ring-0 machinery (the disks
+        // nest — ring 0 streams exactly as before).
+        assert!(chain.contains("clod:post/capture"));
+        assert!(chain.contains("\"clod_h_b\""));
+    }
+    // The chain templates already bind the depth texture into every
+    // capture pass (kept since v5.3 "for the chain schema") — the gate
+    // rides the existing binding, no chain change. The count: 5 capture
+    // passes + the march's own tVan read (6), +1 more when the unfog
+    // variant's extra pass rides the chain (7).
+
+    #[test]
     fn capture_mirror_arm_decodes_the_canopy_carrier() {
         // v6.25 MIRROR LUMINANCE-DELTA ARM (#318/#319 forensics): the §7b
         // canopy shades the rank-0/1 carriers into NEUTRAL DARK ((35,38,42),
@@ -1266,6 +1287,11 @@ mod tests {
             !mask.contains("ringLumMin"),
             "dust_mask.fsh must NOT carry the reverted v6.25.1 shape gate"
         );
+        // The chain templates already bind the depth texture into every
+        // capture pass (kept since v5.3 "for the chain schema") — the gate
+        // rides the existing binding, no chain change. The count: 5 capture
+        // passes + the march's own tVan read (6), +1 more when the unfog
+        // variant's extra pass rides the chain (7).
         // The chain templates already bind the depth texture into every
         // capture pass (kept since v5.3 "for the chain schema") — the gate
         // rides the existing binding, no chain change. The count: 5 capture

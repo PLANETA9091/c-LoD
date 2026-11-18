@@ -223,6 +223,20 @@ pub struct Config {
     /// no built-in motion, the dot holds its plane for the whole
     /// lifetime). false = the legacy happy_villager.
     pub carrier_dust: bool,
+    /// v6.59 THE CASCADE: the six coarser rings behind the ring-0 disk
+    /// (cells 16 m * 4^k, coverage to ±2.1 Mm). false = byte-stable v6.58
+    /// (no cascade store, no scaffold dots, the production pack unchanged).
+    pub cascade: bool,
+    /// Engine ticks per cascade lap (one 64x64 window sweep per ring per
+    /// lap; 300 = 15 s, a full ring in 16 laps ≈ 4 min).
+    pub cascade_lap_ticks: u64,
+    /// Ticks at every lap boundary the scaffold stays silent (in-flight
+    /// dots from the previous window die before the slots are reused).
+    pub cascade_guard_ticks: u64,
+    /// Scaffold dots per engine tick (each ring cell costs 10: 6 HI + 4 LO).
+    pub cascade_budget: u32,
+    /// Chunk-generation admissions per engine tick for the cascade builder.
+    pub cascade_gen_budget: u32,
 }
 
 impl Default for Config {
@@ -285,6 +299,11 @@ impl Default for Config {
             rim_mask: false,
             carrier_sink: 0.0,
             carrier_dust: false,
+            cascade: false,
+            cascade_lap_ticks: 300,
+            cascade_guard_ticks: 8,
+            cascade_budget: 1400,
+            cascade_gen_budget: 32,
         }
     }
 }
@@ -494,6 +513,22 @@ impl Config {
         // v6.43.0: carrier_dust — the stationary green dust carrier.
         if let Some(v) = get("carrier_dust") {
             cfg.carrier_dust = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
+        // v6.59 THE CASCADE: the six coarse rings behind the ring-0 disk.
+        if let Some(v) = get("cascade") {
+            cfg.cascade = matches!(v.trim(), "1" | "true" | "yes" | "on");
+        }
+        if let Some(v) = get("cascade_lap_ticks").and_then(|v| v.parse::<u64>().ok()) {
+            cfg.cascade_lap_ticks = v.clamp(40, 6000);
+        }
+        if let Some(v) = get("cascade_guard_ticks").and_then(|v| v.parse::<u64>().ok()) {
+            cfg.cascade_guard_ticks = v.min(120);
+        }
+        if let Some(v) = get("cascade_budget").and_then(|v| v.parse::<u32>().ok()) {
+            cfg.cascade_budget = v.clamp(40, 16384);
+        }
+        if let Some(v) = get("cascade_gen_budget").and_then(|v| v.parse::<u32>().ok()) {
+            cfg.cascade_gen_budget = v.clamp(1, 256);
         }
         cfg
     }

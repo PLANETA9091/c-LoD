@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# v6.59 THE CASCADE probe — the CI lane for the six coarse rings (cells
+# 16 m * 4^k, coverage to ±2.1 Mm). Boots the module with cascade=true,
+# joins a real vanilla client at a rank-0-safe vantage (y=140: the
+# eye-100 rank rule keeps every scaffold word on the v5.1 planes 80/120 —
+# the LIVING SECTION minefield stays clear), polls /clod-pack.info for
+# the ring coverage (the builder fills the rings by native chunk
+# sampling), and shoots the money shots: the aerial panorama (rings
+# behind the disk edge) and the far-horizon view, plus zoom crops (the
+# owner reads the frames with his own eyes). GATE: ring idx 0 coverage
+# >= R0_FLOOR and ring idx 1 >= R1_FLOOR by the timeout, else exit 1.
+set -uo pipefail
+BENCH_DIR="$(cd "$(dirname "$0")" && pwd)"
+SHOTS="${SHOTS:-/home/runner/mc-test/shots/cascade}"
+mkdir -p "$SHOTS"
+NOTES="$SHOTS/probe.log"
+: > "$NOTES"
+note() { echo "$(date -u +%H:%M:%S) $*" | tee -a "$NOTES"; }
+CENTER="${CLOD_CENTER:--930,796}"
+CX="${CENTER%,*}"
+CZ="${CENTER#*,}"
+
+note "cascade probe: center $CENTER, options cascade=true"
+export CLOD_EXTRA_OPTS="cascade=true;cascade_lap_ticks=300;cascade_guard_ticks=8;cascade_budget=1400;cascade_gen_budget=64"
+CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" || note "boot_server rc=$? (continuing)"
+srv() { echo "$1" > /tmp/server.in; }
+srv "gamerule advance_time false"
+srv "time set noon"
+
+bash "$BENCH_DIR/run_client.sh" || note "run_client rc=$? (continuing)"
+sleep 25
+
+# The fill vantage: y=140 — rank 0 planes (80/120) for every slot (the
+# eye-100 rule bottoms out at tier 0), the PROVEN transport from y=140.
+srv "gamemode spectator Stepan"
+srv "tp Stepan $CX 140 $CZ 0 8"
+sleep 10
+
+info() { curl -fsS "http://127.0.0.1:8199/clod-pack.info" 2>/dev/null || echo ""; }
+cov() { # ring idx -> pct
+  info | grep -oE "r$1=[0-9.]+" | head -1 | cut -d= -f2 || echo "0"
+}
+
+# ---- the fill loop ----------------------------------------------------------
+R0_FLOOR="${R0_FLOOR:-90}"
+R1_FLOOR="${R1_FLOOR:-30}"
+DEADLINE=$(( $(date +%s) + 8 * 60 ))
+best_r0=0
+best_r1=0
+while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+  r0=$(cov 0)
+  r1=$(cov 1)
+  best_r0=$(python3 -c "print(max($best_r0, $r0))")
+  best_r1=$(python3 -c "print(max($best_r1, $r1))")
+  note "coverage r0=${r0}% r1=${r1}% (best $best_r0/$best_r1)"
+  ok=$(python3 -c "print(1 if $r0 >= $R0_FLOOR and $r1 >= $R1_FLOOR else 0)")
+  [ "$ok" = "1" ] && break
+  sleep 30
+done
+info > "$SHOTS/pack-info.txt"
+
+# ---- the shots --------------------------------------------------------------
+shot() { # name
+  ffmpeg -nostdin -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 \
+    -i :99 -frames:v 1 "$SHOTS/$1.png" 2>>"$SHOTS/ffmpeg.err" \
+    && note "shot $1" || note "screenshot $1 failed"
+}
+shot cascade_aerial
+# the far-horizon view: look south across the rings (yaw 0 = +Z)
+srv "tp Stepan $CX 150 $CZ 0 0"
+sleep 8
+shot cascade_horizon
+# zoom crops (the owner reads the frames with his own eyes)
+python3 - <<PYEOF || true
+from PIL import Image
+import os
+for n in ("cascade_aerial", "cascade_horizon"):
+    p = os.path.join("$SHOTS", n + ".png")
+    if not os.path.exists(p):
+        continue
+    im = Image.open(p).convert("RGB")
+    w, h = im.size
+    im.crop((0, int(h * 0.30), w, int(h * 0.80))).resize((w, h)).save(
+        os.path.join("$SHOTS", n + "_zoom.png"))
+    print("zoom", n)
+PYEOF
+
+note "GATE: best r0=$best_r0 (floor $R0_FLOOR), r1=$best_r1 (floor $R1_FLOOR)"
+awk -v a="$best_r0" -v b="$best_r1" -v fa="$R0_FLOOR" -v fb="$R1_FLOOR" \
+  'BEGIN { exit !(a >= fa && b >= fb) }' \
+  && { note "CASCADE GATE: GREEN"; exit 0; } \
+  || { note "CASCADE GATE: RED"; exit 1; }
