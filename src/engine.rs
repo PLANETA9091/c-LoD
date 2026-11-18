@@ -1268,6 +1268,12 @@ fn stream_step(state: &Arc<State>, env: Env) {
         if world_handle != 0 {
             let world = unsafe { as_obj(world_handle) };
             let tick = state.tick_no.load(Ordering::Relaxed);
+            // LOCK ORDER: stream BEFORE cascade — the seedgen worker takes
+            // stream (gen_batch) then cascade (ingest); the opposite order
+            // here deadlocked both sides in run #500's watchdog dump (the
+            // server thread froze inside the native tick at the first
+            // cascade ingest, the Watchdog killed Paper at exit 70).
+            let s = state.stream.lock().unwrap();
             let mut cas = state.cascade.lock().unwrap();
             if let Some(c) = cas.as_mut() {
                 // Builder pump: admit far-ring chunk samples to the seedgen
@@ -1278,15 +1284,12 @@ fn stream_step(state: &Arc<State>, env: Env) {
                         let _ = sg.push(cx, cz);
                     }
                 };
-                {
-                    let s = state.stream.lock().unwrap();
-                    c.pump(
-                        &s,
-                        &state.cfg,
-                        state.cfg.cascade_gen_budget as usize,
-                        &mut admit,
-                    );
-                }
+                c.pump(
+                    &s,
+                    &state.cfg,
+                    state.cfg.cascade_gen_budget as usize,
+                    &mut admit,
+                );
                 // Scaffold stream: views[0]'s eye anchors the transport.
                 if let Some(v) = views.first() {
                     // Sky-blind rule mirrors the per-player gate (pitch < 47

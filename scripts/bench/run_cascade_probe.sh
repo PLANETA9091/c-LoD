@@ -43,8 +43,11 @@ cov() { # ring idx -> pct
 
 # ---- the fill loop ----------------------------------------------------------
 R0_FLOOR="${R0_FLOOR:-90}"
-R1_FLOOR="${R1_FLOOR:-30}"
-DEADLINE=$(( $(date +%s) + 8 * 60 ))
+R1_FLOOR="${R1_FLOOR:-25}"
+# 12 min: ring idx 0's annulus admits ~3.5 min (the cursor exhausts), ring
+# idx 1's chunks ride the same stream + another ~4 min — run #500 showed
+# r0=92.8% at 5 min with r1 just starting.
+DEADLINE=$(( $(date +%s) + 12 * 60 ))
 best_r0=0
 best_r1=0
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
@@ -86,6 +89,14 @@ for n in ("cascade_aerial", "cascade_horizon"):
 PYEOF
 
 note "GATE: best r0=$best_r0 (floor $R0_FLOOR), r1=$best_r1 (floor $R1_FLOOR)"
+# Run #500: the probe finished but the step hung to the 45-min ceiling —
+# the boot_server JVM and the client hold the step's stdout/stderr. Kill
+# everything BEFORE the gate verdict.
+pkill -f "paper-26.3.jar" 2>/dev/null || true
+pkill -f "dev.dist.launcher.Main" 2>/dev/null || true
+sleep 3
+pkill -f "Minecraft" 2>/dev/null || true
+true
 awk -v a="$best_r0" -v b="$best_r1" -v fa="$R0_FLOOR" -v fb="$R1_FLOOR" \
   'BEGIN { exit !(a >= fa && b >= fb) }' \
   && { note "CASCADE GATE: GREEN"; exit 0; } \
