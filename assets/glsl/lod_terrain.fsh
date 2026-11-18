@@ -774,29 +774,37 @@ void main() {
             float aspect = ScreenSize.x / max(ScreenSize.y, 1.0);
             vec3 cam = vec3(CameraBlockPos) + CameraOffset;
             vec2 anchor = floor(vec2(CameraBlockPos) / 128.0) * 128.0;
+            // v6.59.8g 2D CENSUS: sweep a 64x64 m window centered on the
+            // beacon column at plane 120 (2 m steps, 33x33 samples): R =
+            // the max g-b *4, G = the dx index /32, B = the dz index /32 —
+            // the next run localizes any dot that renders near (but not at)
+            // the beacon slot.
             float bestD = -1.0;
             float bestP = 0.0;
-            float sum = 0.0;
-            for (int k = 0; k < 32; ++k) {
-                float py = 80.0 + float(k) * 4.0;
-                vec3 P = vec3(anchor.x + 127.0, py, anchor.y + 127.0);
-                vec3 d = P - cam;
-                float z = dot(d, F);
-                vec2 ndc = vec2(dot(d, R) / (z * tanH * aspect),
-                                dot(d, U) / (z * tanH));
-                if (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0 || z < 2.0) {
-                    continue;
-                }
-                vec2 sc = ndc * 0.5 + 0.5;
-                vec3 raw = texture(InSampler, sc).rgb;
-                float dd = raw.g - raw.b;
-                sum += dd;
-                if (dd > bestD) {
-                    bestD = dd;
-                    bestP = float(k);
+            float bestDz = 0.0;
+            for (int kx = 0; kx < 33; ++kx) {
+                for (int kz = 0; kz < 33; ++kz) {
+                    float px = anchor.x + 127.0 + (float(kx) - 16.0) * 2.0;
+                    float pz = anchor.y + 127.0 + (float(kz) - 16.0) * 2.0;
+                    vec3 P = vec3(px, 120.0, pz);
+                    vec3 d = P - cam;
+                    float z = dot(d, F);
+                    vec2 ndc = vec2(dot(d, R) / (z * tanH * aspect),
+                                    dot(d, U) / (z * tanH));
+                    if (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0 || z < 2.0) {
+                        continue;
+                    }
+                    vec2 sc = ndc * 0.5 + 0.5;
+                    vec3 raw = texture(InSampler, sc).rgb;
+                    float dd = raw.g - raw.b;
+                    if (dd > bestD) {
+                        bestD = dd;
+                        bestP = float(kx) / 32.0;
+                        bestDz = float(kz) / 32.0;
+                    }
                 }
             }
-            fragColor = vec4(bestD * 4.0, bestP / 31.0, sum / 32.0 * 4.0, 1.0);
+            fragColor = vec4(bestD * 4.0, bestP, bestDz, 1.0);
             return;
         }
         if (hb.x == 203) {

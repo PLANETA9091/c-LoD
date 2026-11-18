@@ -132,14 +132,18 @@ im = Image.open(os.environ['SHOTS'] + '/cascade_aerial.png').convert('RGB')
 w, h = im.size
 y = h - 3
 out = []
-xs = list(range(200, 205)) + [205]
-names = ['r1H', 'r2H', 'rot', 'r1C', 'r3H', 'rwin']
+xs = list(range(200, 205)) + [205, 206]
+names = ['r1H', 'r2H', 'rot', 'r1C', 'r3H', 'rwin', 'census']
 for k, x in enumerate(xs):
     r, g, b = im.getpixel((x, y))
     if k == 2:
         out.append('rot az=%.2f el=%.2f fovf=%.2f' % (r, g, b))
     elif k == 5:
         out.append('rwin w=%d conf=%.2f seen=%.2f' % (int(r*16+0.5), g, b))
+    elif k == 6:
+        dx = (g * 32 - 16) * 2.0
+        dz = (b * 32 - 16) * 2.0
+        out.append('census max(g-b)=%.3f dx=%.0fm dz=%.0fm' % (r / 255 / 4, dx, dz))
     else:
         out.append('%s mark=%.1f%% max=%d min=%d' % (names[k], r*100, int(g*255+0.5), int(b*255+0.5)))
 print('HB: ' + ' | '.join(out))
