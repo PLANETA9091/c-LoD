@@ -722,7 +722,7 @@ void main() {
     //   x=203: ring-1 COLOR slice (marked fraction, max lattice byte, min).
     //   x=204: ring-3 height slice.
     ivec2 hb = ivec2(gl_FragCoord.xy);
-    if (hb.y == 2 && ((hb.x >= 200 && hb.x <= 204) || hb.x == 205 || hb.x == 206)) {
+    if (hb.y == 2 && ((hb.x >= 200 && hb.x <= 204) || hb.x == 205 || hb.x == 206 || hb.x == 207)) {
         float marked = 0.0;
         float mx = 0.0;
         float mn = 1.0;
@@ -754,6 +754,14 @@ void main() {
         if (hb.x == 205) {
             vec4 rw = texelFetch(RwinSampler, ivec2(0, 0), 0);
             fragColor = vec4(rw.r, rw.g, rw.a, 1.0);
+            return;
+        }
+        if (hb.x == 207) {
+            // v6.59.8l: the beacon probe's projection-aliveness fraction
+            // (rw.b = bestSeen/16) — 0 = every projection missed the screen,
+            // 1 = all 16 on-screen. R/G/B all carry it for the RGB PNG.
+            vec4 rw = texelFetch(RwinSampler, ivec2(0, 0), 0);
+            fragColor = vec4(rw.b, rw.b, rw.b, 1.0);
             return;
         }
         if (hb.x == 206) {

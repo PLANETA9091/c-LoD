@@ -163,8 +163,8 @@ im = Image.open(os.environ['SHOTS'] + '/cascade_aerial.png').convert('RGB')
 w, h = im.size
 y = h - 3
 out = []
-xs = list(range(200, 205)) + [205, 206]
-names = ['r1H', 'r2H', 'rot', 'r1C', 'r3H', 'rwin', 'census']
+xs = list(range(200, 205)) + [205, 206, 207]
+names = ['r1H', 'r2H', 'rot', 'r1C', 'r3H', 'rwin', 'census', 'seen']
 for k, x in enumerate(xs):
     r, g, b = im.getpixel((x, y))
     rn, gn, bn = r / 255.0, g / 255.0, b / 255.0
@@ -173,6 +173,8 @@ for k, x in enumerate(xs):
     elif k == 5:
         # the strip x=205 = (rw.r, rw.g, rw.a) = (word/16, conf, beaconHits)
         out.append('rwin w=%d conf=%.2f hits=%d' % (int(rn * 16 + 0.5), gn, int(bn * 255 + 0.5)))
+    elif k == 7:
+        out.append('seen=%.2f' % (rn,))
     elif k == 6:
         dx = (gn * 32 - 16) * 2.0
         dz = (bn * 32 - 16) * 2.0
