@@ -21,7 +21,7 @@ CX="${CENTER%,*}"
 CZ="${CENTER#*,}"
 
 note "cascade probe: center $CENTER, options cascade=true"
-export CLOD_EXTRA_OPTS="cascade=true;cascade_lap_ticks=300;cascade_guard_ticks=8;cascade_budget=1400;cascade_gen_budget=64"
+export CLOD_EXTRA_OPTS="cascade=true;cascade_lap_ticks=300;cascade_guard_ticks=8;cascade_budget=1400;cascade_gen_budget=64;carrier_sink=-0.03"
 CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" || note "boot_server rc=$? (continuing)"
 srv() { echo "$1" > /tmp/server.in; }
 srv "gamerule advance_time false"
