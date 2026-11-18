@@ -185,6 +185,36 @@ pub struct Column {
     pub biome: String,
 }
 
+/// v6.59.8e the scaffold gate counters (run #519's cas 0d with a valid
+/// store and a passing geometry review — the refusing gate is named here).
+#[derive(Default)]
+pub struct CDiag {
+    pub ticks: u64,
+    pub beacon_ok: u64,
+    pub slots_examined: u64,
+    pub cells_valid: u64,
+    pub dec_sky: u64,
+    pub dec_band: u64,
+    pub dec_cone: u64,
+    pub dec_ok: u64,
+}
+
+impl CDiag {
+    pub fn line(&self) -> String {
+        format!(
+            "t{} bk{} sl{} cv{} sky{} band{} cone{} ok{}",
+            self.ticks,
+            self.beacon_ok,
+            self.slots_examined,
+            self.cells_valid,
+            self.dec_sky,
+            self.dec_band,
+            self.dec_cone,
+            self.dec_ok
+        )
+    }
+}
+
 /// The whole cascade: six rings + the builder cursors + the scaffold
 /// streamer state. Lives behind the State mutex; all methods run on the
 /// main thread (the seedgen worker writes cells through the same lock).
@@ -202,6 +232,8 @@ pub struct Cascade {
     rank_cache: HashMap<(u32, u32), usize>,
     /// The anchor the cache was built for.
     anchor: (f64, f64),
+    /// The scaffold gate counters (the engine diag prints the line).
+    pub diag: CDiag,
     /// Diagnostics: cells sampled per ring since boot.
     pub sampled: [u64; RINGS],
 }
@@ -221,6 +253,7 @@ impl Cascade {
             rank_cache: HashMap::new(),
             anchor: (f64::NAN, f64::NAN),
             sampled: [0; RINGS],
+            diag: CDiag::default(),
         }
     }
 
@@ -496,6 +529,7 @@ impl Cascade {
             // (the slots stay streamable when the sky comes back).
             return 0;
         }
+        self.diag.ticks += 1;
         let lap = tick / lap_ticks;
         let w = (lap % u64::from(WINDOWS)) as u32;
         if lap != self.last_lap {
@@ -524,6 +558,14 @@ impl Cascade {
             let word = beacon_byte << 8;
             // Same band+cone discipline as the cell words: a beacon dot the
             // eye cannot decode is waste (and the test's band invariant).
+            self.diag.beacon_ok += u64::from(decodable(
+                bx,
+                crate::stream::HI_TIERS[rank] + zoff,
+                bz + zoff,
+                eye,
+                look,
+                sky_visible,
+            ));
             if decodable(
                 bx,
                 crate::stream::HI_TIERS[rank] + zoff,
@@ -554,6 +596,7 @@ impl Cascade {
                     if (si, sj) == BEACON_SLOT {
                         continue;
                     }
+                    self.diag.slots_examined += 1;
                     let cx = wx + si;
                     let cz = wz + sj;
                     let Some(cell) = self.rings[k].get(cx, cz).cloned() else {
@@ -562,6 +605,7 @@ impl Cascade {
                     if !cell.valid {
                         continue;
                     }
+                    self.diag.cells_valid += 1;
                     let scx = ax + (si as f64 + 0.5) * SCAFFOLD_PITCH;
                     let scz = az + (sj as f64 + 0.5) * SCAFFOLD_PITCH;
                     let rank =
@@ -572,9 +616,15 @@ impl Cascade {
                     // keeps refused slots from costing budget).
                     let hi_y = crate::stream::HI_TIERS[rank];
                     let lo_y = crate::stream::LO_TIERS[rank];
-                    if !decodable(scx, hi_y + zoff, scz + zoff, eye, look, sky_visible)
-                        || !decodable(scx, lo_y + zoff, scz + zoff, eye, look, sky_visible)
-                    {
+                    let d_hi = dec_ok_reason(scx, hi_y + zoff, scz + zoff, eye, look, sky_visible);
+                    let d_lo = dec_ok_reason(scx, lo_y + zoff, scz + zoff, eye, look, sky_visible);
+                    match d_hi.max(d_lo) {
+                        1 => self.diag.dec_sky += 1,
+                        2 => self.diag.dec_band += 1,
+                        3 => self.diag.dec_cone += 1,
+                        _ => self.diag.dec_ok += 1,
+                    }
+                    if d_hi > 0 || d_lo > 0 {
                         continue;
                     }
                     let (hw, cw) = crate::stream::Streamer::encode_words(&cell);
@@ -601,6 +651,24 @@ impl Cascade {
 /// The spawn-gate geometry for a word's probe center (mirrors the per-dot
 /// gate: band (CULL_RADIUS, ZONE_FAR] + frustum cone; the delivery gate
 /// repeats it exactly per dot).
+/// The refusal reason for the counted pre-check: 0 = decodable,
+/// 1 = sky-blind, 2 = out of the decode band, 3 = outside the frustum cone.
+fn dec_ok_reason(x: f64, y: f64, z: f64, eye: [f64; 3], look: [f64; 3], sky_visible: bool) -> u8 {
+    if !sky_visible {
+        return 1;
+    }
+    let d = [x - eye[0], y - eye[1], z - eye[2]];
+    let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+    let r = r2.sqrt();
+    if r <= crate::stream::CULL_RADIUS || r > crate::stream::ZONE_FAR {
+        return 2;
+    }
+    if (d[0] * look[0] + d[1] * look[1] + d[2] * look[2]) / r <= crate::stream::cos_half_cone() {
+        return 3;
+    }
+    0
+}
+
 fn decodable(x: f64, y: f64, z: f64, eye: [f64; 3], look: [f64; 3], sky_visible: bool) -> bool {
     if !sky_visible {
         return false;
