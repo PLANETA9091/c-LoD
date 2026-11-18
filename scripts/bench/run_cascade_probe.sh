@@ -30,11 +30,57 @@ srv "time set noon"
 bash "$BENCH_DIR/run_client.sh" || note "run_client rc=$? (continuing)"
 sleep 25
 
+# v6.59.3 (run #503's own frame): the client sat on the REQUIRED-pack prompt
+# the whole session — the cascade pack's SHA is new, the cached acceptance is
+# for the old one, and the probe never clicked Proceed (the visual lanes
+# carry accept_pack_prompt; the server-side gate measured the BUILDER, the
+# capture never ran). Ported verbatim from run_ci_visual.sh.
+accept_pack_prompt() { # tag loops
+  local tag="$1" loops="$2"
+  for _ in $(seq 1 "$loops"); do
+    ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 \
+      -i :99 -frames:v 1 /tmp/prompt_probe.png 2>/dev/null
+    XY=$(python3 -c "
+from PIL import Image
+im = Image.open('/tmp/prompt_probe.png').convert('RGB')
+px = im.load()
+warn = sum(1 for y in range(280, 370) for x in range(200, 1100)
+           if (lambda p: p[0] > 220 and p[1] > 220 and p[2] < 120)(px[x, y]))
+if warn <= 30:
+    print('')
+else:
+    xs, ys = [], []
+    for y in range(410, 480):
+        for x in range(120, 700):
+            p = px[x, y]
+            if p[0] > 235 and p[1] > 235 and p[2] > 235:
+                xs.append(x); ys.append(y)
+    if xs:
+        print(f'{(min(xs)+max(xs))//2} {(min(ys)+max(ys))//2}')
+    else:
+        print('561 447')
+")
+    if [ -n "$XY" ]; then
+      python3 "$BENCH_DIR/click.py" $XY
+      note "$tag: pack prompt clicked at ($XY)"
+      return 0
+    fi
+    sleep 2
+  done
+  note "$tag: no pack prompt rendered in time (cached pack auto-accept?)"
+  return 0
+}
+accept_pack_prompt cascade 30
+
 # The fill vantage: y=140 — rank 0 planes (80/120) for every slot (the
 # eye-100 rule bottoms out at tier 0), the PROVEN transport from y=140.
 srv "gamemode spectator Stepan"
 srv "tp Stepan $CX 140 $CZ 0 8"
 sleep 10
+# The client must be IN-WORLD (the prompt screen or a menu means the capture
+# never runs and the march paints nothing): detect the yellow prompt again;
+# if it re-rendered (a second push), click it once more.
+accept_pack_prompt cascade-2 15
 
 info() { curl -fsS "http://127.0.0.1:8199/clod-pack.info" 2>/dev/null || echo ""; }
 cov() { # ring idx -> pct
