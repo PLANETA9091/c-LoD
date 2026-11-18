@@ -1138,7 +1138,11 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb ffmpeg libgl1 libglx-mesa0 libgl1-mesa-dri mesa-utils curl
-          python3 -m pip install --quiet --user pillow numpy
+          # python-xlib: click.py's XTest injector — WITHOUT it every pack
+          # prompt click fails with ImportError (the note still prints
+          # "clicked"), the client sits on the prompt all session and the
+          # shots catch the dialog, not the march (#503/#504/#507 frames).
+          python3 -m pip install --quiet --user pillow numpy python-xlib
       - name: Build module (release)
         run: cargo build --release
       - name: Build CRUSSTY runtime + launcher
