@@ -167,16 +167,19 @@ xs = list(range(200, 205)) + [205, 206]
 names = ['r1H', 'r2H', 'rot', 'r1C', 'r3H', 'rwin', 'census']
 for k, x in enumerate(xs):
     r, g, b = im.getpixel((x, y))
+    rn, gn, bn = r / 255.0, g / 255.0, b / 255.0
     if k == 2:
-        out.append('rot az=%.2f el=%.2f fovf=%.2f' % (r, g, b))
+        out.append('rot az=%.2f el=%.2f fovf=%.2f' % (rn, gn, bn))
     elif k == 5:
-        out.append('rwin w=%d conf=%.2f hits=%d' % (int(r*16+0.5), g, b * 255))
+        # the strip x=205 = (rw.r, rw.g, rw.a) = (word/16, conf, beaconHits)
+        out.append('rwin w=%d conf=%.2f hits=%d' % (int(rn * 16 + 0.5), gn, int(bn * 255 + 0.5)))
     elif k == 6:
-        dx = (g * 32 - 16) * 2.0
-        dz = (b * 32 - 16) * 2.0
-        out.append('census max(g-b)=%.3f dx=%.0fm dz=%.0fm' % (r / 255 / 4, dx, dz))
+        dx = (gn * 32 - 16) * 2.0
+        dz = (bn * 32 - 16) * 2.0
+        out.append('census max(g-b)=%.3f dx=%.0fm dz=%.0fm' % (rn / 4, dx, dz))
     else:
-        out.append('%s mark=%.1f%% max=%d min=%d' % (names[k], r*100, int(g*255+0.5), int(b*255+0.5)))
+        # mark = the marked fraction; max/min = the lattice bytes as ints
+        out.append('%s mark=%.1f%% max=%d min=%d' % (names[k], rn * 100, g, b))
 print('HB: ' + ' | '.join(out))
 PYD
 )
