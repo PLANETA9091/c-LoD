@@ -17,7 +17,8 @@ pkill -f "net.minecraft.client.main.Main" 2>/dev/null || true
 pkill Xvfb 2>/dev/null || true
 sleep 1
 
-Xvfb :99 -screen 0 1280x720x24 +extension GLX +render -noreset > /tmp/xvfb.log 2>&1 &
+CL_W=${CL_W:-1280}; CL_H=${CL_H:-720}
+Xvfb :99 -screen 0 ${CL_W}x${CL_H}x24 +extension GLX +render -noreset > /tmp/xvfb.log 2>&1 &
 XVFB=$!
 sleep 2
 
@@ -126,7 +127,7 @@ nohup "$JAVA" -Xmx1200M \
   --accessToken 0 \
   --userType legacy \
   --versionType release \
-  --width 1280 --height 720 \
+  --width ${CL_W} --height ${CL_H} \
   --quickPlayMultiplayer "127.0.0.1:25565" \
   > /tmp/client.log 2>&1 &
 CLI=$!

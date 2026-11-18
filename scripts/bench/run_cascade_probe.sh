@@ -27,6 +27,10 @@ srv() { echo "$1" > /tmp/server.in; }
 srv "gamerule advance_time false"
 srv "time set noon"
 
+# v6.59.8j: the cascade chain = 17 passes; the first chain frame on
+# llvmpipe takes minutes at 720p — run the client at 640x360 (4x
+# fewer fragments; the word sub pitch stays ~2 px at 107 m).
+export CL_W=640 CL_H=360
 bash "$BENCH_DIR/run_client.sh" || note "run_client rc=$? (continuing)"
 sleep 25
 
@@ -38,7 +42,7 @@ sleep 25
 accept_pack_prompt() { # tag loops
   local tag="$1" loops="$2"
   for _ in $(seq 1 "$loops"); do
-    ffmpeg -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 \
+    ffmpeg -y -loglevel error -f x11grab -video_size ${CL_W}x${CL_H} -framerate 2 \
       -i :99 -frames:v 1 /tmp/prompt_probe.png 2>/dev/null
     XY=$(python3 -c "
 from PIL import Image
@@ -116,11 +120,27 @@ info > "$SHOTS/pack-info.txt"
 
 # ---- the shots --------------------------------------------------------------
 shot() { # name
-  ffmpeg -nostdin -y -loglevel error -f x11grab -video_size 1280x720 -framerate 2 \
+  ffmpeg -nostdin -y -loglevel error -f x11grab -video_size ${CL_W}x${CL_H} -framerate 2 \
     -i :99 -frames:v 1 "$SHOTS/$1.png" 2>>"$SHOTS/ffmpeg.err" \
     && note "shot $1" || note "screenshot $1 failed"
 }
 accept_pack_prompt cascade-shot 5
+# v6.59.8j THE MARCH-ALIVE POLL: the heartbeat strip x=202 reads the hotbar
+# pixels (64,116,160) while the client is still compiling/rendering the
+# first chain frame — the v6.59.8a-8i runs all shot the first frame (the
+# frozen burst/aerial pair proved it). Poll until x=202 differs, then shoot.
+for i in $(seq 1 45); do
+  ffmpeg -nostdin -y -loglevel error -f x11grab -video_size ${CL_W}x${CL_H} -framerate 2 \
+    -i :99 -frames:v 1 /tmp/readiness.png 2>>"$SHOTS/ffmpeg.err" || true
+  rv=$(python3 -c "
+from PIL import Image
+im = Image.open('/tmp/readiness.png').convert('RGB')
+w, h = im.size
+r, g, b = im.getpixel((202, h - 3))
+print(0 if (r, g, b) == (64, 116, 160) else 1)")
+  if [ "$rv" = "1" ]; then note "march alive after ~$((i * 20))s"; break; fi
+  sleep 20
+done
 # v6.59.8i THE RENDER-RENDER CONTROL: vanilla console bursts 15-40 m in
 # front of the vantage — end_rod (white) and the cascade's own carrier
 # happy_villager. If neither shows on the burst shot, the pack kills
