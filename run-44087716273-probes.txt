@@ -1,7 +1,0 @@
-probe0 red=6455 paint=18289 lod_silhouette_cols=42 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 fog=live fog_end_b=23 strobe_hits=5 hits_hi=17 mask_hits=30
-- leg-2 baseline scene px: 0
-- leg-2 renderer probe NEAR white px: 0 changed: 0
-- leg-2 renderer probe FAR white px: 483 changed: 483
-- leg-2 green dust changed-green px: 0 total changed: 803
-relog_probe0 red=0 scene=391 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 fog=live fog_end_b=23 strobe_hits=0 hits_hi=0 mask_hits=3
-relog_probe1 red=1591 scene=131406 lens_red=0 lens_black=0 lens_water=0 lens_dark=197796 lens_zero=0 rot=decoded cam_x_b=8 cam_z_b=11 az_b=0 el_b=3 fog=live fog_end_b=23 strobe_hits=1 hits_hi=9 mask_hits=30
