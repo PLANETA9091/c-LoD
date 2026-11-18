@@ -80,10 +80,12 @@ const float PI = 3.14159265358979;
 // The cascade word probe: `slots` Z rows x 4 X subs, every dot shifted
 // +zoff along Z. Strobe + fog + mirror arms are capture.fsh's verbatim.
 void probe_cword(vec2 slotCtr, float planeY, float zoff, int slots, float sub,
-                 float depthNear, out uint word, out bool anyHit, out bool allSlots) {
+                 float depthNear, out uint word, out bool anyHit, out bool allSlots,
+                 out float seen) {
     word = 0u;
     anyHit = false;
     allSlots = true;
+    seen = 0.0;
 
     vec4 rotP = texelFetch(RotSampler, ivec2(0, 0), 0);
     float az = rotP.r * 2.0 * PI;
@@ -134,6 +136,7 @@ void probe_cword(vec2 slotCtr, float planeY, float zoff, int slots, float sub,
                 continue;
             }
             vec2 sc = ndc * 0.5 + 0.5;
+            seen += 1.0; // the projection landed in the frustum
             vec2 scrPx = vec2(ScreenSize);
             ivec2 basePx = ivec2(clamp(sc * scrPx, vec2(0.0), scrPx - 1.0));
             float ringGB = 0.0;
@@ -212,13 +215,16 @@ void main() {
         vec4 rotP = texelFetch(RotSampler, ivec2(0, 0), 0);
         uint byte = 0u;
         bool got = false;
+        float bestSeen = 0.0;
         for (int k = 0; k < 6 && !got; ++k) {
             for (int r = 0; r < 4 && !got; ++r) {
                 uint w;
                 bool hit;
                 bool all;
+                float sn;
                 probe_cword(ctr, tierY(TiersHi, r), float(k) * 4.0, 4, StreamInfo.y,
-                            0.0, w, hit, all);
+                            0.0, w, hit, all, sn);
+                bestSeen = max(bestSeen, sn);
                 if (hit) {
                     byte = w >> 8;
                     got = true;
@@ -236,7 +242,11 @@ void main() {
                 conf = 1.0;
             }
         }
-        fragColor = vec4(wOut / 16.0, conf, 0.0, 1.0);
+        // v6.59.8b: b carries the projection-aliveness fraction (the max
+        // on-screen probe count / 16) — 0 = every projection missed the
+        // screen (a camera/anchor mismatch), 1 = the dots were projected
+        // and still produced no honest word (the detector or the dots).
+        fragColor = vec4(wOut / 16.0, conf, bestSeen / 16.0, 1.0);
         return;
     }
 
@@ -278,8 +288,9 @@ void main() {
         uint w;
         bool hit;
         bool all;
+        float sn;
         probe_cword(ctr, tierY(ladders, r), zoff, slots, StreamInfo.y,
-                    StreamInfo.z, w, hit, all);
+                    StreamInfo.z, w, hit, all, sn);
         if (!hit) {
             continue;
         }

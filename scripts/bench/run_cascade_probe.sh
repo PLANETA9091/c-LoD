@@ -139,7 +139,7 @@ for k, x in enumerate(xs):
     if k == 2:
         out.append('rot az=%.2f el=%.2f fovf=%.2f' % (r, g, b))
     elif k == 5:
-        out.append('rwin w=%d conf=%.2f alive=%.2f' % (int(r*16+0.5), g, b))
+        out.append('rwin w=%d conf=%.2f seen=%.2f' % (int(r*16+0.5), g, b))
     else:
         out.append('%s mark=%.1f%% max=%d min=%d' % (names[k], r*100, int(g*255+0.5), int(b*255+0.5)))
 print('HB: ' + ' | '.join(out))
