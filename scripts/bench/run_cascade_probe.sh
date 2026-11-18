@@ -125,21 +125,27 @@ shot cascade_aerial
 # v6.59.7: decode the march's cascade atlas heartbeat strip (GL row 2 =
 # PNG y h-3, x 200..204): ring-1/2/3 height slices (marked fraction, max
 # byte, min byte), the rot channel (az/el/conf), the ring-1 color slice.
-python3 - << 'PYD'
+HB=$(SHOTS="$SHOTS" python3 << 'PYD'
+import os
 from PIL import Image
-im = Image.open("$SHOTS/cascade_aerial.png").convert('RGB')
+im = Image.open(os.environ['SHOTS'] + '/cascade_aerial.png').convert('RGB')
 w, h = im.size
 y = h - 3
-names = ['r1H', 'r2H', 'rot', 'r1C', 'r3H']
-vals = []
-for k, x in enumerate(range(200, 205)):
+out = []
+xs = list(range(200, 205)) + [205]
+names = ['r1H', 'r2H', 'rot', 'r1C', 'r3H', 'rwin']
+for k, x in enumerate(xs):
     r, g, b = im.getpixel((x, y))
     if k == 2:
-        vals.append(f"{names[k]} az={r:.2f} el={g:.2f} conf={b:.2f}")
+        out.append('rot az=%.2f el=%.2f fovf=%.2f' % (r, g, b))
+    elif k == 5:
+        out.append('rwin w=%d conf=%.2f alive=%.2f' % (int(r*16+0.5), g, b))
     else:
-        vals.append(f"{names[k]} mark={r*100:.1f}% max={int(g*255+0.5)} min={int(b*255+0.5)}")
-note("HB: " + " | ".join(vals))
+        out.append('%s mark=%.1f%% max=%d min=%d' % (names[k], r*100, int(g*255+0.5), int(b*255+0.5)))
+print('HB: ' + ' | '.join(out))
 PYD
+)
+note "${HB:-HB decode failed}"
 # the far-horizon view: look south across the rings (yaw 0 = +Z)
 srv "tp Stepan $CX 150 $CZ 0 0"
 sleep 8

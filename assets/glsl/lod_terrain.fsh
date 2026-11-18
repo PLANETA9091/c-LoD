@@ -57,6 +57,7 @@ uniform sampler2D MaskSampler;    // clod_mask — dust eraser mask (this frame,
 #ifdef CASCADE
 uniform sampler2D HAtlasSampler;  // clod_rh_b — cascade height atlas
 uniform sampler2D CAtlasSampler;  // clod_rc_b — cascade color atlas
+uniform sampler2D RwinSampler;    // clod_rwin — the beacon's window broadcast
 #endif
 
 // v5.0.3: SamplerInfo never existed as a client UBO — it stayed zeroed
@@ -721,7 +722,7 @@ void main() {
     //   x=203: ring-1 COLOR slice (marked fraction, max lattice byte, min).
     //   x=204: ring-3 height slice.
     ivec2 hb = ivec2(gl_FragCoord.xy);
-    if (hb.y == 2 && hb.x >= 200 && hb.x <= 204) {
+    if (hb.y == 2 && ((hb.x >= 200 && hb.x <= 204) || hb.x == 205)) {
         float marked = 0.0;
         float mx = 0.0;
         float mn = 1.0;
@@ -747,7 +748,12 @@ void main() {
         }
         if (hb.x == 202) {
             vec4 rotP = texelFetch(RotSampler, ivec2(0, 0), 0);
-            fragColor = vec4(rotP.rgb, 1.0);
+            fragColor = vec4(rotP.r, rotP.g, rotP.a, 1.0);
+            return;
+        }
+        if (hb.x == 205) {
+            vec4 rw = texelFetch(RwinSampler, ivec2(0, 0), 0);
+            fragColor = vec4(rw.r, rw.g, rw.a, 1.0);
             return;
         }
         if (hb.x == 203) {

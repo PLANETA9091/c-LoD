@@ -345,7 +345,8 @@
                 { "sampler_name": "Rot", "target": "clod_rot_a" },
                 { "sampler_name": "Mask", "target": "clod_mask" },
                 { "sampler_name": "HAtlas", "target": "clod_rh_b" },
-                { "sampler_name": "CAtlas", "target": "clod_rc_b" }
+                { "sampler_name": "CAtlas", "target": "clod_rc_b" },
+                { "sampler_name": "Rwin", "target": "clod_rwin" }
             ],
             "output": "clod_swap",
             "uniforms": {
