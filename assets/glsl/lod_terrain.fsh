@@ -757,10 +757,12 @@ void main() {
             return;
         }
         if (hb.x == 206) {
-            // v6.59.8c BEACON PIXEL PROBE: project the beacon slot center
-            // (the capture's own geometry) and report what the screen holds
-            // there: R = the raw center delta (g-b), G = the max 5-tap
-            // delta, B = the ring ambient (the 4-corner mean of g-b).
+            // v6.59.8d BEACON COLUMN SCAN: project the beacon slot center
+            // and sweep the planes 80..204 step 4 (32 planes = the whole
+            // tier+zoff ladder): R = the max g-b seen *4, G = the plane
+            // index where it peaked / 31 (0=80, 31=204), B = the mean g-b
+            // over the whole column *4. A green dot anywhere on the column
+            // lights R; G names its plane.
             vec4 rotP = texelFetch(RotSampler, ivec2(0, 0), 0);
             float az = rotP.r * 2.0 * PI;
             float el = rotP.g * PI - PI * 0.5;
@@ -772,28 +774,29 @@ void main() {
             float aspect = ScreenSize.x / max(ScreenSize.y, 1.0);
             vec3 cam = vec3(CameraBlockPos) + CameraOffset;
             vec2 anchor = floor(vec2(CameraBlockPos) / 128.0) * 128.0;
-            vec3 P = vec3(anchor.x + 127.0, 120.0 + 0.0, anchor.y + 127.0);
-            vec3 d = P - cam;
-            float z = dot(d, F);
-            vec2 ndc = vec2(dot(d, R) / (z * tanH * aspect),
-                            dot(d, U) / (z * tanH));
-            vec2 sc = ndc * 0.5 + 0.5;
-            vec2 texel = 1.0 / ScreenSize;
-            vec3 raw = texture(InSampler, sc).rgb;
-            float ring = 0.0;
-            float mxd = -1.0;
-            for (int t = 0; t < 5; ++t) {
-                vec2 off = t == 0 ? vec2(0.0)
-                    : t == 1 ? vec2(0.75 * texel.x, 0.0)
-                    : t == 2 ? vec2(-0.75 * texel.x, 0.0)
-                    : t == 3 ? vec2(0.0, 0.75 * texel.y)
-                    : vec2(0.0, -0.75 * texel.y);
-                vec3 s = texture(InSampler, sc + off).rgb;
-                mxd = max(mxd, (s.g - s.b) - (raw.g - raw.b));
-                if (t > 0) { ring += s.g - s.b; }
+            float bestD = -1.0;
+            float bestP = 0.0;
+            float sum = 0.0;
+            for (int k = 0; k < 32; ++k) {
+                float py = 80.0 + float(k) * 4.0;
+                vec3 P = vec3(anchor.x + 127.0, py, anchor.y + 127.0);
+                vec3 d = P - cam;
+                float z = dot(d, F);
+                vec2 ndc = vec2(dot(d, R) / (z * tanH * aspect),
+                                dot(d, U) / (z * tanH));
+                if (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0 || z < 2.0) {
+                    continue;
+                }
+                vec2 sc = ndc * 0.5 + 0.5;
+                vec3 raw = texture(InSampler, sc).rgb;
+                float dd = raw.g - raw.b;
+                sum += dd;
+                if (dd > bestD) {
+                    bestD = dd;
+                    bestP = float(k);
+                }
             }
-            ring *= 0.25;
-            fragColor = vec4((raw.g - raw.b) * 4.0, mxd * 4.0, ring * 4.0, 1.0);
+            fragColor = vec4(bestD * 4.0, bestP / 31.0, sum / 32.0 * 4.0, 1.0);
             return;
         }
         if (hb.x == 203) {

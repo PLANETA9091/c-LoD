@@ -83,6 +83,8 @@ pub struct State {
     /// v6.59 THE CASCADE: the six coarse rings + the scaffold streamer.
     /// None until the disk arms (cascade=true builds it alongside).
     pub cascade: Mutex<Option<crate::cascade::Cascade>>,
+    /// The cascade streamer's dots spent this tick (the diag line reads it).
+    pub cascade_dots: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -155,6 +157,7 @@ impl State {
             diag_wire_bytes: AtomicU64::new(0),
             diag_wire_tick: AtomicU64::new(0),
             cascade: Mutex::new(None),
+            cascade_dots: AtomicU64::new(0),
         })
     }
 }
@@ -1181,10 +1184,11 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     }
     let p0 = players.first();
     crate::log_info(&format!(
-        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}) ewin {} rbeat {rb_q}p/{rb_left} rearm {ra_c}c/{ra_t}t rescan {rescan_c}c/{rescan_e}e, edits {e_char}{e_pushes}p/{e_cells}c/{e_edits}e drop {e_drops}, spawned {} / failed {}, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} ~{kbps} kB/s {cache_stat}, srbeat {sr_sent}s/{sr_q}q drop {sr_stale}stale/{sr_undec}undec, ereb {er_sent}s/{er_q}q, sweep {sw_rel}r/{sw_drn}d",
+        "stream: tick {tick} {valid}/{total_cells} cells, lap {laps}, cone {cone_c} zone {zone_c} dirty {dirty_c} (q {dirty_q}) ewin {} rbeat {rb_q}p/{rb_left} rearm {ra_c}c/{ra_t}t rescan {rescan_c}c/{rescan_e}e, edits {e_char}{e_pushes}p/{e_cells}c/{e_edits}e drop {e_drops}, spawned {} / failed {}, cas {}d, cam0 {}, wish {wish_n} forced {forced_n}, native {nat_c}c/{nat_ch}ch fail {nat_f} ({nat_w}w q {nat_q}) helper {nat_hs}{nat_ts}, wire {wire_mode} {wire_s}p/{wire_b}b fail {wire_f} ~{kbps} kB/s {cache_stat}, srbeat {sr_sent}s/{sr_q}q drop {sr_stale}stale/{sr_undec}undec, ereb {er_sent}s/{er_q}q, sweep {sw_rel}r/{sw_drn}d",
         state.stream.lock().unwrap().edit_window,
         jni::STREAM_SPAWNED.load(Ordering::Relaxed),
         jni::STREAM_FAILED.load(Ordering::Relaxed),
+        state.cascade_dots.swap(0, Ordering::Relaxed),
         p0.map(|p| format!("yaw {:.0} pitch {:.0}", p.yaw, p.pitch))
             .unwrap_or_else(|| "none".into()),
     ));
@@ -1263,6 +1267,7 @@ fn stream_step(state: &Arc<State>, env: Env) {
     // SAME per-tick batch: the wire and the per-player spawn gate serve
     // them unchanged (other players' gates refuse them, the anchor owner
     // decodes).
+    let mut cascade_dots: usize = 0;
     if state.cfg.cascade {
         let world_handle = *state.world_obj.lock().unwrap();
         if world_handle != 0 {
@@ -1298,7 +1303,7 @@ fn stream_step(state: &Arc<State>, env: Env) {
                     let mut rank_probe = |wx: i32, wz: i32| -> Option<i16> {
                         jni::sample_surface(env, world, wx, wz).map(|(y, _, _, _)| y as i16)
                     };
-                    c.stream_tick(
+                    cascade_dots += c.stream_tick(
                         &state.cfg,
                         tick,
                         state.cfg.cascade_lap_ticks,
@@ -1313,6 +1318,9 @@ fn stream_step(state: &Arc<State>, env: Env) {
                 }
             }
         }
+        state
+            .cascade_dots
+            .store(cascade_dots as u64, Ordering::Relaxed);
     }
     stream_diag(state, &players);
     if batch.is_empty() {
