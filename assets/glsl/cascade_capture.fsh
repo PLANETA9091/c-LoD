@@ -77,6 +77,9 @@ layout(location = 0) out vec4 fragColor;
 
 const float PI = 3.14159265358979;
 
+// v6.59.8h: the beacon probe's detector-fire count (the rwin alpha).
+int beaconHits = 0;
+
 // The cascade word probe: `slots` Z rows x 4 X subs, every dot shifted
 // +zoff along Z. Strobe + fog + mirror arms are capture.fsh's verbatim.
 void probe_cword(vec2 slotCtr, float planeY, float zoff, int slots, float sub,
@@ -216,6 +219,11 @@ void main() {
         uint byte = 0u;
         bool got = false;
         float bestSeen = 0.0;
+        // v6.59.8h: the strobe-hit counter rides the rwin alpha — the number
+        // of the 24 beacon probes whose detector fired at all. 0 = the
+        // capture sees no dots (projection/UBO/rendering), >0 = the dots
+        // strobe but the word assembly fails.
+        beaconHits = 0;
         for (int k = 0; k < 6 && !got; ++k) {
             for (int r = 0; r < 4 && !got; ++r) {
                 uint w;
@@ -226,6 +234,7 @@ void main() {
                             0.0, w, hit, all, sn);
                 bestSeen = max(bestSeen, sn);
                 if (hit) {
+                    beaconHits += 1;
                     byte = w >> 8;
                     got = true;
                 }
@@ -246,7 +255,7 @@ void main() {
         // on-screen probe count / 16) — 0 = every projection missed the
         // screen (a camera/anchor mismatch), 1 = the dots were projected
         // and still produced no honest word (the detector or the dots).
-        fragColor = vec4(wOut / 16.0, conf, bestSeen / 16.0, 1.0);
+        fragColor = vec4(wOut / 16.0, conf, bestSeen / 16.0, float(min(beaconHits, 255)) / 255.0);
         return;
     }
 

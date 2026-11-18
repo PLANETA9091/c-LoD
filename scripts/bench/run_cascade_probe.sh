@@ -139,7 +139,7 @@ for k, x in enumerate(xs):
     if k == 2:
         out.append('rot az=%.2f el=%.2f fovf=%.2f' % (r, g, b))
     elif k == 5:
-        out.append('rwin w=%d conf=%.2f seen=%.2f' % (int(r*16+0.5), g, b))
+        out.append('rwin w=%d conf=%.2f hits=%d' % (int(r*16+0.5), g, b * 255))
     elif k == 6:
         dx = (g * 32 - 16) * 2.0
         dz = (b * 32 - 16) * 2.0
