@@ -21,7 +21,7 @@ CX="${CENTER%,*}"
 CZ="${CENTER#*,}"
 
 note "cascade probe: center $CENTER, options cascade=true"
-export CLOD_EXTRA_OPTS="cascade=true;cascade_lap_ticks=300;cascade_guard_ticks=8;cascade_budget=1400;cascade_gen_budget=64;carrier_sink=-0.03"
+export CLOD_EXTRA_OPTS="cascade=true;cascade_lap_ticks=40;cascade_guard_ticks=8;cascade_budget=2000;cascade_gen_budget=64;carrier_sink=-0.03"
 CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" || note "boot_server rc=$? (continuing)"
 srv() { echo "$1" > /tmp/server.in; }
 # v6.59.8m: peaceful — a zombie killed the frozen client mid-run (#533 = the death screen instead of the world)
@@ -157,10 +157,15 @@ from PIL import Image
 a = Image.open('/tmp/ready_a.png').convert('RGB')
 w, h = a.size
 px = [a.getpixel((x, h - 3)) for x in range(200, 208)]
-print(px[2][2], px[0][0] * 100.0 / 255.0)")
-  mb=${rv%% *}; at=${rv##* }
-  if [ "$mb" = "255" ]; then
-    note "MARCH ALIVE (rot alpha=255) after ~$((i * 8))s, atlas=${at}%"
+# x=202 = the rot channel: the march writes vec4(az, el, conf, 1.0); a
+# sane camera has conf >= 0.25 (the capture passes early-out below it).
+# x=201 = the r2 sweep: mn=255 means the empty-atlas signature.
+conf = px[2][2] / 255.0
+mn2 = px[1][2]
+print(f'{conf:.3f} {mn2} {px[0][0] * 100.0 / 255.0:.1f}')")
+  conf=${rv%% *}; rest=${rv#* }; mn2=${rest%% *}; at=${rest##* }
+  if python3 -c "import sys; sys.exit(0 if float('$conf') >= 0.25 else 1)"; then
+    note "MARCH ALIVE (rot conf=$conf) after ~$((i * 8))s, atlas=${at}%, r2mn=$mn2"
     break
   fi
   accept_pack_prompt poll-accept 1
