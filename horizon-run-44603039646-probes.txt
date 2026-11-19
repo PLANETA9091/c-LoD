@@ -1,0 +1,1 @@
+probe0 red=220877 paint=576619 lod_silhouette_cols=200 lens_red=0 lens_black=0 lens_water=0 lens_dark=0 lens_zero=0 rot=none scan=0 carriers=0
