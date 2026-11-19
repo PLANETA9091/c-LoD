@@ -73,7 +73,7 @@ cd "$D"
 # mid-boot with live lens panels — the suspects are the pack's post-chains
 # vs the runner environment itself).
 if [ "${CLOD_CONTROL:-0}" = "1" ]; then
-  tail -f /tmp/server.in 2>/tmp/tail.err | "$JAVA" -Xmx2G -jar versions/paper-26.3.jar > /tmp/server.log 2>&1 &
+  tail -f /tmp/server.in 2>/tmp/tail.err | "$JAVA" -Xmx1G -jar versions/paper-26.3.jar > /tmp/server.log 2>&1 &
   SRV=$!
   exec 9>/tmp/server.in
   echo "control paper pid $SRV"
@@ -94,7 +94,7 @@ if [ "${CLOD_CONTROL:-0}" = "1" ]; then
 fi
 # reader first (tail blocks on open until the writer side opens), then
 # hold the write end open for the lifetime of the server
-tail -f /tmp/server.in 2>/tmp/tail.err | "$JAVA" -Xmx2G -jar launcher.jar > /tmp/server.log 2>&1 &
+tail -f /tmp/server.in 2>/tmp/tail.err | "$JAVA" -Xmx1G -jar launcher.jar > /tmp/server.log 2>&1 &
 SRV=$!
 exec 9>/tmp/server.in
 echo "launcher pid $SRV"

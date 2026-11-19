@@ -112,7 +112,7 @@ cat > "$LOG4J_CFG" <<'EOF'
 EOF
 fi
 
-nohup "$JAVA" -Xmx1200M \
+nohup "$JAVA" -Xmx768M \
   -Djava.library.path="$C/natives" \
   -Dorg.lwjgl.librarypath="$C/natives" \
   -Dorg.lwjgl.opengl.libname=libGL.so.1 \
