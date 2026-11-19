@@ -84,7 +84,7 @@ accept_pack_prompt cascade 30
 # The fill vantage: y=140 — rank 0 planes (80/120) for every slot (the
 # eye-100 rule bottoms out at tier 0), the PROVEN transport from y=140.
 srv "gamemode spectator Stepan"
-srv "tp Stepan $CX 140 $CZ 0 8"
+srv "tp Stepan ${SWEEP_X:--336} ${SWEEP_Y:-113} ${SWEEP_Z:--128} 0 8"
 sleep 10
 # The client must be IN-WORLD (the prompt screen or a menu means the capture
 # never runs and the march paints nothing): detect the yellow prompt again;
