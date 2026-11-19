@@ -237,7 +237,7 @@ PYD
 )
 note "${HB:-HB decode failed}"
 # the far-horizon view: look south across the rings (yaw 0 = +Z)
-srv "tp Stepan $CX 150 $CZ 0 0"
+srv "tp Stepan $CX 165 $CZ 0 30"
 sleep 8
 accept_pack_prompt cascade-shot2 5
 shot cascade_horizon
