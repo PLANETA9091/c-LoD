@@ -19,7 +19,7 @@ CENTER="${CLOD_CENTER:-256,320}"
 export CLOD_OPTS="tick_ms=100;region_blocks=512;cell_size=2;particles_per_tick=2048;scan_budget=4096;http_port=8199;center_x=${CENTER%,*};center_z=${CENTER#*,}${CLOD_EXTRA_OPTS:+;$CLOD_EXTRA_OPTS}"
 # 4GB container: Paper+module must fit alongside the client later;
 # host OOM-killer targets the fattest RSS — stay small and fast
-export DIST_JAVA_OPTS="-Xms256M -Xmx384M -XX:MaxMetaspaceSize=256M -XX:MaxDirectMemorySize=128M -XX:+UseG1GC"
+export DIST_JAVA_OPTS="-Xms256M -Xmx512M -XX:MaxMetaspaceSize=256M -XX:MaxDirectMemorySize=128M -XX:+UseG1GC"
 
 # v5.5 frontier: chunk-system thread tuning (measured A/B on the 2-CPU bench:
 # auto=1 gen worker -> 35 cells/s, workers=4 -> 72 cells/s, workers=6 -> 80

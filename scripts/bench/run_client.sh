@@ -112,7 +112,7 @@ cat > "$LOG4J_CFG" <<'EOF'
 EOF
 fi
 
-nohup "$JAVA" -Xmx512M -XX:MaxDirectMemorySize=256M \
+nohup "$JAVA" -Xmx768M -XX:MaxDirectMemorySize=256M \
   -Djava.library.path="$C/natives" \
   -Dorg.lwjgl.librarypath="$C/natives" \
   -Dorg.lwjgl.opengl.libname=libGL.so.1 \
