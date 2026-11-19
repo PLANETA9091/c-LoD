@@ -134,19 +134,35 @@ accept_pack_prompt cascade-shot 5
 # pixels (64,116,160) while the client is still compiling/rendering the
 # first chain frame — the v6.59.8a-8i runs all shot the first frame (the
 # frozen burst/aerial pair proved it). Poll until x=202 differs, then shoot.
+# v6.59.8o: the strip row (GL row 2 = PNG y=h-3) is UNDER THE HOTBAR — the
+# client draws the UI after the post chain, so every screen grab reads
+# hotbar sprite pixels, never the march's heartbeat (the whole month's
+# "atlas 51.8/68.6" numbers were the hotbar). Press F1 ONCE (hideGui) so
+# the strip becomes readable, then wait for the march's rot write: the
+# shader writes vec4(...,1.0) so the rot pixel's B channel = 255; the
+# hotbar's is 160. x=200's R = the real atlas marked fraction.
+F1_SENT=0
 for i in $(seq 1 30); do
+  if [ "$F1_SENT" != "1" ]; then
+    python3 "$BENCH_DIR/press_key.py" 67 >/dev/null 2>&1 || true
+    F1_SENT=1
+    note "F1 sent (hideGui — the heartbeat row sits under the hotbar)"
+    sleep 2
+  fi
   grab() { ffmpeg -nostdin -y -loglevel error -f x11grab -video_size ${CL_W}x${CL_H} -framerate 2 \
     -i :99 -frames:v 1 "$1" 2>>"$SHOTS/ffmpeg.err" || true; }
   grab /tmp/ready_a.png; sleep 6; grab /tmp/ready_b.png
   rv=$(python3 -c "
 from PIL import Image
 a = Image.open('/tmp/ready_a.png').convert('RGB')
-b = Image.open('/tmp/ready_b.png').convert('RGB')
-ha, hb = a.size[1] - 3, b.size[1] - 3
-sa = [a.getpixel((x, ha)) for x in range(200, 208)]
-sb = [b.getpixel((x, hb)) for x in range(200, 208)]
-print(0 if sa == sb else 1)")
-  if [ "$rv" = "1" ]; then note "march alive (strip moves) after ~$((i * 7))s"; break; fi
+w, h = a.size
+px = [a.getpixel((x, h - 3)) for x in range(200, 208)]
+print(px[2][2], px[0][0] * 100.0 / 255.0)")
+  mb=${rv%% *}; at=${rv##* }
+  if [ "$mb" = "255" ]; then
+    note "MARCH ALIVE (rot alpha=255) after ~$((i * 8))s, atlas=${at}%"
+    break
+  fi
   accept_pack_prompt poll-accept 1
   sleep 1
 done
