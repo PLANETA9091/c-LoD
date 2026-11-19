@@ -21,7 +21,7 @@ CX="${CENTER%,*}"
 CZ="${CENTER#*,}"
 
 note "cascade probe: center $CENTER, options cascade=true"
-export CLOD_EXTRA_OPTS="cascade=true;cascade_lap_ticks=40;cascade_guard_ticks=8;cascade_budget=2000;cascade_gen_budget=64;carrier_sink=-0.03"
+export CLOD_EXTRA_OPTS="cascade=true;cascade_lap_ticks=300;cascade_guard_ticks=8;cascade_budget=2000;cascade_gen_budget=64;carrier_sink=-0.03"
 CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" || note "boot_server rc=$? (continuing)"
 srv() { echo "$1" > /tmp/server.in; }
 # v6.59.8m: peaceful — a zombie killed the frozen client mid-run (#533 = the death screen instead of the world)
@@ -134,6 +134,26 @@ accept_pack_prompt cascade-shot 5
 # pixels (64,116,160) while the client is still compiling/rendering the
 # first chain frame — the v6.59.8a-8i runs all shot the first frame (the
 # frozen burst/aerial pair proved it). Poll until x=202 differs, then shoot.
+# v6.59.8s SWEEP ACCUMULATION: the lap must outlive the dust lifetime
+# (~60-80 ticks) or the beacon slot mixes two window bytes and the march
+# rejects w -> the whole stream is discarded (lap=40 in #544: 23x slots
+# ok server-side, atlas still 0% — the beacon was never stable). Keep
+# lap=300 and instead give the sweep dedicated accumulation time before
+# the money shots: the atlas grows ~1.5%/min once the fill passes the
+# swept windows.
+SWEEP_WAIT=${SWEEP_WAIT:-1500}
+# v6.59.8u THE SWEEP VANTAGE: from the fill vantage (y=140 at the wall)
+# the carrier planes sit BEHIND the terrain silhouette — the client sees
+# ~0 green pixels and the atlas starves (mon3/mon4 in #543: 2-14 px).
+# At the proven low-shore vantage (-336,113,-128: #543's accidental tp,
+# 6655 green px) every plane 80..204 projects against the sky and the
+# words decode. Teleport there for the accumulation phase; the march
+# reads the same world-keyed atlas when the shots return to the wall.
+srv "gamemode spectator Stepan"
+srv "tp Stepan ${SWEEP_X:--336} ${SWEEP_Y:-113} ${SWEEP_Z:--128} 0 8"
+note "sweep vantage -336,113,-128; wait ${SWEEP_WAIT}s (the atlas accumulates)"
+sleep "$SWEEP_WAIT"
+
 # v6.59.8o: the strip row (GL row 2 = PNG y=h-3) is UNDER THE HOTBAR — the
 # client draws the UI after the post chain, so every screen grab reads
 # hotbar sprite pixels, never the march's heartbeat (the whole month's
