@@ -786,17 +786,20 @@ void main() {
             // (the slots ride ax + (si+0.5)*2m = [ax+1, ax+129]) at ANY tier
             // plane (HI_TIERS[rank]+zoff, ranks 0..3 = the whole 80..204
             // ladder) — the old sweep (a +127-shifted window at plane 120)
-            // missed both. Sweep the cell interior on every plane: R = the
-            // max g-b *4, G = the plane index /31, B = the dx index /32.
+            // missed both. v6.59.8q: 17x17 cell steps (7.5 m) x 9 planes
+            // (16 m) = ~2.6k samples — the first draft (33x33x32 = 34k)
+            // blew up llvmpipe's shader JIT and the client died on pack
+            // apply (#541). R = the max g-b *4, G = the plane index /8,
+            // B = the dx index /16.
             float bestD = -1.0;
             float bestP = 0.0;
             float bestDz = 0.0;
-            for (int kx = 0; kx < 33; ++kx) {
-                for (int kz = 0; kz < 33; ++kz) {
-                    float px = anchor.x + 2.0 + float(kx) * 3.8;
-                    float pz = anchor.y + 2.0 + float(kz) * 3.8;
-                    for (int pl = 0; pl < 32; ++pl) {
-                        vec3 P = vec3(px, 80.0 + float(pl) * 4.0, pz);
+            for (int kx = 0; kx < 17; ++kx) {
+                for (int kz = 0; kz < 17; ++kz) {
+                    float px = anchor.x + 2.0 + float(kx) * 7.5;
+                    float pz = anchor.y + 2.0 + float(kz) * 7.5;
+                    for (int pl = 0; pl < 9; ++pl) {
+                        vec3 P = vec3(px, 80.0 + float(pl) * 16.0, pz);
                         vec3 d = P - cam;
                         float z = dot(d, F);
                         vec2 ndc = vec2(dot(d, R) / (z * tanH * aspect),
@@ -809,8 +812,8 @@ void main() {
                         float dd = raw.g - raw.b;
                         if (dd > bestD) {
                             bestD = dd;
-                            bestP = float(pl) / 31.0;
-                            bestDz = float(kx) / 32.0;
+                            bestP = float(pl) / 8.0;
+                            bestDz = float(kx) / 16.0;
                         }
                     }
                 }
