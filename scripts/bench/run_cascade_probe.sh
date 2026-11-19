@@ -48,23 +48,26 @@ accept_pack_prompt() { # tag loops
       -i :99 -frames:v 1 /tmp/prompt_probe.png 2>/dev/null
     XY=$(python3 -c "
 from PIL import Image
+import os
 im = Image.open('/tmp/prompt_probe.png').convert('RGB')
 px = im.load()
-warn = sum(1 for y in range(280, 370) for x in range(200, 1100)
+# scale the 720p-era coords to the actual grab size (640x360 = half linear)
+sx, sy = im.size[0] / 1280, im.size[1] / 720
+warn = sum(1 for y in range(int(280 * sy), int(370 * sy)) for x in range(int(200 * sx), int(1100 * sx))
            if (lambda p: p[0] > 220 and p[1] > 220 and p[2] < 120)(px[x, y]))
-if warn <= 30:
+if warn <= int(30 * sx * sy):
     print('')
 else:
     xs, ys = [], []
-    for y in range(410, 480):
-        for x in range(120, 700):
+    for y in range(int(410 * sy), int(480 * sy)):
+        for x in range(int(120 * sx), int(700 * sx)):
             p = px[x, y]
             if p[0] > 235 and p[1] > 235 and p[2] > 235:
                 xs.append(x); ys.append(y)
     if xs:
         print(f'{(min(xs)+max(xs))//2} {(min(ys)+max(ys))//2}')
     else:
-        print('561 447')
+        print(f'{int(561 * sx)} {int(447 * sy)}')
 ")
     if [ -n "$XY" ]; then
       python3 "$BENCH_DIR/click.py" $XY
