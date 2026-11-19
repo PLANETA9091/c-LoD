@@ -24,6 +24,8 @@ note "cascade probe: center $CENTER, options cascade=true"
 export CLOD_EXTRA_OPTS="cascade=true;cascade_lap_ticks=300;cascade_guard_ticks=8;cascade_budget=1400;cascade_gen_budget=64;carrier_sink=-0.03"
 CLOD_CENTER="$CENTER" bash "$BENCH_DIR/boot_server.sh" || note "boot_server rc=$? (continuing)"
 srv() { echo "$1" > /tmp/server.in; }
+# v6.59.8m: peaceful — a zombie killed the frozen client mid-run (#533 = the death screen instead of the world)
+srv "difficulty peaceful"
 srv "gamerule advance_time false"
 srv "time set noon"
 
@@ -129,17 +131,21 @@ accept_pack_prompt cascade-shot 5
 # pixels (64,116,160) while the client is still compiling/rendering the
 # first chain frame — the v6.59.8a-8i runs all shot the first frame (the
 # frozen burst/aerial pair proved it). Poll until x=202 differs, then shoot.
-for i in $(seq 1 45); do
-  ffmpeg -nostdin -y -loglevel error -f x11grab -video_size ${CL_W}x${CL_H} -framerate 2 \
-    -i :99 -frames:v 1 /tmp/readiness.png 2>>"$SHOTS/ffmpeg.err" || true
+for i in $(seq 1 30); do
+  grab() { ffmpeg -nostdin -y -loglevel error -f x11grab -video_size ${CL_W}x${CL_H} -framerate 2 \
+    -i :99 -frames:v 1 "$1" 2>>"$SHOTS/ffmpeg.err" || true; }
+  grab /tmp/ready_a.png; sleep 6; grab /tmp/ready_b.png
   rv=$(python3 -c "
 from PIL import Image
-im = Image.open('/tmp/readiness.png').convert('RGB')
-w, h = im.size
-r, g, b = im.getpixel((202, h - 3))
-print(0 if (r, g, b) == (64, 116, 160) else 1)")
-  if [ "$rv" = "1" ]; then note "march alive after ~$((i * 20))s"; break; fi
-  sleep 20
+a = Image.open('/tmp/ready_a.png').convert('RGB')
+b = Image.open('/tmp/ready_b.png').convert('RGB')
+ha, hb = a.size[1] - 3, b.size[1] - 3
+sa = [a.getpixel((x, ha)) for x in range(200, 208)]
+sb = [b.getpixel((x, hb)) for x in range(200, 208)]
+print(0 if sa == sb else 1)")
+  if [ "$rv" = "1" ]; then note "march alive (strip moves) after ~$((i * 7))s"; break; fi
+  accept_pack_prompt poll-accept 1
+  sleep 1
 done
 # v6.59.8i THE RENDER-RENDER CONTROL: vanilla console bursts 15-40 m in
 # front of the vantage — end_rod (white) and the cascade's own carrier
