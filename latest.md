@@ -1,168 +1,162 @@
-- phase: 0 sanity (19:49:42)
+- phase: 0 sanity (19:55:42)
 ### c-LoD visual run (-930,796, marker=red_concrete, vantage -1005,150 yaw 270)
 - GL:     Vendor: Mesa (0xffffffff);    Device: llvmpipe (LLVM 21.1.8, 256 bits) (0xffffffff);OpenGL renderer string: llvmpipe (LLVM 21.1.8, 256 bits);OpenGL core profile version string: 4.5 (Core Profile) Mesa 26.0.8-1ubuntu0.3;
-- boot + gates OK (19:50:11)
-- phase: 1 server booted (19:50:11)
+- boot + gates OK (19:56:23)
+- phase: 1 server booted (19:56:23)
 - sky-grid armed
-- phase: 2 leg-1 client joined (19:50:40)
-- joined session 1 (19:50:40)
+- phase: 2 leg-1 client joined (19:56:52)
+- joined session 1 (19:56:52)
 - stream live: cells=65536
-- phase: 3 scan populated (19:51:03)
+- phase: 3 scan populated (19:57:19)
 - terrain range: 2 terraced mountains at (CX-4,CZ-20)/(CX-2,CZ+16), tops 185/190, grass terraces + stone caps, 66..82 m from the eye (inside the 83.5 m band, chunk edge 64 m)
 - scan complete=1 (cells=cells=65536/65536)
-- paint settled=1 (wire 12874p)
-- **FAIL:** rejoin1: client left the game mid-test (joins=2 lefts=2) — the shot is the main-menu panorama, not the LOD proof
+- paint settled=1 (wire 0p)
+- **FAIL:** rejoin1: client left the game mid-test (joins=1 lefts=1) — the shot is the main-menu panorama, not the LOD proof
 
 ### boot / stream
 ```
 [c-LoD] c-LoD pack finalized (ONE-TIME, static): shader-only, 153603 bytes, sha1 2867a7a3d6fcecee18045acb46d0b51c4e117fa4 — zero textures, zero world data, one push per join
-[19:50:07 INFO]: [c-LoD] c-LoD pack finalized (ONE-TIME, static): shader-only, 153603 bytes, sha1 2867a7a3d6fcecee18045acb46d0b51c4e117fa4 — zero textures, zero world data, one push per join
-[19:50:07 INFO]: [c-LoD] c-LoD sky-grid stream armed: 256x256 cells at (-1186,540), 2048 particles/tick, 256 ticks/lap
+[19:56:21 INFO]: [c-LoD] c-LoD pack finalized (ONE-TIME, static): shader-only, 153603 bytes, sha1 2867a7a3d6fcecee18045acb46d0b51c4e117fa4 — zero textures, zero world data, one push per join
 [c-LoD] c-LoD sky-grid stream armed: 256x256 cells at (-1186,540), 2048 particles/tick, 256 ticks/lap
-[c-LoD] stream: tick 900 65536/65536 cells, lap 383, cone 562 zone 817 dirty 777 (q 11102) ewin 256 rbeat 51p/1 rearm 80c/2733t rescan 62364c/1364e, edits +2342p/1718c/363e drop 0, spawned 0 / failed 0, cas 0d, cam0 none, wish 309 forced 203, native 65536c/1089ch fail 0 (3w q 0) helper on, trees 1089ch/fail 0, wire bundle 27547p/42b fail 0 ~0 kB/s cache 13442/24576 h14105 m13442 e0, srbeat 1215s/142q drop 35stale/0undec, ereb 56s/793q, sweep 0r/0d, cdiag off
-[19:55:27 INFO]: [c-LoD] stream: tick 900 65536/65536 cells, lap 383, cone 562 zone 817 dirty 777 (q 11102) ewin 256 rbeat 51p/1 rearm 80c/2733t rescan 62364c/1364e, edits +2342p/1718c/363e drop 0, spawned 0 / failed 0, cas 0d, cam0 none, wish 309 forced 203, native 65536c/1089ch fail 0 (3w q 0) helper on, trees 1089ch/fail 0, wire bundle 27547p/42b fail 0 ~0 kB/s cache 13442/24576 h14105 m13442 e0, srbeat 1215s/142q drop 35stale/0undec, ereb 56s/793q, sweep 0r/0d, cdiag off
+[19:56:21 INFO]: [c-LoD] c-LoD sky-grid stream armed: 256x256 cells at (-1186,540), 2048 particles/tick, 256 ticks/lap
+[c-LoD] stream: tick 800 65536/65536 cells, lap 325, cone 0 zone 768 dirty 684 (q 6352) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 49862c/716e, edits +1146p/834c/141e drop 0, spawned 0 / failed 0, cas 0d, cam0 none, wish 395 forced 117, native 65536c/1089ch fail 0 (3w q 0) helper on, trees 1089ch/fail 0, wire bundle 12220p/12b fail 0 ~0 kB/s cache 12220/24576 h0 m12220 e0, srbeat 0s/1060q drop 0stale/0undec, ereb 0s/700q, sweep 0r/0d, cdiag off
+[20:01:00 INFO]: [c-LoD] stream: tick 800 65536/65536 cells, lap 325, cone 0 zone 768 dirty 684 (q 6352) ewin 0 rbeat 0p/0 rearm 0c/0t rescan 49862c/716e, edits +1146p/834c/141e drop 0, spawned 0 / failed 0, cas 0d, cam0 none, wish 395 forced 117, native 65536c/1089ch fail 0 (3w q 0) helper on, trees 1089ch/fail 0, wire bundle 12220p/12b fail 0 ~0 kB/s cache 12220/24576 h0 m12220 e0, srbeat 0s/1060q drop 0stale/0undec, ereb 0s/700q, sweep 0r/0d, cdiag off
 ```
 ### sessions
 ```
-[19:50:39 INFO]: System chat: Stepan joined the game
-[19:51:20 INFO]: System chat: Stepan left the game
-[19:52:12 INFO]: System chat: Stepan joined the game
-[19:52:20 INFO]: System chat: Stepan left the game
+[19:56:52 INFO]: System chat: Stepan joined the game
+[19:57:33 INFO]: System chat: Stepan left the game
 ```
 ### client log tail
 ```
-[19:52:20] [Netty Epoll IO #0/DEBUG]:  IN: [play:clientbound/minecraft:section_blocks_update] net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket -> 16 bytes
-[19:52:20] [Netty Epoll IO #0/DEBUG]:  IN: [play:clientbound/minecraft:block_update] net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket -> 10 bytes
-[19:52:20] [Worker-Main-3/ERROR]: Couldn't compile pipeline (clod:lod_terrain/10): 
-com.mojang.renderpearl.util.ShaderCompileException: Couldn't parse GLSL: clod:post/debug_lens:62: error: '' :  syntax error, unexpected IDENTIFIER
-
-	at com.mojang.renderpearl.frontend.shaders.GlslCompiler.compileToSpv(GlslCompiler.java:140)
-	at com.mojang.renderpearl.frontend.shaders.PipelineBuilder.generateBackendCreateInfo(PipelineBuilder.java:76)
-	at com.mojang.renderpearl.frontend.shaders.PipelineBuilder.lambda$compilePipeline$0(PipelineBuilder.java:329)
-	at java.base/java.util.concurrent.CompletableFuture$AsyncSupply.run(CompletableFuture.java:1789)
-	at java.base/java.util.concurrent.CompletableFuture$AsyncSupply.exec(CompletableFuture.java:1781)
-	at java.base/java.util.concurrent.ForkJoinTask.doExec(ForkJoinTask.java:511)
-	at java.base/java.util.concurrent.ForkJoinPool$WorkQueue.topLevelExec(ForkJoinPool.java:1450)
-	at java.base/java.util.concurrent.ForkJoinPool.runWorker(ForkJoinPool.java:2019)
-	at java.base/java.util.concurrent.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:187)
-[19:52:20] [Worker-Main-3/ERROR]: Couldn't preload shader clod:shaders/post/debug_lens.fsh
-java.io.FileNotFoundException: clod:shaders/post/debug_lens.fsh
-	at net.minecraft.server.packs.resources.ResourceProvider.lambda$getResourceOrThrow$0(ResourceProvider.java:21)
-	at java.base/java.util.Optional.orElseThrow(Optional.java:403)
-	at net.minecraft.server.packs.resources.ResourceProvider.getResourceOrThrow(ResourceProvider.java:21)
-	at net.minecraft.client.renderer.GameRenderer$1.getShader(GameRenderer.java:261)
-	at com.mojang.renderpearl.frontend.shaders.PipelineBuilder.loadShaderSource(PipelineBuilder.java:365)
-	at com.mojang.renderpearl.frontend.shaders.PipelineBuilder.generateBackendCreateInfo(PipelineBuilder.java:70)
-	at com.mojang.renderpearl.frontend.shaders.PipelineBuilder.lambda$compilePipeline$0(PipelineBuilder.java:329)
-	at java.base/java.util.concurrent.CompletableFuture$AsyncSupply.run(CompletableFuture.java:1789)
-	at java.base/java.util.concurrent.CompletableFuture$AsyncSupply.exec(CompletableFuture.java:1781)
-	at java.base/java.util.concurrent.ForkJoinTask.doExec(ForkJoinTask.java:511)
-	at java.base/java.util.concurrent.ForkJoinPool$WorkQueue.topLevelExec(ForkJoinPool.java:1450)
-	at java.base/java.util.concurrent.ForkJoinPool.runWorker(ForkJoinPool.java:2019)
-	at java.base/java.util.concurrent.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:187)
-[19:52:20] [Worker-Main-3/ERROR]: Couldn't find source for FRAGMENT shader (clod:post/debug_lens)
-[19:52:20] [Worker-Main-3/ERROR]: Couldn't find source for FRAGMENT shader (clod:post/debug_lens)
-[19:52:20] [Render thread/ERROR]: Failed to load post chain: clod:lod_terrain
-net.minecraft.client.renderer.ShaderManager$CompilationException: Failed to compile post processing pipeline clod:lod_terrain/10
-	at net.minecraft.client.renderer.PostChain.createPass(PostChain.java:101)
-	at net.minecraft.client.renderer.PostChain.load(PostChain.java:66)
-	at net.minecraft.client.renderer.ShaderManager$PostChainCache.loadPostChain(ShaderManager.java:340)
-	at net.minecraft.client.renderer.ShaderManager$PostChainCache.getOrLoadPostChain(ShaderManager.java:327)
-	at net.minecraft.client.renderer.ShaderManager.getPostChain(ShaderManager.java:259)
-	at net.minecraft.client.renderer.GameRenderer.preparePostEffects(GameRenderer.java:541)
-	at net.minecraft.client.renderer.GameRenderer.render(GameRenderer.java:491)
-	at net.minecraft.client.Minecraft.renderFrame(Minecraft.java:1376)
-	at net.minecraft.client.Minecraft.runTick(Minecraft.java:1274)
-	at net.minecraft.client.Minecraft.run(Minecraft.java:967)
-	at net.minecraft.client.main.Main.main(Main.java:292)
-[19:52:20] [Netty Epoll IO #0/DEBUG]:  IN: [play:clientbound/minecraft:block_update] net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket -> 10 bytes
-[19:52:20] [Netty Epoll IO #0/DEBUG]:  IN: [play:clientbound/minecraft:rotate_head] net.minecraft.network.protocol.game.ClientboundRotateHeadPacket -> 3 bytes
-[19:52:20] [Netty Epoll IO #0/DEBUG]:  IN: [play:clientbound/minecraft:set_entity_motion] net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket -> 9 bytes
-[19:52:20] [Netty Epoll IO #0/DEBUG]:  IN: [play:clientbound/minecraft:move_entity_pos] net.minecraft.network.protocol.game.ClientboundMoveEntityPacket$Pos -> 11 bytes
-[19:52:20] [Netty Epoll IO #0/DEBUG]:  IN: [play:clientbound/minecraft:set_entity_motion] net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket -> 9 bytes
-[19:52:20] [Netty Epoll IO #0/DEBUG]:  IN: [play:clientbound/minecraft:move_entity_pos] net.minecraft.network.protocol.game.ClientboundMoveEntityPacket$Pos -> 11 bytes
-[19:52:20] [Netty Epoll IO #0/DEBUG]:  IN: [play:clientbound/minecraft:rotate_head] net.minecraft.network.protocol.game.ClientboundRotateHeadPacket -> 4 bytes
-[19:52:20] [Render thread/INFO]: Reloading ResourceManager: vanilla, vanilla
-[19:52:21] [Worker-Main-2/INFO]: Found unifont_all_no_pua-17.0.01.hex, loading
-[19:52:21] [Worker-Main-3/INFO]: Found unifont_pua-17.0.01.hex, loading
-[19:52:21] [Worker-Main-2/INFO]: Found unifont_jp_patch-17.0.01.hex, loading
-[19:52:21] [Download-2/INFO]: Could not authorize you against Realms server: java.lang.RuntimeException: Failed to parse into SignedJWT: 0
-[19:52:21] [Download-2/ERROR]: Couldn't connect to realms
-com.mojang.realmsclient.exception.RealmsServiceException: Realms authentication error with message 'java.lang.RuntimeException: Failed to parse into SignedJWT: 0'
-	at com.mojang.realmsclient.client.RealmsClient.execute(RealmsClient.java:625)
-	at com.mojang.realmsclient.client.RealmsClient.clientCompatible(RealmsClient.java:354)
-	at com.mojang.realmsclient.RealmsAvailability.lambda$check$0(RealmsAvailability.java:48)
+com.mojang.authlib.exceptions.InvalidCredentialsException: Status: 401
+	at com.mojang.authlib.exceptions.MinecraftClientHttpException.toAuthenticationException(MinecraftClientHttpException.java:70)
+	at com.mojang.authlib.services.MinecraftServicesUserApiService.fetchProperties(MinecraftServicesUserApiService.java:168)
+	at net.minecraft.client.Minecraft.lambda$new$1(Minecraft.java:451)
 	at java.base/java.util.concurrent.CompletableFuture$AsyncSupply.run(CompletableFuture.java:1789)
 	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
 	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
 	at java.base/java.lang.Thread.run(Thread.java:1474)
+Caused by: MinecraftClientHttpException[type=HTTP_ERROR, status=401, response=ErrorResponse[path=/player/attributes, error=null, errorMessage=null, details=null]]
+	at com.mojang.authlib.minecraft.client.MinecraftClient.buildHttpException(MinecraftClient.java:170)
+	at com.mojang.authlib.minecraft.client.MinecraftClient.readServiceResponse(MinecraftClient.java:147)
+	at com.mojang.authlib.minecraft.client.MinecraftClient.getWithEtag(MinecraftClient.java:81)
+	at com.mojang.authlib.minecraft.client.MinecraftClient.get(MinecraftClient.java:65)
+	at com.mojang.authlib.services.MinecraftServicesUserApiService.fetchProperties(MinecraftServicesUserApiService.java:118)
+	... 5 more
+[libclodgl] glXChooseFBConfig called (9 attribs)
+[libclodgl] glXChooseFBConfig -> configs
+[libclodgl] missing real symbol: glNamedFramebufferTextureMultiviewOVR
+[19:58:08] [Render thread/INFO]: Using graphics backend OpenGL, using drivers: 4.5 (Core Profile) Mesa 26.0.8-1ubuntu0.3
+[19:58:08] [Render thread/INFO]: Using graphics device: llvmpipe (LLVM 21.1.8, 256 bits) (Mesa)
+[19:58:08] [Render thread/INFO]: Using graphics device extensions: GL_ARB_multi_draw_indirect, GL_ARB_buffer_storage, GL_ARB_shader_draw_parameters, GL_ARB_base_instance, GL_KHR_debug, GL_ARB_draw_indirect, GL_ARB_clip_control, GL_ARB_vertex_attrib_binding, GL_ARB_direct_state_access, GL_EXT_texture_filter_anisotropic
+[libclodgl] glXChooseFBConfig called (9 attribs)
+[libclodgl] glXChooseFBConfig -> configs
+[19:58:08] [Render thread/INFO]: Created window using SDL video driver: x11
+[19:58:09] [Render thread/DEBUG]: Using polling for tracking audio device changes
+[19:58:09] [Download-1/INFO]: Could not authorize you against Realms server: java.lang.RuntimeException: Failed to parse into SignedJWT: 0
+[19:58:09] [Download-1/ERROR]: Failed to fetch Realms feature flags
+com.mojang.realmsclient.exception.RealmsServiceException: Realms authentication error with message 'java.lang.RuntimeException: Failed to parse into SignedJWT: 0'
+	at com.mojang.realmsclient.client.RealmsClient.execute(RealmsClient.java:625)
+	at com.mojang.realmsclient.client.RealmsClient.fetchFeatureFlags(RealmsClient.java:204)
+	at java.base/java.util.concurrent.CompletableFuture$AsyncSupply.run(CompletableFuture.java:1789)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+	at java.base/java.lang.Thread.run(Thread.java:1474)
+[19:58:10] [Render thread/INFO]: Reloading ResourceManager: vanilla, vanilla
+[19:58:10] [Render thread/DEBUG]: Growing IndexBuffer: Old limit 0, new limit 60.
+[19:58:11] [Worker-Main-3/INFO]: Found unifont_all_no_pua-17.0.01.hex, loading
+[19:58:11] [Worker-Main-2/INFO]: Found unifont_pua-17.0.01.hex, loading
+[19:58:11] [Worker-Main-3/INFO]: Found unifont_jp_patch-17.0.01.hex, loading
 [ALSOFT] (EE) Could not query RTKit: No such file or directory (2)
-[19:52:22] [Render thread/INFO]: OpenAL initialized on device No Output
-[19:52:22] [Render thread/INFO]: Sound engine started
-[19:52:22] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
-[19:52:22] [Render thread/INFO]: Created: 256x128x0 minecraft:textures/atlas/celestials.png-atlas
-[19:52:22] [Render thread/INFO]: Created: 128x128x0 minecraft:textures/atlas/decorated_pot.png-atlas
-[19:52:22] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
-[19:52:22] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
-[19:52:22] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
-[19:52:22] [Render thread/INFO]: Created: 2048x2048x4 minecraft:textures/atlas/blocks.png-atlas
-[19:52:22] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/items.png-atlas
-[19:52:22] [Render thread/INFO]: Created: 1024x1024x0 minecraft:textures/atlas/gui.png-atlas
-[19:52:22] [Render thread/INFO]: Created: 128x64x0 minecraft:textures/atlas/map_decorations.png-atlas
-[19:52:22] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/chest.png-atlas
-[19:52:22] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/shulker_boxes.png-atlas
+[19:58:16] [Render thread/INFO]: OpenAL initialized on device No Output
+[19:58:16] [Render thread/INFO]: Sound engine started
+[19:58:16] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
+[19:58:16] [Render thread/INFO]: Created: 256x128x0 minecraft:textures/atlas/celestials.png-atlas
+[19:58:16] [Render thread/INFO]: Created: 128x128x0 minecraft:textures/atlas/decorated_pot.png-atlas
+[19:58:16] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
+[19:58:16] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
+[19:58:16] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
+[19:58:16] [Render thread/INFO]: Created: 2048x2048x4 minecraft:textures/atlas/blocks.png-atlas
+[19:58:16] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/items.png-atlas
+[19:58:16] [Render thread/INFO]: Created: 1024x1024x0 minecraft:textures/atlas/gui.png-atlas
+[19:58:16] [Render thread/INFO]: Created: 128x64x0 minecraft:textures/atlas/map_decorations.png-atlas
+[19:58:16] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/chest.png-atlas
+[19:58:16] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/shulker_boxes.png-atlas
+[19:58:17] [Render thread/INFO]: Connecting to 127.0.0.1, 25565
+[19:58:18] [Server Connector #1/ERROR]: Couldn't connect to server
+io.netty.channel.AbstractChannel$AnnotatedConnectException: finishConnect(..) failed with error(-111): Connection refused: localhost/127.0.0.1:25565
+	Suppressed: java.util.concurrent.CompletionException: Rethrowing promise failure cause
+		at io.netty.util.concurrent.DefaultPromise.rethrowIfFailed(DefaultPromise.java:686)
+		at io.netty.util.concurrent.DefaultPromise.syncUninterruptibly(DefaultPromise.java:427)
+		at io.netty.channel.DefaultChannelPromise.syncUninterruptibly(DefaultChannelPromise.java:125)
+		at io.netty.channel.DefaultChannelPromise.syncUninterruptibly(DefaultChannelPromise.java:30)
+		at net.minecraft.client.gui.screens.ConnectScreen$1.run(ConnectScreen.java:115)
+Caused by: java.net.ConnectException: finishConnect(..) failed with error(-111): Connection refused
+	at io.netty.channel.unix.Errors.newConnectException0(Errors.java:166)
+	at io.netty.channel.unix.Errors.handleConnectErrno(Errors.java:131)
+	at io.netty.channel.unix.Socket.finishConnect(Socket.java:361)
+	at io.netty.channel.epoll.AbstractEpollChannel$AbstractEpollUnsafe.doFinishConnect(AbstractEpollChannel.java:772)
+	at io.netty.channel.epoll.AbstractEpollChannel$AbstractEpollUnsafe.finishConnect(AbstractEpollChannel.java:749)
+	at io.netty.channel.epoll.AbstractEpollChannel$AbstractEpollUnsafe.epollOutReady(AbstractEpollChannel.java:616)
+	at io.netty.channel.epoll.AbstractEpollChannel$AbstractEpollUnsafe.handle(AbstractEpollChannel.java:477)
+	at io.netty.channel.epoll.EpollIoHandler$DefaultEpollIoRegistration.handle(EpollIoHandler.java:349)
+	at io.netty.channel.epoll.EpollIoHandler.processReady(EpollIoHandler.java:548)
+	at io.netty.channel.epoll.EpollIoHandler.run(EpollIoHandler.java:491)
+	at io.netty.channel.SingleThreadIoEventLoop.runIo(SingleThreadIoEventLoop.java:225)
+	at io.netty.channel.SingleThreadIoEventLoop.run(SingleThreadIoEventLoop.java:196)
+	at io.netty.util.concurrent.SingleThreadEventExecutor$5.run(SingleThreadEventExecutor.java:1204)
+	at io.netty.util.internal.ThreadExecutorMap$2.run(ThreadExecutorMap.java:74)
+	at java.base/java.lang.Thread.run(Thread.java:1474)
+[19:58:18] [Render thread/DEBUG]: Growing IndexBuffer: Old limit 60, new limit 2136.
 --- exceptions (Realms/RTKit noise filtered) ---
-25:[19:52:05] [Render thread/ERROR]: Error parsing option value 4 for option Simulation Distance: Value 4 outside of range [5:17]
-48:[19:52:06] [Download-2/ERROR]: Failed to fetch user properties
-49:com.mojang.authlib.exceptions.InvalidCredentialsException: Status: 401
-50:	at com.mojang.authlib.exceptions.MinecraftClientHttpException.toAuthenticationException(MinecraftClientHttpException.java:70)
-57:Caused by: MinecraftClientHttpException[type=HTTP_ERROR, status=401, response=ErrorResponse[path=/player/attributes, error=null, errorMessage=null, details=null]]
-58:	at com.mojang.authlib.minecraft.client.MinecraftClient.buildHttpException(MinecraftClient.java:170)
-16795:[19:52:20] [Worker-Main-3/ERROR]: Couldn't compile pipeline (clod:lod_terrain/10): 
-16796:com.mojang.renderpearl.util.ShaderCompileException: Couldn't parse GLSL: clod:post/debug_lens:62: error: '' :  syntax error, unexpected IDENTIFIER
-16807:[19:52:20] [Worker-Main-3/ERROR]: Couldn't preload shader clod:shaders/post/debug_lens.fsh
-16808:java.io.FileNotFoundException: clod:shaders/post/debug_lens.fsh
-16822:[19:52:20] [Worker-Main-3/ERROR]: Couldn't find source for FRAGMENT shader (clod:post/debug_lens)
-16823:[19:52:20] [Worker-Main-3/ERROR]: Couldn't find source for FRAGMENT shader (clod:post/debug_lens)
-16824:[19:52:20] [Render thread/ERROR]: Failed to load post chain: clod:lod_terrain
-16825:net.minecraft.client.renderer.ShaderManager$CompilationException: Failed to compile post processing pipeline clod:lod_terrain/10
-16849:[19:52:21] [Download-2/ERROR]: Couldn't connect to realms
+25:[19:58:08] [Render thread/ERROR]: Error parsing option value 4 for option Simulation Distance: Value 4 outside of range [5:17]
+39:[19:58:08] [Download-2/ERROR]: Failed to fetch user properties
+40:com.mojang.authlib.exceptions.InvalidCredentialsException: Status: 401
+41:	at com.mojang.authlib.exceptions.MinecraftClientHttpException.toAuthenticationException(MinecraftClientHttpException.java:70)
+48:Caused by: MinecraftClientHttpException[type=HTTP_ERROR, status=401, response=ErrorResponse[path=/player/attributes, error=null, errorMessage=null, details=null]]
+49:	at com.mojang.authlib.minecraft.client.MinecraftClient.buildHttpException(MinecraftClient.java:170)
+95:[19:58:18] [Server Connector #1/ERROR]: Couldn't connect to server
+96:io.netty.channel.AbstractChannel$AnnotatedConnectException: finishConnect(..) failed with error(-111): Connection refused: localhost/127.0.0.1:25565
+97:	Suppressed: java.util.concurrent.CompletionException: Rethrowing promise failure cause
+103:Caused by: java.net.ConnectException: finishConnect(..) failed with error(-111): Connection refused
+104:	at io.netty.channel.unix.Errors.newConnectException0(Errors.java:166)
 ```
 ### server log tail
 ```
 [c-LoD] EB: enter, native_gen=true
 [c-LoD] EB: enter, native_gen=true
-[19:55:41 INFO]: [ChunkHolderManager] Saved 897 block chunks, 512 entity chunks, 13 poi chunks in world 'minecraft:overworld' in 2.11s
-[19:55:41 INFO]: [ChunkHolderManager] Waiting 60s for chunk I/O to halt for world 'minecraft:overworld'
-[19:55:41 INFO]: [ChunkHolderManager] Halted I/O scheduler for world 'minecraft:overworld'
-[19:55:41 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_nether
-[19:55:41 INFO]: [ChunkHolderManager] Waiting 60s for chunk system to halt for world 'minecraft:the_nether'
-[19:55:41 INFO]: [ChunkHolderManager] Halted chunk system for world 'minecraft:the_nether'
-[19:55:41 INFO]: [ChunkHolderManager] Saving all chunkholders for world 'minecraft:the_nether'
-[19:55:41 INFO]: [ChunkHolderManager] Saved 0 block chunks, 0 entity chunks, 0 poi chunks in world 'minecraft:the_nether' in 0.00s
-[19:55:41 INFO]: [ChunkHolderManager] Waiting 60s for chunk I/O to halt for world 'minecraft:the_nether'
-[19:55:41 INFO]: [ChunkHolderManager] Halted I/O scheduler for world 'minecraft:the_nether'
-[19:55:41 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_end
-[19:55:41 INFO]: [ChunkHolderManager] Waiting 60s for chunk system to halt for world 'minecraft:the_end'
-[19:55:41 INFO]: [ChunkHolderManager] Halted chunk system for world 'minecraft:the_end'
-[19:55:41 INFO]: [ChunkHolderManager] Saving all chunkholders for world 'minecraft:the_end'
-[19:55:41 INFO]: [ChunkHolderManager] Saved 0 block chunks, 0 entity chunks, 0 poi chunks in world 'minecraft:the_end' in 0.00s
-[19:55:41 INFO]: [ChunkHolderManager] Waiting 60s for chunk I/O to halt for world 'minecraft:the_end'
-[19:55:41 INFO]: [ChunkHolderManager] Halted I/O scheduler for world 'minecraft:the_end'
-[19:55:41 INFO]: Waiting for all RegionFile I/O tasks to complete...
-[19:55:41 INFO]: All RegionFile I/O tasks to complete
-[19:55:41 INFO]: [MoonriseCommon] Awaiting termination of worker pool for up to 60s...
-[19:55:41 INFO]: [MoonriseCommon] Awaiting termination of I/O pool for up to 60s...
 [c-LoD] EB: enter, native_gen=true
-[launcher] server exited with code 143
+[c-LoD] engine tick alive: tick 850
+[c-LoD] EB: enter, native_gen=true
+[20:01:50 INFO]: [c-LoD] engine tick alive: tick 850
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
+[c-LoD] EB: enter, native_gen=true
 ```
 ### shots
 ```
-total 88
-drwxr-xr-x 2 runner runner  4096 Nov 19 19:55 .
-drwxr-xr-x 3 runner runner  4096 Nov 19 19:48 ..
--rw-r--r-- 1 runner runner 62347 Nov 19 19:55 server_full.log
--rw-r--r-- 1 runner runner 14426 Nov 19 19:55 summary.md
+total 104
+drwxr-xr-x 2 runner runner  4096 Nov 19 20:02 .
+drwxr-xr-x 3 runner runner  4096 Nov 19 19:54 ..
+-rw-r--r-- 1 runner runner 84373 Nov 19 20:02 server_full.log
+-rw-r--r-- 1 runner runner 12041 Nov 19 20:02 summary.md
 ```
 
 **exit=1** failures=1 leg1=0 leg2=0
