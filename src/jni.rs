@@ -1535,8 +1535,8 @@ fn resolve_nms(env: Env) -> Option<Nms> {
                 clear_if_pending(env);
                 let args: Vec<jvalue> = match variant {
                     1u8 => vec![jv(color), ji(1)],
-                    2u8 => vec![jv(color), jf(1.2)],
-                    _ => vec![ji(65280), jf(1.2)], // int-rgb green + float scale
+                    2u8 => vec![jv(color), jf(4.0)],
+                    _ => vec![ji(65280), jf(4.0)], // int-rgb green + float scale
                 };
                 let local = env
                     .new_object(dust_particle_cls, mid, &args)

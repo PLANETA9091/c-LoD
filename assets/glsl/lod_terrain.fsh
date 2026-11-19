@@ -782,33 +782,36 @@ void main() {
             float aspect = ScreenSize.x / max(ScreenSize.y, 1.0);
             vec3 cam = vec3(CameraBlockPos) + CameraOffset;
             vec2 anchor = floor(vec2(CameraBlockPos) / 128.0) * 128.0;
-            // v6.59.8g 2D CENSUS: sweep a 64x64 m window centered on the
-            // beacon column at plane 120 (2 m steps, 33x33 samples): R =
-            // the max g-b *4, G = the dx index /32, B = the dz index /32 —
-            // the next run localizes any dot that renders near (but not at)
-            // the beacon slot.
+            // v6.59.8p CENSUS v3: the dots sit anywhere in the anchor cell
+            // (the slots ride ax + (si+0.5)*2m = [ax+1, ax+129]) at ANY tier
+            // plane (HI_TIERS[rank]+zoff, ranks 0..3 = the whole 80..204
+            // ladder) — the old sweep (a +127-shifted window at plane 120)
+            // missed both. Sweep the cell interior on every plane: R = the
+            // max g-b *4, G = the plane index /31, B = the dx index /32.
             float bestD = -1.0;
             float bestP = 0.0;
             float bestDz = 0.0;
             for (int kx = 0; kx < 33; ++kx) {
                 for (int kz = 0; kz < 33; ++kz) {
-                    float px = anchor.x + 127.0 + (float(kx) - 16.0) * 2.0;
-                    float pz = anchor.y + 127.0 + (float(kz) - 16.0) * 2.0;
-                    vec3 P = vec3(px, 120.0, pz);
-                    vec3 d = P - cam;
-                    float z = dot(d, F);
-                    vec2 ndc = vec2(dot(d, R) / (z * tanH * aspect),
-                                    dot(d, U) / (z * tanH));
-                    if (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0 || z < 2.0) {
-                        continue;
-                    }
-                    vec2 sc = ndc * 0.5 + 0.5;
-                    vec3 raw = texture(InSampler, sc).rgb;
-                    float dd = raw.g - raw.b;
-                    if (dd > bestD) {
-                        bestD = dd;
-                        bestP = float(kx) / 32.0;
-                        bestDz = float(kz) / 32.0;
+                    float px = anchor.x + 2.0 + float(kx) * 3.8;
+                    float pz = anchor.y + 2.0 + float(kz) * 3.8;
+                    for (int pl = 0; pl < 32; ++pl) {
+                        vec3 P = vec3(px, 80.0 + float(pl) * 4.0, pz);
+                        vec3 d = P - cam;
+                        float z = dot(d, F);
+                        vec2 ndc = vec2(dot(d, R) / (z * tanH * aspect),
+                                        dot(d, U) / (z * tanH));
+                        if (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0 || z < 2.0) {
+                            continue;
+                        }
+                        vec2 sc = ndc * 0.5 + 0.5;
+                        vec3 raw = texture(InSampler, sc).rgb;
+                        float dd = raw.g - raw.b;
+                        if (dd > bestD) {
+                            bestD = dd;
+                            bestP = float(pl) / 31.0;
+                            bestDz = float(kx) / 32.0;
+                        }
                     }
                 }
             }
