@@ -1154,7 +1154,7 @@ mod tests {
         // marker stays a comment, no ring targets, no scaffold token.
         let prod = build(&Config::parse(""));
         let prod_entries = zip_entries(&prod.zip);
-        assert_eq!(prod_entries.len(), 13, "production entry count fixed");
+        assert_eq!(prod_entries.len(), 14, "production entry count fixed"); // +pyr_build.fsh (v6.59.13)
         assert!(!prod_entries
             .iter()
             .any(|(n, _)| n.contains("cascade_capture")));
@@ -1182,7 +1182,7 @@ mod tests {
         let entries = zip_entries(&cas.zip);
         assert_eq!(
             entries.len(),
-            14,
+            15, // prod(14) + cascade_capture.fsh
             "cascade pack = prod + cascade_capture.fsh"
         );
         assert!(entries

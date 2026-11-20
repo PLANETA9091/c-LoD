@@ -44,6 +44,8 @@
 // everywhere it holds data. Where vanilla is genuinely closer, vanilla keeps
 // the pixel. mesh_paint=false keeps the pre-G8d behavior byte-for-byte.
 
+// __CASCADE__ (v6.59: packgen swaps this marker for the cascade define in
+// the cascade pack; production keeps the comment — byte-stable artifact).
 uniform sampler2D InSampler;      // minecraft:main color
 uniform sampler2D InDepthSampler; // minecraft:main depth
 uniform sampler2D HeightSampler;  // clod_h_b — streamed height bytes (1 px = 1 cell)
