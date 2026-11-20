@@ -391,3 +391,13 @@ height byte over the band, x=310.r = MAX color-word ALPHA (254 = decoded).
    vantage (165/30) — the deliverable frames.
 5. Verdict on 186 via §3 graceful-stop + .mca parse (no cargo needed — do
    it FIRST on the fresh stand).
+
+## SURVIVAL AUDIT (2026-11-20, post-recycle inventory) — plan revised
+
+ALIVE (this tree): src/stream.rs WITH the cascade functions (encode_words at :930, 24 grep hits on encode_words/HI_TIERS/word_dots — the notes were wrong to mark it lost); assets/glsl/lod_terrain.fsh + rot_copy.fsh + rot_solve.fsh (the march pipeline); scripts/bench/{boot_server.sh, run_client.sh, run_client_voxy.sh, press_key.py}; /usr/bin/java exists (version check pending). config.rs, engine.rs, http.rs, jni.rs, packgen.rs + the rest of src/ also alive.
+
+DEAD: src/cascade.rs (the heart: word_dots, stream_tick, CDiag, rings, beacon — verbatim fragments are in the notes + this conversation read lines 191-215/260-300/540-660/689-780); assets/glsl/cascade_capture.fsh (the whole 367-line atlas decoder — read fully in-conversation); run_cascade_probe.sh + w11_check.sh (lane recipes recoverable from notes: SWEEP_WAIT env, vantages sweep -336/113/-128, shots CX 165 pitch 30); mc-test stand (paper jar + world + client); /home/z/tools (jdk25, cargo, glslang).
+
+REMOTE SURPRISE: origin/fix/v618-unfog = 61e842378 (v6.39.2) — yesterday's pushes (aedf8e6, d4fe696) are GONE from GitHub too; both sides regressed to pre-cascade lines. So GitHub is NOT a safe archive for the v6.59 work — the conversation context + download/ are the only carriers.
+
+REVISED ORDER: (1) java -version (if >=21, paper 26.3 boots with it); (2) rustup + cargo (cascade.rs needs a real build, no more blind writes); (3) reconstruct cascade.rs from notes+context (~1200 lines, skeleton first, cargo test as the verifier); (4) reconstruct cascade_capture.fsh from the in-context full read; (5) run_cascade_probe.sh + w11_check.sh from recipes; (6) mc-test stand (paper download, boot_server paths); (7) THEN the #550-state experiments: window-11 world check (graceful stop + .mca heightmap parse — verdict on the constant-186) and run #551 with the 165/30 vantage.
