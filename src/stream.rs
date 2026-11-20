@@ -140,7 +140,7 @@ pub const SUB_PER_CELL: f64 = 4.0;
 /// never share a plane. §5b/§7b spawn bytes: rank 0/1/3 untouched, and
 /// those worlds hold NO rank-2 cells — only the marker class changes.
 pub const LO_TIERS: [f64; 4] = [80.0, 140.0, 173.0, 200.0];
-pub const HI_TIERS: [f64; 4] = [120.0, 180.0, 175.0, 240.0];
+pub const HI_TIERS: [f64; 4] = [120.0, 180.0, 175.0, 192.5];
 pub const RS_TIERS: [f64; 4] = [100.0, 160.0, 174.0, 220.0];
 /// The intra-cell step guard: a word's 4 dots spread +-0.75 blocks around
 /// the sampled surface point (sub = cell/4, cell = 2) while ONE sampled

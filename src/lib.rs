@@ -19,6 +19,7 @@
 //!      Per tick the engine switches chains per player (Off / Veil / Full
 //!      tiers) — the only dynamic part, pure `/posteffect`.
 
+mod cascade;
 mod config;
 mod edits;
 mod engine;
