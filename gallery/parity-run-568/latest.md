@@ -1,4 +1,4 @@
-# PARITY RUN 553 (run 44613719785, sha aedf8e6) — gate: False
+# PARITY RUN 568 (run 44820069718, sha ba59c7c) — gate: False
 
 # PARITY GATE — c-LoD vs Voxy (pixel-perfect, per vantage)
 
