@@ -46,6 +46,9 @@ pub struct State {
     pub push_fails: AtomicU32,
     /// v5 sky-grid streaming state (Rust side; main-thread only).
     pub stream: Mutex<Streamer>,
+    /// v6.59 THE CASCADE: the six-ring word stream (rings, sweep, diag) —
+    /// lives only when cfg.cascade is set (CLOD_OPTS cascade=true).
+    pub cascade: Mutex<crate::cascade::Cascade>,
     /// v5.0.4 frontier: chunks with an in-flight moonrise FORCED ticket
     /// (chunk -> tick when requested). NON-BLOCKING: the chunk generates on
     /// the chunk system's workers; this ledger is polled each tick and the
@@ -129,6 +132,7 @@ impl State {
         Arc::new(Self {
             cfg,
             stream: Mutex::new(stream),
+            cascade: Mutex::new(crate::cascade::Cascade::new()),
             server,
             pack: RwLock::new(None),
             phase: AtomicU8::new(PHASE_BOOT),
@@ -1002,6 +1006,76 @@ fn arm_stream(state: &Arc<State>, ox: f64, oz: f64) {
 /// Rate-limited stream diagnostics + live /clod-pack.info counters.
 /// Runs with AND without players (v5.7: the playerless pre-join arm +
 /// SEEDGEN fill must stay visible to ops).
+/// v6.59 THE CASCADE stream step: the budgeted ring scan (sample_surface at
+/// the ring-0 16 m cell centers, ingested into every ring) + the word sweep
+/// for the active window (beacon + six rings, round robin). Appends to the
+/// spawn batch the delivery loop already carries to every player.
+fn cascade_step(
+    state: &Arc<State>,
+    env: Env,
+    world: jvmti_bindings::jni::jobject,
+    views: &[crate::stream::ViewHint],
+) -> Vec<crate::stream::Spawn> {
+    use crate::cascade::{ring_origin, Column};
+    let mut cas = state.cascade.lock().unwrap();
+    let origin = ring_origin(&state.cfg);
+
+    // ---- the budgeted ring scan ----------------------------------------
+    // The cursor walks ring 0 (256x256 cells of 16 m); valid cells skip
+    // free, invalid ones cost a JNI sample (budgeted) and ingest into ALL
+    // rings (the column falls into one cell per ring). Unloaded chunks
+    // retry on the next lap — the native gen fills them playerless.
+    let side = 256u32;
+    let total = side * side;
+    let budget = state.cfg.scan_budget as usize;
+    let start = cas.scan_cursor;
+    let mut cols: Vec<Column> = Vec::new();
+    let mut attempts = 0usize;
+    for i in 0..total {
+        if attempts >= budget || cols.len() >= budget {
+            break;
+        }
+        let idx = (start + i) % total;
+        let cx = idx % side;
+        let cz = idx / side;
+        if cas.rings[0].valid_at(cx, cz) {
+            continue;
+        }
+        attempts += 1;
+        let wx = origin.0 as i32 + (cx as i32) * 16 + 8;
+        let wz = origin.1 as i32 + (cz as i32) * 16 + 8;
+        if let Some((y, liquid, material, _biome)) = jni::sample_surface(env, world, wx, wz) {
+            cols.push(Column {
+                wx,
+                wz,
+                height: y.clamp(-64, 1023) as i16,
+                liquid,
+                material,
+            });
+        }
+    }
+    cas.scan_cursor = (start + total) % total;
+    cas.ingest_columns(origin, &cols);
+
+    // ---- the word sweep for the active window ---------------------------
+    let mut batch = Vec::new();
+    if let Some(v) = views.first() {
+        // sky_visible = true: the lane camera always holds sky; the capture
+        // gates sky-blindness on its side (the beacon checksum dies first).
+        let w = cas.window();
+        let _ = cas.stream_tick(
+            origin,
+            w,
+            v.eye,
+            v.look,
+            state.cfg.particles_per_tick as usize,
+            true,
+            &mut batch,
+        );
+    }
+    batch
+}
+
 fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     let tick = state.tick_no.load(Ordering::Relaxed);
     if !tick.is_multiple_of(100) {
@@ -1132,6 +1206,12 @@ fn stream_diag(state: &Arc<State>, players: &[PlayerInfo]) {
     state
         .server
         .set_sparse_diag(sr_sent, sr_q, sr_stale, sr_undec);
+    // v6.59 THE CASCADE: the lane's coverage line rides the same beat.
+    if state.cfg.cascade {
+        state
+            .server
+            .set_cascade_line(state.cascade.lock().unwrap().coverage_line());
+    }
     // v6.5.2 CI forensics: when debug_cell is configured, refresh the
     // /clod-cells window (the server's belief about the cells it streams)
     // on the same 100-tick beat.
@@ -1216,9 +1296,19 @@ fn stream_step(state: &Arc<State>, env: Env) {
             .collect()
     };
     let batch: Vec<crate::stream::Spawn> = {
-        let mut s = state.stream.lock().unwrap();
-        s.tick_batch(state.cfg.particles_per_tick as usize, &views)
-            .to_vec()
+        if state.cfg.cascade {
+            // v6.59 THE CASCADE: the six-ring word stream replaces the disk
+            // batch — the disk scaffold's dots would collide with the
+            // cascade slots (same planes, same 2 m scaffold), and the
+            // cascade chain renders from its own atlas, not the disk one.
+            let world_handle = *state.world_obj.lock().unwrap();
+            let world = unsafe { as_obj(world_handle) };
+            cascade_step(state, env, world, &views)
+        } else {
+            let mut s = state.stream.lock().unwrap();
+            s.tick_batch(state.cfg.particles_per_tick as usize, &views)
+                .to_vec()
+        }
     };
     stream_diag(state, &players);
     if batch.is_empty() {

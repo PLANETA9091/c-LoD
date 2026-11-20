@@ -122,6 +122,38 @@
         },
         {
             "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/cascade_march",
+            "inputs": [
+                { "sampler_name": "In", "target": "minecraft:main" },
+                { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
+                { "sampler_name": "Height", "target": "clod_rh_b" },
+                { "sampler_name": "ColBuf", "target": "clod_rc_b" },
+                { "sampler_name": "Rot", "target": "clod_rot_a" }
+            ],
+            "output": "minecraft:main",
+            "uniforms": {
+                "ClodGrid": [
+                    { "name": "GridInfo", "type": "vec4", "value": [__ORIGIN_X__, __ORIGIN_Z__, 0.0, 0.0] }
+                ],
+                "ClodRegion": [
+                    { "name": "RegionInfo", "type": "vec4", "value": [__REGION_BLOCKS__, __CELL__, __SEA_LEVEL__, __MAX_HEIGHT__] }
+                ],
+                "ClodParams": [
+                    { "name": "LodParams", "type": "vec4", "value": [__LOD_NEAR__, __MAX_HEIGHT__, __SEA_LEVEL__, __MIN_CONF__] }
+                ],
+                "ClodPaint": [
+                    { "name": "PaintParams", "type": "vec4", "value": [__DEPTH_NEAR__, __MESH_PAINT__, 0.0, 0.0] }
+                ],
+                "ClodColors": [
+                    { "name": "ColLow", "type": "vec4", "value": __COL_LOW__ },
+                    { "name": "ColHigh", "type": "vec4", "value": __COL_HIGH__ },
+                    { "name": "ColWater", "type": "vec4", "value": __COL_WATER__ },
+                    { "name": "VeilColor", "type": "vec4", "value": __VEIL_RGBA__ }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
             "fragment_shader": "clod:post/cascade_census",
             "inputs": [
                 { "sampler_name": "In", "target": "minecraft:main" },

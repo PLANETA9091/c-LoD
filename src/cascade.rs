@@ -116,6 +116,11 @@ impl Ring {
         Some(&self.cells[(cz * GRID + cx) as usize])
     }
 
+    /// Cheap scan-cursor skip: has this cell ingested any column?
+    pub fn valid_at(&self, cx: u32, cz: u32) -> bool {
+        self.get(cx, cz).map(|c| c.valid).unwrap_or(false)
+    }
+
     fn set(&mut self, cx: u32, cz: u32, cell: Cell) -> bool {
         if cx >= GRID || cz >= GRID {
             return false;
@@ -187,6 +192,9 @@ pub struct Cascade {
     pub sweep: [u32; RINGS],
     pub diag: CDiag,
     pub ticks: u64,
+    /// The engine's ring-scan cursor (ring-0 cell index 0..65536).
+    pub scan_cursor: u32,
+    last_lap: u64,
 }
 
 impl Cascade {
@@ -207,7 +215,23 @@ impl Cascade {
                 dec_ok: 0,
             },
             ticks: 0,
+            scan_cursor: 0,
+            last_lap: u64::MAX,
         }
+    }
+
+    /// The lane coverage line: ingested-cell percentages for rings 0/1, the
+    /// fill gate the probe lane reads off /clod-pack.info.
+    pub fn coverage_line(&self) -> String {
+        let pct = |r: usize| -> f64 {
+            let valid = self.rings[r]
+                .cells
+                .iter()
+                .filter(|c| c.valid)
+                .count() as f64;
+            valid * 100.0 / f64::from(GRID * GRID)
+        };
+        format!("cascade r0={:.1}% r1={:.1}%", pct(0), pct(1))
     }
 
     /// The chunk whose center falls inside ring cell (ccx, ccz) — the chunk
@@ -267,7 +291,7 @@ impl Cascade {
     /// the eye-40 line (a plane below it cannot carry over the terrain).
     pub fn slot_rank(
         &self,
-        origin: (f64, f64),
+        _origin: (f64, f64),
         si: u32,
         sj: u32,
         probe: Option<i16>,
@@ -295,7 +319,14 @@ impl Cascade {
         let ax = anchor_of(eye[0]);
         let az = anchor_of(eye[2]);
         let mut spent = 0usize;
-        self.diag.ticks += 1;
+        self.ticks += 1;
+        self.diag.ticks = self.ticks;
+        // Lap boundary: reset the per-ring slot sweeps for the next window.
+        let lap = self.ticks / LAP_TICKS;
+        if lap != self.last_lap {
+            self.last_lap = lap;
+            self.sweep = [0; RINGS];
+        }
 
         // ---- the beacon: the window broadcast at every ring's Z offset ----
         let beacon_byte = ((w * 17) & 0xFF) as u16;

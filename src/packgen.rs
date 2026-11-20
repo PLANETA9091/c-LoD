@@ -309,11 +309,12 @@ fn build_zip(
     } else {
         lod_terrain
     };
-    // v6.59 THE CASCADE: the capture/census shaders ride the cascade pack.
+    // v6.59 THE CASCADE: the capture/census/march shaders ride the cascade pack.
     let cascade_fsh = if cascade {
         Some((
             include_str!("../assets/glsl/cascade_capture.fsh"),
             include_str!("../assets/glsl/cascade_census.fsh"),
+            include_str!("../assets/glsl/cascade_march.fsh"),
         ))
     } else {
         None
@@ -389,9 +390,10 @@ fn build_zip(
     if let Some(lens) = debug_lens_fsh {
         zip.add("assets/clod/shaders/post/debug_lens.fsh", lens.as_bytes());
     }
-    if let Some((cap, census)) = cascade_fsh {
+    if let Some((cap, census, march)) = cascade_fsh {
         zip.add("assets/clod/shaders/post/cascade_capture.fsh", cap.as_bytes());
         zip.add("assets/clod/shaders/post/cascade_census.fsh", census.as_bytes());
+        zip.add("assets/clod/shaders/post/cascade_march.fsh", march.as_bytes());
     }
     zip.add("assets/minecraft/shaders/core/sky.vsh", sky_vsh.as_bytes());
     zip.add("assets/minecraft/shaders/core/sky.fsh", sky_fsh.as_bytes());

@@ -33,6 +33,9 @@ pub struct PackMeta {
     pub sparse_q: u64,
     pub sparse_stale: u64,
     pub sparse_undec: u64,
+    /// v6.59 THE CASCADE: the live `cascade r0=..% r1=..%` coverage line the
+    /// probe lane's fill gate parses (empty when cascade is off).
+    pub cascade_line: String,
 }
 
 pub struct PackServer {
@@ -79,6 +82,14 @@ impl PackServer {
             m.sparse_q = q as u64;
             m.sparse_stale = stale;
             m.sparse_undec = undec;
+        }
+    }
+
+    /// v6.59 THE CASCADE: refresh the cascade coverage line on the same
+    /// diag beat (the probe lane's fill gate parses it off /clod-pack.info).
+    pub fn set_cascade_line(&self, line: String) {
+        if let Ok(mut m) = self.meta.write() {
+            m.cascade_line = line;
         }
     }
 
@@ -194,9 +205,10 @@ fn handle(mut stream: TcpStream, srv: &PackServer) -> std::io::Result<()> {
             }
             let len = srv.bytes.read().map(|b| b.len()).unwrap_or(0);
             let body = format!(
-                "revision={}\nsha1={}\ncells={}/{}\nbytes={}\nsparse_sent={}\nsparse_q={}\nsparse_stale={}\nsparse_undec={}\n",
+                "revision={}\nsha1={}\ncells={}/{}\nbytes={}\nsparse_sent={}\nsparse_q={}\nsparse_stale={}\nsparse_undec={}\n{}\n",
                 meta.rev, meta.sha1_hex, meta.cells, meta.total_cells, len,
-                meta.sparse_sent, meta.sparse_q, meta.sparse_stale, meta.sparse_undec
+                meta.sparse_sent, meta.sparse_q, meta.sparse_stale, meta.sparse_undec,
+                meta.cascade_line
             )
             .into_bytes();
             write_plain(&mut stream, &body)
