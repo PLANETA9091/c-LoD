@@ -139,6 +139,10 @@ pub struct Config {
     /// debug_lens=true keeps the debug chain (the lens variant has no unfog
     /// pass); the parity world runs debug_lens=false + unfog=true.
     pub unfog: bool,
+    /// v6.59 THE CASCADE: ship the cascade post chain (lod_terrain_cascade.json —
+    /// beacon + the 2048x256 ring atlases + the census strip) and let the
+    /// module serve the six-ring word stream. Production stays cascade=false.
+    pub cascade: bool,
     /// v6.18.2 EVIDENCE: ship the un-fog ENGAGEMENT MASK instead of the
     /// render (unfog_debug.fsh: GREEN = the swap applied, RED = the vanilla
     /// fog saturated, BLUE = the channel blind, DIM = the fogs agree).
@@ -227,6 +231,7 @@ impl Default for Config {
             pack_prompt: String::new(),
             world: String::new(),
             region_blocks: 512,
+            cascade: false,
             cell_size: 2,
             scan_budget: 4096,
             rescan_ticks: 40,
@@ -302,6 +307,9 @@ impl Config {
         }
         if let Some(v) = get("world") {
             cfg.world = v.to_string();
+        }
+        if let Some(v) = get("cascade") {
+            cfg.cascade = v == "true" || v == "1";
         }
         if let Some(v) = get("region_blocks").and_then(|v| v.parse::<i32>().ok()) {
             if (256..=2048).contains(&v) && (v & (v - 1)) == 0 {

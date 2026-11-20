@@ -80,7 +80,11 @@ pub fn build(cfg: &Config) -> Pack {
     // parity world session runs the plain production unfog chain.
     let debug_lens = cfg.debug_lens;
     let unfog = cfg.unfog;
-    let lod_terrain_tpl = if debug_lens && unfog {
+    let lod_terrain_tpl = if cfg.cascade {
+        // v6.59 THE CASCADE: the beacon + ring-atlas capture chain + the
+        // census strip (the march swap rides with the cascade march work).
+        include_str!("../assets/post_effect/lod_terrain_cascade.json")
+    } else if debug_lens && unfog {
         // v6.18.2: the debug chain + the un-fog pass — the §5b evidence lane
         // (lens panels + the un-fog engagement map in one client).
         include_str!("../assets/post_effect/lod_terrain_debug_unfog.json")
@@ -202,6 +206,7 @@ pub fn build(cfg: &Config) -> Pack {
             cfg.quant_ssao,
             cfg.fog_voxy,
             cfg.rim_mask,
+            cfg.cascade,
         );
     }
     build_zip(
@@ -215,6 +220,7 @@ pub fn build(cfg: &Config) -> Pack {
         cfg.quant_ssao,
         cfg.fog_voxy,
         cfg.rim_mask,
+        cfg.cascade,
     )
 }
 
@@ -230,6 +236,7 @@ fn build_zip(
     quant_ssao: bool,
     fog_voxy: bool,
     rim_mask: bool,
+    cascade: bool,
 ) -> Pack {
     let lod_terrain_json = substitute(lod_terrain_tpl, &map);
     let atmosphere_json = substitute(atmosphere_tpl, &map);
@@ -302,6 +309,15 @@ fn build_zip(
     } else {
         lod_terrain
     };
+    // v6.59 THE CASCADE: the capture/census shaders ride the cascade pack.
+    let cascade_fsh = if cascade {
+        Some((
+            include_str!("../assets/glsl/cascade_capture.fsh"),
+            include_str!("../assets/glsl/cascade_census.fsh"),
+        ))
+    } else {
+        None
+    };
     let clod_blit = include_str!("../assets/glsl/clod_blit.fsh");
     let atmosphere = include_str!("../assets/glsl/atmosphere.fsh");
     // v6.18: the un-fog shader ships in EVERY unfog variant; unfog_debug
@@ -372,6 +388,10 @@ fn build_zip(
     );
     if let Some(lens) = debug_lens_fsh {
         zip.add("assets/clod/shaders/post/debug_lens.fsh", lens.as_bytes());
+    }
+    if let Some((cap, census)) = cascade_fsh {
+        zip.add("assets/clod/shaders/post/cascade_capture.fsh", cap.as_bytes());
+        zip.add("assets/clod/shaders/post/cascade_census.fsh", census.as_bytes());
     }
     zip.add("assets/minecraft/shaders/core/sky.vsh", sky_vsh.as_bytes());
     zip.add("assets/minecraft/shaders/core/sky.fsh", sky_fsh.as_bytes());
