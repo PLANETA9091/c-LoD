@@ -542,6 +542,42 @@ float march_terrain(vec3 cam, vec3 dir, float t0, float tCap, float tanH,
         float above = ground_at(xz, smooth_w(t), 0.0, wflag, okflag) - yRay;
 
         if (above > 0.0 && prevDiff <= 0.0) {
+            // v6.59.14 THE SPIKE GATE: the OR-ratchet (the v6.50/51 gate
+            // repeal) pushes partial-word heights to the byte ceiling — the
+            // wall class paints 30-90 m stone stripes far above honest
+            // terrain (parity-554 01/07: dark slab bands high in the sky).
+            // A ceiling byte is in-window and byte-wise indistinguishable
+            // from a real summit; the DISCRIMINATOR is lateral support.
+            // Real terrain (2 m cells) never towers > 24 m over all four
+            // marked neighbours; a ratchet stripe always does. 4 fetches
+            // once per crossing candidate — not per march step. Frontier
+            // cells (no marked neighbours) keep painting: nothing to judge.
+            {
+                ivec2 hci = ivec2(floor((xz - GridInfo.xy) / cell));
+                float h0 = texelFetch(HeightSampler, hci, 0).r * 255.0 - 64.0;
+                float hn = -64.0;
+                bool sup = false;
+                for (int q = 0; q < 4; ++q) {
+                    ivec2 dd = q == 0 ? ivec2(1, 0)
+                             : q == 1 ? ivec2(-1, 0)
+                             : q == 2 ? ivec2(0, 1) : ivec2(0, -1);
+                    vec4 nt = texelFetch(HeightSampler, hci + dd, 0);
+                    if (nt.a > 0.5) {
+                        hn = max(hn, nt.r * 255.0 - 64.0);
+                        sup = true;
+                    }
+                }
+                if (sup && h0 - hn > 24.0) {
+                    // ceiling-ratchet stripe: no lateral support, no paint —
+                    // walk on; the ray must exit and re-enter real terrain.
+                    prevT = t;
+                    prevDiff = above;
+                    if (t >= tCap) {
+                        break;
+                    }
+                    continue;
+                }
+            }
             // Entering crossing between prevT and t; bisection converges on
             // the first sample where the ray is underground.
             float lo = prevT;
@@ -848,14 +884,14 @@ void main() {
     // mid-terraces sit at 16-64 m, inside the vanilla band). Over sky there
     // is no vanilla texture to lose — the far flanks keep the honest
     // fallback paint.
-    // v6.59.12 THE SLAB-WALL KILL (extends the v6.21.1 vanilla gate to ALL
-    // pixels): a colorless cell — no decoded color word — never owns a
-    // pixel. Height-only columns used to paint the ColLow/ColHigh fallback
-    // at heights the rank-0 windows never encoded (v6.24 buffer-dump
-    // forensics; parity-554: voxy paints SKY at 07/12 where we painted the
-    // wall). The color word is the paint permit; the height byte alone is
-    // never enough.
-    if (colorless) {
+    // v6.59.14 THE FALLBACK RESTORE: the color gate returns to the vanilla
+    // path only (v6.21.1 as it was) — the v6.59.12 blanket kill also voided
+    // the HONEST height-only cells, and the real-LOD flank paint (the green
+    // terraces voxy shows at 01) died with the wall. The wall class is
+    // handled where it actually lives: the SPIKE GATE in march_terrain
+    // rejects the ceiling-ratchet stripes; height-only cells with lateral
+    // support paint the fallback palette again.
+    if (tVan > 0.0 && colorless) {
         fragColor = scene;
         return;
     }
@@ -978,7 +1014,16 @@ void main() {
     // per-pixel depth comparison already decided ownership; the gate stays
     // on the sky path exactly as v5.3 shipped it.
     float rd = fogLive ? max(vanRD, 64.0) : 128.0;
-    float gate = (tVan > 0.0) ? 1.0 : smoothstep(rd * 0.92, rd * 1.10, tHit);
+    // v6.59.14 FULL-DISK PAINT: the vanish-band gate (smoothstep rd*0.92..
+    // rd*1.10) was the measured far-render cut — with rd=64 the flap
+    // instrument read 60 m and EVERYTHING past ~70 m returned scene: the
+    // LOD disk (512 m) painted only a sliver past the chunk edge, so the
+    // screens showed dust and slabs instead of the mountains (parity-554;
+    // the horizon verdict "cut walk 100 m: 0 white px"). The sky path now
+    // paints every hit inside the march horizon — the pyramid skip makes
+    // the long empty spans cheap, the spike gate keeps ratchet stripes out,
+    // and the fog/atmosphere chain grades the distance.
+    float gate = 1.0;
 
     vec3 outCol = mix(mix(scene.rgb, lit, fade * gate), scene.rgb, fadeOut);
 #ifdef MESH_DEBUG
