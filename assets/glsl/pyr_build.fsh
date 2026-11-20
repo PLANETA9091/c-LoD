@@ -1,3 +1,6 @@
+#version 330
+#extension GL_ARB_separate_shader_objects : require
+
 // c-LoD v6.59.13 THE PYRAMID BUILDER (the atlas-path port, part 1):
 // packed conservative max-height pyramid over the streamed height atlas
 // (clod_h_b 256x256). Level k (k=1..4) has dim = 256>>k cells and lives at
@@ -12,14 +15,14 @@
 // freshest pyramid so far) — the chain builds L1..L4 in sequence and the
 // march always reads the settled clod_py_a.
 
-uniform sampler2D Atlas; // clod_h_b — the settled height atlas (R byte, A mark)
-uniform sampler2D Prev;  // clod_py_a — the freshest pyramid rows
+uniform sampler2D AtlasSampler; // clod_h_b — the settled height atlas (R byte, A mark)
+uniform sampler2D PrevSampler;  // clod_py_a — the freshest pyramid rows
 
 layout(std140) uniform ClodPyr {
     vec4 LevelK;         // x = k (1..4), y = rowBase, z = dim
 };
 
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
 
 void main() {
     ivec2 p = ivec2(gl_FragCoord.xy);
@@ -37,9 +40,9 @@ void main() {
             ivec2 q = ivec2(cx + (i & 1), cy + (i >> 1));
             vec4 c;
             if (k == 1) {
-                c = texelFetch(Atlas, q, 0);
+                c = texelFetch(AtlasSampler, q, 0);
             } else {
-                c = texelFetch(Prev, ivec2(q.x, childBase + q.y), 0);
+                c = texelFetch(PrevSampler, ivec2(q.x, childBase + q.y), 0);
             }
             if (c.a > 0.5) {
                 mx = max(mx, c.r);
@@ -52,5 +55,5 @@ void main() {
 
     // Passthrough rows: whatever Prev holds (fresh for built levels, stale
     // for the levels this frame's later passes will rebuild).
-    fragColor = texelFetch(Prev, p, 0);
+    fragColor = texelFetch(PrevSampler, p, 0);
 }

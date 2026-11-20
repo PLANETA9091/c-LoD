@@ -7,6 +7,8 @@
         "clod_h_b": { "width": 256, "height": 256, "persistent": true },
         "clod_c_a": { "width": 256, "height": 256, "persistent": true },
         "clod_c_b": { "width": 256, "height": 256, "persistent": true },
+        "clod_py_a": { "width": 256, "height": 256, "persistent": true },
+        "clod_py_b": { "width": 256, "height": 256, "persistent": true },
         "clod_reset": {},
         "clod_mask": {},
         "clod_swap": {},
@@ -217,8 +219,97 @@
         },
         {
             "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/pyr_build",
+            "inputs": [
+                { "sampler_name": "Atlas", "target": "clod_h_b" },
+                { "sampler_name": "Prev", "target": "clod_py_a" }
+            ],
+            "output": "clod_py_b",
+            "uniforms": {
+                "ClodPyr": [
+                    { "name": "LevelK", "type": "vec4", "value": [1, 0, 128, 0.0] }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/rot_copy",
+            "inputs": [
+                { "sampler_name": "In", "target": "clod_py_b" }
+            ],
+            "output": "clod_py_a"
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/pyr_build",
+            "inputs": [
+                { "sampler_name": "Atlas", "target": "clod_h_b" },
+                { "sampler_name": "Prev", "target": "clod_py_a" }
+            ],
+            "output": "clod_py_b",
+            "uniforms": {
+                "ClodPyr": [
+                    { "name": "LevelK", "type": "vec4", "value": [2, 128, 64, 0.0] }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/rot_copy",
+            "inputs": [
+                { "sampler_name": "In", "target": "clod_py_b" }
+            ],
+            "output": "clod_py_a"
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/pyr_build",
+            "inputs": [
+                { "sampler_name": "Atlas", "target": "clod_h_b" },
+                { "sampler_name": "Prev", "target": "clod_py_a" }
+            ],
+            "output": "clod_py_b",
+            "uniforms": {
+                "ClodPyr": [
+                    { "name": "LevelK", "type": "vec4", "value": [3, 192, 32, 0.0] }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/rot_copy",
+            "inputs": [
+                { "sampler_name": "In", "target": "clod_py_b" }
+            ],
+            "output": "clod_py_a"
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/pyr_build",
+            "inputs": [
+                { "sampler_name": "Atlas", "target": "clod_h_b" },
+                { "sampler_name": "Prev", "target": "clod_py_a" }
+            ],
+            "output": "clod_py_b",
+            "uniforms": {
+                "ClodPyr": [
+                    { "name": "LevelK", "type": "vec4", "value": [4, 224, 16, 0.0] }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "clod:post/rot_copy",
+            "inputs": [
+                { "sampler_name": "In", "target": "clod_py_b" }
+            ],
+            "output": "clod_py_a"
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
             "fragment_shader": "clod:post/lod_terrain",
             "inputs": [
+                { "sampler_name": "Pyr", "target": "clod_py_a" },
                 { "sampler_name": "In", "target": "clod_unfog" },
                 { "sampler_name": "InDepth", "target": "minecraft:main", "use_depth_buffer": true },
                 { "sampler_name": "Height", "target": "clod_h_b" },

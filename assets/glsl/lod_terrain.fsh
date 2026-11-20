@@ -49,6 +49,15 @@
 uniform sampler2D InSampler;      // minecraft:main color
 uniform sampler2D InDepthSampler; // minecraft:main depth
 uniform sampler2D HeightSampler;  // clod_h_b — streamed height bytes (1 px = 1 cell)
+#ifdef CASCADE
+// v6.59 THE CASCADE RING ATLAS bindings (bindings-only scaffold: the
+// six coarse rings live in clod_rh_b/clod_rc_b, the window tokens in
+// clod_rwin; the march consumes them as the ring tiers wire in — the
+// declarations exist so the cascade chain's bindings validate).
+uniform sampler2D HAtlasSampler; // clod_rh_b — ring height atlas
+uniform sampler2D CAtlasSampler; // clod_rc_b — ring color atlas
+uniform sampler2D RwinSampler;   // clod_rwin — ring window tokens
+#endif
 uniform sampler2D ColBufSampler;  // clod_c_b — streamed color index bytes (1 px = 1 cell)
 // v6.59.13 THE PYRAMID: packed conservative max-height pyramid over the
 // height atlas (the atlas-path port). Level k has dim 256>>k, rows
