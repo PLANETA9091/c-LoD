@@ -325,6 +325,8 @@ fn build_zip(
         lod_terrain
     };
     let clod_blit = include_str!("../assets/glsl/clod_blit.fsh");
+    // v6.59.13 THE PYRAMID: the packed max-height builder rides every pack.
+    let pyr_build = include_str!("../assets/glsl/pyr_build.fsh");
     let atmosphere = include_str!("../assets/glsl/atmosphere.fsh");
     // v6.18: the un-fog shader ships in EVERY unfog variant; unfog_debug
     // swaps the chain's pass to the engagement-mask shader (evidence lane).
@@ -385,6 +387,10 @@ fn build_zip(
     zip.add(
         "assets/clod/shaders/post/clod_blit.fsh",
         clod_blit.as_bytes(),
+    );
+    zip.add(
+        "assets/clod/shaders/post/pyr_build.fsh",
+        pyr_build.as_bytes(),
     );
     if let Some(fsh) = unfog_fsh {
         let name = if unfog_debug {
@@ -460,8 +466,8 @@ mod tests {
 
         let count = u16::from_le_bytes([pack.zip[n - 12], pack.zip[n - 11]]) as usize;
         assert_eq!(
-            count, 13,
-            "pack.mcmeta + 2 json + 8 fsh + sky.vsh + sky.fsh"
+            count, 14,
+            "pack.mcmeta + 2 json + 9 fsh + sky.vsh + sky.fsh" // +pyr_build.fsh (v6.59.13)
         );
     }
 
@@ -540,7 +546,7 @@ mod tests {
         let prod = build(&Config::parse(""));
         let prod_entries = zip_entries(&prod.zip);
         let names: Vec<String> = prod_entries.iter().map(|(n, _)| n.clone()).collect();
-        assert_eq!(names.len(), 13, "production entry count fixed");
+        assert_eq!(names.len(), 14, "production entry count fixed"); // +pyr_build.fsh (v6.59.13)
         assert!(!names.iter().any(|n| n.contains("debug_lens")));
         let chain = String::from_utf8_lossy(
             &prod_entries
@@ -561,7 +567,7 @@ mod tests {
         let entries = zip_entries(&dbg.zip);
         assert_eq!(
             entries.len(),
-            14,
+            15, // +pyr_build.fsh (v6.59.13)
             "debug pack = production + debug_lens.fsh"
         );
         assert!(entries

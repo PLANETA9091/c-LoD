@@ -3,7 +3,6 @@
 #include <minecraft:globals.glsl>
 // __MESH_DEBUG__
 // __RIM_MASK__
-// __CASCADE__
 
 // c-LoD pass (v5.0 "SKY-GRID BIT-STREAM"): the actual level-of-distant-detail
 // renderer.
@@ -49,16 +48,13 @@ uniform sampler2D InSampler;      // minecraft:main color
 uniform sampler2D InDepthSampler; // minecraft:main depth
 uniform sampler2D HeightSampler;  // clod_h_b — streamed height bytes (1 px = 1 cell)
 uniform sampler2D ColBufSampler;  // clod_c_b — streamed color index bytes (1 px = 1 cell)
+// v6.59.13 THE PYRAMID: packed conservative max-height pyramid over the
+// height atlas (the atlas-path port). Level k has dim 256>>k, rows
+// [rowBase..rowBase+dim), rowBase = sum_{j<k} (256>>j), k = 1..4. R = the
+// max height byte, A = 1.0 when ANY fine cell under the block is marked.
+uniform sampler2D PyrSampler;      // clod_py_a — the packed pyramid
 uniform sampler2D RotSampler;     // clod:clod_rot_a (2x2 persistent, camera + fog channel)
 uniform sampler2D MaskSampler;    // clod_mask — dust eraser mask (this frame, v5.3)
-
-// v6.59 THE CASCADE: the ring atlases (2048x256, 256 px per ring slice,
-// ring idx = slice; ring k cell = 16 m * 4^k, all centered on GridInfo.xy).
-#ifdef CASCADE
-uniform sampler2D HAtlasSampler;  // clod_rh_b — cascade height atlas
-uniform sampler2D CAtlasSampler;  // clod_rc_b — cascade color atlas
-uniform sampler2D RwinSampler;    // clod_rwin — the beacon's window broadcast
-#endif
 
 // v5.0.3: SamplerInfo never existed as a client UBO — it stayed zeroed
 // (the whole capture wrote cell (0,0), the march divided by zero).
@@ -105,11 +101,7 @@ layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 
 const float PI = 3.14159265358979;
-#ifdef CASCADE
-const int MAX_STEPS = 420; // the six coarse rings add march distance
-#else
 const int MAX_STEPS = 260;
-#endif
 const int BISECT = 7;
 const float FADE_START = 0.9; // Voxy: fade begins at 90% of the view radius
 
@@ -193,7 +185,7 @@ float smooth_w2(float t) {
 // the caller's height fallback (color_at returns the sentinel); a cell
 // with neither word is still void. Water stays color-gated (the flag lives
 // in the color word — an undecoded color word cannot claim water).
-float ground_at0(vec2 xz, float w, float w2, out bool water, out bool ok) {
+float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
     float cell = RegionInfo.y;             // blocks per cell
     ivec2 celli = ivec2(floor((xz - GridInfo.xy) / cell)); // 0..255
     ok = false;
@@ -256,50 +248,6 @@ float ground_at0(vec2 xz, float w, float w2, out bool water, out bool ok) {
     }
     return mix(avg, s2 / c2, w2);
 }
-
-#ifdef CASCADE
-// v6.59 THE CASCADE dispatcher: ring 0 inside its disk, then the finest
-// cascade ring whose square contains the point. Void cascade cells return
-// no-data (the march keeps sky there — the ring fill is progressive).
-float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
-    float g = ground_at0(xz, w, w2, water, ok);
-    if (ok) {
-        return g;
-    }
-    for (int r = 1; r <= 6; ++r) {
-        float csz = 16.0 * exp2(2.0 * float(r - 1));
-        ivec2 ci = ivec2(floor((xz - GridInfo.xy) / csz));
-        if (any(lessThan(ci, ivec2(0))) || any(greaterThanEqual(ci, ivec2(256)))) {
-            continue;
-        }
-        vec4 h = texelFetch(HAtlasSampler, ivec2((r - 1) * 256 + ci.x, ci.y), 0);
-        if (h.a < 0.5) {
-            continue;
-        }
-        vec4 c = texelFetch(CAtlasSampler, ivec2((r - 1) * 256 + ci.x, ci.y), 0);
-        water = c.a >= 0.5 && abs(c.r * 255.0 - 216.0) < 0.5;
-        ok = true;
-        return h.r * 255.0 - 64.0;
-    }
-    return -1.0e8;
-}
-// The cell size of the finest ring covering xz (the march step scale and
-// the shading's per-cell normal offsets).
-float cell_at(vec2 xz) {
-    for (int r = 0; r <= 6; ++r) {
-        float csz = r == 0 ? RegionInfo.y : 16.0 * exp2(2.0 * float(r - 1));
-        ivec2 ci = ivec2(floor((xz - GridInfo.xy) / csz));
-        if (all(greaterThanEqual(ci, ivec2(0))) && all(lessThan(ci, ivec2(256)))) {
-            return csz;
-        }
-    }
-    return RegionInfo.y;
-}
-#else
-// Production build (cascade off): ground_at IS the ring-0 sampler — the
-// call sites stay untouched, the march stays byte-identical.
-#define ground_at ground_at0
-#endif
 
 // Surface color of one streamed cell: the 6x6x6 RGB lattice decode.
 // Water (idx 216) returns a negative sentinel — the caller uses its own
@@ -482,27 +430,6 @@ float march_ssao(vec3 pos, vec3 n) {
     return pow(clamp(1.0 - ao * (1.0 / SSAO_STEPS_F), 0.0, 1.0), 2.5); // :226
 }
 
-#ifdef CASCADE
-// v6.59: the cascade color word — the same 6x6x6 lattice, no smoothing
-// (the ring cells are already the coarse representation).
-vec3 color_at_c(ivec2 celli, int ring, out bool water, out bool colorless) {
-    vec4 c = texelFetch(CAtlasSampler, ivec2((ring - 1) * 256 + celli.x, celli.y), 0);
-    if (c.a < 0.5) {
-        water = false;
-        colorless = true;
-        return vec3(-1.0);
-    }
-    colorless = false;
-    float idx = floor(c.r * 255.0 + 0.5);
-    water = idx > 215.5;
-    if (water) {
-        return vec3(-1.0);
-    }
-    vec3 lattice = vec3(mod(idx, 6.0), mod(floor(idx / 6.0), 6.0), floor(idx / 36.0));
-    return lattice * (51.0 / 255.0);
-}
-#endif
-
 // Horizontal distance from cam to the box boundary along dir.xz.
 float edge_distance_xz(vec3 cam, vec3 dir, vec2 minW, vec2 maxW) {
     float e = 1.0e9;
@@ -550,6 +477,29 @@ vec3 erase_dust(float r) {
 // one streamed cell; a 7-step bisection converges on the crossing. Returns
 // -1.0 when the ray never enters the field (open sky, out-of-data, or the
 // ceiling/box early-out).
+const int PYR_K = 4;          // pyramid levels built by the chain (k=1..4)
+const float SKIP_MARGIN = 1.0; // a jump is safe when the ray clears the block max by this
+
+// Max height over the 2^k-cell block containing cid (the packed pyramid;
+// unmarked blocks read -64 so the skip test clears them outright).
+float pyr_max(ivec2 cid, int k) {
+    int rowBase = 0;
+    for (int j = 1; j < k; ++j) {
+        rowBase += 256 >> j;
+    }
+    int dim = 256 >> k;
+    int bx = cid.x >> k;
+    int by = cid.y >> k;
+    if (bx < 0 || by < 0 || bx >= dim || by >= dim) {
+        return -64.0;
+    }
+    vec4 t4 = texelFetch(PyrSampler, ivec2(bx, rowBase + by), 0);
+    if (t4.a < 0.5) {
+        return -64.0;
+    }
+    return t4.r * 255.0 - 64.0;
+}
+
 float march_terrain(vec3 cam, vec3 dir, float t0, float tCap, float tanH,
                     float cell, float horizon) {
     // Rays that leave the heightfield from above can never hit: early-out
@@ -567,12 +517,7 @@ float march_terrain(vec3 cam, vec3 dir, float t0, float tCap, float tanH,
     }
 
     float t = t0;
-#ifdef CASCADE
-    float dt = max(cell_at(cam.xz + dir.xz * t) * (t > 2048.0 ? 2.0 : 0.5),
-                   t * (2.0 * tanH / max(ScreenSize.y, 1.0)));
-#else
     float dt = max(cell * 0.5, t * (2.0 * tanH / max(ScreenSize.y, 1.0)));
-#endif
 
     // Sign convention: above = groundY - rayY; POSITIVE means the ray is
     // UNDER the surface. A hit is the ENTERING crossing (above-ground ->
@@ -588,16 +533,11 @@ float march_terrain(vec3 cam, vec3 dir, float t0, float tCap, float tanH,
 
     for (int i = 0; i < MAX_STEPS; ++i) {
         t = min(t + dt, tCap);
-#ifdef CASCADE
-        vec2 xz = cam.xz + dir.xz * t;
-        dt = max(cell_at(xz) * (t > 2048.0 ? 2.0 : 0.5),
-                 t * (2.0 * tanH / max(ScreenSize.y, 1.0)));
-#else
         dt = max(cell * 0.5, t * (2.0 * tanH / max(ScreenSize.y, 1.0)));
 
         vec2 xz = cam.xz + dir.xz * t;
-#endif
-        float above = ground_at(xz, smooth_w(t), 0.0, wflag, okflag) - (cam.y + dir.y * t);
+        float yRay = cam.y + dir.y * t;
+        float above = ground_at(xz, smooth_w(t), 0.0, wflag, okflag) - yRay;
 
         if (above > 0.0 && prevDiff <= 0.0) {
             // Entering crossing between prevT and t; bisection converges on
@@ -616,6 +556,42 @@ float march_terrain(vec3 cam, vec3 dir, float t0, float tCap, float tanH,
                 }
             }
             return (lo + hi) * 0.5;
+        }
+        // v6.59.13 PYRAMID SKIP (the atlas-path port): advance to the exit
+        // of the largest 2^k block the ray clears by SKIP_MARGIN. The pyramid
+        // max is conservative, so a cleared block cannot contain a crossing
+        // — the jump is exact and the state must be re-sampled at the exit.
+        bool jumped = false;
+        ivec2 cid = ivec2(floor((xz - GridInfo.xy) / cell));
+        for (int kk = PYR_K; kk >= 1; --kk) {
+            float hmax = pyr_max(cid, kk);
+            if (yRay - hmax <= SKIP_MARGIN) {
+                continue; // block may contain terrain: try a finer level
+            }
+            float bs = float(256 >> kk) * cell;
+            vec2 bmin = GridInfo.xy
+                + vec2(float(cid.x >> kk), float(cid.y >> kk)) * bs;
+            vec2 tv;
+            tv.x = abs(dir.x) < 1.0e-9 ? 1.0e9
+                : (dir.x > 0.0 ? (bmin.x + bs - cam.x) : (bmin.x - cam.x)) / dir.x;
+            tv.y = abs(dir.z) < 1.0e-9 ? 1.0e9
+                : (dir.z > 0.0 ? (bmin.y + bs - cam.z) : (bmin.y - cam.z)) / dir.z;
+            float tExit = min(tv.x, tv.y);
+            if (tExit > t + 1.0e-3) {
+                t = min(tExit, tCap);
+                jumped = true;
+                break;
+            }
+        }
+        if (jumped) {
+            vec2 nxz = cam.xz + dir.xz * t;
+            prevDiff = ground_at(nxz, smooth_w(t), 0.0, wflag, okflag)
+                       - (cam.y + dir.y * t);
+            prevT = t;
+            if (t >= tCap) {
+                break;
+            }
+            continue;
         }
         prevT = t;
         prevDiff = above;
@@ -709,136 +685,6 @@ void main() {
         return;
     }
 #endif
-#ifdef CASCADE
-    // v6.59.7 CASCADE ATLAS HEARTBEAT (CI-only; the production pack never
-    // defines CASCADE). Run #508's "terrain wall" was the NEAR disk seen
-    // edge-on — the ring atlases were empty client-side while the gate
-    // measured the SERVER store. GL row 2, x 200..204 (PNG y = h-3):
-    //   x=200: ring-1 height slice (atlas x 256..511): R = marked fraction
-    //          over a 32x32 stride-8 sweep, G = max height byte, B = min.
-    //   x=201: the same for the ring-2 slice (x 512..767).
-    //   x=202: the rot channel (R = az, G = el, B = conf — a blind camera
-    //          (< 0.25) makes every capture pass early-out).
-    //   x=203: ring-1 COLOR slice (marked fraction, max lattice byte, min).
-    //   x=204: ring-3 height slice.
-    ivec2 hb = ivec2(gl_FragCoord.xy);
-    if (hb.y == 2 && ((hb.x >= 200 && hb.x <= 204) || hb.x == 205 || hb.x == 206 || hb.x == 207)) {
-        float marked = 0.0;
-        float mx = 0.0;
-        float mn = 1.0;
-        // One explicit block per pixel: samplers stay literal (a sampler
-        // chosen by a non-uniform condition is non-portable GLSL).
-        if (hb.x == 200) {
-            for (int i = 0; i < 32; ++i)
-            for (int j = 0; j < 32; ++j) {
-                vec4 t = texelFetch(HAtlasSampler, ivec2(256 + i * 8, j * 8), 0);
-                if (t.a >= 0.5) { marked += 1.0; mx = max(mx, t.r); mn = min(mn, t.r); }
-            }
-            fragColor = vec4(marked / 1024.0, mx, mn, 1.0);
-            return;
-        }
-        if (hb.x == 201) {
-            for (int i = 0; i < 32; ++i)
-            for (int j = 0; j < 32; ++j) {
-                vec4 t = texelFetch(HAtlasSampler, ivec2(512 + i * 8, j * 8), 0);
-                if (t.a >= 0.5) { marked += 1.0; mx = max(mx, t.r); mn = min(mn, t.r); }
-            }
-            fragColor = vec4(marked / 1024.0, mx, mn, 1.0);
-            return;
-        }
-        if (hb.x == 202) {
-            vec4 rotP = texelFetch(RotSampler, ivec2(0, 0), 0);
-            fragColor = vec4(rotP.r, rotP.g, rotP.a, 1.0);
-            return;
-        }
-        if (hb.x == 205) {
-            vec4 rw = texelFetch(RwinSampler, ivec2(0, 0), 0);
-            fragColor = vec4(rw.r, rw.g, rw.a, 1.0);
-            return;
-        }
-        if (hb.x == 207) {
-            // v6.59.8l: the beacon probe's projection-aliveness fraction
-            // (rw.b = bestSeen/16) — 0 = every projection missed the screen,
-            // 1 = all 16 on-screen. R/G/B all carry it for the RGB PNG.
-            vec4 rw = texelFetch(RwinSampler, ivec2(0, 0), 0);
-            fragColor = vec4(rw.b, rw.b, rw.b, 1.0);
-            return;
-        }
-        if (hb.x == 206) {
-            // v6.59.8d BEACON COLUMN SCAN: project the beacon slot center
-            // and sweep the planes 80..204 step 4 (32 planes = the whole
-            // tier+zoff ladder): R = the max g-b seen *4, G = the plane
-            // index where it peaked / 31 (0=80, 31=204), B = the mean g-b
-            // over the whole column *4. A green dot anywhere on the column
-            // lights R; G names its plane.
-            vec4 rotP = texelFetch(RotSampler, ivec2(0, 0), 0);
-            float az = rotP.r * 2.0 * PI;
-            float el = rotP.g * PI - PI * 0.5;
-            float fov = 5.0 + rotP.a * 115.0;
-            vec3 F = vec3(cos(el) * cos(az), sin(el), cos(el) * sin(az));
-            vec3 R = vec3(-sin(az), 0.0, cos(az));
-            vec3 U = vec3(-cos(az) * sin(el), cos(el), -sin(az) * sin(el));
-            float tanH = tan(radians(fov) * 0.5);
-            float aspect = ScreenSize.x / max(ScreenSize.y, 1.0);
-            vec3 cam = vec3(CameraBlockPos) + CameraOffset;
-            vec2 anchor = floor(vec2(CameraBlockPos) / 128.0) * 128.0;
-            // v6.59.8p CENSUS v3: the dots sit anywhere in the anchor cell
-            // (the slots ride ax + (si+0.5)*2m = [ax+1, ax+129]) at ANY tier
-            // plane (HI_TIERS[rank]+zoff, ranks 0..3 = the whole 80..204
-            // ladder) — the old sweep (a +127-shifted window at plane 120)
-            // missed both. v6.59.8q: 17x17 cell steps (7.5 m) x 9 planes
-            // (16 m) = ~2.6k samples — the first draft (33x33x32 = 34k)
-            // blew up llvmpipe's shader JIT and the client died on pack
-            // apply (#541). R = the max g-b *4, G = the plane index /8,
-            // B = the dx index /16.
-            float bestD = -1.0;
-            float bestP = 0.0;
-            float bestDz = 0.0;
-            for (int kx = 0; kx < 17; ++kx) {
-                for (int kz = 0; kz < 17; ++kz) {
-                    float px = anchor.x + 2.0 + float(kx) * 7.5;
-                    float pz = anchor.y + 2.0 + float(kz) * 7.5;
-                    for (int pl = 0; pl < 9; ++pl) {
-                        vec3 P = vec3(px, 80.0 + float(pl) * 16.0, pz);
-                        vec3 d = P - cam;
-                        float z = dot(d, F);
-                        vec2 ndc = vec2(dot(d, R) / (z * tanH * aspect),
-                                        dot(d, U) / (z * tanH));
-                        if (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0 || z < 2.0) {
-                            continue;
-                        }
-                        vec2 sc = ndc * 0.5 + 0.5;
-                        vec3 raw = texture(InSampler, sc).rgb;
-                        float dd = raw.g - raw.b;
-                        if (dd > bestD) {
-                            bestD = dd;
-                            bestP = float(pl) / 8.0;
-                            bestDz = float(kx) / 16.0;
-                        }
-                    }
-                }
-            }
-            fragColor = vec4(bestD * 4.0, bestP, bestDz, 1.0);
-            return;
-        }
-        if (hb.x == 203) {
-            for (int i = 0; i < 32; ++i)
-            for (int j = 0; j < 32; ++j) {
-                vec4 t = texelFetch(CAtlasSampler, ivec2(256 + i * 8, j * 8), 0);
-                if (t.a >= 0.5) { marked += 1.0; mx = max(mx, t.r); mn = min(mn, t.r); }
-            }
-            fragColor = vec4(marked / 1024.0, mx, mn, 1.0);
-            return;
-        }
-        for (int i = 0; i < 32; ++i)
-        for (int j = 0; j < 32; ++j) {
-            vec4 t = texelFetch(HAtlasSampler, ivec2(1024 + i * 8, j * 8), 0);
-            if (t.a >= 0.5) { marked += 1.0; mx = max(mx, t.r); mn = min(mn, t.r); }
-        }
-        fragColor = vec4(marked / 1024.0, mx, mn, 1.0);
-        return;
-    }
-#endif
     vec4 scene = texture(InSampler, texCoord);
     float depth = texture(InDepthSampler, texCoord).r;
     vec2 px = texCoord * ScreenSize;
@@ -896,11 +742,6 @@ void main() {
     // The march spans two regions in every direction (the 2x2 slot grid);
     // stale data beyond that is stamp-rejected anyway.
     float horizon = region * 2.0;
-#ifdef CASCADE
-    // v6.59: the march owns everything the cascade covers — the far ring's
-    // half-span (16 m * 4^5 * 128 = ±2.1 Mm) plus box slack.
-    horizon = 16.0 * 1024.0 * 128.0 * 1.05;
-#endif
 
     // v6.19 G8d MESH PAINT — the vanilla path. The vanilla fragment's ray
     // distance is reconstructed from the device depth (eyeZ = DEPTH_NEAR /
@@ -952,19 +793,6 @@ void main() {
 
     float fade = 1.0; // v4.4.1 port: full-alpha paint, conf is diagnostics
     vec3 hitPos = cam + dir * tHit;
-#ifdef CASCADE
-    // The hit's ring: ring 0 when its disk covers the hit, else the finest
-    // cascade ring at that point (the dispatcher's own choice).
-    int hring = 0;
-    for (int r = 1; r <= 6; ++r) {
-        float csz = 16.0 * exp2(2.0 * float(r - 1));
-        ivec2 ci = ivec2(floor((hitPos.xz - GridInfo.xy) / csz));
-        if (all(greaterThanEqual(ci, ivec2(0))) && all(lessThan(ci, ivec2(256)))) {
-            hring = r;
-            break;
-        }
-    }
-#endif
 
     // ---- LIVE FOG STATE (camera channel group B) --------------------------
     vec4 fogCol = texelFetch(RotSampler, ivec2(1, 0), 0);
@@ -982,61 +810,30 @@ void main() {
     // Shade inputs at the hit: per-cell flags + per-cell gradient normal
     // (nearest reads; the normal is constant per cell = flat Voxy quads).
     float rb = region;
-#ifdef CASCADE
-    // The fade references the ACTIVE ring's data frontier (the ring disk).
-    if (hring > 0) {
-        rb = 16.0 * exp2(2.0 * float(hring - 1)) * 256.0;
-    }
-#endif
     vec2 hr = floor((hitPos.xz - GridInfo.xy) / rb);
     vec2 hmin = GridInfo.xy + hr * rb;
     vec2 hmax = hmin + vec2(rb);
     ivec2 tc = ivec2(floor((hitPos.xz - GridInfo.xy) / cell));
-#ifdef CASCADE
-    if (hring > 0) {
-        tc = ivec2(floor((hitPos.xz - GridInfo.xy)
-                         / (16.0 * exp2(2.0 * float(hring - 1)))));
-    }
-#endif
 
     bool isWater = false; bool okW; bool dum;
     float sw = smooth_w(tHit);  // level-1 weight
     float sw2 = smooth_w2(tHit); // level-2 weight (v5.2.1)
     float hC = ground_at(hitPos.xz, sw, sw2, isWater, okW);
-#ifdef CASCADE
-    // Far-ring hits shade with THEIR cell size (flat Voxy quads at the
-    // ring's resolution — the ring-0 2 m offsets would read one flat cell).
-    float hcell = cell_at(hitPos.xz);
-    float hL = ground_at(hitPos.xz - vec2(hcell, 0.0), sw, sw2, dum, okW);
-    float hR = ground_at(hitPos.xz + vec2(hcell, 0.0), sw, sw2, dum, okW);
-    float hD = ground_at(hitPos.xz - vec2(0.0, hcell), sw, sw2, dum, okW);
-    float hU = ground_at(hitPos.xz + vec2(0.0, hcell), sw, sw2, dum, okW);
-#else
     float hL = ground_at(hitPos.xz - vec2(cell, 0.0), sw, sw2, dum, okW);
     float hR = ground_at(hitPos.xz + vec2(cell, 0.0), sw, sw2, dum, okW);
     float hD = ground_at(hitPos.xz - vec2(0.0, cell), sw, sw2, dum, okW);
     float hU = ground_at(hitPos.xz + vec2(0.0, cell), sw, sw2, dum, okW);
-#endif
     // Void neighbors read -1e8: clamp them to the center height so the
     // normal stays flat instead of exploding at the data frontier.
     hL = hL < -1.0e7 ? hC : hL;
     hR = hR < -1.0e7 ? hC : hR;
     hD = hD < -1.0e7 ? hC : hD;
     hU = hU < -1.0e7 ? hC : hU;
-#ifdef CASCADE
-    vec3 nrm = normalize(vec3(hL - hR, 2.0 * hcell, hD - hU));
-#else
     vec3 nrm = normalize(vec3(hL - hR, 2.0 * cell, hD - hU));
-#endif
 
     // ---- COLOR: the Voxy model -------------------------------------------
     bool colWater; bool colorless;
-#ifdef CASCADE
-    vec3 col = (hring == 0) ? color_at(tc, sw, sw2, colWater, colorless)
-                            : color_at_c(tc, hring, colWater, colorless);
-#else
     vec3 col = color_at(tc, sw, sw2, colWater, colorless);
-#endif
     float hn = clamp((hitPos.y - sea) / max(maxY - sea, 1.0), 0.0, 1.0);
     vec3 fallback = (isWater || colWater) ? ColWater.rgb : mix(ColLow.rgb, ColHigh.rgb, smoothstep(0.15, 0.9, hn));
     vec3 albedo = colWater ? fallback : (col.r < 0.0 ? fallback : col);
@@ -1161,19 +958,7 @@ void main() {
     // opacity. Voxy's own finish() applies the same dimension fog on top
     // of its march — 150 m forest: mix 0.15 (dark, matches), far summits:
     // 0.3-0.7 (fogged, matches).
-#ifdef CASCADE
-    // v6.59 CASCADE FOG: the vanilla 0..1024 pair would wall the far rings
-    // behind a 1 km fog ceiling. The vanilla line keeps its near-field
-    // shape, then the DH-style curve carries the horizon to the data
-    // frontier (0.92 ceiling — the far terrain stays visible).
-    float fogNear = clamp(tHit * (1.0 / 1024.0), 0.0, 1.0)
-        * (1.0 - smoothstep(1024.0, 4096.0, tHit));
-    float fogFar = smoothstep(fogLive ? max(vanRD, 128.0) : 128.0,
-                              horizon * 0.995, tHit) * 0.92;
-    float fog = fogLive ? (fogNear + fogFar) * fogOpacity : 0.0; // __FOG_VOXY__
-#else
     float fog = fogLive ? clamp(tHit * (1.0 / 1024.0), 0.0, 1.0) * fogOpacity : 0.0; // __FOG_VOXY__
-#endif
     lit = mix(lit, fogTint, fog);
 
     // ---- FADE: Voxy FogMode.FADE, MODE=1 (xz only), last 10% ------------
