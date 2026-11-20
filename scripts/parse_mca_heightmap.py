@@ -25,21 +25,40 @@ ORIGIN_X = CENTER_X - 256.0  # region_blocks=512
 ORIGIN_Z = CENTER_Z - 256.0
 
 def read_region(path):
+    import zlib
     data = open(path, "rb").read()
+    if len(data) < 8192:
+        return
     for i in range(1024):
-        off = struct.unpack(">I", b"\x00" + data[i * 4:i * 4 + 3])[0] * 4096
-        ln = struct.unpack(">I", b"\x00" + data[i * 4 + 3:i * 4 + 4])[0]
-        if off == 0 or ln == 0:
+        b = data[i * 4:i * 4 + 4]
+        if len(b) < 4:
+            return
+        off = (b[0] << 16) | (b[1] << 8) | b[2]  # 24-bit BE sector number
+        sectors = b[3]  # sector count
+        if off == 0 or sectors == 0:
             continue
-        chunk = data[off + 1:off + 1 + ln - 1]
-        yield i % 32, i // 32, chunk
+        start = off * 4096
+        if start + 5 > len(data):
+            return
+        plen = struct.unpack(">I", data[start:start + 4])[0]
+        comp = data[start + 4]
+        payload = data[start + 5:start + 4 + plen]
+        try:
+            if comp == 2:
+                payload = zlib.decompress(payload)
+            elif comp == 1:
+                import gzip
+                payload = gzip.decompress(payload)
+            else:
+                continue
+        except Exception:
+            continue
+        # yield the UNCOMPRESSED chunk NBT
+        yield i % 32, i // 32, payload
 
 def read_longs(b):
-    # zlib/NBT-lite: find the heightmap longs inside the chunk stream.
-    # Paper writes NBT zlib-compressed; the MOTION_BLOCKING array is
-    # 37 bytes of 9-bit packed values (256 entries -> 36 longs + header).
-    import zlib
-    raw = zlib.decompress(b)
+    # NBT-lite: find the heightmap longs inside the uncompressed chunk NBT.
+    raw = b
     # scan for the compressed NBT payload of the heightmap: walk top-level
     # tags is heavy; instead locate the byte pattern of 36 longs whose
     # 9-bit packing yields 256 in-range values — the "MOTION_BLOCKING"
@@ -48,21 +67,28 @@ def read_longs(b):
     idx = raw.find(b"MOTION_BLOCKING")
     if idx < 0:
         return None
-    # NBT: TAG name ... payload is [type byte][len i32][36 x i64]
+    # NBT layout: [type=12][name len][name][len i32 BE][36 x i64] — the
+    # payload length header starts RIGHT after the name.
     p = idx + len(b"MOTION_BLOCKING")
-    # skip to the next long-array header within a small window
-    for q in range(p, p + 64):
-        if raw[q] == 12:  # TAG_Long_Array
-            n = struct.unpack(">i", raw[q + 1:q + 5])[0]
-            if n == 37 or n == 36:
-                vals = []
-                for k in range(n):
-                    lo = struct.unpack(">q", raw[q + 5 + k * 8:q + 13 + k * 8])[0]
-                    for j in range(7, -1, -1):
-                        v = (lo >> (j * 9)) & 0x1FF
-                        if v:
-                            vals.append(v)
-                return vals[:256]
+    starts = [p]
+    for q in range(p, min(len(raw), p + 256)):
+        if raw[q] == 12:
+            starts.append(q + 5)
+    for st in starts:
+        if st + 4 > len(raw):
+            continue
+        n = struct.unpack(">i", raw[st:st + 4])[0]
+        if n not in (36, 37):
+            continue
+        vals = []
+        for k in range(n):
+            lo = struct.unpack(">q", raw[st + 4 + k * 8:st + 12 + k * 8])[0]
+            for j in range(7, -1, -1):
+                v = (lo >> (j * 9)) & 0x1FF
+                if v:
+                    vals.append(v)
+        if len(vals) >= 200:
+            return vals[:256]
     return None
 
 def world_minmax(vals, bx0, bz0):
