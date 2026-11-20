@@ -858,9 +858,13 @@ void main() {
     // positive values that grow with proximity.
     vec4 rot = texelFetch(RotSampler, ivec2(0, 0), 0);
     float conf = rot.b;
-    float minConf = LodParams.w;
+    // v6.59.12 PORT of looksbetter v4.4.1: confidence no longer gates
+    // VISIBILITY, only the very first frame (conf decays x0.99 on sky-blind
+    // pans; a down-looking aerial reads a tiny sky sliver and used to lose
+    // the whole paint — parity-554 01_aerial_west missing mountain).
+    float minConf = LodParams.w; // diagnostics only, see the gate below
 
-    if (conf < minConf) {
+    if (conf < 0.02) {
         fragColor = scene;
         return;
     }
@@ -946,7 +950,7 @@ void main() {
     }
 
 
-    float fade = smoothstep(minConf, minConf + 0.15, conf);
+    float fade = 1.0; // v4.4.1 port: full-alpha paint, conf is diagnostics
     vec3 hitPos = cam + dir * tHit;
 #ifdef CASCADE
     // The hit's ring: ring 0 when its disk covers the hit, else the finest
@@ -1045,7 +1049,14 @@ void main() {
     // mid-terraces sit at 16-64 m, inside the vanilla band). Over sky there
     // is no vanilla texture to lose — the far flanks keep the honest
     // fallback paint.
-    if (tVan > 0.0 && colorless) {
+    // v6.59.12 THE SLAB-WALL KILL (extends the v6.21.1 vanilla gate to ALL
+    // pixels): a colorless cell — no decoded color word — never owns a
+    // pixel. Height-only columns used to paint the ColLow/ColHigh fallback
+    // at heights the rank-0 windows never encoded (v6.24 buffer-dump
+    // forensics; parity-554: voxy paints SKY at 07/12 where we painted the
+    // wall). The color word is the paint permit; the height byte alone is
+    // never enough.
+    if (colorless) {
         fragColor = scene;
         return;
     }
