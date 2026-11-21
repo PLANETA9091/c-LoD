@@ -577,7 +577,11 @@ void main() {
     if (outByte >= 255u) {
         outByte = 0u;
         mark = 0.0;
-        eraseFlag = 0.0;
+        // v6.59.15b ANTI-FLICKER: erase=1 kills the cell's dots, so the
+        // void is PERMANENT — with erase=0 the cell re-strobed, re-ORed to
+        // the ceiling and re-voided EVERY FRAME (run 44883946009's baseline
+        // drift climbed to 33493 px: the flicker loop WAS the drift).
+        eraseFlag = 1.0;
     }
     // .b = the FRESH word (this frame, not merged) for the eraser mask.
     fragColor = vec4(
