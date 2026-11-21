@@ -202,8 +202,14 @@ vals = sorted((p[0] + p[1] + p[2]) / 3.0 for p in px)
 # wall blobs can cover most of the zenith strip on a bright haze day
 # (run 44913969594's night_01: mean 129.6 on a usable day frame); night is
 # uniformly dark so its percentile is dark too. day p60 = 190-213, dusk 83-126.
+# v6.59.15m: the threshold drops 130 -> 60 (USABLE LIGHT, not strict noon) —
+# the 26.3 noon-pin is broken on this runner (run 44921315869: advance_time
+# confirmed false, the world noon->dusk in 32 s, doDaylightCycle and
+# do_daylight_cycle rejected as unknown rules, the time moved to the 26.3
+# 'timeline' system). Both sides of the A/B drift to dusk TOGETHER (the same
+# server clock), so the pair stays fair; only deep night is disqualified.
 p60 = vals[int(len(vals) * 0.6)]
-sys.exit(0 if p60 >= 130 else 1)
+sys.exit(0 if p60 >= 60 else 1)
 PYEOF
 }
 
@@ -1845,6 +1851,7 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
   sum "- pre-tour pass done: $PRE_N vantages x ${PARITY_PREPASS_SETTLE}s (the tour now reads the second OR-merge lap; the rim/dip transport race reads from the tour deltas)"
   PW_N=0
   PW_NIGHT=0
+  DG_REJOINS=0  # v6.59.15m: set -u safe — the day-guard cap counter
   while read -r PNAME PYAW PPITCH PX PY PZ <&3; do
     case "$PNAME" in ''|\#*) continue;; esac
     PX=$(( ${PX//CX/$CX} )); PZ=$(( ${PZ//CZ/$CZ} ))
