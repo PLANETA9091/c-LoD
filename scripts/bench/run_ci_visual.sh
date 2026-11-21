@@ -110,7 +110,24 @@ if [ "${CLOD_CONTROL:-0}" = "1" ]; then
   echo "$(date -u +%FT%TZ) control pulse: leg start (stdout/stderr teed to control-leg.log)" >> "$HOME/mc-test/control-steps.log"
 fi
 
-srv() { echo "$1" > /tmp/server.in; }
+srv_raw() { echo "$1" > /tmp/server.in; }
+
+# v6.59.15l THE NOON TRIO: the 26.3 day cycle is not frozen by advance_time
+# alone (run 44921315869: day 16:42:48 -> dusk 16:43:20 with the rule
+# confirmed false in the log). Every pin sends all three candidate freeze
+# rules (unknown names cost one 'Unknown game rule' line) and audits the
+# tick with 'time query daytime' into the server log.
+srv() {
+  if [ "$1" = "gamerule advance_time false" ] || [ "$1" = "time set noon" ]; then
+    srv_raw "gamerule advance_time false"
+    srv_raw "gamerule doDaylightCycle false"
+    srv_raw "gamerule do_daylight_cycle false"
+    srv_raw "time set noon"
+    srv_raw "time query daytime"
+    return 0
+  fi
+  srv_raw "$1"
+}
 
 wait_log() { # pattern file timeout_loops
   for _ in $(seq 1 "$3"); do
@@ -1871,6 +1888,17 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
       # walk_keys kills the tutorial toast the rejoin restores; the tp
       # restores the vantage before the reshoot.
       if ! day_ok "parity/$PNAME"; then
+        # v6.59.15l: the rejoin costs ~4 min — cap it at 2 per session so a
+        # genuinely broken pin renames and finishes the tour, not times out.
+        if [ "${DG_REJOINS:-0}" -ge 2 ]; then
+          ct "day guard: rejoin cap reached — accepting night for $PNAME"
+          mv "$SHOTS/parity/$PNAME.png" "$SHOTS/parity/night_$PNAME.png" 2>/dev/null || true
+          PW_NIGHT=$((PW_NIGHT + 1))
+          sum "- **DAY GUARD:** $PNAME night after cap (rejoins used: $DG_REJOINS) — renamed night_$PNAME.png; the row pairs as missing, NOT as a renderer diff"
+          PW_N=$((PW_N + 1))
+          continue
+        fi
+        DG_REJOINS=$((DG_REJOINS + 1))
         bash "$BENCH_DIR/run_client.sh" || { fail "day-guard relaunch rc nonzero"; exit 1; }
         wait_log "Stepan joined the game" /tmp/server.log 240 || {
           echo "FAIL: day-guard rejoin never joined"; tail -20 /tmp/client.log; exit 1; }
