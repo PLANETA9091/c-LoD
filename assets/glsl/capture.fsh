@@ -575,13 +575,16 @@ void main() {
     // frame-stable (no drift growth), and the transport re-strobes the
     // cell later — an honest world never produces 255.
     if (outByte >= 255u) {
-        outByte = 0u;
-        mark = 0.0;
-        // v6.59.15b ANTI-FLICKER: erase=1 kills the cell's dots, so the
-        // void is PERMANENT — with erase=0 the cell re-strobed, re-ORed to
-        // the ceiling and re-voided EVERY FRAME (run 44883946009's baseline
-        // drift climbed to 33493 px: the flicker loop WAS the drift).
-        eraseFlag = 1.0;
+        // v6.59.15c THE VOID LATCH: the byte stays 255 (every reader voids
+        // the ceiling — ground_at, both averages, the pyramid) but the cell
+        // MARKS: merge honesty (b) makes a marked word immutable without a
+        // reset electron, so the server's endless re-strobes can no longer
+        // re-OR the word from 0 toward the ceiling. erase=0 only killed the
+        // dots — new dots respawned and the cycle ran on (44897164651's
+        // drift: 8-36k px over 12 tries, dense sky blobs = the toggle
+        // painted every intermediate partial). The latch is stable void;
+        // an honest reset electron (a real edit) still replaces the word.
+        mark = 1.0;
     }
     // .b = the FRESH word (this frame, not merged) for the eraser mask.
     fragColor = vec4(

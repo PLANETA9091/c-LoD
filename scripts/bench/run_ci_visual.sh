@@ -365,6 +365,17 @@ paint_px() { # a.png b.png -> changed pixel count, ALWAYS a single line
   echo "${out:-999999}"
 }
 
+paint_px_struct() { # a.png b.png -> STRUCTURAL changed px (3x3 blur swallows
+  # the transport's 1-2 px dot sparkles; v6.59.15i: on a streaming full-disk
+  # atlas the alive-dot population is never zero at the shot instant, so the
+  # raw count can never settle — the baseline gate reads the structural
+  # metric, the raw count stays in the summary for the record).
+  local out
+  out=$(python3 "$BENCH_DIR/visual_diff.py" "$1" "$2" --min-change 2000000000 --structural 2>/dev/null \
+        | grep -o 'paint px = [0-9]*' | grep -o '[0-9]*$' | tail -1) || true
+  echo "${out:-999999}"
+}
+
 accept_pack_prompt() { # tag loops — wait for the yellow prompt, click Proceed
   # v6.9.0 WINDOW FIX FALLOUT: with the client window at 1280x720 the prompt
   # renders FULL-SIZE — the yellow warning sits at y~288..335 and the Proceed
@@ -825,13 +836,14 @@ for t in 1 2 3 4 5 6 7 8 9 10 11 12; do
   shot 11_baseline_settle || true
   [ -f "$SHOTS/11_baseline_settle.png" ] || { fail "settle shot missing"; exit 1; }
   DRIFT=$(paint_px "$SHOTS/10_before_edit.png" "$SHOTS/11_baseline_settle.png")
-  note "baseline stability try $t: drift=$DRIFT px"
-  sum "- baseline try $t: drift=$DRIFT px"
-  [ "$DRIFT" -le 1500 ] 2>/dev/null && break
+  DRIFT_S=$(paint_px_struct "$SHOTS/10_before_edit.png" "$SHOTS/11_baseline_settle.png")
+  note "baseline stability try $t: drift=$DRIFT px (structural $DRIFT_S)"
+  sum "- baseline try $t: drift=$DRIFT px (structural $DRIFT_S — the gate reads structural: the streaming disk's alive-dot speckle never reaches zero raw)"
+  [ "$DRIFT_S" -le 1500 ] 2>/dev/null && break
   sleep 20  # v6.59.15c: let the tail of the decode wave drain between tries
 done
-[ "$DRIFT" -le 1500 ] 2>/dev/null \
-  || fail "no stable baseline after 12 tries (drift=$DRIFT) — the A/B would lie"
+[ "$DRIFT_S" -le 1500 ] 2>/dev/null \
+  || fail "no stable baseline after 12 tries (raw drift=$DRIFT, structural=$DRIFT_S) — the A/B would lie"
 
 # ---- 4a2. LOD PAINT PROOF on the settled baseline (v6.14) --------------------
 # The marker column (5x111x5 red_concrete, y 60..170) stands 75 m east of the

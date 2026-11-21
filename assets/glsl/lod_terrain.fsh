@@ -573,7 +573,9 @@ float march_terrain(vec3 cam, vec3 dir, float t0, float tCap, float tanH,
                              : q == 1 ? ivec2(-1, 0)
                              : q == 2 ? ivec2(0, 1) : ivec2(0, -1);
                     vec4 nt = texelFetch(HeightSampler, hci + dd, 0);
-                    if (nt.a > 0.5) {
+                    // v6.59.15c: a void-latched neighbour (byte 255 under a
+                    // mark) neither supports nor blocks — it is not terrain.
+                    if (nt.a > 0.5 && nt.r < 0.999) {
                         hn = max(hn, nt.r * 255.0 - 64.0);
                         sup = true;
                     }
