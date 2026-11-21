@@ -786,9 +786,13 @@ sum "- paint settled=$SETTLED (wire ${LAST_WIRE}p)"
 
 # ---- 4a. stable baseline (the scan keeps painting late cells; retry) ---------
 # v6.4.4: 3 tries 12 s apart still fired mid-wave once the scan tail ran long;
-# now 6 tries with a 10 s drain between them (worst case ~2 min extra).
+# then 6 tries with a 10 s drain. v6.59.15c: the FULL-DISK PAINT (gate=1.0,
+# 65536 cells decoding through the tier walk) stretches the settle wave to
+# minutes — runs 44820069718/44883946009 burned all 6 tries (drift 13948 /
+# 33493 px) while the OR/void cells were still flipping; 12 tries with a 20 s
+# drain (worst case ~6 min extra, the job has ~25 min of slack).
 DRIFT=999999
-for t in 1 2 3 4 5 6; do
+for t in 1 2 3 4 5 6 7 8 9 10 11 12; do
   # v6.47.5 THE REJOIN GUARD: the client sometimes leaves cleanly 1-2 s
   # after the pack push / the first TP (the runs #451-#455 died to the
   # OpenAL crash — fixed in v6.47.4 — and #456 still disconnected cleanly
@@ -814,10 +818,10 @@ for t in 1 2 3 4 5 6; do
   note "baseline stability try $t: drift=$DRIFT px"
   sum "- baseline try $t: drift=$DRIFT px"
   [ "$DRIFT" -le 1500 ] 2>/dev/null && break
-  sleep 10  # v6.4.4: let the tail of the wave drain between tries
+  sleep 20  # v6.59.15c: let the tail of the decode wave drain between tries
 done
 [ "$DRIFT" -le 1500 ] 2>/dev/null \
-  || fail "no stable baseline after 6 tries (drift=$DRIFT) — the A/B would lie"
+  || fail "no stable baseline after 12 tries (drift=$DRIFT) — the A/B would lie"
 
 # ---- 4a2. LOD PAINT PROOF on the settled baseline (v6.14) --------------------
 # The marker column (5x111x5 red_concrete, y 60..170) stands 75 m east of the
