@@ -207,7 +207,7 @@ jobs:
           done
           mkdir -p dist/plugins hostout
           javac -cp paper-api.jar:adventure-api.jar:adventure-key.jar \
-            -d hostout scripts/java/host/ClodHost.java java/ClodEdits.java \
+            -d hostout scripts/java/host/ClodHost.java \
             || { echo "javac failed"; exit 1; }
           jar cf dist/plugins/clodhost.jar -C hostout clod -C scripts/java/host plugin.yml
       - name: Assemble dist root
@@ -442,7 +442,7 @@ jobs:
           done
           mkdir -p dist/plugins hostout
           javac -cp paper-api.jar:adventure-api.jar:adventure-key.jar \
-            -d hostout scripts/java/host/ClodHost.java java/ClodEdits.java \
+            -d hostout scripts/java/host/ClodHost.java \
             || { echo "javac failed"; exit 1; }
           jar cf dist/plugins/clodhost.jar -C hostout clod -C scripts/java/host plugin.yml
       - name: Assemble dist root (fixed seed; view-distance 4 keeps the marker zone pure-LOD)
@@ -586,7 +586,7 @@ jobs:
           curl -sL -o adventure-key.jar "$B/net/kyori/adventure-key/5.2.0/adventure-key-5.2.0.jar"
           mkdir -p dist/plugins hostout
           javac -cp paper-api.jar:adventure-api.jar:adventure-key.jar \
-            -d hostout scripts/java/host/ClodHost.java java/ClodEdits.java
+            -d hostout scripts/java/host/ClodHost.java
           jar cf dist/plugins/clodhost.jar -C hostout clod -C scripts/java/host plugin.yml
       - name: Assemble dist root (fixed seed; view-distance 4 keeps the marker zone pure-LOD)
         run: |
@@ -1172,7 +1172,7 @@ jobs:
           done
           mkdir -p dist/plugins hostout
           javac -cp paper-api.jar:adventure-api.jar:adventure-key.jar \
-            -d hostout scripts/java/host/ClodHost.java java/ClodEdits.java \
+            -d hostout scripts/java/host/ClodHost.java \
             || { echo "javac failed"; exit 1; }
           jar cf dist/plugins/clodhost.jar -C hostout clod -C scripts/java/host plugin.yml
       - name: Assemble dist root (fixed seed; view-distance 4)
