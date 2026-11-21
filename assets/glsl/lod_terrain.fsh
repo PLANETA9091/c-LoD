@@ -207,7 +207,9 @@ float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
     vec4 c = texelFetch(ColBufSampler, celli, 0);
     water = c.a >= 0.5 && abs(c.r * 255.0 - 216.0) < 0.5;
     vec4 h = texelFetch(HeightSampler, celli, 0);
-    if (h.a < 0.5) {
+    if (h.a < 0.5 || h.r >= 0.999) {
+        // v6.59.15 THE CEILING KILL (defense layer): byte 255 = the
+        // OR-ratchet's fingerprint (honest tops encode 249..254), reads void.
         return -1.0e8; // height word not decoded yet (or the cell is void)
     }
     ok = true;
@@ -225,8 +227,8 @@ float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
             continue;
         }
         vec4 hq = texelFetch(HeightSampler, q, 0);
-        if (hq.a < 0.5) {
-            continue;
+        if (hq.a < 0.5 || hq.r >= 0.999) {
+            continue; // v6.59.15: ceiling bytes are ratchet garbage, not data
         }
         sum += hq.r * 255.0 - 64.0;
         cnt += 1.0;
@@ -251,8 +253,8 @@ float ground_at(vec2 xz, float w, float w2, out bool water, out bool ok) {
             continue;
         }
         vec4 hq = texelFetch(HeightSampler, q, 0);
-        if (hq.a < 0.5) {
-            continue;
+        if (hq.a < 0.5 || hq.r >= 0.999) {
+            continue; // v6.59.15: ceiling bytes are ratchet garbage, not data
         }
         s2 += hq.r * 255.0 - 64.0;
         c2 += 1.0;

@@ -44,7 +44,11 @@ void main() {
             } else {
                 c = texelFetch(PrevSampler, ivec2(q.x, childBase + q.y), 0);
             }
-            if (c.a > 0.5) {
+            // v6.59.15 THE CEILING KILL: a level-1 child at the byte
+            // ceiling (255) is OR-ratchet garbage — it neither raises the
+            // block max nor counts as marked, so a garbage-only block stays
+            // A=0 and the march's pyramid skip jumps it outright.
+            if (c.a > 0.5 && c.r < 0.999) {
                 mx = max(mx, c.r);
                 marked = 1.0;
             }
