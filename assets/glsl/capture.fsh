@@ -549,21 +549,6 @@ void main() {
     // stripes); with the gate above they are rejected, and this block
     // makes the refusal permanent for the whole marked lifetime.
     float mark = allSlots ? 1.0 : prev.a;
-    // v6.59.15 THE CEILING KILL: byte 255 (191 m) is unreachable honestly
-    // in the parity worlds (tops 185/190 = bytes 249/254) — it is the
-    // OR-ratchet's fingerprint (v6.22 #316: honest summit bytes 249..254
-    // climb TO the 255 ceiling). Run 44820069718's 07/12 showed the wall
-    // class surviving the march spike gate: the ratchet poisons a COHERENT
-    // REGION whose neighbours stand at the same garbage height, so lateral
-    // support exists and the gate passes them. Void the cell at commit:
-    // the atlas never holds the fingerprint, the repeated void is
-    // frame-stable (no drift growth), and the transport re-strobes the
-    // cell later — an honest world never produces 255.
-    if (outByte >= 255u) {
-        outByte = 0u;
-        mark = 0.0;
-        eraseFlag = 0.0;
-    }
     // v6.35.0 THE ERASE FLAG = COMPLETION, not anyHit. The eraser reads .g
     // and kills a cell's dots the first frame the word strobes AT ALL —
     // an anyHit from ONE slot fired the whole word's dot death, so a
@@ -579,6 +564,21 @@ void main() {
     // stays invisible: the dots are distance-fogged 1-2 px sparkles, and
     // the particle lifetime bounds any lingering field.
     float eraseFlag = (allSlots || prev.a > 0.5) ? 1.0 : 0.0;
+    // v6.59.15 THE CEILING KILL: byte 255 (191 m) is unreachable honestly
+    // in the parity worlds (tops 185/190 = bytes 249/254) — it is the
+    // OR-ratchet's fingerprint (v6.22 #316: honest summit bytes 249..254
+    // climb TO the 255 ceiling). Run 44820069718's 07/12 showed the wall
+    // class surviving the march spike gate: the ratchet poisons a COHERENT
+    // REGION whose neighbours stand at the same garbage height, so lateral
+    // support exists and the gate passes them. Void the cell at commit:
+    // the atlas never holds the fingerprint, the repeated void is
+    // frame-stable (no drift growth), and the transport re-strobes the
+    // cell later — an honest world never produces 255.
+    if (outByte >= 255u) {
+        outByte = 0u;
+        mark = 0.0;
+        eraseFlag = 0.0;
+    }
     // .b = the FRESH word (this frame, not merged) for the eraser mask.
     fragColor = vec4(
         float(outByte) / 255.0,
