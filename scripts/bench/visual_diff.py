@@ -19,11 +19,19 @@ given, so a failed job uploads the evidence.
 
 Usage:
   visual_diff.py BEFORE.png AFTER.png [--probe red|white] [--min-probe N]
-                 [--min-change N] [--out composite.png]
+                 [--min-change N] [--out composite.png] [--structural]
+
+  --structural: the paint metric counts only pixels that survive a 3x3
+    BoxBlur of the diff (a changed pixel whose whole 3x3 neighborhood
+    averages <= THRESH is an isolated 1-2 px sparkle). The transport dust
+    (server-side strobe particles) moves constantly BY DESIGN — runs
+    44820069718/44883946009/44889619819 read 10-27k 'changed' px on a
+    structurally frozen screen, which burned every baseline try. Solid
+    edits (a filled marker, a painted region) survive the blur untouched.
 """
 import sys
 
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageFilter
 
 THRESH = 15
 
@@ -60,11 +68,11 @@ def main():
         print(f"FAIL size mismatch: {before.size} vs {after.size}")
         return 1
 
-    opts = {"--probe": None, "--min-probe": 150, "--min-change": 200, "--out": None}
+    opts = {"--probe": None, "--min-probe": 150, "--min-change": 200, "--out": None, "--structural": False}
     i = 2
     while i < len(args):
         if args[i] in opts:
-            opts[args[i]] = args[i + 1] if args[i] != "--probe" else args[i + 1]
+            opts[args[i]] = args[i + 1] if args[i] not in ("--probe", "--structural") else (args[i + 1] if args[i] == "--probe" else True)
             i += 2
         else:
             print(f"unknown arg {args[i]}")
@@ -76,7 +84,17 @@ def main():
     diff = ImageChops.difference(before, after).convert("L")
     px = diff.load()
     w, h = diff.size
-    changed = sum(1 for y in range(h) for x in range(w) if px[x, y] > THRESH)
+    raw_changed = sum(1 for y in range(h) for x in range(w) if px[x, y] > THRESH)
+    if opts["--structural"]:
+        # v6.59.15d: count only STRUCTURAL change — a pixel whose blurred
+        # 3x3 neighborhood still exceeds THRESH. Isolated dust sparkles
+        # (1-2 px) average away; solid paint regions survive unchanged.
+        blurred = diff.filter(ImageFilter.BoxBlur(1))
+        bpx = blurred.load()
+        changed = sum(1 for y in range(1, h - 1) for x in range(1, w - 1)
+                      if bpx[x, y] > THRESH)
+    else:
+        changed = raw_changed
 
     pa = after.load()
     probed = sum(1 for y in range(h) for x in range(w) if probe_fn(pa[x, y])) if probe_fn else -1
@@ -91,7 +109,7 @@ def main():
             if px[x, y] > THRESH:
                 grid[gy][x // cw] += 1
 
-    print(f"paint px = {changed} ({100.0 * changed / (w * h):.2f}%)")
+    print(f"paint px = {changed} ({100.0 * changed / (w * h):.2f}%) raw = {raw_changed}")
     for row in grid:
         print(" ".join(f"{v:6d}" for v in row))
     if probe_fn:

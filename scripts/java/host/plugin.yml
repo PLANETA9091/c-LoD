@@ -4,3 +4,7 @@ version: 1.0.0
 description: c-LoD CI host - an enabled plugin so ClodEdits can register
 author: c-LoD
 api-version: '26.3'
+commands:
+  clodpush:
+    description: push a block square into the c-LoD edit ring (console /fill fires no Bukkit events)
+    usage: /clodpush <x> <z> [radius=4]

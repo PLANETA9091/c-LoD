@@ -807,6 +807,16 @@ for t in 1 2 3 4 5 6 7 8 9 10 11 12; do
     assert_online "rejoin$t" || exit 1
   fi
   assert_online "baseline try $t" || exit 1
+  # v6.59.15e THE TUTORIAL TOAST KILL: the horizon client's 'Move with
+  # W, A, S and D' hint never dismisses without real input (tutorial.rs
+  # needs 40 move ticks + 40 look ticks; the bot only teleports) and its
+  # animated toast area sat in EVERY baseline A/B pair — run 44889619819's
+  # drift composite showed it as the dominant solid blob (drift 10-27k px
+  # on a frozen scene). Walk 2.6 s + sweep the camera 1.4 s: both gates
+  # close, the client steps the tutorial to None (creative) and the toast
+  # dies for the session (a rejoin resets it — this runs EVERY try, before
+  # the teleport restores the vantage).
+  python3 "$BENCH_DIR/walk_keys.py" 2.6 >/dev/null 2>&1 || true
   srv "time set noon"  # v6.4.8: keep the strobe bright across the tries
   srv "tp Stepan $VX $VY $CZ $VYAW $VPITCH"
   sleep 6
@@ -1078,6 +1088,16 @@ fi
 grep -iE "Changed [0-9]+ block|Filled" /tmp/server.log | tail -1 \
   || note "fill summary not in log (probe loop decides)"
 sum "- fill issued: 5x$((FILL_Y1 - FILL_Y0 + 1))x5 $MARKER at $CX,$CZ (zone forceloaded ±48)"
+# v6.59.15f THE CONSOLE FILL BRIDGE: a console /fill fires NO Bukkit block
+# events (the vanilla command writes blocks directly), so the marker cells
+# streamed their pre-edit 'water' height/color forever — the 44820069718/
+# 44889619819 dumps showed rgb [63,118,228] h=62 water=1 under a 111-tall
+# red_concrete column, and the march painted the marker gray/white (the
+# 11_topdown + the drift composite's gray towers). /clodpush feeds the same
+# edit ring the 13 event handlers use: the cells re-stroke with the reset
+# electron and the server's belief becomes the real column.
+srv "clodpush $CX $CZ 6"
+sleep 2
 phase "4 marker filled"
 # v6.5.2 forensics: the SERVER's belief about the marker cells right after
 # the fill — heights/valid/words before any probe claims anything.
