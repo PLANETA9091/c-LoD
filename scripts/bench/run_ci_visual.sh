@@ -180,8 +180,13 @@ import sys
 from PIL import Image
 im = Image.open(sys.argv[1]).convert("RGB")
 px = list(im.crop((0, 0, im.width, 40)).getdata())
-mean = sum(p[0] + p[1] + p[2] for p in px) / (3 * len(px))
-sys.exit(0 if mean >= 130 else 1)
+vals = sorted((p[0] + p[1] + p[2]) / 3.0 for p in px)
+# v6.59.15k: the 60th percentile, not the mean — clouds and the far-band
+# wall blobs can cover most of the zenith strip on a bright haze day
+# (run 44913969594's night_01: mean 129.6 on a usable day frame); night is
+# uniformly dark so its percentile is dark too. day p60 = 190-213, dusk 83-126.
+p60 = vals[int(len(vals) * 0.6)]
+sys.exit(0 if p60 >= 130 else 1)
 PYEOF
 }
 
@@ -1852,12 +1857,32 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     shot "parity/$PNAME" || true
     # v6.25.5 DAY GUARD: pitch >= 60 rows (11_topdown) hold no sky — skip.
     if [ "${PPITCH%%.*}" -lt 60 ] 2>/dev/null && ! day_ok "parity/$PNAME"; then
-      ct "day guard: $PNAME night — re-pin + reshoot"
+      ct "day guard: $PNAME night — re-pin + rejoin + reshoot"
       srv "gamerule advance_time false"
       srv "time set noon"
       srv "weather clear"  # v6.32.1: noon under thunder still reads < 130
       sleep 10
       shot "parity/$PNAME" || true
+      # v6.59.15k: the server pin alone cannot fix the client's sky — the
+      # horizon client advances its own local clock from the join sync and
+      # ignores the server freeze (run 44913969594: 7 day vantages right
+      # after the boot join, then dusk on a noon-frozen server with the
+      # re-pin confirmed 5x in the server log). A rejoin resyncs the clock;
+      # walk_keys kills the tutorial toast the rejoin restores; the tp
+      # restores the vantage before the reshoot.
+      if ! day_ok "parity/$PNAME"; then
+        bash "$BENCH_DIR/run_client.sh" || { fail "day-guard relaunch rc nonzero"; exit 1; }
+        wait_log "Stepan joined the game" /tmp/server.log 240 || {
+          echo "FAIL: day-guard rejoin never joined"; tail -20 /tmp/client.log; exit 1; }
+        accept_pack_prompt "dayguard$PNAME" 60
+        assert_online "dayguard$PNAME" || exit 1
+        python3 "$BENCH_DIR/walk_keys.py" 2.6 >/dev/null 2>&1 || true
+        srv "gamerule advance_time false"
+        srv "time set noon"
+        srv "tp Stepan $PX $PY $PZ $PYAW $PPITCH"
+        sleep "$PARITY_SETTLE"
+        shot "parity/$PNAME" || true
+      fi
       if ! day_ok "parity/$PNAME"; then
         mv "$SHOTS/parity/$PNAME.png" "$SHOTS/parity/night_$PNAME.png" 2>/dev/null || true
         PW_NIGHT=$((PW_NIGHT + 1))
