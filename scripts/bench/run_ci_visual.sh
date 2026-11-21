@@ -352,7 +352,7 @@ print(f"lod_silhouette_cols={int((cols >= 250).sum())}")
 PYEOF
 }
 
-paint_px() { # a.png b.png -> changed pixel count, ALWAYS a single line
+paint_px() { # a.png b.png [region] -> changed pixel count, ALWAYS a single line
   # v6.4.2 FIX: visual_diff.py asserts against --min-change and exits 1 when
   # below it; with the 2000000000 sentinel the assertion always fired, and
   # under `set -o pipefail` the `|| echo 999999` appended a SECOND line after
@@ -360,18 +360,18 @@ paint_px() { # a.png b.png -> changed pixel count, ALWAYS a single line
   # died on the multiline string ("no stable baseline after 3 tries
   # (drift=0\n999999)"). Capture, take the last count, tolerate the exit.
   local out
-  out=$(python3 "$BENCH_DIR/visual_diff.py" "$1" "$2" --min-change 2000000000 2>/dev/null \
+  out=$(python3 "$BENCH_DIR/visual_diff.py" "$1" "$2" --min-change 2000000000 ${3:+--region "$3"} 2>/dev/null \
         | grep -o 'paint px = [0-9]*' | grep -o '[0-9]*$' | tail -1) || true
   echo "${out:-999999}"
 }
 
-paint_px_struct() { # a.png b.png -> STRUCTURAL changed px (3x3 blur swallows
+paint_px_struct() { # a.png b.png [region] -> STRUCTURAL changed px (3x3 blur swallows
   # the transport's 1-2 px dot sparkles; v6.59.15i: on a streaming full-disk
   # atlas the alive-dot population is never zero at the shot instant, so the
   # raw count can never settle — the baseline gate reads the structural
   # metric, the raw count stays in the summary for the record).
   local out
-  out=$(python3 "$BENCH_DIR/visual_diff.py" "$1" "$2" --min-change 2000000000 --structural 2>/dev/null \
+  out=$(python3 "$BENCH_DIR/visual_diff.py" "$1" "$2" --min-change 2000000000 ${3:+--region "$3"} --structural 2>/dev/null \
         | grep -o 'paint px = [0-9]*' | grep -o '[0-9]*$' | tail -1) || true
   echo "${out:-999999}"
 }
@@ -835,15 +835,15 @@ for t in 1 2 3 4 5 6 7 8 9 10 11 12; do
   sleep 6
   shot 11_baseline_settle || true
   [ -f "$SHOTS/11_baseline_settle.png" ] || { fail "settle shot missing"; exit 1; }
-  DRIFT=$(paint_px "$SHOTS/10_before_edit.png" "$SHOTS/11_baseline_settle.png")
-  DRIFT_S=$(paint_px_struct "$SHOTS/10_before_edit.png" "$SHOTS/11_baseline_settle.png")
-  note "baseline stability try $t: drift=$DRIFT px (structural $DRIFT_S)"
-  sum "- baseline try $t: drift=$DRIFT px (structural $DRIFT_S — the gate reads structural: the streaming disk's alive-dot speckle never reaches zero raw)"
+  DRIFT=$(paint_px "$SHOTS/10_before_edit.png" "$SHOTS/11_baseline_settle.png" ground)
+  DRIFT_S=$(paint_px_struct "$SHOTS/10_before_edit.png" "$SHOTS/11_baseline_settle.png" ground)
+  note "baseline stability try $t: drift=$DRIFT px (ground structural $DRIFT_S)"
+  sum "- baseline try $t: drift=$DRIFT px (ground structural $DRIFT_S — the gate reads the GROUND half: v6.59.15j, run 44903108766's drift map split 36552/2168 sky-vs-ground — the sky band's wall blobs vetoed every session while the ground sat at sparkle level; full-frame numbers stay printed)"
   [ "$DRIFT_S" -le 1500 ] 2>/dev/null && break
   sleep 20  # v6.59.15c: let the tail of the decode wave drain between tries
 done
 [ "$DRIFT_S" -le 1500 ] 2>/dev/null \
-  || fail "no stable baseline after 12 tries (raw drift=$DRIFT, structural=$DRIFT_S) — the A/B would lie"
+  || fail "no stable baseline after 12 tries (raw drift=$DRIFT, ground structural=$DRIFT_S) — the A/B would lie"
 
 # ---- 4a2. LOD PAINT PROOF on the settled baseline (v6.14) --------------------
 # The marker column (5x111x5 red_concrete, y 60..170) stands 75 m east of the

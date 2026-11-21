@@ -68,11 +68,11 @@ def main():
         print(f"FAIL size mismatch: {before.size} vs {after.size}")
         return 1
 
-    opts = {"--probe": None, "--min-probe": 150, "--min-change": 200, "--out": None, "--structural": False}
+    opts = {"--probe": None, "--min-probe": 150, "--min-change": 200, "--out": None, "--structural": False, "--region": "full"}
     i = 2
     while i < len(args):
         if args[i] in opts:
-            opts[args[i]] = args[i + 1] if args[i] not in ("--probe", "--structural") else (args[i + 1] if args[i] == "--probe" else True)
+            opts[args[i]] = args[i + 1] if args[i] not in ("--probe", "--region", "--structural") else (args[i + 1] if args[i] in ("--probe", "--region") else True)
             i += 2
         else:
             print(f"unknown arg {args[i]}")
@@ -81,15 +81,27 @@ def main():
     min_probe = int(opts["--min-probe"])
     min_change = int(opts["--min-change"])
 
+    # v6.59.15j: --region ground crops the bottom half before the metric
+    # (the sky band's wall blobs never block the settle gate; full = default).
+    if opts["--region"] == "ground":
+        _w, _h = before.size
+        _box = (0, _h // 2, _w, _h)
+        before, after = before.crop(_box), after.crop(_box)
+
     diff = ImageChops.difference(before, after).convert("L")
     px = diff.load()
     w, h = diff.size
     raw_changed = sum(1 for y in range(h) for x in range(w) if px[x, y] > THRESH)
     if opts["--structural"]:
         # v6.59.15d: count only STRUCTURAL change — a pixel whose blurred
-        # 3x3 neighborhood still exceeds THRESH. Isolated dust sparkles
-        # (1-2 px) average away; solid paint regions survive unchanged.
-        blurred = diff.filter(ImageFilter.BoxBlur(1))
+        # neighborhood still exceeds THRESH. Isolated dust sparkles (1-2 px)
+        # average away; solid paint regions survive unchanged.
+        # v6.59.15j: BoxBlur(2) (5x5) — run 44903108766's ground half still
+        # read 3945 at r=1 (the rank planes' dot grids are 2-3 px clusters
+        # that survive 3x3); at r=2 the same pair reads 1237 while the sky
+        # wall blobs keep 38010 full-frame — grids dissolve, terrain motion
+        # and solid blobs survive.
+        blurred = diff.filter(ImageFilter.BoxBlur(2))
         bpx = blurred.load()
         changed = sum(1 for y in range(1, h - 1) for x in range(1, w - 1)
                       if bpx[x, y] > THRESH)
