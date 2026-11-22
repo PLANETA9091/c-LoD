@@ -1036,7 +1036,11 @@ jobs:
     # convergence work must drive to zero; a pair below the floor still
     # FAILs and the job stays red on any FAIL/missing shot.
     name: "parity gate (c-LoD vs Voxy — credit gate: chunk agreement credited, dispute strict)"
-    needs: [visual, voxy-reference]
+    # v6.59.15n: the horizon job publishes the parity shots (the tour runs
+    # ~45-65 min in) — without it in `needs` the gate raced ahead at ~40 min
+    # and read 'no ours shot' for all 13 vantages while the tour was still
+    # mid-flight (run 44942273797: the gate log 19:56, the tour 20:38-20:44).
+    needs: [visual, voxy-reference, horizon]
     # v6.16.4: the gate needs BOTH legs' artifacts — on push both legs skip,
     # and an always() gate compared a voxy artifact that does not exist
     # against an ours artifact that does not exist: every pair read

@@ -1753,17 +1753,43 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
     "195 CX+45 CZ-166"
     "225 CX+122 CZ-122"
     "255 CX+166 CZ-45"
+    # v6.59.15n THE LOW RING: y=120, r100 — the ground-coverage lever
+    "270 CX+100 CZ 120"
+    "300 CX+87 CZ+50 120"
+    "330 CX+50 CZ+87 120"
+    "0   CX CZ+100 120"
+    "30  CX-50 CZ+87 120"
+    "60  CX-87 CZ+50 120"
+    "90  CX-100 CZ 120"
+    "120 CX-87 CZ-50 120"
+    "150 CX-50 CZ-87 120"
+    "180 CX CZ-100 120"
+    "210 CX+50 CZ-87 120"
+    "240 CX+87 CZ-50 120"
   )
+  # v6.59.15n THE LOW RING: run 44942273797's first real parity table split
+  # the verdict — 05 CREDITED (86.8% exact), 00 at 79.1% credit (1% from the
+  # floor), the far band 51-58%, but the AERIALS 3-10% exact with rim_mask 01
+  # reading DOMINANT BLUE (heights never decoded). The geometry: from y=160
+  # the ground (rank-0 plane 80) sits dy=80 -> dxz<=78.7 m of the eye; the
+  # aerials look at forest 144-200 m out — those cells are STRUCTURALLY
+  # outside the 112 m decodability window, no settle time can save them.
+  # view_probe.md confirms: q 9762 -> 14365 -> 18524 -> 21674 MONOTONICALLY
+  # RISING across the sweep (each teleport re-dirties faster than the
+  # windowed decode drains) with the tour plateauing at q~19287 deferred.
+  # Fix: a second ring at y=120 (40 m above the rank-0 plane, dy=40 ->
+  # dxz<=104.6 m — the ground decodes at ~105 m radius per position),
+  # 12 base azimuths x r100, both looks, no shots. Cost ~+4 min.
   SW_N=0
   for SWEEP in "${SWEEPS[@]}"; do
     set -- $SWEEP
-    SYAW=$1; SX=$2; SZ=$3
+    SYAW=$1; SX=$2; SZ=$3; SY=${4:-160}
     SX=$(( ${SX//CX/$CX} )); SZ=$(( ${SZ//CZ/$CZ} ))
     for SWDIR in 0 1; do
       SWYAW=$(( (SYAW + SWDIR * 180) % 360 ))
       srv "gamerule advance_time false"
       srv "time set noon"
-      srv "tp Stepan $SX 160 $SZ $SWYAW 0"
+      srv "tp Stepan $SX $SY $SZ $SWYAW 0"
       # v6.26.6 SETTLE-BY-LAPS (pre-registered post-#340 queue item 2): the
       # fixed 6 s per position IS the sweeps-era lottery — the laps a VM
       # decodes in 6 s varies with llvmpipe throughput (jump spread
@@ -1787,9 +1813,9 @@ if [ "${CLOD_CONTROL:-0}" != "1" ]; then
       echo "PROBE sweep pos $SX,$SZ yaw $SWYAW q $SWQ_PRE -> $SWQ_END settle ${SW_EL}s" >> "$SWEEP_PROBE"
       SW_N=$((SW_N + 1))
     done
-    ct "coverage sweep $SW_N/72 done (pos $SX,$SZ both looks)"
+    ct "coverage sweep $SW_N/96 done (pos $SX,$SZ y$SY both looks)"
   done
-  sum "- coverage sweeps: $SW_N eye passes = 36 positions (12 az x r144/200 + 12 off-az x r172, y=160) x 2 looks (outward+inward), settle-by-laps >= $PARITY_SWEEP_SETTLE s (q stable 3x1s), deadline $PARITY_SWEEP_LAPS_MAX s/pos, no shots — the v6.26.0 data-coverage lever + v6.26.6 lottery kill; probe rides parity/view_probe.md"
+  sum "- coverage sweeps: $SW_N eye passes = 48 positions (12 az x r144/200 + 12 off-az x r172 at y=160 + 12 az x r100 at y=120 THE LOW RING v6.59.15n: the aerials' ground sits dy=100 -> dxz<=50 from y=160, structurally outside the 112 m window — view_probe q 9762->21674 monotonically rising, the tour plateaued at q~19287 deferred) x 2 looks (outward+inward), settle-by-laps >= $PARITY_SWEEP_SETTLE s (q stable 3x1s), deadline $PARITY_SWEEP_LAPS_MAX s/pos, no shots — the v6.26.0 data-coverage lever + v6.26.6 lottery kill; probe rides parity/view_probe.md"
   # v6.26.2 DRAIN-SETTLE (#337/#338): the sweeps leave a decode backlog over the
   # steady band (session-3 tail q 22047/18375/22066 vs the parity-world steady
   # 7744..11246 — #336 pre-sweeps tails) and the tour used to start on the
