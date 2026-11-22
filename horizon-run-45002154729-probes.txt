@@ -1,0 +1,6 @@
+probe0 red=16046 paint=136868 lod_silhouette_cols=91 lens_red=0 lens_black=0 lens_water=0 lens_dark=0 lens_zero=0 rot=none scan=0 carriers=0
+- leg-2 baseline scene px: 24984
+- leg-2 renderer probe NEAR white px: 499 changed: 1871
+- leg-2 renderer probe FAR white px: 329 changed: 2973
+- leg-2 green dust changed-green px: 76 total changed: 21490
+relog_probe0 red=16043 scene=24945 lens_red=0 lens_black=0 lens_water=0 lens_dark=0 lens_zero=0 rot=none scan=0 carriers=0
