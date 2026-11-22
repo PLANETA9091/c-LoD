@@ -1066,6 +1066,16 @@ jobs:
         with:
           name: visual-evidence
           path: ours
+      # v6.59.15o: the parity tour = the HORIZON job's product (the run_ci_visual
+      # tour lives in the horizon lane since v6.44); the visual-evidence
+      # artifact carries no parity/ dir, so the gate read 'ours shots: 0' even
+      # after needs: horizon made it wait (run 45002154729: horizon SUCCESS,
+      # the gate still 0/13). Download the horizon verdict artifact too.
+      - name: Download the horizon parity shots
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-horizon-verdict-${{ github.run_id }}
+          path: horizon
       - name: Pixel-perfect parity diff (100% = green, anything less = red)
         run: |
           VOXY=$(dirname "$(find voxy -name '01_aerial_west.png' | head -1)" 2>/dev/null || true)
@@ -1075,7 +1085,10 @@ jobs:
           # only). The old bare-name glob would pick either nondeterministically
           # (find order between siblings is unspecified) and could pair the
           # gate against the PANEL-painted debug frames — pin the path.
-          OURS=$(dirname "$(find ours -type f -path '*parity/01_aerial_west.png' | head -1)" 2>/dev/null || true)
+          # v6.59.15o: the horizon artifact is the gate's primary input; the
+          # visual-evidence dir stays the fallback for the pre-horizon layouts.
+          OURS=$(dirname "$(find horizon -type f -path '*parity/01_aerial_west.png' | head -1)" 2>/dev/null || true)
+          [ -z "$OURS" ] && OURS=$(dirname "$(find ours -type f -path '*parity/01_aerial_west.png' | head -1)" 2>/dev/null || true)
           [ -n "${OURS:-}" ] || OURS=$(dirname "$(find ours -name '*01_aerial_west.png' | head -1)" 2>/dev/null || true)
           # v6.26.5 (#349 soup class): the fallback can resolve a WIDE root
           # when the parity tour lost its anchor shot — #349 paired 13 voxy
