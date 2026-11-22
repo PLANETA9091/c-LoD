@@ -1,0 +1,500 @@
+{
+ "pairs": {
+  "00_summit_rise": {
+   "exact_pct": 52.3737,
+   "near_pct": 56.0229,
+   "dispute_pct": 43.9771,
+   "mean_delta": 17.777,
+   "max_delta": 255,
+   "px_total": 921600,
+   "verdict": "FAIL",
+   "credit_floor": 80.0,
+   "pass": false,
+   "ours_src": "00_summit_rise.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 2.074,
+     "2-4": 1.298,
+     "4-8": 0.267,
+     "8-16": 0.04,
+     "16-32": 0.337,
+     "32-64": 31.829,
+     "64-inf": 11.781
+    },
+    "edge_vs_flat": {
+     "hot_total": 405293,
+     "flat_px": 397480,
+     "flat_signed": -4.84,
+     "edge_px": 4618,
+     "edge_signed": 48.22,
+     "mid_px": 3195
+    },
+    "sky_share_hot": 44.931,
+    "near_band": {
+     "near_px": 33631,
+     "near_flat_signed": -0.05,
+     "near_edge_signed": 0.03
+    },
+    "ours_black_share": 0.59
+   }
+  },
+  "01_aerial_west": {
+   "exact_pct": 5.4861,
+   "near_pct": 15.1647,
+   "dispute_pct": 84.8353,
+   "mean_delta": 50.362,
+   "max_delta": 255,
+   "px_total": 921600,
+   "verdict": "FAIL",
+   "credit_floor": 80.0,
+   "pass": false,
+   "ours_src": "01_aerial_west.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 1.215,
+     "2-4": 2.538,
+     "4-8": 4.74,
+     "8-16": 8.721,
+     "16-32": 16.228,
+     "32-64": 25.033,
+     "64-inf": 36.039
+    },
+    "edge_vs_flat": {
+     "hot_total": 781842,
+     "flat_px": 488429,
+     "flat_signed": -41.18,
+     "edge_px": 134241,
+     "edge_signed": 14.29,
+     "mid_px": 159172
+    },
+    "sky_share_hot": 29.469,
+    "near_band": {
+     "near_px": 89198,
+     "near_flat_signed": -3.48,
+     "near_edge_signed": -3.48
+    },
+    "ours_black_share": 0.59
+   }
+  },
+  "02_aerial_south": {
+   "exact_pct": 6.748,
+   "near_pct": 24.0015,
+   "dispute_pct": 75.9985,
+   "mean_delta": 40.594,
+   "max_delta": 255,
+   "px_total": 921600,
+   "verdict": "FAIL",
+   "credit_floor": 80.0,
+   "pass": false,
+   "ours_src": "02_aerial_south.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 3.215,
+     "2-4": 4.454,
+     "4-8": 7.912,
+     "8-16": 11.374,
+     "16-32": 17.891,
+     "32-64": 18.017,
+     "64-inf": 30.39
+    },
+    "edge_vs_flat": {
+     "hot_total": 700402,
+     "flat_px": 453572,
+     "flat_signed": -49.24,
+     "edge_px": 88978,
+     "edge_signed": -7.35,
+     "mid_px": 157852
+    },
+    "sky_share_hot": 31.69,
+    "near_band": {
+     "near_px": 159008,
+     "near_flat_signed": -4.06,
+     "near_edge_signed": -1.83
+    },
+    "ours_black_share": 0.59
+   }
+  },
+  "03_aerial_north": {
+   "exact_pct": 7.1122,
+   "near_pct": 22.1291,
+   "dispute_pct": 77.8709,
+   "mean_delta": 41.134,
+   "max_delta": 255,
+   "px_total": 921600,
+   "verdict": "FAIL",
+   "credit_floor": 80.0,
+   "pass": false,
+   "ours_src": "03_aerial_north.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 2.711,
+     "2-4": 3.871,
+     "4-8": 7.1,
+     "8-16": 10.291,
+     "16-32": 17.109,
+     "32-64": 19.848,
+     "64-inf": 31.958
+    },
+    "edge_vs_flat": {
+     "hot_total": 717658,
+     "flat_px": 439474,
+     "flat_signed": -47.0,
+     "edge_px": 109660,
+     "edge_signed": -5.8,
+     "mid_px": 168524
+    },
+    "sky_share_hot": 31.133,
+    "near_band": {
+     "near_px": 138396,
+     "near_flat_signed": -3.7,
+     "near_edge_signed": -2.21
+    },
+    "ours_black_share": 0.59
+   }
+  },
+  "04_aerial_east": {
+   "exact_pct": 10.2669,
+   "near_pct": 16.9457,
+   "dispute_pct": 83.0543,
+   "mean_delta": 46.54,
+   "max_delta": 255,
+   "px_total": 921600,
+   "verdict": "FAIL",
+   "credit_floor": 80.0,
+   "pass": false,
+   "ours_src": "04_aerial_east.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 0.978,
+     "2-4": 1.725,
+     "4-8": 3.127,
+     "8-16": 7.271,
+     "16-32": 15.699,
+     "32-64": 23.124,
+     "64-inf": 37.809
+    },
+    "edge_vs_flat": {
+     "hot_total": 765428,
+     "flat_px": 648201,
+     "flat_signed": -47.42,
+     "edge_px": 39996,
+     "edge_signed": -18.25,
+     "mid_px": 77231
+    },
+    "sky_share_hot": 30.101,
+    "near_band": {
+     "near_px": 61552,
+     "near_flat_signed": -3.27,
+     "near_edge_signed": -2.84
+    },
+    "ours_black_share": 0.59
+   }
+  },
+  "05_oblique": {
+   "exact_pct": 85.0574,
+   "near_pct": 89.0476,
+   "dispute_pct": 10.9524,
+   "mean_delta": 7.241,
+   "max_delta": 255,
+   "px_total": 921600,
+   "verdict": "CREDITED",
+   "credit_floor": 80.0,
+   "pass": true,
+   "ours_src": "05_oblique.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 2.243,
+     "2-4": 0.696,
+     "4-8": 0.976,
+     "8-16": 0.311,
+     "16-32": 0.091,
+     "32-64": 4.5,
+     "64-inf": 6.126
+    },
+    "edge_vs_flat": {
+     "hot_total": 100937,
+     "flat_px": 73134,
+     "flat_signed": -7.53,
+     "edge_px": 10614,
+     "edge_signed": 56.21,
+     "mid_px": 17189
+    },
+    "sky_share_hot": 99.069,
+    "near_band": {
+     "near_px": 36774,
+     "near_flat_signed": -0.02,
+     "near_edge_signed": -0.08
+    },
+    "ours_black_share": 0.59
+   }
+  },
+  "06_ground_west": {
+   "exact_pct": 5.4412,
+   "near_pct": 18.8051,
+   "dispute_pct": 81.1949,
+   "mean_delta": 38.371,
+   "max_delta": 255,
+   "px_total": 921600,
+   "verdict": "FAIL",
+   "credit_floor": 80.0,
+   "pass": false,
+   "ours_src": "06_ground_west.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 1.855,
+     "2-4": 3.56,
+     "4-8": 6.466,
+     "8-16": 10.528,
+     "16-32": 15.154,
+     "32-64": 27.092,
+     "64-inf": 29.904
+    },
+    "edge_vs_flat": {
+     "hot_total": 748292,
+     "flat_px": 470056,
+     "flat_signed": -27.64,
+     "edge_px": 116580,
+     "edge_signed": -2.93,
+     "mid_px": 161656
+    },
+    "sky_share_hot": 30.79,
+    "near_band": {
+     "near_px": 123162,
+     "near_flat_signed": -3.17,
+     "near_edge_signed": -2.95
+    },
+    "ours_black_share": 0.59
+   }
+  },
+  "07_far_north": {
+   "exact_pct": 61.5193,
+   "near_pct": 66.4519,
+   "dispute_pct": 33.5481,
+   "mean_delta": 16.664,
+   "max_delta": 255,
+   "px_total": 921600,
+   "verdict": "FAIL",
+   "credit_floor": 80.0,
+   "pass": false,
+   "ours_src": "07_far_north.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 1.095,
+     "2-4": 2.106,
+     "4-8": 1.565,
+     "8-16": 0.887,
+     "16-32": 1.251,
+     "32-64": 19.896,
+     "64-inf": 11.68
+    },
+    "edge_vs_flat": {
+     "hot_total": 309179,
+     "flat_px": 240158,
+     "flat_signed": 1.18,
+     "edge_px": 42696,
+     "edge_signed": 67.57,
+     "mid_px": 26325
+    },
+    "sky_share_hot": 36.746,
+    "near_band": {
+     "near_px": 45459,
+     "near_flat_signed": 0.85,
+     "near_edge_signed": 0.7
+    },
+    "ours_black_share": 0.59
+   }
+  },
+  "08_back_inside": {
+   "exact_pct": 6.653,
+   "near_pct": 13.438,
+   "dispute_pct": 86.562,
+   "mean_delta": 43.297,
+   "max_delta": 255,
+   "px_total": 921600,
+   "verdict": "FAIL",
+   "credit_floor": 80.0,
+   "pass": false,
+   "ours_src": "08_back_inside.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 0.655,
+     "2-4": 1.472,
+     "4-8": 3.612,
+     "8-16": 8.28,
+     "16-32": 16.526,
+     "32-64": 28.957,
+     "64-inf": 33.844
+    },
+    "edge_vs_flat": {
+     "hot_total": 797755,
+     "flat_px": 518245,
+     "flat_signed": -26.69,
+     "edge_px": 117866,
+     "edge_signed": 10.7,
+     "mid_px": 161644
+    },
+    "sky_share_hot": 28.881,
+    "near_band": {
+     "near_px": 62531,
+     "near_flat_signed": -3.58,
+     "near_edge_signed": -3.82
+    },
+    "ours_black_share": 0.59
+   }
+  },
+  "09_after_mesh": {
+   "exact_pct": 5.5052,
+   "near_pct": 15.3992,
+   "dispute_pct": 84.6008,
+   "mean_delta": 46.605,
+   "max_delta": 255,
+   "px_total": 921600,
+   "verdict": "FAIL",
+   "credit_floor": 80.0,
+   "pass": false,
+   "ours_src": "09_after_mesh.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 1.306,
+     "2-4": 2.65,
+     "4-8": 4.844,
+     "8-16": 8.386,
+     "16-32": 15.489,
+     "32-64": 27.442,
+     "64-inf": 34.378
+    },
+    "edge_vs_flat": {
+     "hot_total": 779681,
+     "flat_px": 487618,
+     "flat_signed": -33.68,
+     "edge_px": 133388,
+     "edge_signed": 15.26,
+     "mid_px": 158675
+    },
+    "sky_share_hot": 29.551,
+    "near_band": {
+     "near_px": 91183,
+     "near_flat_signed": -3.22,
+     "near_edge_signed": -2.35
+    },
+    "ours_black_share": 0.59
+   }
+  },
+  "10_marker_ray": {
+   "exact_pct": 56.8599,
+   "near_pct": 68.489,
+   "dispute_pct": 31.511,
+   "mean_delta": 21.06,
+   "max_delta": 255,
+   "px_total": 921600,
+   "verdict": "FAIL",
+   "credit_floor": 80.0,
+   "pass": false,
+   "ours_src": "10_marker_ray.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 6.196,
+     "2-4": 4.549,
+     "4-8": 0.837,
+     "8-16": 0.28,
+     "16-32": 0.818,
+     "32-64": 13.208,
+     "64-inf": 17.252
+    },
+    "edge_vs_flat": {
+     "hot_total": 290405,
+     "flat_px": 211179,
+     "flat_signed": 14.4,
+     "edge_px": 39132,
+     "edge_signed": 94.93,
+     "mid_px": 40094
+    },
+    "sky_share_hot": 30.331,
+    "near_band": {
+     "near_px": 107174,
+     "near_flat_signed": 0.11,
+     "near_edge_signed": 0.95
+    },
+    "ours_black_share": 0.59
+   }
+  },
+  "11_topdown": {
+   "exact_pct": 2.629,
+   "near_pct": 25.0475,
+   "dispute_pct": 74.9525,
+   "mean_delta": 25.797,
+   "max_delta": 228,
+   "px_total": 921600,
+   "verdict": "FAIL",
+   "credit_floor": 80.0,
+   "pass": false,
+   "ours_src": "11_topdown.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 4.61,
+     "2-4": 6.369,
+     "4-8": 9.259,
+     "8-16": 16.625,
+     "16-32": 27.392,
+     "32-64": 25.981,
+     "64-inf": 7.135
+    },
+    "edge_vs_flat": {
+     "hot_total": 690762,
+     "flat_px": 198324,
+     "flat_signed": -22.57,
+     "edge_px": 192278,
+     "edge_signed": -14.02,
+     "mid_px": 300160
+    },
+    "sky_share_hot": 31.133,
+    "near_band": {
+     "near_px": 206609,
+     "near_flat_signed": -1.96,
+     "near_edge_signed": -2.62
+    },
+    "ours_black_share": 0.59
+   }
+  },
+  "12_far_north_re": {
+   "exact_pct": 60.2558,
+   "near_pct": 65.1844,
+   "dispute_pct": 34.8156,
+   "mean_delta": 17.051,
+   "max_delta": 255,
+   "px_total": 921600,
+   "verdict": "FAIL",
+   "credit_floor": 80.0,
+   "pass": false,
+   "ours_src": "12_far_north_re.png",
+   "diag": {
+    "delta_hist": {
+     "1-2": 1.093,
+     "2-4": 2.105,
+     "4-8": 1.565,
+     "8-16": 0.887,
+     "16-32": 1.248,
+     "32-64": 21.159,
+     "64-inf": 11.688
+    },
+    "edge_vs_flat": {
+     "hot_total": 320861,
+     "flat_px": 251977,
+     "flat_signed": 1.51,
+     "edge_px": 42573,
+     "edge_signed": 67.53,
+     "mid_px": 26311
+    },
+    "sky_share_hot": 41.555,
+    "near_band": {
+     "near_px": 45422,
+     "near_flat_signed": 0.86,
+     "near_edge_signed": 0.7
+    },
+    "ours_black_share": 0.59
+   }
+  }
+ },
+ "missing": [],
+ "pass": false
+}
